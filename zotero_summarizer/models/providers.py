@@ -10,7 +10,7 @@ from socket import inet_aton
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, model_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 __all__ = [
     "STAGES",
@@ -164,6 +164,8 @@ class LLMRoutingConfig(BaseModel):
 
 class ResolvedStage(BaseModel):
     """A stage's effective provider profile + model after inheritance."""
+
+    model_config = ConfigDict(extra="forbid")
 
     stage: str
     provider: ProviderConfig

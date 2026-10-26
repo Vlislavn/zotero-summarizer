@@ -20,6 +20,8 @@ use exact assigned-count fractions, not rounded/subtracted float rates. Inclusiv
 resource caps use exact token counts and captured decimal latency; displayed means
 are unchanged and checked against their count maps. No epsilon relaxes a breach.
 Saved optional acceptance must match its retained invocation tape on reopening.
+Returned input/plan/record JSON is decoded from the exact bytes already checked
+against the manifest, not a second read after a concurrent replacement.
 Inspection checks actual approval rows, not only the CSV hash. Experiment sources,
 run/export parents and reopened run paths reject symlinks and selected-project
 escapes before I/O; the manifest itself cannot be a symlink. Blind packet and
@@ -60,6 +62,11 @@ benchmark/Q&A text behavior. Experimental Search reuses these coordinates throug
 Library hybrid retrieval and reuses `ANSWER_PROMPT`/`parse_answer` and shared grounding;
 its bounded independent verifier is a product experiment, not a benchmark oracle or
 a measured improvement. No benchmark score, dataset or reporting policy changes.
+Shared answer parsing admits answer/quote strings only if they encode as UTF-8.
+Escaped lone surrogates can be valid JSON but are invalid output, not a successful
+answer or scientific negative. Unicode admission failures propagate without a
+model repair/replay; the existing single repair for malformed JSON remains intact.
+Valid supplementary/combining Unicode, null spellings and grounding are unchanged.
 
 Package exports resolve lazily to the same defining objects. Constants and pure
 `_options.RunOptions` validation can be used by CLI admission without importing

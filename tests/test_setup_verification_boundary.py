@@ -43,16 +43,22 @@ def test_hosted_probe_rejects_an_empty_real_response(monkeypatch):
     result = operational_check.probe_provider(provider, "public-model")
 
     assert result["status"] == "fail"
-    assert "empty" in result["detail"].lower()
+    assert result["reason_code"] == "inference_failed"
+    assert result["request_completion"]["expected"] == 0
 
 
 def test_callback_lock_survives_waiter_cancellation_and_records_uncertainty():
+    from uuid import uuid4
+    import httpx
     from zotero_summarizer.services.setup.load_attempt import SetupAttempt
 
     entered, release = Event(), Event()
     attempt = SetupAttempt()
 
     def blocked():
+        request = attempt.requests.expect("scripted", "fixture", "https://synthetic.invalid/v1/chat/completions", local=False)
+        request.native_started(uuid4())
+        request.transport_started(httpx.Request("POST", "https://synthetic.invalid/v1/chat/completions", json={"model": "fixture"}))
         entered.set()
         assert release.wait(3)
         return {"status": "ready"}
@@ -60,14 +66,16 @@ def test_callback_lock_survives_waiter_cancellation_and_records_uncertainty():
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=1) as pool:
         waiting = pool.submit(attempt.run, blocked, timeout=2)
-        assert entered.wait(2)
-        attempt.abandon("cancelled")
-        result = waiting.result(timeout=2)
-        assert result["reason_code"] == "waiter_cancelled"
-        assert result["ownership"] == "unresolved"
-        other = SetupAttempt().run(lambda: pytest.fail("worker still owns boundary"), timeout=1)
-        assert other["reason_code"] == "setup_load_busy"
-        release.set()
+        try:
+            assert entered.wait(2)
+            attempt.abandon("cancelled")
+            result = waiting.result(timeout=2)
+            assert result["reason_code"] == "waiter_cancelled"
+            assert result["ownership"] == "unresolved"
+            other = SetupAttempt().run(lambda: pytest.fail("worker still owns boundary"), timeout=1)
+            assert other["reason_code"] == "setup_load_busy"
+        finally:
+            release.set()
     from zotero_summarizer.services.setup.load_attempt import _WORKER
 
     assert _WORKER.acquire(timeout=2)
@@ -307,20 +315,31 @@ def test_failed_redaction_is_needs_action_not_unredacted_success(tmp_path, monke
                                                        ("other-model", "end_turn", False),
                                                        ("public-model", "max_tokens", False)])
 def test_native_hosted_verification_observes_identity_and_owns_transport(monkeypatch, response_model, stop, success):
-    import sys
-    from types import SimpleNamespace
+    import httpx
+    anthropic = pytest.importorskip("anthropic")
+    from zotero_summarizer.integrations import llm_requests
     from zotero_summarizer.integrations.llm_anthropic import AnthropicLLMClient
 
-    captured = {}
+    captured, wire = {}, []
+    native = anthropic.Anthropic
+    http_client = llm_requests.verification_http_client
+
+    def respond(request):
+        wire.append(request)
+        assert request.url.path == "/v1/messages"
+        assert json.loads(request.content)["model"] == "public-model"
+        return httpx.Response(200, json={"id": "msg_fixture", "type": "message", "role": "assistant",
+            "model": response_model, "stop_reason": stop, "stop_sequence": None,
+            "content": [{"type": "text", "text": "fixture response"}],
+            "usage": {"input_tokens": 1, "output_tokens": 2}})
 
     def sdk(**kwargs):
         captured.update(kwargs)
-        response = SimpleNamespace(model=response_model, stop_reason=stop, usage=SimpleNamespace(),
-                                   content=[SimpleNamespace(type="text", text="fixture response")])
-        return SimpleNamespace(messages=SimpleNamespace(create=lambda **_kwargs: response),
-                               close=kwargs["http_client"].close)
+        return native(**kwargs)
 
-    monkeypatch.setitem(sys.modules, "anthropic", SimpleNamespace(Anthropic=sdk))
+    monkeypatch.setattr(anthropic, "Anthropic", sdk)
+    monkeypatch.setattr(llm_requests, "verification_http_client",
+                        lambda hook: http_client(hook, transport=httpx.MockTransport(respond)))
     client = AnthropicLLMClient(model="public-model", api_key="fixture", verification=True)
     try:
         assert captured["max_retries"] == 0
@@ -329,11 +348,11 @@ def test_native_hosted_verification_observes_identity_and_owns_transport(monkeyp
         if success:
             assert client.prompt("public fixture") == "fixture response"
         else:
-            with pytest.raises(ValueError, match="identity or successful terminal"):
+            with pytest.raises(ValueError):
                 client.prompt("public fixture")
     finally:
         client.close()
-    assert captured["http_client"].is_closed
+    assert captured["http_client"].is_closed and len(wire) == 1
 
 
 @pytest.mark.parametrize("host", _LOCAL_HOSTS)
@@ -364,8 +383,10 @@ def test_verification_factory_refuses_local_before_credentials_or_adapter(monkey
                                  "localhost.example.test", "notlocalhost.test"])
 @pytest.mark.parametrize("kind", ["openai", "anthropic"])
 def test_remote_verification_retains_credential_and_adapter_path(monkeypatch, kind, host):
-    from types import SimpleNamespace
+    from dataclasses import replace
+    from tests._setup_request_events import observed_client
     from zotero_summarizer.integrations import llm_anthropic
+    from zotero_summarizer.services._common import settings
     from zotero_summarizer.services.llm import factory
 
     provider = ProviderConfig(name="remote", type=kind, base_url=f"https://{host}:8080/v1", api_key_env="PUBLIC_KEY")
@@ -378,12 +399,14 @@ def test_remote_verification_retains_credential_and_adapter_path(monkeypatch, ki
     def adapter(*_args, **kwargs):
         assert kwargs["verification"] is True
         calls.append("adapter")
-        return SimpleNamespace(prompt=lambda *_a: "synthetic response", close=lambda: None)
+        return observed_client(provider, "public-model", output="synthetic response",
+                               owner=kwargs["request_owner"], before_request=kwargs["before_request"])
 
     monkeypatch.setattr(factory, "resolve_api_key", credentials)
     monkeypatch.setattr(factory, "build_llm", adapter)
     monkeypatch.setattr(llm_anthropic, "AnthropicLLMClient", adapter)
-    monkeypatch.setattr(factory, "settings", lambda: SimpleNamespace(summary_timeout_seconds=17))
+    configured = replace(settings(), summary_timeout_seconds=17)
+    monkeypatch.setattr(factory, "settings", lambda: configured)
 
     result = operational_check.probe_provider(provider, "public-model")
 

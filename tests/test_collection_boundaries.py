@@ -163,6 +163,7 @@ def test_absent_corpus_never_means_confident_no_match(tmp_path):
 def test_shortlist_is_the_same_for_every_arm_and_recall_is_separate(tmp_path):
     config, inputs, truth, path = prepared(tmp_path)
     inputs['tree']['selected_keys'] = ['B']
+    inputs['tree']['selection_provenance'] = 'SYNTHETIC frozen non-gold selector'
     inputs['recordings'] = inputs['recordings'][1::2]
     cfg = Config.model_validate(save(tmp_path, config, inputs, truth))
     _, report = run(cfg, path.read_bytes())

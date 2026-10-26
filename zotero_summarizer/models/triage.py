@@ -171,8 +171,9 @@ class PaperDigest(QualityReview):
         if self.read_decision == "skim" and not any(part.strip() for part in self.read_parts):
             raise ValueError("skim requires at least one exact read target")
         if self.read_decision == "skip":
-            self.read_parts = []
-            self.original_value = ""
+            # Normalized defaults must not masquerade as explicitly supplied fields.
+            object.__setattr__(self, "read_parts", [])
+            object.__setattr__(self, "original_value", "")
         return self
 
 

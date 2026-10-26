@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 const navigate = vi.hoisted(() => vi.fn());
 const verify = vi.hoisted(() => vi.fn());
@@ -10,21 +10,14 @@ vi.mock('react-router-dom', async (original) => ({
   ...await original(), useNavigate: () => navigate,
 }));
 
-vi.mock('../../api/setupApi.js', () => ({ fetchDoctorStatus: vi.fn().mockResolvedValue({ ready: false }) }));
-vi.mock('../settings/DeploymentCard.jsx', () => ({
-  DoctorChecklist: ({ onOpenAiSettings }) => {
-    const mutation = useMutation({ mutationKey: ['setup-doctor-run'], mutationFn: verify });
-    return <>
-      <button onClick={() => mutation.mutate()}>Verify setup</button>
-      <button onClick={onOpenAiSettings}>Review endpoint settings</button>
-    </>;
-  },
-}));
+vi.mock('../../api/setupApi.js', () => ({ fetchDoctorStatus: vi.fn(), runDoctor: verify, cancelDoctor: vi.fn() }));
 
 import StepDone from './StepDone.jsx';
 import { fetchDoctorStatus } from '../../api/setupApi.js';
 beforeEach(() => {
   vi.clearAllMocks();
+  verify.mockReset();
+  fetchDoctorStatus.mockReset().mockResolvedValue({ ready: false, status: 'not_started', checks: [] });
   const values = new Map();
   vi.stubGlobal('localStorage', {
     getItem: (key) => values.get(key) || null,
@@ -35,12 +28,16 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-it('AI recovery opens Settings without verification, save, consent or dismissal', async () => {
+it('offers the real AI recovery destination without verification, save, consent or dismissal', async () => {
+  fetchDoctorStatus.mockResolvedValue({ ready: false, status: 'needs_action', checks: [{
+    id: 'llm_inference', status: 'needs_action', message: 'Synthetic unknown admission',
+    recovery: { action: 'open_ai_settings', label: 'Review endpoint settings' },
+  }] });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(<QueryClientProvider client={client}><MemoryRouter><StepDone /></MemoryRouter></QueryClientProvider>);
-  fireEvent.click(screen.getByRole('button', { name: 'Review endpoint settings' }));
-  expect(navigate).toHaveBeenCalledTimes(1);
-  expect(navigate).toHaveBeenCalledWith('/settings#ai-models');
+  expect((await screen.findByRole('link', { name: 'Review endpoint settings' })).getAttribute('href')).toBe('/settings#ai-models');
+  expect(navigate).not.toHaveBeenCalled();
+  expect(verify).not.toHaveBeenCalled();
   expect(window.localStorage.getItem('zs:setupDismissed')).toBeNull();
   expect(screen.getByRole('button', { name: 'Open Today' }).disabled).toBe(true);
   client.clear();
@@ -70,7 +67,7 @@ it('does not claim completion or open Today until a real Doctor result is ready'
   render(<QueryClientProvider client={client}><MemoryRouter><StepDone /></MemoryRouter></QueryClientProvider>);
 
   expect(screen.getByRole('heading', { name: 'Setup saved' })).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Verify setup' })).toBeTruthy();
+  expect(await screen.findByRole('button', { name: 'Verify setup' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Open Today' }).disabled).toBe(true);
   await waitFor(() => expect(client.getQueryData(['setup-doctor'])?.ready).toBe(false));
   client.setQueryData(['setup-doctor'], { ready: true });

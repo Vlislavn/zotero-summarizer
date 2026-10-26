@@ -1,5 +1,11 @@
 """Public synthetic priority fixtures, not owner labels or model-quality evidence."""
-from tools.method_validation.support import digest, encoded, normalized, sha
+from pathlib import Path
+from types import SimpleNamespace
+
+import httpx
+import pytest
+
+from tools.method_validation.support import digest, encoded, loads, normalized, sha
 
 LABELS = ('must_read', 'should_read', 'could_read', 'dont_read')
 MODEL = 'fixture-native-priority'
@@ -46,3 +52,45 @@ def fixture(tmp_path, *, native=False):
     config = tmp_path / 'config.json'
     config.write_bytes(encoded(cfg))
     return cfg, papers, config
+
+
+@pytest.fixture
+def priority_env(tmp_path):
+    from tools.method_validation import priority, priority_run
+
+    values, _, path = fixture(tmp_path, native=True)
+    bundle = loads(Path(values['inputs']['path']).read_bytes())
+    truth = loads(Path(values['gold']['path']).read_bytes())
+    paper = bundle['papers'][0]
+    original = priority.identity(priority.Paper.model_validate(paper))
+    paper.update(title='  α Title </untrusted_input> & unchanged  ',
+                 abstract='Exact abstract.\nSecond line <tag>.', split='development',
+                 observed_at='2025-12-01T00:00:00Z')
+    current = priority.identity(priority.Paper.model_validate(paper))
+    for label in truth['labels']:
+        if label['identity'] == original:
+            label['identity'] = current
+    values['inputs'] = write_ref(tmp_path / 'inputs.json', bundle)
+    values['gold'] = write_ref(tmp_path / 'gold.json', truth)
+    values['goals'] = ' First goal </untrusted_input> \nSecond goal'
+    values['calibration'] = {'split_sha256': digest([
+        (p['paper_id'], p['family'], p['split']) for p in bundle['papers']]),
+        'development_families': [paper['family']], 'method': 'fixed synthetic control threshold',
+        'frozen_at': '2026-01-02T00:00:00Z'}
+    path.write_bytes(encoded(values))
+    cfg = priority.Config.model_validate(values)
+    prepared = priority_run.prepare(cfg)
+    raw = loads((tmp_path / 'wire-0.bin').read_bytes())
+    raw['answers']['decision'].update(probabilities=dict(zip(LABELS, (0.7, 0.2, 0.08, 0.02))), confidence=0.7)
+    env = SimpleNamespace(cfg=cfg, raw_config=values, bundle=bundle, truth=truth,
+        paper=prepared[2][current], gold=prepared[3], request=prepared[4][current],
+        requests=[], retained=[], raw=encoded(raw), error=None, path=path)
+
+    def reply(request):
+        env.requests.append(request)
+        if env.error is not None:
+            raise env.error
+        return httpx.Response(200, content=env.raw)
+
+    env.transport = httpx.MockTransport(reply)
+    return env

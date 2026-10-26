@@ -12,6 +12,7 @@ from zotero_summarizer.services.library import qa, qa_context
 from zotero_summarizer.services.library._prompt_security import untrusted_input
 from test_library_qa import PAPER_TEXT, _Extractor, _LLM, _fake_state
 from test_qa_checkpoint_contract import _decode_checkpoint, _render
+from test_review_questions import _database
 
 _ANSWER_QUOTE = "We evaluated GlassNet on the ImageNet dataset."
 _HISTORY_QUOTES = (
@@ -209,6 +210,7 @@ def test_history_preserves_real_parse_repair_budget(tmp_path, monkeypatch, respo
 def test_route_consumes_complete_checkpoint_without_bypassing_source_visibility(
     tmp_path, monkeypatch, membership,
 ):
+    _database(tmp_path)
     extractor, llm, artifact, context = _boundary_state(tmp_path, monkeypatch, membership)
     req, history = _history_request(artifact, "compacted")
     if membership == "context-missing":
@@ -224,6 +226,8 @@ def test_route_consumes_complete_checkpoint_without_bypassing_source_visibility(
 
     result = asyncio.run(library_routes.ask_paper(req))
 
+    assert result['question_saved'] is True
+    assert result['question_mirror']['note_written'] is False
     assert llm.prompts == [_expected_prompt(context, prior)]
     assert extractor.calls == 0
     assert result["history_compacted"] is True and result["history_evidence_handles"] == 2
@@ -242,6 +246,7 @@ def test_route_consumes_complete_checkpoint_without_bypassing_source_visibility(
 def test_route_never_promotes_untrusted_history_quote_to_paper_evidence(
     tmp_path, monkeypatch, history_kind,
 ):
+    _database(tmp_path)
     extractor, llm, artifact, context = _boundary_state(tmp_path, monkeypatch)
     req, history = _history_request(artifact, history_kind)
     invented = "We evaluated the fabricated InventedSet dataset in this prior conversation only."
@@ -253,6 +258,8 @@ def test_route_never_promotes_untrusted_history_quote_to_paper_evidence(
 
     result = asyncio.run(library_routes.ask_paper(req))
 
+    assert result['question_saved'] is True
+    assert result['question_mirror']['note_written'] is False
     assert len(llm.prompts) == 1 and invented in llm.prompts[0]
     assert extractor.calls == 0
     assert result["abstained"] is True and result["answer"] is None and result["quote"] is None

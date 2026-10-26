@@ -1,323 +1,209 @@
-"""Private one-paper machine binding; scripted native checks are not human warrant."""
+"""Ordinary computation guarantees plus explicit experimental producer counterparts."""
 import builtins
-from types import SimpleNamespace
+from copy import deepcopy
 from unittest.mock import Mock
 
 import pytest
 
-from tests.test_deep_review import _detail
-from tests.test_digest_verification import _claims
-from tests.test_interpretation_binding import C, TEXT, _assert_base_only, config
-from tests.test_interpretation_producer import InterpretationDigestResponse, _base, _card, _payload
-from tests.test_interpretation_verification import _table
+from tests._generated_write_fixtures import config, paper_io, published_review
+from tests._interpretation_experiment import CARD, PAYLOAD, ScriptedClient, run_review
 from tests.test_review_cache import _isolate_cache
-from tests.test_review_source_boundary import _Mapper
 from zotero_summarizer.models import PaperDigest
 from zotero_summarizer.services.library import _digest_audit, _map_reduce, _review_cache, _review_identity, deep_review
 from zotero_summarizer.services.library._digest_verification import DigestSourceRejected, DigestVerifierUnavailable
-from zotero_summarizer.services.zotero import zotero as zotero_svc
+from zotero_summarizer.services.zotero import zotero
 
 
-@pytest.fixture
-def paper_io(tmp_path, monkeypatch):
-    source = tmp_path / "owned-one-paper.pdf"
-    text = TEXT.strip()
-    source.write_text(text, encoding="utf-8")
-    reader, extractor = Mock(), Mock()
-    reader.get_item_detail.return_value = _detail(title="Owned paper", pdf_path=str(tmp_path / "other-attachment.pdf"))
-    extractor.extract_text.return_value = text
-    layers = Mock(return_value=(None, None, None, None, None))
-    mirror = Mock(wraps=deep_review._mirror_digest_note)
-    writer = Mock()
-    monkeypatch.setattr(deep_review._deep_review_layers, "extra_layers", layers)
-    monkeypatch.setattr(deep_review, "_mirror_digest_note", mirror)
-    monkeypatch.setattr(zotero_svc, "zotero_upsert_digest_note", writer)
-    monkeypatch.setattr(deep_review, "now_iso_z", lambda: "2026-10-14T00:00:00Z")
-    return SimpleNamespace(source=source, text=text, reader=reader, extractor=extractor,
-                           layers=layers, mirror=mirror, writer=writer)
+def _compute(config, io, client, **kwargs):
+    return deep_review._review_one({'item_key': 'LIBR0038', 'pdf_path': str(io.source)}, reader=io.reader,
+        config=config, extractor=io.extractor, llm=client, quality_enabled=True, **kwargs)
 
 
-@pytest.mark.parametrize("strategy", ["rank", "prefix", "map_reduce"])
-@pytest.mark.parametrize("lean_tier", [False, True], ids=["full", "lean"])
-def test_private_c_native_entry_binds_same_collector_source_and_readonly_cache(config, paper_io, monkeypatch, strategy, lean_tier):
-    config.quality_review.chunk_strategy = strategy
-    mapper, generator = _Mapper("Generation context only."), Mock()
-    generator.pydantic_prompt.return_value = _payload(_card())
-    relay = Mock(wraps=_map_reduce.digest_for_strategy)
-    assessment = Mock(wraps=_map_reduce.assess_digest)
-    identity = Mock(wraps=_review_identity.build_review_identity)
-    binder = Mock(wraps=_digest_audit.bind_cached_audit)
-    guard = Mock(wraps=_review_identity.assert_review_source_unchanged)
-    trace = Mock()
-    trace.attach_mock(guard, "guard")
-    trace.attach_mock(paper_io.mirror, "mirror")
-    trace.attach_mock(binder, "bind")
-    monkeypatch.setattr(_map_reduce, "digest_for_strategy", relay)
-    monkeypatch.setattr(_map_reduce, "assess_digest", assessment)
-    monkeypatch.setattr(_review_identity, "build_review_identity", identity)
-    monkeypatch.setattr(_review_identity, "assert_review_source_unchanged", guard)
-    monkeypatch.setattr(_digest_audit, "bind_cached_audit", binder)
-    entry = deep_review._review_one(
-        {"item_key": "LIBR0038", "pdf_path": str(paper_io.source)}, reader=paper_io.reader,
-        config=config, extractor=paper_io.extractor, llm=object(), quality_enabled=True,
-        llm_digest=generator, llm_map=mapper, lean_tier=lean_tier, sub_concurrency=2,
-        focus_prompt="Owned focus", interpretation_schema=C, provenance={"fixture": "owned"},
-    )
-    paper_io.extractor.extract_text.assert_called_once_with(str(paper_io.source))
-    assert identity.call_count == relay.call_count == assessment.call_count == binder.call_count == 1
-    assert identity.call_args.kwargs["interpretation_schema"] == C
-    assert identity.call_args.kwargs["source_kind"] == "override"
-    assert binder.call_args.kwargs == {"interpretation_schema": C}
-    collector = relay.call_args.kwargs["interpretation_out"]
-    assert collector is assessment.call_args.kwargs["interpretation_out"]
-    assert binder.call_args.args[0]["interpretation"] is collector
-    assert binder.call_args.args[0]["verification_audit"] is relay.call_args.kwargs["verification_audit"]
-    assert assessment.call_args.kwargs["verification_audit"] is relay.call_args.kwargs["verification_audit"]
-    cap = config.quality_review.lean_max_text_chars if lean_tier else config.quality_review.max_text_chars
-    assert relay.call_args.kwargs["budget"] == _map_reduce.ChunkBudget(int(cap), config.quality_review.map_chunk_chars, 2)
-    assert type(PaperDigest.model_validate(entry["digest"])) is PaperDigest
-    assert "interpretation" not in entry["digest"]
-    assert entry["review_identity"]["interpretation_schema"] == C and entry["review_identity"]["focus_prompt"] == "Owned focus"
-    assert entry["provenance"] == {"fixture": "owned"}
-    assert entry["zotero_note_written"] is False and entry["zotero_note_error"] is None
-    paper_io.mirror.assert_not_called()
-    paper_io.writer.assert_not_called()
-    assert [call[0] for call in trace.mock_calls] == ["guard", "guard", "bind", "guard"]
-    assert generator.pydantic_prompt.call_count == mapper.calls == 1
-    assert mapper.map_calls == (len(_map_reduce.split_chunks(paper_io.text, config.quality_review.map_chunk_chars)) if strategy == "map_reduce" else 0)
-    assert generator.pydantic_prompt.call_args.kwargs["pydantic_model"] is InterpretationDigestResponse
-    audit = entry["verification_audit"]
-    assert audit["identity"]["review_source_sha256"] == entry["review_identity"]["source_sha256"]
-    assert audit["verified_digest"]["basis"] == "full_text"
-    assert entry["digest"]["basis"] == ("map_reduce" if strategy == "map_reduce" else "full_text")
-    assert entry["interpretation"] == collector == audit["verified_interpretation"]
-    assert collector["native_support"]["base_digest_sha256"] == audit["identity"]["verified_digest_sha256"]
-    assert audit["identity"]["cached_digest_sha256"] == _digest_audit.canonical_hash(entry["digest"])
-    assert all(binding["matches_cached_finding"] and all(binding["matches_cached_basis"].values()) for binding in audit["interpretation_bindings"])
-    assert paper_io.layers.call_args.args[0].text == paper_io.text
+@pytest.mark.parametrize('strategy', ['rank', 'prefix', 'map_reduce'])
+def test_private_c_native_entry_binds_same_collector_source_and_readonly_cache(strategy):
+    # Current explicit experiment producer, not an ordinary-C worker or cache adapter.
+    client = ScriptedClient()
+    result = run_review(client, strategy=strategy)
+    from zotero_summarizer.services.library.interpretation import qualify, selected_original
+    assert qualify(result)['items'] == [CARD]
+    assert result['verification_audit']['source']['original_characters'] == len(result['text'])
+    assert selected_original(result)
+    assert 'interpretation' not in result['digest']
     assert not _review_cache._cache_path().exists()
-    _review_cache._write_one("LIBR0038", entry)
-    path = _review_cache._cache_path()
-    before = path.read_bytes(), path.stat().st_mtime_ns
-    view = _review_cache.get_current_review("LIBR0038", interpretation_schema=C)
-    assert view["interpretation_qualification"]["status"] == "available" and view["interpretation"] == entry["interpretation"]
-    assert view["verification_audit"] == audit
-    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
 
 
-@pytest.mark.parametrize("strategy", ["rank", "prefix", "map_reduce"])
-@pytest.mark.parametrize("explicit_none", [False, True], ids=["omitted", "none"])
-def test_default_exact_keyword_key_shape_no_c_import_and_original_native_mirror(config, paper_io, monkeypatch, strategy, explicit_none):
+@pytest.mark.parametrize('strategy', ['rank', 'prefix', 'map_reduce'])
+@pytest.mark.parametrize('lean_tier', [False, True])
+def test_default_exact_keyword_key_shape_no_c_import_and_original_native_mirror(config, paper_io, monkeypatch, strategy, lean_tier):
     config.quality_review.chunk_strategy = strategy
-    mapper, generator = _Mapper("Generation notes only."), Mock()
-    generator.pydantic_prompt.return_value = _base()
+    client = ScriptedClient(cards=False)
     relay = Mock(wraps=_map_reduce.digest_for_strategy)
-    identity = Mock(wraps=_review_identity.build_review_identity)
     binder = Mock(wraps=_digest_audit.bind_cached_audit)
-    guard = Mock(wraps=_review_identity.assert_review_source_unchanged)
-    trace = Mock()
-    trace.attach_mock(guard, "guard")
-    trace.attach_mock(paper_io.mirror, "mirror")
-    trace.attach_mock(binder, "bind")
+    forbidden = Mock(side_effect=AssertionError('computation must not acquire a native writer'))
     original_import = builtins.__import__
 
-    def no_c_import(name, *args, **kwargs):
-        assert name != "zotero_summarizer.models.interpretation"
+    def guarded(name, *args, **kwargs):
+        assert 'interpretation' not in name
         return original_import(name, *args, **kwargs)
 
-    monkeypatch.setattr(builtins, "__import__", no_c_import)
-    monkeypatch.setattr(_map_reduce, "digest_for_strategy", relay)
-    monkeypatch.setattr(_review_identity, "build_review_identity", identity)
-    monkeypatch.setattr(_review_identity, "assert_review_source_unchanged", guard)
-    monkeypatch.setattr(_digest_audit, "bind_cached_audit", binder)
-    extra = {"interpretation_schema": None} if explicit_none else {}
-    entry = deep_review._review_one(
-        {"item_key": "LIBR0038", "pdf_path": str(paper_io.source)}, reader=paper_io.reader,
-        config=config, extractor=paper_io.extractor, llm=generator, llm_map=mapper, quality_enabled=True, **extra,
-    )
-    assert identity.call_args.kwargs == {"config": config, "pdf_path": str(paper_io.source), "source_kind": "override", "focus_prompt": ""}
-    assert binder.call_args.kwargs == {}
-    assert set(relay.call_args.kwargs) == {"map_llm", "reduce_llm", "budget", "focus_prompt", "response_format", "verification_audit"}
-    assert "interpretation_schema" not in entry["review_identity"]
-    assert set(entry) == {"review_contract_version", "review_identity", "provenance", "digest", "verification_audit",
-                          "quality", "goal_summaries", "paper_type", "section_overlay", "code_link", "model_read_decision",
-                          "reading_policy_flags", "needs_pdf", "needs_login", "login_url", "gate_relevance", "reviewed_at",
-                          "zotero_note_written", "zotero_note_error"}
-    assert generator.pydantic_prompt.call_args.kwargs["pydantic_model"] is PaperDigest
-    assert "interpretation_evidence" not in entry["verification_audit"]
-    assert [call[0] for call in trace.mock_calls] == ["guard", "guard", "bind"]
-    paper_io.mirror.assert_not_called()  # proposal staging belongs after publication
-    paper_io.writer.assert_not_called()
-    assert entry["zotero_note_written"] is False and entry["zotero_note_error"] is None
-    assert generator.pydantic_prompt.call_count == mapper.calls == 1
+    monkeypatch.setattr(builtins, '__import__', guarded)
+    monkeypatch.setattr(_map_reduce, 'digest_for_strategy', relay)
+    monkeypatch.setattr(_digest_audit, 'bind_cached_audit', binder)
+    monkeypatch.setattr(zotero, 'get_zotero_writer_or_raise', forbidden)
+    entry = _compute(config, paper_io, client, lean_tier=lean_tier)
+    expected_cap = config.quality_review.lean_max_text_chars if lean_tier else config.quality_review.max_text_chars
+    assert relay.call_args.kwargs['budget'].max_chars == expected_cap
+    assert set(relay.call_args.kwargs) == {'map_llm', 'reduce_llm', 'budget', 'focus_prompt', 'response_format', 'verification_audit'}
+    assert relay.call_args.kwargs['map_llm'] is client and relay.call_args.kwargs['reduce_llm'] is client
+    assert relay.call_count == binder.call_count == 1 and binder.call_args.kwargs == {}
+    assert set(entry) == {'review_contract_version', 'review_identity', 'provenance', 'digest', 'verification_audit',
+        'quality', 'goal_summaries', 'paper_type', 'section_overlay', 'code_link', 'model_digest', 'model_read_decision',
+        'reading_policy_flags', 'needs_pdf', 'needs_login', 'login_url', 'gate_relevance', 'reviewed_at',
+        'zotero_note_written', 'zotero_note_error'}
+    assert 'interpretation_schema' not in entry['review_identity']
+    assert entry['review_identity']['source_kind'] == 'override'
+    assert entry['verification_audit']['identity']['review_source_sha256'] == entry['review_identity']['source_sha256']
+    assert entry['zotero_note_written'] is False and entry['zotero_note_error'] is None
+    assert all(model is PaperDigest for _, model, _ in client.calls if model is not None and issubclass(model, PaperDigest))
+    paper_io.note_stage.assert_not_called()
+    forbidden.assert_not_called()
+    assert not _review_cache._cache_path().exists()
 
 
-@pytest.mark.parametrize("selection", ["unknown", "", "paper-digest-v1", False, 0])
+@pytest.mark.parametrize('selection', ['unknown', '', 'paper-digest-v1', False, 0])
 def test_unknown_condition_refuses_before_item_reader_model_identity_or_native_io(monkeypatch, selection):
-    no_io = Mock(side_effect=AssertionError("condition must refuse before IO"))
-    monkeypatch.setattr(_review_identity, "build_review_identity", no_io)
-    monkeypatch.setattr(_map_reduce, "digest_for_strategy", no_io)
-    monkeypatch.setattr(_digest_audit, "bind_cached_audit", no_io)
-    monkeypatch.setattr(deep_review, "_mirror_digest_note", no_io)
-    with pytest.raises(ValueError, match="review_condition_mismatch"):
-        deep_review._review_one({}, reader=no_io, config=no_io, extractor=no_io, llm=no_io,
-                                quality_enabled=True, interpretation_schema=selection)
-    no_io.assert_not_called()
-    assert no_io.mock_calls == []
+    client = ScriptedClient()
+    forbidden = Mock(side_effect=AssertionError('invalid explicit condition must refuse before work'))
+    monkeypatch.setattr(_review_identity, 'build_review_identity', forbidden)
+    monkeypatch.setattr(_map_reduce, 'digest_for_strategy', forbidden)
+    with pytest.raises(ValueError, match='Unknown interpretation condition'):
+        run_review(client, selection)
+    assert client.calls == []
+    forbidden.assert_not_called()
 
 
-@pytest.mark.parametrize("case", ["missing_item", "missing_pdf", "disabled", "empty_extraction"])
-def test_c_without_a_generated_digest_never_forges_empty_optional_content(config, paper_io, monkeypatch, case):
-    if case == "missing_item":
+@pytest.mark.parametrize('case', ['missing_item', 'missing_pdf', 'disabled', 'empty_extraction'])
+def test_c_without_a_generated_digest_never_forges_empty_optional_content(config, paper_io, case):
+    client = ScriptedClient(cards=False)
+    item = {'item_key': 'LIBR0038'}
+    if case == 'missing_item':
         paper_io.reader.get_item_detail.return_value = None
-    elif case == "missing_pdf":
-        paper_io.reader.get_item_detail.return_value["pdf_path"] = ""
-    elif case == "empty_extraction":
-        paper_io.extractor.extract_text.return_value = " \n\t"
-    relay = Mock(wraps=_map_reduce.digest_for_strategy)
-    binder = Mock(wraps=_digest_audit.bind_cached_audit)
-    generator = Mock()
-    monkeypatch.setattr(_map_reduce, "digest_for_strategy", relay)
-    monkeypatch.setattr(_digest_audit, "bind_cached_audit", binder)
-    item = {"item_key": "LIBR0038"}
-    if case not in {"missing_item", "missing_pdf"}:
-        item["pdf_path"] = str(paper_io.source)
-    kwargs = {"reader": paper_io.reader, "config": config, "extractor": paper_io.extractor,
-              "llm": generator, "quality_enabled": case != "disabled", "interpretation_schema": C}
-    if case == "empty_extraction":
-        with pytest.raises(ValueError, match="PDF extraction returned no text"):
-            deep_review._review_one(item, **kwargs)
-        binder.assert_not_called()
+    elif case == 'missing_pdf':
+        paper_io.reader.get_item_detail.return_value['pdf_path'] = ''
     else:
-        entry = deep_review._review_one(item, **kwargs)
-        if case == "missing_item":
+        item['pdf_path'] = str(paper_io.source)
+    if case == 'empty_extraction':
+        paper_io.extractor.extract_text.return_value = ' \n\t'
+        with pytest.raises(ValueError, match='PDF extraction returned no text'):
+            deep_review._review_one(item, reader=paper_io.reader, config=config, extractor=paper_io.extractor,
+                                    llm=client, quality_enabled=True)
+    else:
+        entry = deep_review._review_one(item, reader=paper_io.reader, config=config, extractor=paper_io.extractor,
+                                       llm=client, quality_enabled=case != 'disabled')
+        if case == 'missing_item':
             assert entry is None
-            binder.assert_not_called()
         else:
-            assert entry["digest"] is None and entry["verification_audit"] is None
-            assert "interpretation" not in entry and "interpretation_qualification" not in entry
-            assert entry["needs_pdf"] is (case == "missing_pdf")
-            assert entry["zotero_note_written"] is False and entry["zotero_note_error"] is None
-    relay.assert_not_called()
-    generator.pydantic_prompt.assert_not_called()
+            assert entry['digest'] is None and entry['verification_audit'] is None
+            assert 'interpretation' not in entry and entry['zotero_note_written'] is False
+            assert entry['needs_pdf'] is (case == 'missing_pdf')
+    assert client.calls == []
     paper_io.layers.assert_not_called()
-    paper_io.mirror.assert_not_called()
-    paper_io.writer.assert_not_called()
+    paper_io.note_stage.assert_not_called()
 
 
-@pytest.mark.parametrize("strategy", ["rank", "prefix", "map_reduce"])
-@pytest.mark.parametrize("optional", ["missing", "malformed", "numeric", "semantic"])
-def test_native_optional_unavailable_is_bound_truthfully_and_only_valid_base_survives_cache_read(config, paper_io, strategy, optional):
-    config.quality_review.chunk_strategy = strategy
-    card = None if optional == "missing" else ({"items": []} if optional == "malformed" else _card("Unreported 99999%.") if optional == "numeric" else _card())
-    generator = Mock()
-    generator.pydantic_prompt.return_value = _payload(card)
-    mapper = _Mapper("Generation context only.") if optional != "semantic" else Mock()
-    if optional == "semantic":
-        mapper.prompt.return_value = "Generation context only."
-        count = len(_claims(_base()))
-        mapper.pydantic_prompt.return_value = {"checks": _table(count + 5, rejected=(count + 1,))}
-    entry = deep_review._review_one(
-        {"item_key": "LIBR0038", "pdf_path": str(paper_io.source)}, reader=paper_io.reader, config=config,
-        extractor=paper_io.extractor, llm=generator, llm_map=mapper, quality_enabled=True, interpretation_schema=C,
-    )
-    payload = entry["interpretation"]
-    assert payload["status"] == "unavailable" and payload["scientific_verification"] == "unverified"
-    assert "items" not in payload and "native_support" not in payload
-    assert entry["verification_audit"]["identity"]["interpretation_sha256"] == _digest_audit.canonical_hash(payload)
-    assert _digest_audit.cached_audit_status(entry, interpretation_schema=C) == ("available", "")
-    assert generator.pydantic_prompt.call_count == 1
-    paper_io.mirror.assert_not_called()
-    paper_io.writer.assert_not_called()
-    _review_cache._write_one("LIBR0038", entry)
-    before = _review_cache._cache_path().read_bytes()
-    view = _review_cache.get_current_review("LIBR0038", interpretation_schema=C)
-    _assert_base_only(view)
-    assert _review_cache._cache_path().read_bytes() == before
+@pytest.mark.parametrize('strategy', ['rank', 'prefix', 'map_reduce'])
+@pytest.mark.parametrize('optional', ['missing', 'malformed', 'numeric', 'semantic'])
+def test_native_optional_unavailable_is_bound_truthfully_and_only_valid_base_survives_cache_read(strategy, optional):
+    card = None if optional == 'missing' else [] if optional == 'malformed' else [dict(CARD, rationale='99999%')] if optional == 'numeric' else [CARD]
+    client = ScriptedClient(cards=False, reject_optional=optional == 'semantic', responses=[PAYLOAD | {'interpretation': card}])
+    result = run_review(client, strategy=strategy)
+    assert result['interpretation']['status'] == {'missing': 'unavailable', 'malformed': 'invalid',
+        'numeric': 'support_not_established', 'semantic': 'support_not_established'}[optional]
+    assert result['verification_audit']['lineage'][-1]['outcome'] == 'accepted'
+    assert sum(model is not None and issubclass(model, PaperDigest) for _, model, _ in client.calls) == 1
+    _review_cache._write_one('LIBR0038', result)
+    assert _review_cache.get_current_review('LIBR0038') is None  # not an ordinary cache artifact
 
 
-@pytest.mark.parametrize("selection", [None, C], ids=["off", "c"])
-@pytest.mark.parametrize("stage", ["extract", "generation", "layers"])
-def test_known_source_mutation_refuses_before_native_mirror_or_final_binding(config, paper_io, monkeypatch, selection, stage):
-    generator, mapper = Mock(), _Mapper("Generation notes only.")
-    reply = _payload(_card()) if selection is not None else _base()
-
-    def replace_source(*args, **kwargs):
-        paper_io.source.write_bytes(b"R" * paper_io.source.stat().st_size)
-        return paper_io.text if stage == "extract" else (reply if stage == "generation" else (None, None, None, None, None))
-
-    generator.pydantic_prompt.side_effect = replace_source if stage == "generation" else None
-    generator.pydantic_prompt.return_value = reply
-    if stage == "extract":
-        paper_io.extractor.extract_text.side_effect = replace_source
-    elif stage == "layers":
-        paper_io.layers.side_effect = replace_source
+@pytest.mark.parametrize('stage', ['extract', 'generation', 'layers', 'configuration'])
+def test_known_source_mutation_refuses_before_native_mirror_or_final_binding(config, paper_io, monkeypatch, stage):
+    client = ScriptedClient(cards=False)
     binder = Mock(wraps=_digest_audit.bind_cached_audit)
-    monkeypatch.setattr(_digest_audit, "bind_cached_audit", binder)
-    with pytest.raises(ValueError, match="source changed"):
-        deep_review._review_one(
-            {"item_key": "LIBR0038", "pdf_path": str(paper_io.source)}, reader=paper_io.reader, config=config,
-            extractor=paper_io.extractor, llm=generator, llm_map=mapper, quality_enabled=True, interpretation_schema=selection,
-        )
-    assert generator.pydantic_prompt.call_count == mapper.calls == 1
-    binder.assert_not_called()
-    paper_io.mirror.assert_not_called()
-    paper_io.writer.assert_not_called()
-    assert not _review_cache._cache_path().exists()
+    monkeypatch.setattr(_digest_audit, 'bind_cached_audit', binder)
 
+    def change():
+        if stage == 'configuration':
+            config.research_goals.append('Changed generation goal')
+        else:
+            paper_io.source.write_bytes(b'R' * paper_io.source.stat().st_size)
 
-@pytest.mark.parametrize("failure", ["base_rejected", "verifier_unavailable", "generator_exception"])
-def test_native_failure_returns_no_forged_entry_and_does_not_bind_or_write(config, paper_io, monkeypatch, failure):
-    generator = Mock()
-    mapper = _Mapper("Generation context only.")
-    error = DigestSourceRejected
-    generator.pydantic_prompt.return_value = _payload(_card())
-    if failure == "base_rejected":
-        mapper.supported = False
-    elif failure == "verifier_unavailable":
-        mapper = Mock()
-        mapper.pydantic_prompt.return_value = ""
-        generator.pydantic_prompt.side_effect = [_payload(_card()), "", ""]
-        error = DigestVerifierUnavailable
+    if stage == 'extract':
+        def extraction(path):
+            change()
+            return paper_io.text
+        paper_io.extractor.extract_text.side_effect = extraction
+    elif stage == 'generation':
+        original = client.pydantic_prompt
+        def generation(**kwargs):
+            value = original(**kwargs)
+            if issubclass(kwargs['pydantic_model'], PaperDigest):
+                change()
+            return value
+        client.pydantic_prompt = generation
     else:
-        generator.pydantic_prompt.side_effect = RuntimeError("scripted generator failure")
-        error = RuntimeError
-    relay = Mock(wraps=_map_reduce.digest_for_strategy)
-    binder = Mock(wraps=_digest_audit.bind_cached_audit)
-    monkeypatch.setattr(_map_reduce, "digest_for_strategy", relay)
-    monkeypatch.setattr(_digest_audit, "bind_cached_audit", binder)
-    with pytest.raises(error):
-        deep_review._review_one(
-            {"item_key": "LIBR0038", "pdf_path": str(paper_io.source)}, reader=paper_io.reader, config=config,
-            extractor=paper_io.extractor, llm=generator, llm_map=mapper, quality_enabled=True, interpretation_schema=C,
-        )
-    assert relay.call_args.kwargs["interpretation_out"] == {}
+        def layers(ctx):
+            change()
+            return (None,) * 5
+        paper_io.layers.side_effect = layers
+    with pytest.raises(ValueError, match='source changed'):
+        _compute(config, paper_io, client)
     binder.assert_not_called()
-    paper_io.mirror.assert_not_called()
-    paper_io.writer.assert_not_called()
+    paper_io.note_stage.assert_not_called()
     assert not _review_cache._cache_path().exists()
 
 
-def test_each_paper_gets_a_distinct_collector_and_missing_next_card_never_reuses_first(config, paper_io, monkeypatch):
-    generator, mapper = Mock(), _Mapper("Generation notes only.")
-    generator.pydantic_prompt.side_effect = [_payload(_card()), _payload(None), RuntimeError("third paper failed")]
-    relay = Mock(wraps=_map_reduce.digest_for_strategy)
-    monkeypatch.setattr(_map_reduce, "digest_for_strategy", relay)
-    entries = []
-    for key in ("LIBR0038", "LIBR0039"):
-        entries.append(deep_review._review_one(
-            {"item_key": key, "pdf_path": str(paper_io.source)}, reader=paper_io.reader, config=config,
-            extractor=paper_io.extractor, llm=generator, llm_map=mapper, quality_enabled=True, interpretation_schema=C,
-        ))
-    with pytest.raises(RuntimeError, match="third paper failed"):
-        deep_review._review_one(
-            {"item_key": "LIBR0040", "pdf_path": str(paper_io.source)}, reader=paper_io.reader, config=config,
-            extractor=paper_io.extractor, llm=generator, llm_map=mapper, quality_enabled=True, interpretation_schema=C,
-        )
-    first, second, third = [call.kwargs["interpretation_out"] for call in relay.call_args_list]
-    assert first is not second and first is not third and second is not third
-    assert entries[0]["interpretation"]["items"] == first["items"] == _card()["items"]
-    assert entries[1]["interpretation"]["unavailable_reason"] == "missing_interpretation"
-    assert "items" not in second and third == {}
-    paper_io.mirror.assert_not_called()
-    paper_io.writer.assert_not_called()
+@pytest.mark.parametrize('failure', ['base_rejected', 'verifier_unavailable', 'generator_exception'])
+def test_native_failure_returns_no_forged_entry_and_does_not_bind_or_write(config, paper_io, monkeypatch, failure):
+    client = ScriptedClient(cards=False)
+    original = client.pydantic_prompt
+    def fail(**kwargs):
+        if failure == 'generator_exception':
+            raise RuntimeError('scripted generator failure')
+        result = original(**kwargs)
+        if not issubclass(kwargs['pydantic_model'], PaperDigest):
+            if failure == 'verifier_unavailable':
+                return {}
+            result['checks'][0] = dict(result['checks'][0], supported=False, evidence=[])
+        return result
+    client.pydantic_prompt = fail
+    binder = Mock(wraps=_digest_audit.bind_cached_audit)
+    monkeypatch.setattr(_digest_audit, 'bind_cached_audit', binder)
+    error = RuntimeError if failure == 'generator_exception' else DigestVerifierUnavailable if failure == 'verifier_unavailable' else DigestSourceRejected
+    with pytest.raises(error):
+        _compute(config, paper_io, client)
+    binder.assert_not_called()
+    paper_io.note_stage.assert_not_called()
+    assert not _review_cache._cache_path().exists()
+
+
+def test_each_paper_gets_a_distinct_collector_and_missing_next_card_never_reuses_first():
+    client = ScriptedClient(cards=False, responses=[PAYLOAD | {'interpretation': [CARD]}, PAYLOAD, PAYLOAD | {'tldr': '99999%'}])
+    first = run_review(client)
+    saved = deepcopy(first)
+    second = run_review(client)
+    assert first['interpretation']['items'] == [CARD] and second['interpretation'] == {'status': 'unavailable'}
+    client.responses.append(PAYLOAD | {'tldr': '99999%'})
+    with pytest.raises(DigestSourceRejected):
+        run_review(client)
+    assert first == saved
+
+
+def test_worker_publishes_before_proposal_staging_without_native_write(published_review):
+    env = published_review
+    assert env.job['status'] == 'ready' and env.job['error'] is None
+    assert len(env.stage_snapshots) == 1
+    entry, revision = env.stage_snapshots[0]
+    assert revision and entry == env.entry
+    assert entry['zotero_note_written'] is False
+    assert entry['verification_audit']['identity']['review_source_sha256'] == entry['review_identity']['source_sha256']
+    env.writer.apply_changes.assert_not_called()

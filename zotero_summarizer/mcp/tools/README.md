@@ -42,8 +42,12 @@ including parallel items still draining during cancellation. The old singular
 together. Missing activity in the response is a contract error, not an invented
 empty list. Historical/terminal jobs receive an explicit empty list from the API.
 
-`find_similar_papers` ranks unread library papers with semantic hybrid search,
-with explicit unavailable feedback when the reranker cannot serve the query. `get_paper` gets
+`find_similar_papers` ranks unread library papers with semantic hybrid search.
+A blank effective query (explicit query or seed title) is a validation error before
+queue I/O. Candidates require the API's `semantic=true` confirmation; missing/false
+confirmation or `semantic_unavailable` returns explicit unavailability, never ordinary
+queue recommendations. A confirmed semantic empty result remains a successful empty
+result. `get_paper` gets
 pending/history rows using the item-key filter, so unrelated queue traffic does
 not consume its result window.
 

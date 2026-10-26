@@ -6,7 +6,7 @@ import pytest
 from tests.test_setup_doctor import _settings
 from zotero_summarizer.models.providers import DefaultModelConfig, LLMRoutingConfig, ProviderConfig, StageModelConfig
 from zotero_summarizer.services.setup import doctor
-from zotero_summarizer.services.llm import model_list
+from zotero_summarizer.services.llm import factory, model_list, operational_check
 
 
 def _routing(other_first):
@@ -31,10 +31,14 @@ def test_other_local_runtime_failure_is_not_reclassified_as_ollama(tmp_path, mon
             raise failure
         return [provider.name + "-model"]
 
+    inference = Mock(side_effect=AssertionError("Inventory must not construct an inference client"))
+    monkeypatch.setattr(factory, "build_client_for_provider", inference)
     monkeypatch.setattr(model_list, "list_models_for_provider", listed)
-    with pytest.raises(RuntimeError) as exc:
-        doctor._runtime_model(_settings(tmp_path))
-    assert exc.value is failure
+    row = doctor._runtime_model(_settings(tmp_path))
+    assert row["id"] == "runtime_model" and row["status"] == "needs_action"
+    assert row["detail"] == "custom-peer/custom-peer-model at http://localhost:8899/v1: RuntimeError: custom runtime refused"
+    assert row["recovery"]["action"] == "open_ai_settings" and "command" not in row["recovery"]
+    inference.assert_not_called()
 
 
 @pytest.mark.parametrize("other_first", [False, True])
@@ -46,8 +50,9 @@ def test_missing_other_local_model_never_suggests_ollama_pull(tmp_path, monkeypa
                         lambda p: [] if p.name == "custom-peer" else [p.name + "-model"])
     row = doctor._runtime_model(_settings(tmp_path))
     assert row["status"] == "needs_action"
-    assert row["detail"].split(", ") == ["custom-peer/custom-peer-model"] * (2 if other_first else 1)
-    assert row["recovery"] == {"label": "Choose a served model", "action": "open_ai_settings"}
+    assert row["detail"].split(", ") == ["custom-peer/custom-peer-model at http://localhost:8899/v1"] * (
+        2 if other_first else 1)
+    assert row["recovery"]["action"] == "open_ai_settings" and "command" not in row["recovery"]
 
 
 @pytest.mark.parametrize("other_first", [False, True])
@@ -55,15 +60,17 @@ def test_non_ollama_chat_failure_keeps_native_recovery(tmp_path, monkeypatch, ot
     config = _routing(other_first)
     monkeypatch.setattr(doctor, "read_config", lambda *_args: config)
     stages = [{"stage": "feed", "provider": "custom-peer", "model": "custom-peer-model",
-               "status": "fail", "detail": "model does not support chat"}]
+               "base_url": "http://localhost:8899/v1", "status": "fail",
+               "detail": "model does not support chat", "reason_code": "inference_failed"}]
 
     async def checked(*_args, **_kwargs):
         return {"stages": stages}
 
-    monkeypatch.setattr(doctor, "check_setup_stages", checked)
-    expected = doctor.load_check_row("llm_inference", stages, "Every LLM stage returned a real response")
-    assert doctor._llm_inference(_settings(tmp_path)) == expected
-    assert expected["recovery"].get("command") != "ollama pull custom-peer-model"
+    monkeypatch.setattr(operational_check, "check_routing_stages", checked)
+    row = doctor._llm_inference(_settings(tmp_path))
+    assert row["id"] == "llm_inference" and row["status"] == "needs_action"
+    assert row["load_receipts"] == stages
+    assert row["recovery"]["action"] == "open_ai_settings" and "command" not in row["recovery"]
 
 
 def test_ml_only_runtime_still_makes_no_inventory_call(tmp_path, monkeypatch):

@@ -29,8 +29,12 @@ _CHECKS = [
 ]
 
 
+@pytest.mark.parametrize("recovery_id,label,control", [
+    ("rss-feeds", "Add a source in Settings", "#rss-feeds button"),
+    ("ai-models", "Review endpoint settings", "#ai-models input"),
+], ids=["sources", "ai"])
 @pytest.mark.parametrize("width", [390, 1024, 1440])
-def test_setup_health_states_reflow_and_keyboard_recovery(application_browser, width):
+def test_setup_health_states_reflow_and_keyboard_recovery(application_browser, width, recovery_id, label, control):
     from patchright.sync_api import expect
 
     page, _client, settings, seen = application_browser
@@ -51,6 +55,9 @@ def test_setup_health_states_reflow_and_keyboard_recovery(application_browser, w
     expect(page.get_by_role("heading", name="Setup saved", exact=True)).to_be_visible()
     expect(page.get_by_role("button", name="Open Today", exact=True)).to_be_disabled()
     checklist = page.get_by_role("list", name="Setup checks")
+    other_checks = checklist.get_by_text("1 check passed · 1 unavailable", exact=True)
+    other_checks.focus()
+    other_checks.press("Enter")
     for status in ("Not started", "Running", "Ready", "Needs action", "Unavailable"):
         expect(checklist.get_by_text(status, exact=True).first).to_be_visible()
     expect(page.get_by_text("Local inference", exact=True)).to_be_visible()
@@ -64,15 +71,33 @@ def test_setup_health_states_reflow_and_keyboard_recovery(application_browser, w
     state["checks"][1].update(status="ready", message="Runtime inventory finished")
     page.reload()
 
-    recovery = page.get_by_role("button", name="Add a source in Settings", exact=True)
+    recovery = page.get_by_role("link", name=label, exact=True)
     recovery.focus()
     recovery.press("Enter")
-    expect(page).to_have_url("http://127.0.0.1/settings#rss-feeds")
-    expect(page.locator("#rss-feeds button").first).to_be_focused()
+    expect(page).to_have_url(f"http://127.0.0.1/settings#{recovery_id}")
+    expect(page.locator(control).first).to_be_focused()
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     assert doctor_reads
     assert not [row for row in seen if row[0] == "POST" and row[1] in {
         "/api/setup/doctor", "/api/admin/llm-models", "/api/rss/refresh",
     }]
     print("BROWSER_RECEIPT", json.dumps({"journey": "synthetic-setup-health-keyboard-recovery",
-                                        "width": width, "states": 5, "model_loads": "not requested"}))
+                                        "width": width, "recovery": recovery_id,
+                                        "states": 5, "model_loads": "not requested"}))
+
+
+@pytest.mark.parametrize("width", [320, 390])
+def test_setup_progress_reflows_with_accessible_states(application_browser, width):
+    from patchright.sync_api import expect
+
+    page, _client, settings, _seen = application_browser
+    page.set_viewport_size({"width": width, "height": 844})
+    page.goto("http://127.0.0.1/setup")
+    expect(page.get_by_role("heading", name="Set up Zotero Summarizer", exact=True)).to_be_visible()
+    progress = page.get_by_role("list", name="Setup progress")
+    current = progress.locator('[aria-current="step"]')
+    expect(current).to_have_count(1)
+    expect(current).to_contain_text("Current step")
+    assert "Not complete" in progress.locator(".sr-only").all_text_contents()
+    page.screenshot(path=str(settings.data_dir / f"setup-progress-{width}.png"), full_page=True)
+    assert page.evaluate("document.documentElement.scrollWidth === document.documentElement.clientWidth")

@@ -79,6 +79,7 @@ def test_whole_cohort_precedes_both_budgets_and_review_never_backfills(
     filler = _stored(settings, 3, 1)
     generated, loaded = [], []
     build = runner.build_card
+    retained = {key: _review(key) for key in (leader, goal, filler)}
 
     def ensure(_settings, candidates, timeout, actual_profile):
         assert actual_profile == load_profile(_settings.data_dir)
@@ -91,12 +92,12 @@ def test_whole_cohort_precedes_both_budgets_and_review_never_backfills(
             return None
         if outcome == "review_error":
             raise RuntimeError("owned review failure")
-        return _review(key)
+        return deepcopy(retained[key])
 
-    def card(candidate, *args):
+    def card(candidate, *args, **kwargs):
         if outcome == "card_error":
             raise ValueError("owned card failure")
-        return build(candidate, *args)
+        return build(candidate, *args, **kwargs)
 
     monkeypatch.setattr(runner, "_ensure_reviews", ensure)
     monkeypatch.setattr(runner, "build_card", card)
@@ -187,6 +188,15 @@ def test_missing_aux_objects_are_not_malformed(rank, raw):
     assert len(ordered) == 1 and failed == []
     assert metadata["inputs"]["one"]["goal_sim"] is None
     assert metadata["inputs"]["one"]["citation_percentile"] is None
+
+
+@pytest.mark.parametrize("field", ["summary", "aux_context"])
+def test_nullable_history_fields_preserve_unknown_and_original_payload(field):
+    payload = json.dumps({field: None})
+    row = {"shap_contribs_json": payload}
+
+    assert source.summary(row, field) == {}
+    assert row["shap_contribs_json"] == payload
 
 
 @pytest.mark.parametrize(("field", "raw"), [
@@ -353,11 +363,11 @@ def test_present_invalid_payload_fails_only_consumed_scored_pair(rank, raw):
 
 
 def test_source_helpers_are_canonical_and_absent_row_is_not_an_observed_default(rank):
-    assert runner._summary is source._summary and runner._number is source._number
-    assert source._summary({"shap_contribs_json": '{"summary":{},"aux_context":null}'}) == {}
-    assert source._number(None, default=0.5, maximum=1) == 0.5
-    with pytest.raises(ValueError, match="^stored triage aux_context field must be an object$"):
-        source._summary({"shap_contribs_json": '{"aux_context":false}'}, field="aux_context")
+    assert runner.summary is source.summary and runner.number is source.number
+    assert source.summary({"shap_contribs_json": '{"summary":{},"aux_context":null}'}) == {}
+    assert source.number(None, default=0.5, maximum=1) == 0.5
+    with pytest.raises(ValueError, match="^stored triage summary is invalid JSON$"):
+        source.summary({"shap_contribs_json": '{"aux_context":false}'}, field="aux_context")
     ordered, metadata, failed = rank([_pair("one")], {}, ["one"])
     assert len(ordered) == 1 and failed == []
     assert metadata["inputs"]["one"]["relevance"] is None

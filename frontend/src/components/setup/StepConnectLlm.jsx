@@ -1,19 +1,14 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { listModels } from '../../api/settingsApi.js';
 import { fetchAiPresets, saveAiCredential } from '../../api/setupApi.js';
 import { invalidateSetupDoctor } from '../../utils/setupDoctorState.js';
+import { localProfileForStage, resolveStage } from '../../utils/configForm.js';
 import { humanizeError } from '../../utils/humanizeError.js';
 import { Banner, Field } from '../form/Fields.jsx';
 import Button from '../ui/Button.jsx';
 
 const INPUT = 'w-full mt-1 p-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500';
-
-function activeProvider(routing) {
-  const name = routing?.default?.provider;
-  return (routing?.providers || []).find((provider) => provider.name === name)
-    || (routing?.providers || [])[0];
-}
 
 function presetFor(provider, presets) {
   if (!provider) return 'openrouter';
@@ -28,21 +23,21 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
   const presetsQuery = useQuery({ queryKey: ['ai-presets'], queryFn: fetchAiPresets });
   const presets = presetsQuery.data?.presets || [];
   const localCatalog = presetsQuery.data?.local_profiles;
-  const current = activeProvider(routing);
+  const current = resolveStage(routing, 'default').provider || routing?.providers?.[0];
   const [choice, setChoice] = useState(null);
-  const [localProfile, setLocalProfile] = useState(null);
+  const [editingExisting, setEditingExisting] = useState(false);
+  const modelListId = useId();
   const [apiKey, setApiKey] = useState('');
   const [models, setModels] = useState([]);
   const selectedId = mode === 'local' ? 'local' : choice || presetFor(current, presets);
   const selected = presets.find((preset) => preset.id === selectedId);
-  const selectedLocal = localCatalog?.profiles.find((profile) => profile.id === localProfile)
-    || (current?.name === 'local' ? (
-      localCatalog?.profiles.find((profile) => profile.model && profile.model === routing?.default?.model)
-      || localCatalog?.profiles.find((profile) => profile.id === 'existing')
-    ) : null);
+  const effectiveLocal = selectedId === 'local' ? localProfileForStage(routing, localCatalog) : null;
+  const selectedLocal = selectedId === 'local'
+    ? (editingExisting ? localCatalog?.profiles.find((profile) => profile.id === 'existing') : effectiveLocal)
+    : null;
   const provider = selectedId === 'custom' ? current
     : selectedId === 'local'
-      ? (selectedLocal?.id === 'existing' ? current : selectedLocal?.provider || selected?.provider)
+      ? current || selectedLocal?.provider || selected?.provider
       : selected?.provider;
   const defaultModel = routing?.default?.model || '';
 
@@ -63,7 +58,7 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
 
   function choosePreset(id) {
     setChoice(id);
-    setLocalProfile(null);
+    setEditingExisting(false);
     setApiKey('');
     const preset = presets.find((item) => item.id === id);
     if (preset?.provider) patchProvider(preset.provider, true);
@@ -75,7 +70,7 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
     const providers = (routing?.providers || []).filter((item) => item.name !== local.name);
     providers.push(local);
     const model = profile.model || null;
-    setLocalProfile(profile.id);
+    setEditingExisting(profile.id === 'existing');
     onPatchRouting({
       ...routing, providers,
       default: { provider: local.name, model },
@@ -88,7 +83,8 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
   }
 
   function patchExistingEndpoint(base_url) {
-    if (current?.name !== 'local') return;
+    if (!current) return;
+    setEditingExisting(true);
     onPatchRouting({ ...routing,
       providers: routing.providers.map((item) => item.name === current.name ? { ...item, base_url } : item),
     });
@@ -110,6 +106,7 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
       next[stage] = { provider: provider?.name, model: null };
     });
     onPatchRouting(next);
+    onTested?.(false);
   }
 
   const connectMutation = useMutation({
@@ -135,7 +132,8 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
   const legacyStored = status?.llm?.api_key_env === provider?.api_key_env
     && status?.llm?.api_key_present;
   const stored = Boolean(selected?.credential?.present || legacyStored);
-  const canConnect = Boolean(provider && (selectedId !== 'local' || selectedLocal)
+  const canConnect = Boolean(provider && (selectedId !== 'local'
+    || (selectedLocal?.compatible === true && effectiveLocal?.compatible === true))
     && (!requiresKey || apiKey || stored));
   const connected = Boolean(testedOk && connectMutation.isSuccess && models.includes(defaultModel));
   const cardClass = (id) => `text-left rounded-xl border px-3 py-2 transition-colors ${
@@ -180,16 +178,28 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
                 onClick={() => chooseLocalProfile(profile)}>
                 <span className="block text-sm font-semibold text-slate-800">{profile.label}</span>
                 <span className="block text-xs text-slate-500 mt-1">
-                  {profile.model || 'Your model'}{profile.size_gb ? ` · ${profile.size_gb} GB` : ''}
+                  {profile.model || 'Your model'}{profile.size_gb ? ` · approximately ${profile.size_gb} GB` : ''}
                 </span>
                 <span className="block text-[11px] text-slate-500 mt-1">{profile.compatibility_detail}</span>
               </button>
             ))}
           </div>
-          {selectedLocal?.id === 'existing' && (
-            <Field label="Local endpoint URL" value={current?.base_url || ''}
-              onChange={patchExistingEndpoint} />
-          )}
+          {selectedLocal?.id === 'existing' && <>
+            <Field label="Local endpoint URL" value={current?.base_url || ''} onChange={patchExistingEndpoint} />
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700">Local model name</span>
+              <input value={defaultModel} list={modelListId} className={INPUT}
+                onChange={(event) => { setEditingExisting(true); patchModel(event.target.value); }} />
+              <datalist id={modelListId}>
+                {models.map((model) => <option key={model} value={model} />)}
+              </datalist>
+            </label>
+          </>}
+          {effectiveLocal?.model && effectiveLocal.min_memory_gb != null && effectiveLocal.min_disk_gb != null &&
+            <p className="text-xs text-slate-500">
+              Static profile floors: {effectiveLocal.min_memory_gb} GB memory · {effectiveLocal.min_disk_gb} GB free disk.
+              {' '}These are not proof of load safety.
+            </p>}
           {selectedLocal && (
             <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600">
               <p>{selectedLocal.runtime} · {selectedLocal.features.join(', ')}</p>
@@ -233,12 +243,12 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
       <div className="flex items-center gap-3 flex-wrap">
         <Button variant="secondary" onClick={() => connectMutation.mutate()}
           disabled={!canConnect || connectMutation.isPending}>
-          {connectMutation.isPending ? 'Connecting…' : 'Connect & load models'}
+          {connectMutation.isPending ? 'Listing models…' : 'List available models'}
         </Button>
         {connected && <span className="text-sm font-semibold text-emerald-700">✓ Connected</span>}
       </div>
 
-      {models.length > 0 && (
+      {models.length > 0 && selectedLocal?.id !== 'existing' && (
         <label className="block">
           <span className="text-sm font-semibold text-slate-700">Model</span>
           <select value={defaultModel} onChange={(event) => patchModel(event.target.value)} className={`${INPUT} bg-white`}>

@@ -58,6 +58,66 @@ it('opens a retained CLI run with cards, paper links, downloads and honest unkno
   expect(screen.queryByRole('button', { name: /Build/ })).toBeNull();
 });
 
+it('shows retained unverified observations as literal visible notes without inventing project actions', async () => {
+  const saved = report();
+  const note = 'Retained goal observation (unverified) — 生物 Δ: <img src=x onerror=alert(1)> & compare.\nOriginal line.';
+  const card = saved.cards[0].card;
+  card.project_use_notes = ['Project mechanisms and validation experiments have not been assessed.', note];
+  card.project_assessment_status = 'not_assessed';
+  card.project_uses = [];
+  saved.research_ideas_by_project = {};
+  const before = structuredClone(saved);
+  researchFeedApi.list.mockResolvedValue({ items: [] });
+  researchFeedApi.get.mockResolvedValue(saved);
+  mount('/weekly?run=weekly-observation');
+
+  await screen.findByRole('heading', { name: 'Agent benchmark' });
+  const item = screen.getAllByRole('listitem').find((row) => row.textContent === note);
+  expect(item).toBeTruthy();
+  expect(item.closest('details')).toBeNull();
+  expect(item.querySelector('img, script, a')).toBeNull();
+  expect(screen.getByText('No structured ideas recorded.')).toBeTruthy();
+  expect(researchFeedApi.get).toHaveBeenCalledTimes(1);
+  expect(saved).toEqual(before);
+});
+
+it('shows unqualified reviews without claiming unavailable full text or hiding them as none', async () => {
+  const saved = report();
+  saved.cards = [];
+  saved.manual_full_text_required = [];
+  saved.research_ideas_by_project = {};
+  saved.unqualified_reviews = [{
+    candidate: { source_id: 'feed:waiting', title: 'Waiting for a current review', url: '' },
+    reason: 'review_missing',
+  }];
+  researchFeedApi.list.mockResolvedValue({ items: [] });
+  researchFeedApi.get.mockResolvedValue(saved);
+  mount('/weekly?run=weekly-unqualified');
+
+  const link = await screen.findByRole('link', { name: 'Waiting for a current review' });
+  expect(link.getAttribute('href')).toBe('/paper/feed%3Awaiting?autoRun=false');
+  expect(link.closest('details')).toBeNull();
+  const section = screen.getByRole('heading', { name: 'Needs a current review / full text' }).parentElement;
+  expect(section.textContent).toContain('Review not qualified: review_missing');
+  expect(section.textContent).not.toContain('None recorded.');
+  expect(section.textContent).toContain('does not prove the PDF is unavailable');
+  expect(researchFeedApi.get).toHaveBeenCalledTimes(1);
+});
+
+it('keeps manual source needs and unqualified reviews in one visible section with distinct reasons', async () => {
+  const saved = report();
+  saved.unqualified_reviews = [{ candidate: { source_id: 'feed:other', title: 'Unbound current review' }, reason: 'review_source_unbound' }];
+  researchFeedApi.list.mockResolvedValue({ items: [] });
+  researchFeedApi.get.mockResolvedValue(saved);
+  mount('/weekly?run=weekly-mixed');
+
+  const pending = await screen.findByRole('link', { name: 'Unbound current review' });
+  const manual = screen.getByRole('link', { name: 'Missing current review' });
+  expect(pending.closest('section')).toBe(manual.closest('section'));
+  expect(pending.closest('section').textContent).toContain('Review not qualified: review_source_unbound');
+  expect(pending.getAttribute('href')).toBe('/paper/feed%3Aother?autoRun=false');
+});
+
 it('does not replace the selected run when an older detail request completes late', async () => {
   let resolveOld;
   researchFeedApi.list.mockResolvedValue({ items: ['weekly-old', 'weekly-new'].map((run_id) => ({ run_id, available: true, counts: { cards_generated: 1 } })) });

@@ -2,8 +2,9 @@
 
 `faithbench interpretation` inspects a frozen recipe by default, without provider
 construction or output effects. Explicit `--run --capture-local` records a private
-A/B/C attempt; `--run-id` exports blinded human packets, and `--labels` scores an
-existing run. Inconsistent/unconsented flags refuse at the existing pre-Settings
+A/B/C attempt; its stage clients resolve through `services.llm.factory` using
+invocation-local `RuntimeState` cache state. `--run-id` exports blinded human
+packets, and `--labels` scores an existing run. Inconsistent/unconsented flags refuse at the existing pre-Settings
 validator, including the real dispatcher. See [experiment overview](../../docs/features.md#interpretation-experiment).
 
 Each command group lives in its own module and owns both its handlers and its

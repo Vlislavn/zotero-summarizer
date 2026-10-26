@@ -2,17 +2,18 @@
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import json
+from pathlib import Path
 import sqlite3
 from threading import Event
 from types import SimpleNamespace
 
 import pytest
 
-from tests._zotero_fixtures import add_library_item
 from tests.test_discovery_server import PRIVATE, begin, journey  # noqa: F401 — shared fixture
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.api.routes import search
 from zotero_summarizer.services.search import discovery, materialize, pipeline, session
+from zotero_summarizer.services.llm import factory
 from zotero_summarizer.services.search._models import QueryPlan, SearchIntent
 from zotero_summarizer.storage import repositories
 
@@ -69,14 +70,14 @@ def test_assessment_lock_rechecks_before_actual_client_resolution(journey, monke
     waiting = Event()
     original = discovery._assess
     calls = []
-    resolver = journey.runtime.resolve_stage_client
+    resolver = factory.resolve_stage_client
 
     def assess(*args):
         waiting.set()
         return original(*args)
 
     monkeypatch.setattr(discovery, "_assess", assess)
-    monkeypatch.setattr(journey.runtime, "resolve_stage_client", lambda *a, **kw: (calls.append(kw), resolver(*a, **kw))[1])
+    monkeypatch.setattr(factory, "resolve_stage_client", lambda *a, **kw: (calls.append(kw), resolver(*a, **kw))[1])
     kwargs = request(journey)
     with ThreadPoolExecutor(max_workers=1) as pool:
         with session._lock_for("related-assessment"):
@@ -261,23 +262,36 @@ def test_stale_review_and_new_add_409_before_effect_but_old_add_replay_preserved
 
 def test_new_add_changes_membership_and_next_get_is_stale(journey, monkeypatch):
     result = begin(journey).json()
-    effects = []
+    effects, receipts = [], []
+    actual = materialize.ZoteroWriter.apply_feed_materialization
 
-    class Writer:
-        def apply_feed_materialization(self, **kwargs):
-            effects.append(kwargs)
-            add_library_item(journey.native_db, item_key=kwargs["new_item_key"],
-                             title=kwargs["feed_payload"]["title"], doi=kwargs["feed_payload"]["doi"])
+    def observed(writer, **kwargs):
+        assert writer.db_path == journey.native_db
+        effects.append(deepcopy(kwargs))
+        receipt = actual(writer, **kwargs)
+        receipts.append(receipt)
+        return receipt
 
     monkeypatch.setattr(materialize, "settings", lambda: journey.paths)
-    monkeypatch.setattr(materialize, "ZoteroWriter", lambda *a: Writer())
+    monkeypatch.setattr(materialize.ZoteroWriter, "is_connector_running", lambda self: False)
+    monkeypatch.setattr(materialize.ZoteroWriter, "apply_feed_materialization", observed)
     added = journey.client.post(f"/api/search/{result['id']}/materialize", json={"candidate_id": "10.1/new"})
     assert added.status_code == 200 and added.json()["status"] == "added"
-    assert len(effects) == 1 and PRIVATE not in json.dumps(effects, ensure_ascii=False)
+    assert len(effects) == len(receipts) == 1 and PRIVATE not in json.dumps(effects, ensure_ascii=False)
+    key = added.json()["zotero_key"]
+    assert receipts[0]["item_key"] == key and receipts[0]["applied_steps"]
+    backup = Path(receipts[0]["backup_path"])
+    assert backup.parent == journey.native_db.parent and backup.is_file()
+    with sqlite3.connect(f"{backup.as_uri()}?mode=ro&immutable=1", uri=True) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert connection.execute("SELECT COUNT(*) FROM items WHERE key=?", (key,)).fetchone() == (0,)
+    detail = journey.reader.get_item_detail(key)
+    assert detail["doi"] == "10.1/new" and detail["title"] == effects[0]["feed_payload"]["title"]
     after = journey.client.get(f"/api/search/{result['id']}").json()["discovery"]
     assert after["freshness"] == "stale" and after["new_actions_allowed"] is False
     assert journey.client.post(f"/api/search/{result['id']}/materialize", json={"candidate_id": "10.1/new"}).json()["status"] == "already_added"
-    assert len(effects) == 1
+    assert len(effects) == len(receipts) == 1
+    assert list(journey.native_db.parent.glob("zotero.sqlite.backup_*")) == [backup]
 
 
 def test_ordinary_search_autostart_and_agentic_order_are_preserved(journey, monkeypatch):

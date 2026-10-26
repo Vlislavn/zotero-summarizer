@@ -46,6 +46,63 @@ def _loaded_source_receipt(tmp_path):
     (tmp_path / "loaded-source.json").write_text(json.dumps(receipt, indent=2) + "\n")
 
 
+@pytest.mark.parametrize("owner", ["parent_root", "telegram_directory", "state_file"])
+def test_saved_news_refuses_aliased_output_owner_before_inputs_or_models(tmp_path, monkeypatch, owner):
+    from unittest.mock import Mock
+    from zotero_summarizer.services.research_feed import telegram
+
+    settings = _project(tmp_path)
+    parent = settings.data_dir / "research_feed"
+    directory = parent / "telegram"
+    outside = settings.data_dir / "not-news-owned"
+    outside.mkdir()
+    sentinel = outside / "sentinel.txt"
+    sentinel.write_bytes(b"preserve owned outside data")
+    if owner == "parent_root":
+        parent.rename(settings.data_dir / "retained-parent")
+        parent.symlink_to(outside, target_is_directory=True)
+        link = parent
+    elif owner == "telegram_directory":
+        directory.symlink_to(outside, target_is_directory=True)
+        link = directory
+    else:
+        directory.mkdir()
+        link = directory / "state.json"
+        link.symlink_to(sentinel)
+    before = settings.triage_db_path.read_bytes()
+    forbidden = Mock(side_effect=AssertionError("output admission must precede saved input/model work"))
+    monkeypatch.setattr(telegram, "read_posts", forbidden)
+    monkeypatch.setattr(telegram, "load_profile", forbidden)
+    monkeypatch.setattr(telegram, "read_config", forbidden)
+    monkeypatch.setattr(telegram, "_process", forbidden)
+
+    with pytest.raises(ValueError, match="symlink"):
+        telegram.run_saved(settings, input_jsonl=settings.project_root / "not-read.jsonl", collect_only=True)
+    forbidden.assert_not_called()
+    assert link.is_symlink() and set(outside.iterdir()) == {sentinel}
+    assert sentinel.read_bytes() == b"preserve owned outside data"
+    assert settings.triage_db_path.read_bytes() == before
+
+
+def test_saved_news_publication_rechecks_parent_owner_before_projection(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+    from zotero_summarizer.services.research_feed import telegram
+
+    settings = _project(tmp_path)
+    parent = settings.data_dir / "research_feed"
+    parent.rename(settings.data_dir / "retained-parent")
+    outside = settings.data_dir / "not-news-owned"
+    outside.mkdir()
+    parent.symlink_to(outside, target_is_directory=True)
+    forbidden = Mock(side_effect=AssertionError("publication owner recheck must precede projection"))
+    monkeypatch.setattr(telegram.telegram_render, "payload", forbidden)
+
+    with pytest.raises(ValueError, match="symlink"):
+        telegram._publish(settings, [], {"counts": {}}, None, 1, True)
+    forbidden.assert_not_called()
+    assert parent.is_symlink() and not list(outside.iterdir())
+
+
 def _key(post):
     return f"telegram:{post['channel_id']}:{post['message_id']}"
 

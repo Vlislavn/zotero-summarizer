@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const api = vi.hoisted(() => ({ addRssFeed: vi.fn(), deleteRssFeed: vi.fn(), fetchRssFeeds: vi.fn(),
   importRssFeedsFromZotero: vi.fn(), refreshRssFeeds: vi.fn(), updateRssFeed: vi.fn(),
-  fetchDoctorStatus: vi.fn(), runDoctor: vi.fn() }));
+  fetchDoctorStatus: vi.fn(), runDoctor: vi.fn(), cancelDoctor: vi.fn() }));
 vi.mock('../../api/settingsApi.js', () => api);
 vi.mock('../../api/setupApi.js', () => api);
 import RssFeedsSection from './RssFeedsSection.jsx';
@@ -95,8 +95,12 @@ it.each(['add', 'update', 'disable', 'delete', 'import'])('%s refreshes the shar
 it('retires verification of a removed last source and recovers only after an explicit new check', async () => {
   let finishOld;
   const oldCheck = new Promise((resolve) => { finishOld = resolve; });
-  api.runDoctor.mockReturnValueOnce(oldCheck).mockResolvedValueOnce(missing).mockResolvedValueOnce({
-    ...ready, config_signature: 'recovered-sources',
+  api.runDoctor.mockReturnValueOnce(oldCheck).mockImplementationOnce(async () => {
+    health = missing;
+    return health;
+  }).mockImplementationOnce(async () => {
+    health = { ...ready, config_signature: 'recovered-sources' };
+    return health;
   });
   mount();
   await screen.findByText('✓ Setup verified');

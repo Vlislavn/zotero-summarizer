@@ -20,7 +20,8 @@ def reseal(owner, cfg):
     manifest = json.loads((owner / 'manifest.json').read_bytes())
     rows = [json.loads((owner / f'case-{i}.json').read_bytes()) for i in range(manifest['rows'])]
     prepared = prepare(cfg)
-    result = report(rows, cfg, prepared[0], prepared[1])
+    timings = json.loads((owner / 'paper-times.json').read_bytes())
+    result = report(rows, cfg, prepared[0], prepared[1], timings=timings)
     (owner / 'report.json').write_bytes(encoded(result))
     (owner / 'report.md').write_bytes(readable(result).encode())
     manifest['files'] = {p.name: sha(p.read_bytes()) for p in owner.iterdir()
@@ -56,6 +57,32 @@ def test_self_consistent_derived_hashes_cannot_bypass_frozen_branches(tmp_path, 
     reseal(owner, cfg)
     if mutation == 'missing_ack': (owner / 'ACK').unlink()
     with pytest.raises((ValueError, FileNotFoundError)): reopen(owner)
+
+
+@pytest.mark.parametrize('field,value', [('attempt', True), ('client_retries', False)])
+def test_native_transport_counters_are_integers_not_boolean_aliases(tmp_path, field, value):
+    import httpx
+    from test_collection_native import native
+    from test_collection_fixtures import response
+
+    cfg, path = native(tmp_path)
+    requests = []
+
+    def server(request):
+        requests.append(request.content)
+        return httpx.Response(200, content=response())
+
+    owner, original = run(cfg, path.read_bytes(), transport=httpx.MockTransport(server))
+    assert reopen(owner) == original and len(requests) == 6
+    row = json.loads((owner / 'case-0.json').read_bytes())
+    terminal = (owner / row['terminal']).read_bytes()
+    row['telemetry'][field] = value
+    (owner / 'case-0.json').write_bytes(encoded(row))
+    reseal(owner, cfg)
+    assert (owner / row['terminal']).read_bytes() == terminal
+    with pytest.raises(ValueError):
+        reopen(owner)
+    assert len(requests) == 6
 
 
 @pytest.mark.parametrize('missing', ['recording', 'blocked', 'wall'])

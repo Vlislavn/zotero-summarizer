@@ -202,17 +202,19 @@ def test_high_friction_is_generated_in_the_existing_digest_call(monkeypatch):
     assert result.writing_reasons == source["writing_reasons"] and result.read_decision == "read"
 
 
-def test_real_review_worker_keeps_model_output_while_note_and_cache_receive_policy(monkeypatch, tmp_path):
-    from zotero_summarizer.services.library import deep_review
+def test_review_computation_keeps_model_while_render_and_cache_receive_policy(monkeypatch, tmp_path):
+    from unittest.mock import Mock
+    from zotero_summarizer.services.library import _review_cache, deep_review
     from zotero_summarizer.services.setup.bootstrap import _default_goals_config
-    from zotero_summarizer.services.zotero import zotero
+    from zotero_summarizer.services.zotero import generated_notes
+    from zotero_summarizer.services.zotero._notes import build_digest_note_html
 
     source = PaperDigest(**{**DIGEST, "writing_friction": "high",
                             "writing_reasons": ["§2 omits a state transition."]})
-    notes = []
+    stage = Mock(side_effect=AssertionError("Computation cannot stage an unpublished review"))
     monkeypatch.setattr(deep_review._map_reduce, "digest_for_strategy", lambda *_args, **_kwargs: source)
     monkeypatch.setattr(deep_review._deep_review_layers, "extra_layers", lambda _ctx: (QUALITY, HIT, {"type": "position"}, None, None))
-    monkeypatch.setattr(zotero, "zotero_upsert_digest_note", lambda key, digest: notes.append((key, digest)))
+    monkeypatch.setattr(generated_notes, "stage_current_digest", stage)
     path = tmp_path / "fixture.pdf"
     path.write_bytes(b"Synthetic original bytes; extraction is controlled by the fixture")
     reader = SimpleNamespace(get_item_detail=lambda _key: {"title": "Study", "pdf_path": str(path)})
@@ -222,8 +224,13 @@ def test_real_review_worker_keeps_model_output_while_note_and_cache_receive_poli
     assert result["model_digest"] == source.model_dump()
     assert result["model_read_decision"] == "read" and result["digest"]["read_decision"] == "skim"
     assert result["reading_policy_flags"] == ["writing_friction"]
-    assert notes[0][0] == "PAPER001" and notes[0][1].read_decision == "skim"
-    assert source.read_decision == "read" and result["zotero_note_written"]
+    rendered = build_digest_note_html(PaperDigest.model_validate(result["digest"]))
+    assert "<h2>Digest — skim" in rendered and "§2 omits a state transition." in rendered
+    _review_cache._write_one("PAPER001", result)
+    cached = _review_cache.get_cached_review("PAPER001")
+    assert cached["digest"] == result["digest"] and cached["model_digest"] == source.model_dump()
+    assert source.read_decision == "read" and result["zotero_note_written"] is False
+    stage.assert_not_called()
 
 
 def test_fleet_uses_raw_digest_for_proposal_provenance_and_reapplies_the_same_cap(monkeypatch):

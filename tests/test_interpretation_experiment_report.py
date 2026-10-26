@@ -111,7 +111,7 @@ def test_resealed_record_cannot_detach_from_retained_verifier_or_original(frozen
         if mutation == 'claimed_invocation':
             # Deliberately reseal the copied receipt, not the independent retained call tape.
             result['scientific_call']['scientific_binding'] = canonical_hash(
-                [card['claims'], card['source'], chunk_text(selected_original(result)), card['checks']])
+                [card['claims'], card['source'], chunk_text(selected_original(result)), card['checks'], card['contract_sha256']])
             qualify(result)
     try:
         path.write_text(json.dumps(changed))

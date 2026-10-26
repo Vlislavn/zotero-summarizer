@@ -9,14 +9,11 @@ from typing import Any
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services._common import settings
 from zotero_summarizer.services.library import review_detail
-from zotero_summarizer.services.zotero._notes import VERDICT_NOTE_MARKER
 from zotero_summarizer.services.zotero.zotero import (
     get_library_reader,
     get_zotero_reader_or_raise,
-    zotero_set_label_tag,
-    zotero_upsert_verdict_note,
 )
-from zotero_summarizer.storage import feeds as feeds_storage, label_mirrors, repositories
+from zotero_summarizer.storage import feeds as feeds_storage, repositories
 from zotero_summarizer.storage.feed_identity import LEGACY_FEED_PREFIX
 
 LOGGER = logging.getLogger(__name__)
@@ -123,21 +120,10 @@ def _optional_zotero(exc: BaseException) -> bool:
 
 def mirror_current_verdict(db_path: Path, item_key: str, *, redeliver: bool = False) -> dict | None:
     """Mirror current label and rationale under one lock; acknowledge deletions."""
+    from zotero_summarizer.services.zotero.mirror_notes import mirror_verdict
+
     try:
-        with label_mirrors.current_label(db_path, item_key, redeliver=redeliver) as desired:
-            if desired is None:
-                return None
-            key, priority = desired["target_key"], desired["value"]
-            comment = desired["comment"] if priority is not None else ""
-            note_written = bool(comment.strip()) or any(
-                VERDICT_NOTE_MARKER in note["note"]
-                for note in get_zotero_reader_or_raise().get_item_notes(key)
-            )
-            if note_written:
-                zotero_upsert_verdict_note(key, priority or "", comment)
-            if desired["label_pending"]:
-                zotero_set_label_tag(key, priority)
-        return {"label_written": desired["label_pending"], "note_written": note_written}
+        return mirror_verdict(db_path, item_key, redeliver=redeliver)
     except APIError as exc:
         # Local-first verdicts remain usable without configured Zotero. Leaving
         # the receipt absent keeps an explicit retraction retryable.

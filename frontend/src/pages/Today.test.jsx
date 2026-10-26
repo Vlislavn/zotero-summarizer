@@ -2,7 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const daily = vi.hoisted(() => ({
   fetchDailySlate: vi.fn(), addToLibrary: vi.fn(), trashPapers: vi.fn(),
@@ -11,12 +11,25 @@ const daily = vi.hoisted(() => ({
 vi.mock('../api/dailyApi.js', () => daily);
 vi.mock('../api/reviewApi.js', () => ({ fetchReview: vi.fn() }));
 import { fetchReview } from '../api/reviewApi.js';
-vi.mock('../hooks/useSetupStatus.js', () => ({ useSetupStatus: () => ({ status: { ready: true } }) }));
+vi.mock('../hooks/useSetupStatus.js', () => ({ useSetupStatus: vi.fn(() => ({ status: { ready: true }, isConfigured: true })) }));
+import { useSetupStatus } from '../hooks/useSetupStatus.js';
+import NotConfiguredCard from '../components/setup/NotConfiguredCard.jsx';
 vi.mock('../components/CollectionPicker.jsx', () => ({ default: () => null }));
 
 import Today from './Today.jsx';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
+
+it('keeps the shared setup nudge and route compatible with AI or ML-only choices', () => {
+  useSetupStatus.mockReturnValueOnce({ status: { ready: false }, isConfigured: false, isLoading: false, isError: false });
+  render(<MemoryRouter><Routes>
+    <Route path="/" element={<NotConfiguredCard />} />
+    <Route path="/setup" element={<h1>Setup destination</h1>} />
+  </Routes></MemoryRouter>);
+  expect(screen.getByText('Choose AI or ML-only operation and describe your research so the feed can be scored against your goals. Zotero can be connected later for sync.')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Finish setup' }));
+  expect(screen.getByRole('heading', { name: 'Setup destination' })).toBeTruthy();
+});
 
 it.each([
   ['Add to library', { added: 1, pending_sync: 1 }, /Zotero sync pending \(1\); not saved to Zotero yet/],

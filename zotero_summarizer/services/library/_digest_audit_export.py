@@ -4,7 +4,8 @@ from __future__ import annotations
 from typing import Any
 
 from zotero_summarizer.services.library._digest_audit import (
-    CONTRACT, canonical_hash, contract_hashes, digest_contract_payload, payload_hash, retained_claims,
+    CONTRACT, canonical_hash, contract_hashes, digest_contract_payload, payload_hash,
+    reading_policy_inputs_hash, retained_claims,
 )
 
 
@@ -177,6 +178,8 @@ def retained_audit_status(entry: dict, *, current_identity: dict | None = None) 
         current = all(identity[key] == value for key, value in contract_hashes().items())
         if not current:
             return 'stale', 'audit_contract_changed'
+        if reading_policy_inputs_hash(entry) != identity['reading_policy_inputs_sha256']:
+            return 'stale', 'reading_policy_inputs_changed'
         _validate_audit(entry, audit)
         if any(not claim['matches_cached_field'] for claim in audit['claims']):
             return 'stale', 'post_verification_claim_changed'

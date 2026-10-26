@@ -1,228 +1,247 @@
-"""Narrow cache identity controls; authored tests are not scientific acceptance."""
+"""Exact current identities and early ordinary-cache condition admission."""
 import builtins
 from copy import deepcopy
-from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
-from tests.test_interpretation_binding import C, _assert_base_only, _native_entry, config
-from tests.test_interpretation_producer import _card
+from tests._interpretation_experiment import CARD, PAYLOAD, TEXT, ScriptedClient, run_review
 from tests.test_review_cache import _isolate_cache
+from tests.test_verification_audit_export import audit_env, publish
 from zotero_summarizer.models import PaperDigest
-from zotero_summarizer.services.library import _digest_audit, _review_cache, _review_identity
-from zotero_summarizer.services.library.review_fleet import propose
+from zotero_summarizer.models.interpretation import InterpretationDigest
+from zotero_summarizer.services.library import _digest_audit, _review_cache, _review_identity, deep_review, interpretation
+from zotero_summarizer.services.library._digest_audit_export import retained_audit_status
 
 
-@pytest.mark.parametrize("marker", ["absent", "unknown", None, "paper-digest-v1"])
-def test_stored_condition_refuses_before_optional_import_schema_contract_or_policy(tmp_path, config, monkeypatch, marker):
-    entry = _native_entry(tmp_path, config)
-    stored = entry["review_identity"]
-    if marker == "absent":
-        del stored["interpretation_schema"]
-    else:
-        stored["interpretation_schema"] = marker
-    _review_cache._write_one("ITEM", entry)
-    path = _review_cache._cache_path()
-    before = path.read_bytes(), path.stat().st_mtime_ns
-    no_optional = Mock(side_effect=AssertionError("condition refusal must precede optional work"))
+@pytest.mark.parametrize('marker,optional', [
+    (marker, optional)
+    for marker in ['absent', 'unknown', None, 'paper-digest-v1', 'interpretation-digest-response-v1']
+    for optional in ['payload', 'qualification', 'scientific_call', 'nested_evidence', 'nested_draft', 'nested_binding', 'marker_only']
+    if marker != 'absent' or optional != 'marker_only'
+])
+def test_stored_condition_refuses_before_optional_import_schema_contract_or_policy(monkeypatch, marker, optional):
+    entry = {'digest': PAYLOAD, 'review_contract_version': 3, 'review_identity': {}}
+    if marker != 'absent':
+        entry['review_identity']['interpretation_schema'] = marker
+    if optional == 'payload':
+        entry['interpretation'] = None
+    elif optional == 'qualification':
+        entry['interpretation_qualification'] = {}
+    elif optional == 'scientific_call':
+        entry['scientific_call'] = {}
+    elif optional.startswith('nested_'):
+        field = {'nested_evidence': 'interpretation_evidence', 'nested_draft': 'verified_interpretation',
+                 'nested_binding': 'interpretation_bindings'}[optional]
+        entry['verification_audit'] = {field: None}
+    _review_cache._write_one('LIBR0038', entry)
+    before = _review_cache._cache_path().read_bytes()
+    forbidden = Mock(side_effect=AssertionError('condition admission must precede source/schema/projection'))
     original_import = builtins.__import__
 
-    def no_c_import(name, *args, **kwargs):
-        assert name != "zotero_summarizer.models.interpretation"
+    def guarded(name, *args, **kwargs):
+        assert 'interpretation' not in name
         return original_import(name, *args, **kwargs)
 
-    monkeypatch.setattr(builtins, "__import__", no_c_import)
-    monkeypatch.setattr(PaperDigest, "model_json_schema", no_optional)
-    monkeypatch.setattr(_review_identity, "state", no_optional)
-    monkeypatch.setattr(_review_identity, "_generation_sources", no_optional)
-    monkeypatch.setattr(_digest_audit, "_contract_hashes", no_optional)
-    monkeypatch.setattr(_review_cache, "_project_review", no_optional)
-    assert _review_cache.get_current_review("ITEM", interpretation_schema=C) is None
-    assert not _review_cache.review_is_current(entry, "ITEM", interpretation_schema=C)
-    with pytest.raises(ValueError, match="review_condition_mismatch"):
-        _review_identity.current_review_identity("ITEM", stored, interpretation_schema=C)
-    with pytest.raises(ValueError, match="review_condition_mismatch"):
-        _digest_audit.bind_cached_audit(entry, interpretation_schema=C)
-    assert _digest_audit.cached_audit_status(entry, interpretation_schema=C) == ("unavailable", "review_condition_mismatch")
-    no_optional.assert_not_called()
-    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
-
-
-@pytest.mark.parametrize("selection", ["unknown", "", "paper-digest-v1", False, 0])
-def test_unknown_code_selection_refuses_before_cache_schema_or_contract_io(config, monkeypatch, selection):
-    no_io = Mock(side_effect=AssertionError("invalid selection must not perform IO"))
-    monkeypatch.setattr(_review_cache, "_read_all", no_io)
-    monkeypatch.setattr(PaperDigest, "model_json_schema", no_io)
-    monkeypatch.setattr(_review_identity, "_generation_sources", no_io)
-    monkeypatch.setattr(_review_identity, "state", no_io)
-    assert _review_cache.get_current_review("ITEM", interpretation_schema=selection) is None
-    with pytest.raises(ValueError, match="review_condition_mismatch"):
-        _review_identity.build_review_identity(config=config, pdf_path="", source_kind="override",
-                                               focus_prompt="", interpretation_schema=selection)
-    with pytest.raises(ValueError, match="review_condition_mismatch"):
-        _review_identity.current_review_identity("ITEM", {"interpretation_schema": C}, interpretation_schema=selection)
-    with pytest.raises(ValueError, match="review_condition_mismatch"):
-        _digest_audit._contract_hashes(interpretation_schema=selection)
-    no_io.assert_not_called()
-
-
-@pytest.mark.parametrize("projected_value", [False, 0], ids=["real_false", "type_changed_zero"])
-@pytest.mark.parametrize("assessed_goals", [False, True], ids=["flagged_policy", "unflagged_policy"])
-def test_current_basis_binding_distinguishes_false_from_zero_through_one_raw_read(tmp_path, config, monkeypatch, projected_value, assessed_goals):
-    card = _card()
-    card["items"][0]["basis_refs"].extend(["/parameters", "/parameters/external_validation"])
-    entry = _native_entry(tmp_path, config, card=card)
-    if assessed_goals:
-        entry["goal_summaries"] = [{"retrieval_state": "miss", "relevant": False}]
-    binding = entry["verification_audit"]["interpretation_bindings"][0]
-    assert entry["digest"]["parameters"]["external_validation"] is False
-    assert binding["basis_sha256"]["/parameters/external_validation"] == _digest_audit.canonical_hash(False)
-    assert _digest_audit.canonical_hash(False) != _digest_audit.canonical_hash(0)
-    assert binding["matches_cached_basis"]["/parameters/external_validation"] is True
-    _review_cache._write_one("ITEM", entry)
-    path = _review_cache._cache_path()
-    before = path.read_bytes(), path.stat().st_mtime_ns
-    original_policy = propose.apply_reading_policy
-
-    def changed(*args):
-        digest, raw, flags = original_policy(*args)
-        projected = deepcopy(digest)
-        projected["parameters"]["external_validation"] = projected_value
-        if assessed_goals:
-            assert flags == [] and projected == entry["digest"]
-        return projected, raw, flags
-
-    policy = Mock(side_effect=changed)
-    read = Mock(wraps=_review_cache._read_all)
-    monkeypatch.setattr(propose, "apply_reading_policy", policy)
-    monkeypatch.setattr(_review_cache, "_read_all", read)
-    view = _review_cache.get_current_review("ITEM", interpretation_schema=C)
-    assert read.call_count == policy.call_count == 1
-    assert read.call_args.kwargs == {"readonly": True}
-    assert type(view["digest"]["parameters"]["external_validation"]) is type(projected_value)
-    qualification = view["interpretation_qualification"]
-    matches = qualification["item_matches"][0]
-    assert matches["finding_matches"] is True
-    if projected_value is False:
-        assert qualification["status"] == "available" and qualification["reason"] == ""
-        assert all(matches["basis_matches"].values())
-        assert view["interpretation"] == entry["interpretation"]
-    else:
-        _assert_base_only(view)
-        assert qualification["reason"] == "interpretation_reference_changed"
-        assert matches["basis_matches"]["/parameters"] is False
-        assert matches["basis_matches"]["/parameters/external_validation"] is False
-    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
-
-
-def test_verification_to_cache_binding_also_distinguishes_false_from_zero(tmp_path, config):
-    card = _card()
-    card["items"][0]["basis_refs"].extend(["/parameters", "/parameters/external_validation"])
-    entry = _native_entry(tmp_path, config, card=card)
-    entry["digest"]["parameters"]["external_validation"] = 0
-    rebound = _digest_audit.bind_cached_audit(entry, interpretation_schema=C)
-    binding = rebound["verification_audit"]["interpretation_bindings"][0]
-    assert binding["matches_cached_finding"] is True
-    assert binding["matches_cached_basis"]["/parameters"] is False
-    assert binding["matches_cached_basis"]["/parameters/external_validation"] is False
-    _review_cache._write_one("ITEM", rebound)
-    with pytest.raises(ValueError, match="Invalid verified base audit"):
-        _review_cache.get_current_review("ITEM", interpretation_schema=C)
-
-
-def test_c_only_contract_drift_withholds_card_but_preserves_current_intact_base(tmp_path, config, monkeypatch):
-    entry = _native_entry(tmp_path, config)
-    _review_cache._write_one("ITEM", entry)
-    path = _review_cache._cache_path()
-    before = path.read_bytes(), path.stat().st_mtime_ns
-    original_contracts = _digest_audit._contract_hashes
-
-    def changed_contracts(*, interpretation_schema=None):
-        contracts = original_contracts(interpretation_schema=interpretation_schema)
-        if interpretation_schema == C:
-            contracts["interpretation_contract_sha256"] = "c" * 64
-        return contracts
-
-    contracts = Mock(side_effect=changed_contracts)
-    monkeypatch.setattr(_digest_audit, "_contract_hashes", contracts)
-    assert _review_cache.review_is_current(entry, "ITEM", interpretation_schema=C)
-    view = _review_cache.get_current_review("ITEM", interpretation_schema=C)
-    _assert_base_only(view)
-    assert view["interpretation_qualification"]["reason"] == "interpretation_contract_changed"
-    assert view["digest"]["tldr"] == entry["digest"]["tldr"]
-    assert contracts.call_count == 2
-    assert contracts.call_args_list[0].kwargs == {}
-    assert contracts.call_args_list[1].kwargs == {"interpretation_schema": C}
-    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
-    assert _review_cache._read_all(readonly=True)["ITEM"] == entry
-
-
-@pytest.mark.parametrize("component", ["extraction", "verifier"])
-def test_base_contract_drift_never_becomes_optional_only_failure(tmp_path, config, monkeypatch, component):
-    entry = _native_entry(tmp_path, config)
-    _review_cache._write_one("ITEM", entry)
-    before = _review_cache._cache_path().read_bytes()
-    contracts = _digest_audit._contract_hashes()
-    contracts[component + "_contract_sha256"] = "c" * 64
-    monkeypatch.setattr(_digest_audit, "_contract_hashes", Mock(return_value=contracts))
-    no_projection = Mock(side_effect=AssertionError("stale base must not reach policy or C qualification"))
-    monkeypatch.setattr(_review_cache, "_project_review", no_projection)
-    monkeypatch.setattr(_digest_audit, "qualify_interpretation", no_projection)
-    assert _review_cache.get_current_review("ITEM", interpretation_schema=C) is None
-    no_projection.assert_not_called()
+    monkeypatch.setattr(builtins, '__import__', guarded)
+    monkeypatch.setattr(PaperDigest, 'model_validate', forbidden)
+    monkeypatch.setattr(_review_identity, 'current_review_identity', forbidden)
+    monkeypatch.setattr('zotero_summarizer.services.library.review_fleet.propose.project_review', forbidden)
+    assert _review_cache.get_cached_review('LIBR0038') is None
+    assert _review_cache.get_current_review('LIBR0038') is None
+    assert _review_cache.cached_review_keys() == {'LIBR0038'}
+    assert _review_cache.current_reviews() == {} and _review_cache.current_review_keys() == set()
+    assert not _review_cache.review_is_current(entry, 'LIBR0038')
+    assert _review_cache.export_review_audit('LIBR0038')['reason'] == 'review_condition_mismatch'
     assert _review_cache._cache_path().read_bytes() == before
+    forbidden.assert_not_called()
 
 
-@pytest.mark.parametrize("defect", ["generation_stale", "generation_missing", "source_stale", "source_null",
-                                  "source_hash_missing", "source_path_null", "source_missing", "identity_null", "base_null"])
-def test_stale_missing_or_malformed_source_and_base_identity_is_never_forgiven(tmp_path, config, monkeypatch, defect):
-    entry = _native_entry(tmp_path, config)
-    identity = entry["review_identity"]
-    if defect == "generation_stale":
-        identity["generation_sha256"] = "g" * 64
-    elif defect == "generation_missing":
-        del identity["generation_sha256"]
-    elif defect == "source_stale":
-        identity["source_sha256"] = "s" * 64
-    elif defect == "source_null":
-        identity["source_sha256"] = None
-    elif defect == "source_hash_missing":
-        del identity["source_sha256"]
-    elif defect == "source_path_null":
-        identity["source_path"] = None
-    elif defect == "source_missing":
-        Path(identity["source_path"]).unlink()
-    elif defect == "identity_null":
-        entry["review_identity"] = None
+@pytest.mark.parametrize('selection', ['unknown', '', 'paper-digest-v1', False, 0])
+def test_unknown_code_selection_refuses_before_cache_schema_or_contract_io(monkeypatch, selection):
+    client = ScriptedClient()
+    forbidden = Mock(side_effect=AssertionError('invalid experiment condition must not do IO'))
+    monkeypatch.setattr(_review_cache, '_read_all', forbidden)
+    monkeypatch.setattr(PaperDigest, 'model_json_schema', forbidden)
+    with pytest.raises(ValueError, match='Unknown interpretation condition'):
+        run_review(client, selection)
+    assert client.calls == []
+    forbidden.assert_not_called()
+
+
+@pytest.mark.parametrize('projected_value', [False, 0])
+def test_current_basis_binding_distinguishes_false_from_zero_through_one_raw_read(projected_value):
+    result = run_review(ScriptedClient())
+    snapshot = deepcopy(result)
+    result['digest']['parameters']['external_validation'] = projected_value
+    assert _digest_audit.canonical_hash(False) != _digest_audit.canonical_hash(0)
+    if projected_value is False:
+        assert interpretation.qualify(result)['status'] == 'accepted'
     else:
-        entry["digest"] = None
-    _review_cache._write_one("ITEM", entry)
-    path = _review_cache._cache_path()
-    before = path.read_bytes(), path.stat().st_mtime_ns
-    no_projection = Mock(side_effect=AssertionError("invalid raw identity must not reach policy or C qualification"))
-    monkeypatch.setattr(_review_cache, "_project_review", no_projection)
-    monkeypatch.setattr(_digest_audit, "qualify_interpretation", no_projection)
-    assert _review_cache.get_current_review("ITEM", interpretation_schema=C) is None
-    no_projection.assert_not_called()
-    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+        with pytest.raises(ValueError):
+            interpretation.qualify(result, strict=False)
+    assert snapshot['digest']['parameters']['external_validation'] is False
 
 
-@pytest.mark.parametrize("stage", ["verified", "cached"])
-def test_noncanonical_base_types_raise_even_with_resealed_integrity(tmp_path, config, monkeypatch, stage):
-    entry = _native_entry(tmp_path, config)
-    audit = entry["verification_audit"]
-    digest = audit["verified_digest"] if stage == "verified" else entry["digest"]
-    digest["parameters"]["external_validation"] = 0
-    audit["identity"][stage + "_digest_sha256"] = _digest_audit.canonical_hash(digest)
-    audit["identity"]["audit_sha256"] = _digest_audit._payload_hash(audit)
-    _review_cache._write_one("ITEM", entry)
-    path = _review_cache._cache_path()
-    before = path.read_bytes(), path.stat().st_mtime_ns
-    no_projection = Mock(side_effect=AssertionError("malformed base must not reach policy or C qualification"))
-    monkeypatch.setattr(_review_cache, "_project_review", no_projection)
-    monkeypatch.setattr(_digest_audit, "qualify_interpretation", no_projection)
-    with pytest.raises(ValueError, match="Invalid verified base audit"):
-        _review_cache.get_current_review("ITEM", interpretation_schema=C)
-    no_projection.assert_not_called()
-    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+def test_verification_to_cache_binding_also_distinguishes_false_from_zero():
+    result = run_review(ScriptedClient())
+    assert 'parameters.external_validation: False' in result['interpretation']['claims']
+    result['interpretation']['claims'] = [c.replace('False', '0') for c in result['interpretation']['claims']]
+    assert interpretation.qualify(result, strict=False) == {'status': 'proof_unavailable'}
+    assert interpretation.selected_original(result) == TEXT
+
+
+def test_c_only_contract_drift_withholds_card_but_preserves_current_intact_base():
+    # Exact invocation binding replaces the removed optional-cache fingerprint, not its drift detection.
+    result = run_review(ScriptedClient())
+    result['scientific_call']['scientific_binding'] = 'c' * 64
+    assert interpretation.qualify(result, strict=False) == {'status': 'proof_unavailable'}
+    assert interpretation.selected_original(result) == TEXT
+    assert result['digest']['key_findings'] == PAYLOAD['key_findings']
+
+
+@pytest.mark.parametrize('component', ['schema', 'producer', 'model'])
+def test_optional_contract_drift_withholds_only_card_before_new_source_or_schema(component, monkeypatch):
+    from pathlib import Path
+    from zotero_summarizer.models.interpretation import InterpretationItem
+
+    result = run_review(ScriptedClient())
+    if component == 'schema':
+        schema = InterpretationItem.model_json_schema()
+        monkeypatch.setattr(InterpretationItem, 'model_json_schema', lambda: schema | {'description': 'Changed schema'})
+    else:
+        target = (Path(interpretation.__file__) if component == 'producer' else
+                  Path(interpretation.__file__).parents[2] / 'models/interpretation.py')
+        read = Path.read_bytes
+        monkeypatch.setattr(Path, 'read_bytes', lambda path: read(path) + b'\n' if path == target else read(path))
+    with pytest.raises(ValueError):
+        interpretation.qualify(result)
+    assert interpretation.qualify(result, strict=False) == {'status': 'proof_unavailable'}
+    assert interpretation.selected_original(result) == TEXT
+    assert result['digest']['key_findings'] == PAYLOAD['key_findings']
+
+
+@pytest.mark.parametrize('condition', ['A', 'B'])
+def test_disabled_optional_card_does_not_read_optional_contract(monkeypatch, condition):
+    forbidden = Mock(side_effect=AssertionError('disabled card must not inspect optional contract'))
+    monkeypatch.setattr(interpretation, '_optional_contract_sha256', forbidden)
+    result = run_review(ScriptedClient(), condition)
+    assert interpretation.qualify(result)['status'] == 'disabled'
+    forbidden.assert_not_called()
+
+
+@pytest.mark.parametrize('mutation', ['missing', 'changed'])
+def test_missing_or_changed_optional_contract_never_upgrades_retained_card(mutation):
+    result = run_review(ScriptedClient())
+    if mutation == 'missing':
+        del result['interpretation']['contract_sha256']
+    else:
+        result['interpretation']['contract_sha256'] = 'a' * 64
+    assert interpretation.qualify(result, strict=False) == {'status': 'proof_unavailable'}
+    assert interpretation.selected_original(result) == TEXT
+
+
+@pytest.mark.parametrize('component', ['extraction', 'verifier'])
+def test_base_contract_drift_never_becomes_optional_only_failure(monkeypatch, component):
+    result = run_review(ScriptedClient())
+    contracts = _digest_audit.contract_hashes()
+    contracts[component + '_contract_sha256'] = 'c' * 64
+    monkeypatch.setattr(interpretation, 'contract_hashes', lambda: contracts)
+    with pytest.raises(ValueError, match='contract changed'):
+        interpretation.qualify(result, strict=False)
+
+
+@pytest.mark.parametrize('defect', ['generation_stale', 'generation_missing', 'source_stale', 'source_null',
+                                  'source_hash_missing', 'source_path_null', 'source_missing', 'identity_null', 'base_null'])
+def test_stale_missing_or_malformed_source_and_base_identity_is_never_forgiven(audit_env, defect):
+    entry, client, source = publish(audit_env)
+    identity = entry['review_identity']
+    if defect == 'source_missing':
+        source.unlink()
+    elif defect == 'identity_null':
+        entry['review_identity'] = None
+    elif defect == 'base_null':
+        entry['digest'] = None
+    else:
+        field = 'generation_sha256' if defect.startswith('generation') else 'source_path' if defect == 'source_path_null' else 'source_sha256'
+        if defect.endswith('missing'):
+            del identity[field]
+        else:
+            identity[field] = None if defect.endswith('null') else 'c' * 64
+    _review_cache._write_one('LIBR0038', entry)
+    before = _review_cache._cache_path().read_bytes()
+    assert not _review_cache.review_is_current(entry, 'LIBR0038')
+    assert _review_cache.get_current_review('LIBR0038') is None
+    assert _review_cache._cache_path().read_bytes() == before
+    assert client.generated == client.calls == 1
+
+
+@pytest.mark.parametrize('stage', ['verified', 'cached'])
+def test_noncanonical_base_types_raise_even_with_resealed_integrity(stage):
+    result = run_review(ScriptedClient())
+    digest = result['verification_audit']['verified_digest'] if stage == 'verified' else result['digest']
+    digest['parameters']['external_validation'] = 0
+    if stage == 'verified':
+        result['verification_audit']['identity']['verified_digest_sha256'] = _digest_audit.canonical_hash(digest)
+    with pytest.raises(ValueError):
+        interpretation.qualify(result, strict=False)
+
+
+def test_genuine_ordinary_legacy_and_verified_base_records_remain_readable(audit_env):
+    entry, client, _ = publish(audit_env)
+    key = 'feed:d:' + 'a' * 64
+    _review_cache._write_one('LEGACY01', {'quality': {'grade': 'A'}})
+    assert _review_cache.get_cached_review('LEGACY01') == {'quality': {'grade': 'A'}}
+    assert _review_cache.get_current_review(key) is not None
+    assert _review_cache.export_review_audit(key)['audit_status'] == 'available'
+    assert client.generated == client.calls == 1 and 'interpretation' not in entry
+
+
+@pytest.mark.parametrize('home', ['digest', 'model_digest'])
+@pytest.mark.parametrize('optional', [None, [], [CARD]])
+def test_unexpected_interpretation_subtype_refuses_only_after_genuine_base_publication(audit_env, monkeypatch, home, optional):
+    raw = InterpretationDigest.model_validate(PAYLOAD | {'interpretation': optional})
+    source = audit_env.root / 'unexpected-subtype.pdf'
+    source.write_bytes(b'Owned synthetic original source bytes')
+    client = ScriptedClient(cards=False, responses=[raw])
+    entry = deep_review._review_one({'item_key': 'LIBR0038', 'pdf_path': str(source)},
+        reader=SimpleNamespace(get_item_detail=lambda key: {'title': 'Owned'}), config=audit_env.config,
+        extractor=SimpleNamespace(extract_text=lambda path: TEXT), llm=client, quality_enabled=True)
+    assert entry['model_digest']['interpretation'] == optional and entry['digest']['interpretation'] == optional
+    other = 'model_digest' if home == 'digest' else 'digest'
+    del entry[other]['interpretation']
+    current = _review_identity.current_review_identity('LIBR0038', entry['review_identity'])
+    assert current == entry['review_identity']
+    assert retained_audit_status(entry, current_identity=current) == ('available', '')
+    _review_cache._write_one('LIBR0038', entry)
+    before = _review_cache._cache_path().read_bytes()
+    forbidden = Mock(side_effect=AssertionError('reserved nested payload must refuse before projection or optional work'))
+    original_import = builtins.__import__
+    def guarded(name, *args, **kwargs):
+        assert 'interpretation' not in name
+        return original_import(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, '__import__', guarded)
+    monkeypatch.setattr(interpretation, 'qualify', forbidden)
+    monkeypatch.setattr(_review_identity, 'current_review_identity', forbidden)
+    monkeypatch.setattr('zotero_summarizer.services.library.review_fleet.propose.project_review', forbidden)
+    assert _review_cache.get_cached_review('LIBR0038') is None
+    assert _review_cache.get_current_review('LIBR0038') is None
+    assert _review_cache.current_reviews() == {} and _review_cache.current_review_keys() == set()
+    assert _review_cache.export_review_audit('LIBR0038')['reason'] == 'review_condition_mismatch'
+    assert _review_cache._cache_path().read_bytes() == before
+    forbidden.assert_not_called()
+
+
+def test_unrelated_subtype_metadata_preserves_accepted_original_base_proof(audit_env):
+    entry, client, _ = publish(audit_env)
+    key = 'feed:d:' + 'a' * 64
+    for field in ('digest', 'model_digest'):
+        entry[field]['unrelated_subtype_metadata'] = {'duplicate': ['π', 'π'], 'observed': False, 'count': 0}
+    _review_cache._write_one(key, entry)
+    before = _review_cache._cache_path().read_bytes()
+    view = _review_cache.get_current_review(key)
+    assert view is not None
+    assert view['digest']['unrelated_subtype_metadata'] == entry['digest']['unrelated_subtype_metadata']
+    assert _review_cache.export_review_audit(key)['audit_status'] == 'available'
+    assert _review_cache._cache_path().read_bytes() == before and client.generated == client.calls == 1

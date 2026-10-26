@@ -9,7 +9,7 @@ from zotero_summarizer.models import (
     ResearchFeedTriage,
     ResearchProfile,
 )
-from zotero_summarizer.services.library.review_fleet.propose import effective_read_decision
+from zotero_summarizer.services.library.review_fleet.propose import _goal_evidence, effective_read_decision
 
 
 _TOPIC_TERMS = {
@@ -74,6 +74,22 @@ def _assessment_fields(assessment: dict) -> dict:
     return fields
 
 
+def _goal_notes(review: dict[str, Any], profile: ResearchProfile) -> list[str]:
+    goals = review.get("goal_summaries")
+    if not isinstance(goals, list):
+        return []
+    notes = []
+    for cell in goals:
+        if not isinstance(cell, dict) or cell.get("goal") not in profile.projects:
+            continue
+        summary, quotes = cell.get("summary"), cell.get("supporting_quotes")
+        if (_goal_evidence([cell]) == "match" and isinstance(summary, str) and summary.strip()
+                and isinstance(quotes, list) and quotes
+                and all(isinstance(quote, str) and quote.strip() for quote in quotes)):
+            notes.append(f"Retained goal observation (unverified) — {cell['goal']}: {summary}")
+    return notes
+
+
 def build_card(
     candidate: ResearchCandidate,
     triage: ResearchFeedTriage,
@@ -82,6 +98,7 @@ def build_card(
     *, assessment: dict | None = None,
 ) -> ResearchEngineeringCard:
     from zotero_summarizer.services.library import _feed_assessment
+    _feed_assessment.review_evidence(review)
     if assessment is None:
         assessment = _feed_assessment.qualify(review, _feed_assessment.context_for(candidate.source_id, profile))
     digest, quality = review.get("digest") or {}, review.get("quality") or {}
@@ -101,6 +118,7 @@ def build_card(
     fields = {"reproducibility_tier": tier, "missing_reproduction_inputs": missing,
               "reproducibility_rationale": "Reproduction effort has not been assessed." if not missing else "; ".join(missing),
               **_assessment_fields(assessment)}
+    fields["project_use_notes"].extend(_goal_notes(review, profile))
     fields["missing_reproduction_inputs"] = list(dict.fromkeys([*missing, *fields["missing_reproduction_inputs"]]))
     if missing and assessment.get("content", {}).get("reproduction") is not None:
         fields.update(reproducibility_tier="blocked", reproducibility_rationale=

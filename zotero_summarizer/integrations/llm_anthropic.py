@@ -23,6 +23,8 @@ concise system instruction keeps the response to just the requested content.
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
+from threading import Lock
 from typing import Any
 
 LOGGER = logging.getLogger("zotero_summarizer.llm")
@@ -55,17 +57,30 @@ class AnthropicLLMClient:
         thinking_budget: int | None = None,
         verification: bool = False,
         before_request: Any = None,
+        request_owner: Any = None,
     ) -> None:
         import anthropic  # lazy: optional dependency
 
+        self._request = None
+        self._invocation = Lock()
+        self._request_owner = request_owner
+        if verification and request_owner is None:
+            from functools import partial
+            from uuid import uuid4
+            from .llm_requests import RequestInventory, _generation_endpoint
+
+            inventory = RequestInventory(uuid4().hex, before_start=before_request)
+            endpoint = _generation_endpoint(base_url or "https://api.anthropic.com", "/v1/messages")
+            self._request_owner = partial(inventory.expect, "direct-verification", model, endpoint, local=False)
         transport = None
         if verification:
-            import httpx
+            from .llm_requests import verification_http_client
 
-            transport = httpx.Client(follow_redirects=False, trust_env=False)
+            transport = verification_http_client(self._transport_started)
         try:
             self._client = anthropic.Anthropic(
-                api_key=api_key, base_url=(base_url or None), timeout=timeout,
+                api_key=api_key,
+                base_url=(base_url or "https://api.anthropic.com") if verification else (base_url or None), timeout=timeout,
                 **({"max_retries": 0, "http_client": transport} if verification else {}),
             )
         except BaseException:
@@ -108,36 +123,57 @@ class AnthropicLLMClient:
     def close(self) -> None:
         self._client.close()
 
+    def _transport_started(self, request):
+        if self._request is None:
+            raise ValueError("Verification transport has no expected request")
+        self._request.transport_started(request)
+
+    @contextmanager
+    def _owned_invocation(self):
+        if self._before_request is not None:
+            self._before_request()
+        if not self._verification:
+            yield
+            return
+        if not self._invocation.acquire(blocking=False):
+            raise RuntimeError("Verification client already has an owned invocation")
+        try:
+            self._request = self._request_owner()
+            yield
+        finally:
+            self._request = None
+            self._invocation.release()
+
     def _verify_response(self, response: Any) -> None:
+        if self._request is not None:
+            self._request.terminal(response.model, response.stop_reason)
         if self._verification and (response.model != self._model or response.stop_reason not in {"end_turn", "stop_sequence"}):
             raise ValueError("Verification model identity or successful terminal reason was not established")
 
     def prompt(self, prompt: str, **kwargs: Any) -> str:
-        if self._before_request is not None:
-            self._before_request()
-        resp = self._client.messages.create(
-            model=self._model,
-            max_tokens=self._max_tokens,
-            system=self._system_blocks(),
-            messages=[{"role": "user", "content": prompt}],
-            **self._thinking_kwargs(),
-        )
-        self._verify_response(resp)
+        with self._owned_invocation():
+            resp = self._client.messages.create(
+                model=self._model,
+                max_tokens=self._max_tokens,
+                system=self._system_blocks(),
+                messages=[{"role": "user", "content": prompt}],
+                **self._thinking_kwargs(),
+            )
+            self._verify_response(resp)
         self._log_usage("prompt", resp.usage)
         return "".join(block.text for block in resp.content if block.type == "text")
 
     def pydantic_prompt(self, prompt: str, pydantic_model: Any, **kwargs: Any) -> Any:
-        if self._before_request is not None:
-            self._before_request()
-        resp = self._client.messages.parse(
-            model=self._model,
-            max_tokens=self._max_tokens,
-            system=self._system_blocks(),
-            messages=[{"role": "user", "content": prompt}],
-            output_format=pydantic_model,
-            **self._thinking_kwargs(),
-        )
-        self._verify_response(resp)
+        with self._owned_invocation():
+            resp = self._client.messages.parse(
+                model=self._model,
+                max_tokens=self._max_tokens,
+                system=self._system_blocks(),
+                messages=[{"role": "user", "content": prompt}],
+                output_format=pydantic_model,
+                **self._thinking_kwargs(),
+            )
+            self._verify_response(resp)
         self._log_usage("pydantic_prompt", resp.usage)
         parsed = resp.parsed_output
         if parsed is None:

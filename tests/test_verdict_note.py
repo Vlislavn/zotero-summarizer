@@ -18,15 +18,12 @@ from tests.test_review_questions import _database
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.api.routes import golden as golden_routes
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter, ZoteroWriteError
+from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.services.golden import hybrid_gt
 from zotero_summarizer.services.zotero import zotero
-from zotero_summarizer.services.zotero.pending import (
-    USER_NOTE_MARKER,
-    VERDICT_NOTE_MARKER,
-    build_user_note_html,
-    build_verdict_note_html,
-)
-from zotero_summarizer.storage import repositories, review_note_projection
+from zotero_summarizer.models.zotero_actions import VERDICT_NOTE_MARKER, build_verdict_note_html
+from zotero_summarizer.services.zotero.pending import USER_NOTE_MARKER, build_user_note_html
+from zotero_summarizer.storage import pending_actions, repositories, review_note_projection
 from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS, run_migrations
 
 
@@ -39,9 +36,6 @@ def _query(writer: ZoteroWriter, sql: str, params=()):
         conn.close()
 
 
-# --------------------------------------------------------------------------- #
-# Builder
-# --------------------------------------------------------------------------- #
 def test_build_verdict_note_html_marked_and_escaped():
     h = build_verdict_note_html("must_read", "<b>x</b> & y")
     assert VERDICT_NOTE_MARKER in h  # find+replace marker present
@@ -50,9 +44,6 @@ def test_build_verdict_note_html_marked_and_escaped():
     assert "&lt;b&gt;" in h and "&amp;" in h  # comment HTML-escaped
 
 
-# --------------------------------------------------------------------------- #
-# upsert_note writer op (real Zotero-shaped sqlite)
-# --------------------------------------------------------------------------- #
 def _upsert_change(item_key: str, note_html: str):
     return {
         "id": 0,
@@ -97,39 +88,42 @@ def test_upsert_note_inserts_then_updates_in_place(tmp_path: Path):
     assert "first comment" not in notes[0]["note"]
 
 
-# --------------------------------------------------------------------------- #
-# submit_verdict wiring
-# --------------------------------------------------------------------------- #
-def _patch_verdict_basics(monkeypatch, *, note_fn):
-    monkeypatch.setattr(golden_routes.verdict_effects, "get_zotero_reader_or_raise",
-                        lambda: SimpleNamespace(get_item_notes=lambda key: []))
+def _patch_verdict_basics(monkeypatch, tmp_path, *, note_fn):
+    settings = _database(tmp_path)
+    db = build_zotero_db(tmp_path / "verdict-native")
+    for key in ("K1", "REAL0001", "REAL0002"):
+        add_library_item(db, item_key=key, title="Owned verdict paper")
+    reader, writer = ZoteroReader(db.parent), ZoteroWriter(db.parent)
+    labels = []
+    dispatch = writer._dispatch_change
+
+    def observed(conn, change, columns):
+        origin = pending_actions.history_request(change)
+        assert change["id"] > 0 and origin["source"] == "mirror_verdict"
+        desired = origin["requested"]
+        if change["change_type"] == "upsert_note":
+            note_fn(change["item_key"], desired["value"] or "", desired["comment"] or "")
+        else:
+            labels.append((change["item_key"], desired["value"]))
+        return dispatch(conn, change, columns)
+
+    monkeypatch.setattr(writer, "is_connector_running", lambda: False)
+    monkeypatch.setattr(writer, "_dispatch_change", observed)
+    monkeypatch.setattr(zotero, "get_zotero_reader_or_raise", lambda: reader)
+    monkeypatch.setattr(zotero, "get_zotero_writer_or_raise", lambda: writer)
+    monkeypatch.setattr(golden_routes, "_db_path", lambda: settings.triage_db_path)
     monkeypatch.setattr(golden_routes, "_load_all", lambda: [])
-    monkeypatch.setattr(
-        golden_routes.verdict_effects, "append_training_row", lambda *a, **k: None
-    )
-    monkeypatch.setattr(
-        golden_routes.verdict_effects,
-        "add_feed_verdict_to_library",
-        lambda *_a: {
-            "added_to_library": False,
-            "add_status": "not_applicable",
-            "add_error": None,
-        },
-    )
-    with repositories.with_db_path(golden_routes._db_path()):
-        repositories.init_db()
-    monkeypatch.setattr(
-        golden_routes.verdict_effects, "zotero_set_label_tag", lambda *_a: None
-    )
-    monkeypatch.setattr(
-        golden_routes.verdict_effects, "zotero_upsert_verdict_note", note_fn
-    )
+    monkeypatch.setattr(golden_routes.verdict_effects, "append_training_row", lambda *a, **k: None)
+    monkeypatch.setattr(golden_routes.verdict_effects, "add_feed_verdict_to_library", lambda *_a: {
+        "added_to_library": False, "add_status": "not_applicable", "add_error": None,
+    })
+    return SimpleNamespace(reader=reader, writer=writer, labels=labels)
 
 
-def test_submit_verdict_writes_note_when_comment(monkeypatch):
+def test_submit_verdict_writes_note_when_comment(monkeypatch, tmp_path):
     calls = []
     _patch_verdict_basics(
-        monkeypatch, note_fn=lambda ik, up, c: calls.append((ik, up, c))
+        monkeypatch, tmp_path, note_fn=lambda ik, up, c: calls.append((ik, up, c))
     )
     out = asyncio.run(
         golden_routes.submit_verdict(
@@ -142,9 +136,9 @@ def test_submit_verdict_writes_note_when_comment(monkeypatch):
     assert calls == [("K1", "must_read", "useful")]
 
 
-def test_submit_verdict_skips_note_when_empty_comment(monkeypatch):
+def test_submit_verdict_skips_note_when_empty_comment(monkeypatch, tmp_path):
     calls = []
-    _patch_verdict_basics(monkeypatch, note_fn=lambda *a: calls.append(a))
+    _patch_verdict_basics(monkeypatch, tmp_path, note_fn=lambda *a: calls.append(a))
     out = asyncio.run(
         golden_routes.submit_verdict(
             golden_routes.VerdictRequest(
@@ -156,11 +150,11 @@ def test_submit_verdict_skips_note_when_empty_comment(monkeypatch):
     assert calls == []  # whitespace-only comment writes no note
 
 
-def test_submit_verdict_note_failure_does_not_block_verdict(monkeypatch):
+def test_submit_verdict_note_failure_does_not_block_verdict(monkeypatch, tmp_path):
     def boom(*_a):
         raise RuntimeError("Zotero is open")
 
-    _patch_verdict_basics(monkeypatch, note_fn=boom)
+    _patch_verdict_basics(monkeypatch, tmp_path, note_fn=boom)
     with pytest.raises(RuntimeError, match="Zotero is open"):
         asyncio.run(
             golden_routes.submit_verdict(
@@ -172,7 +166,7 @@ def test_submit_verdict_note_failure_does_not_block_verdict(monkeypatch):
     assert repositories.get_label_verdict(golden_routes._db_path(), "K1")["comment"] == "x"
 
 
-def test_submit_verdict_swallows_optional_zotero_unavailable(monkeypatch):
+def test_submit_verdict_swallows_optional_zotero_unavailable(monkeypatch, tmp_path):
     def unavailable(*_a):
         raise APIError(
             error="zotero_unavailable",
@@ -180,10 +174,8 @@ def test_submit_verdict_swallows_optional_zotero_unavailable(monkeypatch):
             status_code=503,
         )
 
-    _patch_verdict_basics(monkeypatch, note_fn=unavailable)
-    monkeypatch.setattr(
-        golden_routes.verdict_effects, "zotero_set_label_tag", unavailable
-    )
+    _patch_verdict_basics(monkeypatch, tmp_path, note_fn=unavailable)
+    monkeypatch.setattr(zotero, "get_zotero_reader_or_raise", unavailable)
 
     out = asyncio.run(
         golden_routes.submit_verdict(
@@ -200,22 +192,16 @@ def test_submit_verdict_swallows_optional_zotero_unavailable(monkeypatch):
     assert out["note_error"] is None
 
 
-def _submit_feed_verdict(monkeypatch, *, item_key, priority, add_result):
-    notes, labels = [], []
-    _patch_verdict_basics(
-        monkeypatch,
-        note_fn=lambda ik, up, comment: notes.append((ik, up, comment)),
+def _submit_feed_verdict(monkeypatch, tmp_path, *, item_key, priority, add_result):
+    notes = []
+    resources = _patch_verdict_basics(
+        monkeypatch, tmp_path, note_fn=lambda ik, up, comment: notes.append((ik, up, comment)),
     )
     with sqlite3.connect(golden_routes._db_path()) as conn:
         conn.execute(
             "INSERT INTO processed_feed_items(feed_library_id, feed_item_id, stable_feed_key, guid, title, decision, run_id, materialized_zotero_key) VALUES (2, 42, ?, 'g', 'Paper', 'auto_materialized', 'run', ?)",
             (item_key, add_result.get("_zotero_key")),
         )
-    monkeypatch.setattr(
-        golden_routes.verdict_effects,
-        "zotero_set_label_tag",
-        lambda ik, up: labels.append((ik, up)),
-    )
     monkeypatch.setattr(
         golden_routes.verdict_effects,
         "add_feed_verdict_to_library",
@@ -228,12 +214,12 @@ def _submit_feed_verdict(monkeypatch, *, item_key, priority, add_result):
             ),
         )
     )
-    return out, notes, labels
+    return out, notes, resources.labels
 
 
-def test_new_feed_item_comment_uses_materialized_zotero_key(monkeypatch):
+def test_new_feed_item_comment_uses_materialized_zotero_key(monkeypatch, tmp_path):
     out, notes, labels = _submit_feed_verdict(
-        monkeypatch,
+        monkeypatch, tmp_path,
         item_key="feed:g:different-story",
         priority="must_read",
         add_result={
@@ -250,9 +236,9 @@ def test_new_feed_item_comment_uses_materialized_zotero_key(monkeypatch):
     assert "_zotero_key" not in out
 
 
-def test_existing_materialized_feed_mirrors_negative_to_real_key(monkeypatch):
+def test_existing_materialized_feed_mirrors_negative_to_real_key(monkeypatch, tmp_path):
     out, notes, labels = _submit_feed_verdict(
-        monkeypatch,
+        monkeypatch, tmp_path,
         item_key="feed:42",
         priority="dont_read",
         add_result={
@@ -267,9 +253,9 @@ def test_existing_materialized_feed_mirrors_negative_to_real_key(monkeypatch):
     assert out["label_written"] is out["note_written"] is True
 
 
-def test_unmaterialized_negative_feed_comment_stays_local_without_warning(monkeypatch):
+def test_unmaterialized_negative_feed_comment_stays_local_without_warning(monkeypatch, tmp_path):
     out, notes, labels = _submit_feed_verdict(
-        monkeypatch,
+        monkeypatch, tmp_path,
         item_key="feed:g:unmaterialized",
         priority="dont_read",
         add_result={
@@ -284,9 +270,6 @@ def test_unmaterialized_negative_feed_comment_stays_local_without_warning(monkey
     assert out["label_error"] is out["note_error"] is None
 
 
-# --------------------------------------------------------------------------- #
-# Review notes: builder, storage round-trip, save_review_note wiring
-# --------------------------------------------------------------------------- #
 def test_build_user_note_html_marked_and_escaped():
     h = build_user_note_html("para one\n\n<b>x</b> & y")
     assert USER_NOTE_MARKER in h
@@ -447,9 +430,6 @@ def test_save_review_note_blank_item_key_is_422(monkeypatch, review_note_resourc
     review_note_resources.assert_quiet()
 
 
-# --------------------------------------------------------------------------- #
-# provenance list filtering (collection/tag/search → reader candidate intersect)
-# --------------------------------------------------------------------------- #
 def _prov(key, pri="must_read"):
     return SimpleNamespace(
         item_key=key,

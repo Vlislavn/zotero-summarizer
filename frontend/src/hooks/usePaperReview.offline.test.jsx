@@ -19,9 +19,9 @@ function mount(key, initial) {
   const wrapper = ({ children }) => createElement(QueryClientProvider, { client }, children);
   return { ...renderHook(() => usePaperReview(key), { wrapper }), client };
 }
-function disconnect() {
-  vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
-  onlineManager.setOnline(false);
+function disconnect(browserOnline = false) {
+  vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(browserOnline);
+  onlineManager.setOnline(browserOnline);
   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Disconnected test transport')));
 }
 async function changes(key) {
@@ -98,18 +98,21 @@ it('refreshes a durable deletion locally once its transport outage is known', as
   const detail = { item_key: key, user_note: 'Retained', verdict: { user_priority: 'could_read' } };
   await savePapers([{ item_key: key, revisions: { verdict: 4 } }]);
   await cacheResponse(`review:${key}`, detail);
-  disconnect();
+  disconnect(true);
   const reads = [];
   fetch.mockImplementation((_path, options) => options?.method === 'DELETE'
     ? Promise.reject(new TypeError('Disconnected test transport'))
     : new Promise((_resolve, reject) => { reads.push(reject); }));
   const hook = mount(key, detail);
-  act(() => hook.result.current.verdict.onDelete());
-  await waitFor(async () => expect((await changes(key)).length).toBe(1));
-  await waitFor(() => expect(hook.result.current.verdict.deleting).toBe(false));
-  await waitFor(() => expect(hook.result.current.detail.verdict).toBeNull());
-  expect(reads).toHaveLength(1); // the initial read; known outage avoids another blocking request
-  await act(async () => { reads.forEach(reject => reject(new TypeError('Disconnected test transport'))); });
+  try {
+    act(() => hook.result.current.verdict.onDelete());
+    await waitFor(async () => expect((await changes(key)).length).toBe(1));
+    await waitFor(() => expect(hook.result.current.verdict.deleting).toBe(false));
+    await waitFor(() => expect(hook.result.current.detail.verdict).toBeNull());
+    expect(reads).toHaveLength(1);
+  } finally {
+    await act(async () => { reads.forEach(reject => reject(new TypeError('Disconnected test transport'))); });
+  }
 });
 
 it('settles a missing local detail as a transport error instead of remaining paused', async () => {
@@ -123,7 +126,7 @@ it('settles a missing local detail as a transport error instead of remaining pau
 it('does not use a cached detail to hide an HTTP refusal', async () => {
   const key = 'OFFLINE_HTTP_REFUSAL';
   await cacheResponse(`review:${key}`, { item_key: key, user_note: 'Retained' });
-  disconnect();
+  disconnect(true);
   fetch.mockResolvedValue({ ok: false, status: 403, statusText: 'Forbidden',
     json: async () => ({ detail: 'Forbidden' }) });
   const hook = mount(key);

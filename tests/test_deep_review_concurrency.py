@@ -11,6 +11,7 @@ deterministically, with no LLM / model load.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 import threading
 import time
 import types
@@ -168,3 +169,69 @@ def test_progress_clock_advances_while_model_is_busy(monkeypatch):
     assert deep_review._JOBS["A"]["progress"]["total_elapsed_seconds"] == 1
     now[0] += 60
     assert deep_review.status("A")["progress"]["eta_seconds"] is None
+
+
+@pytest.fixture
+def held_submissions(monkeypatch):
+    submitted = []
+
+    class HeldPool:
+        def submit(self, _worker, item, _ctx, _focus):
+            submitted.append(item["item_key"])
+
+    pool = HeldPool()
+    monkeypatch.setattr(deep_review, "_ensure_pool", lambda _provider: pool)
+    return submitted
+
+
+@pytest.mark.parametrize("failure_at", ["_build_ctx", "_resolve_items"])
+def test_setup_failure_preserves_running_a_and_errors_new_b(monkeypatch, held_submissions, failure_at):
+    _wire(monkeypatch, is_local=False)
+    deep_review.start(item_keys=["A"])
+    deep_review.start(item_keys=["A"])
+    assert held_submissions == ["A"]
+    with deep_review._LOCK:
+        owner = deep_review._JOBS["A"]
+        before = deepcopy(owner)
+    original = getattr(deep_review, failure_at)
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("owned admission failure")
+
+    monkeypatch.setattr(deep_review, failure_at, fail)
+    result = deep_review.start(item_keys=["A", "B"])
+    assert result["error"] == "RuntimeError: owned admission failure"
+    with deep_review._LOCK:
+        assert deep_review._JOBS["A"] is owner
+        assert deep_review._JOBS["A"] == before
+    assert deep_review.status("B")["status"] == "error"
+    assert deep_review.status("B")["error"] == result["error"]
+    monkeypatch.setattr(deep_review, failure_at, original)
+    deep_review.start(item_keys=["A"])
+    assert held_submissions == ["A"]
+
+
+def test_setup_failure_rechecks_a_started_during_context_resolution(monkeypatch, held_submissions):
+    _wire(monkeypatch, is_local=False)
+    healthy = deep_review._build_ctx
+    started = []
+
+    def concurrent_admission(reader=None):
+        monkeypatch.setattr(deep_review, "_build_ctx", healthy)
+        deep_review.start(item_keys=["A"])
+        with deep_review._LOCK:
+            owner = deep_review._JOBS["A"]
+            started.append((owner, deepcopy(owner)))
+        raise RuntimeError("owned context failure after A admission")
+
+    monkeypatch.setattr(deep_review, "_build_ctx", concurrent_admission)
+    result = deep_review.start(item_keys=["A", "B"])
+    assert len(started) == 1
+    owner, before = started[0]
+    with deep_review._LOCK:
+        assert deep_review._JOBS["A"] is owner
+        assert deep_review._JOBS["A"] == before
+    assert deep_review.status("B")["status"] == "error"
+    assert deep_review.status("B")["error"] == result["error"]
+    deep_review.start(item_keys=["A"])
+    assert held_submissions == ["A"]

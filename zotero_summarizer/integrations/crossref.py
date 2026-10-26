@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from zotero_summarizer.integrations._rate_limiter import RateLimiter
+from zotero_summarizer.integrations._search_http import json_rows, search_hits
 
 _BASE = "https://api.crossref.org/works"
 _TIMEOUT_SECS = 12.0
@@ -88,36 +89,26 @@ def _hit_from_item(item: dict) -> CrossrefHit | None:
     )
 
 
+def _search_hits(response: httpx.Response, strict: bool) -> list[CrossrefHit | None]:
+    return [_hit_from_item(item) for item in json_rows(response, "message", "items", strict=strict)]
+
+
 def search_crossref(
     query: str,
     *,
     rows: int = 20,
     mailto: str | None = None,
     http_client: httpx.Client | None = None,
+    outcome: dict | None = None,
 ) -> list[CrossrefHit]:
     """Topic search Crossref (relevance order). Returns ``[]`` on any error
     (network, non-200, malformed JSON) — never raises."""
     query = (query or "").strip()
-    if not query:
-        return []
     params: dict[str, str | int] = {"query": query, "rows": max(1, min(rows, 100))}
     if (mailto or "").strip():
         params["mailto"] = mailto.strip()
-    _RATE_LIMITER.acquire()
-    client = http_client or httpx.Client(timeout=_TIMEOUT_SECS)
-    try:
-        resp = client.get(_BASE, params=params, headers={"User-Agent": "zotero-summarizer/1.0"})
-        if resp.status_code != 200:
-            return []
-        payload = resp.json()
-    except (httpx.HTTPError, OSError, ValueError):
-        return []
-    finally:
-        if http_client is None:
-            client.close()
-    items = ((payload.get("message") or {}).get("items")) or []
-    hits = [_hit_from_item(it) for it in items if isinstance(it, dict)]
-    return [h for h in hits if h is not None]
+    return search_hits(query, _BASE, params, _search_hits, _RATE_LIMITER,
+                       timeout=_TIMEOUT_SECS, http_client=http_client, outcome=outcome)
 
 
 __all__ = ["CrossrefHit", "search_crossref"]

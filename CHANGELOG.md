@@ -11,6 +11,431 @@ or feature instructions.
 
 ## [Unreleased]
 
+- Publish the UI fleet audit, source/evidence manifests and first-UAT checklist. Distinguish automated protocol coverage from unperformed human acceptance, private/account/model checks and production readiness.
+
+- Give Search's two textareas persistent native labels and Ops System its missing section heading. No new controls, routing, requests or state; regressions check actual label/control association and heading level.
+
+- Fence explicit Search status reads by generation as well as poll cancellation. Same-session retry preserves pending Add owners; acknowledgements retire older read snapshots without merging DTOs or replaying writes.
+- Bring attachment-format and MCP identifier-encoding fixtures to current artifact/semantic contracts. Retain all filename/path/no-write oracles; supply owned source/HTML and explicit fake semantic confirmation rather than weakening production admission.
+
+- Add read-only current-paper status retry without auto-generation and block Generate during unknown/checking status. Admit batch priority keys only with successful matching detail, preserving its rationale and unrelated navigation.
+- Keep the existing question composer available without PDF/render output; preserve immutable capture, delivery/lifetime and grounding behavior while raw-PDF modes still require a PDF. Remove the obsolete caller eligibility gate.
+
+- Withhold stale paper HTML/figures and invalidate incomplete audited outputs without rewriting saved records. Bound automatic attempts by item/publication and bind held build results to their original query and captured options.
+- Fence ordinary Search polls after Add acknowledgement while continuing fresh review progress. Keep complete long evidence copyable inside shrinking cards at narrow/wide widths using existing wrapping styles.
+- Refuse blank MCP similarity queries before queue I/O and require actual boolean semantic confirmation; ordinary queue fallback is never a recommendation. Retain explicit-query and confirmed-empty controls.
+
+- Preserve tag drafts until same-item delivery acknowledgement and fence retired/single-flight writes. Bind university login to saved access fields and Save completion; pause stale retrain polling on error with same-job status retry.
+- Associate Pending editor labels with their fields; require matching Feed Review receipt identity/state. Remove the misleading Ops backlog-start shortcut: Today owns backlog status; Ops retains Library selected-job monitoring/cancellation.
+- Flush React Query's zero-delay notification after fake-timer React commits in the new retrain tests; retain the stale-running/error and duplicate-start oracles.
+
+- Correct the shared Today/Library setup nudge to include AI or ML-only operation without requiring an LLM key. Retain its existing Setup action and add a rendering/navigation regression.
+
+- Keep calibration path/limit regressions on real selected Settings and explicitly enabled saved config; retain all 14 unsafe-input vectors after the earlier disabled-AI gate.
+
+- Refuse calibration when AI is disabled before reading retained papers, building clients or stamping tiers. Add fresh/cached provider and HTTP-job regressions.
+- Authorize CLI Doctor model inventory from its selected saved configuration when no live config exists; retain unsaved-custom credential refusal and avoid full application startup.
+- Correct Search documentation: ordinary public sessions omit empty Discovery; private storage retains the empty dictionary.
+
+- Match verification endpoint identity to native SDK URL-prefix semantics, including Anthropic's versioned messages path; pin its default target against ambient overrides. Add owned TCP success/disconnect and distinct waiter-late/read-timeout controls without treating timeouts as remote finality.
+
+- Bind verification to expected/native/transport/terminal request evidence and preserve unresolved ownership in Doctor state. Separate per-callback receipts from prior checks; exact late completion cannot resume cancellation. Guard native SDK tests with exact owned loopback and early cleanup.
+
+- Add current-owner Setup regressions rejecting operational callback return or nonempty probe output without native request evidence. Callback completion, synthetic text and client close must not authorize observed remote finality.
+
+- Port shared ordinary Search wire tests to absent empty Discovery, and native Collection deadline fixtures to one declared question without an unprovenanced shortlist. Preserve adoption/polling, exact dispatch, streamed deadline/bytes and replay controls.
+
+- Add bounded byte-approved Setup load-policy files, exact provider/model/envelope matching and fresh private telemetry admission. Policy/approval/revision changes invalidate Doctor Ready; missing authoritative runtime envelope stays UNKNOWN, never a hardware certificate or public facts bypass.
+
+- Reuse the existing DOM contrast probe for settled Interpretation brief/note labels and open support disclosures; retain narrow/wide geometry and no-network checks.
+
+- Keep context-only feed assessment imports and binding out of ordinary review workers. Explicit feed context retains its existing publication/staging order; import sentinels cover current and stale prior preservation.
+
+- Extend Interpretation controls for absent/changed optional contracts and A/B no-work. Inspect settled brief/note HTML at 390/1440px with support disclosure closed and open, retaining no-network/native-editor limits.
+
+- Update the deliberately resealed Interpretation fixture for contract-bound scientific receipts; the unchanged independent call tape must still refuse the forged invocation on replay.
+
+- Decode experiment records from manifest-verified bytes, preventing replacement between verification and JSON parsing. Bind optional Interpretation schema/source identity before generation and in scientific receipts; optional-only drift preserves valid base evidence.
+
+- Reject malformed retained base-audit shapes at the explicit Interpretation input boundary without optional-only fallback. Derive default test source windows from the supplied paper so source-present zero controls are not accidentally clipped.
+
+- Isolate experimental Interpretation records from ordinary cache readers/export, including nested optional subtype fields. Require exact retained canonical items and expose complete scientific fields/bases in one escaped support disclosure; port tests to explicit experiment owners.
+
+- Correct collection row-corruption fixtures to reseal inventory without rendering invalid readouts. Retain all six cases and require their actual row-admission errors before report comparison.
+
+- Add optional declared collection lineage with exact versions, transitive holdout exclusion, all-channel bindings and immutable replayed removal audits. Require frozen shortlist provenance and distinct complete questions for native no-match; unsigned ancestry remains unqualified.
+
+- Recompute Doctor modes from its current checklist on status reads. A persisted Ready label cannot outlive failed dry-run evidence; reads neither rerun checks nor rewrite saved state.
+
+- Require dry-run success before local mode is Ready. Keep timeout fencing for local/setup-owned batches while ordinary hosted diagnostics can check a distinct model without retrying the timed-out identity. Port verification/disabled/redaction fixtures to current owners.
+
+- Correct the Today not-ready fixture to accepted-but-unusable generated prose; no-digest/non-missing-PDF records are intentionally not current. Preserve actual missing-PDF refusal and rerun expanded UI with its explicit question-browser fixture anchor.
+
+- Port expanded browser journeys to current retained/RSS/offline owners. Replace fabricated Today A/D cache positives with accepted production generation and no-digest states with real compute-only results; retain stale/error negatives and unchanged no-auto-work assertions.
+
+- Reject unknown resolved-stage fields with the existing Pydantic boundary before credentials/transport. Preserve known-field JSON, identities, legacy/native factory paths and declaration/adapter metadata; do not restore retired requirement properties or methods.
+
+- Add a resolved-stage boundary regression for silently discarded requirement/operation/route fields. Require typed extra-field rejection before credentials or transport, without reintroducing retired per-stage capability APIs.
+
+- Align ordinary HTTP golden and capability-axis controls with omitted empty Discovery metadata. Storage/planned-key round-trips now use the actual storage serializer; retain exact JSON equality rather than filtering away differences.
+
+- Keep empty Discovery metadata off ordinary public Search sessions in default/display serialization. Preserve existing storage dictionaries and populated Discovery projections; retain the original regression with display, round-trip and storage controls.
+
+- Port Related/Discovery lifecycle controls to saved-seed metadata, actual membership, retry-in-place history and strict namespace lookup. Retain public/private separation and deletion races without reviving removed helpers or API aliases.
+
+- Extend opt-in federation receipts to four native search adapters using existing request ownership. Preserve narrow ordinary calls, independent concurrent/nested outcomes and unknown silent adapters; keep OpenReview/library uninstrumented and saved-paper Discovery's OpenAlex scope.
+
+- Add opt-in request-local outcomes to arXiv, Crossref, Europe PMC and Semantic Scholar through shared HTTP ownership. Empty, HTTP/transport failure and malformed results stay distinct; no global capture state, retries or new user controls.
+
+- Retarget real provider-leaf empty/failure regressions to explicit request-local outcome receipts. Verify locked hosts through owned HTTP transport; preserve zero versus unknown and typed failure codes without resurrecting the removed ambient capture API.
+
+- Scope native Request/signal alignment to data-router fixtures instead of changing every Vitest environment. Remove the temporary composition-retention probe; retain the original Search cancellation oracle and untouched production browser APIs.
+
+- Keep paper-question and unsaved-note documentation in the existing single-paragraph feature format. Preserve both behaviors and their source/test links.
+
+- Retain per-request URL/abort-state diagnostics on Search owner-retirement failures without changing the cancellation assertion. The first fresh whole run exposed one unresolved frontend assertion; no blanket flaky/model-bound claim is made.
+
+- Bind Related-to-Search browser assertions to current checked-snapshot membership labels. Keep known not-saved and unresolved membership separate, preserving canonical safe links and the rule that unknown does not establish a new paper.
+
+- Keep Vitest AbortSignal.timeout/any in the same native realm as controllers and Request/fetch. Preserve actual cancellation composition and migrate the Related primary-ACK fixture to the real data-router context; production browser APIs are unchanged.
+
+- Protect unsaved paper notes at the installed router boundary, covering links, programmatic transitions and history; use native unload confirmation. Remove callback-only Prev/Next guarding. Cancel preserves drafts; clean/saved notes and same-paper anchors do not prompt or auto-save.
+
+- Align Vitest's AbortController with Node-native Request/fetch for real data-router transitions. A no-HTTP realm probe reproduces jsdom signal rejection and confirms native abort propagation; browser production globals and cancellation semantics are unchanged.
+
+- Add route-owned dirty-note regressions for Link, programmatic navigation, Back and unload, with separate clean/saved controls. Move existing note-ACK/offline UI fixtures to the installed data-router API without compatibility fallbacks or changed assertions.
+
+- Supply current seed/admission-basis metadata to the Related browser client, and open its disclosure before checking the private-context consent default. Keep runtime schema validation active instead of bypassing metadata refusal.
+
+- Port Related browser scenarios to metadata admission, explicit opening/comment assessment and Find-to-Search handoff. Retain dirty-note cancellation, literal evidence, canonical links, exact consent/retry bodies and separate zero/unknown observations; no retired inline-discovery APIs.
+
+- Check a Search quote's literal text separately from its adjacent citation, and scope unchecked-evidence assertions to the opened candidate. Retain exact quote equality; hidden baseline details must not impersonate the checked card.
+
+- Port Search browser evidence controls to the current opt-in label, article/readout owners and server-recommended order versus relevance sort. Keep unchecked evidence non-negative, exact explicit request bodies and no automatic Add/Review; these remain scripted UI DTOs.
+
+- Complete the owned offline-PDF fixture's explicit skip/reading/writing fields, including zero minutes and empty targets. Keep actual generation validation active; missing required assessment fields must not be silently accepted.
+
+- Make broad browser review fixtures reuse computation and source verification over owned PDFs/configuration. Move source-change refusal to the actual prepublication worker seam; preserve no-work, source identity and immutable native/question behavior.
+
+- Check browser surface bytes against the actual isolated SPA build and current RelatedPapers sources. Use real owned Zotero writes, backups and readback for same-title Search Adds, retaining transparent invocation checks and reload persistence.
+
+- Assert deleted Related verdicts through the retained increasing-revision tombstone and empty comment projection, not an obsolete null-row assumption. Preserve deletion history without reviving human intent.
+
+- Port Related-library controls to current metadata/consented-assessment owners and explicit source observations. Reuse the owned fixture; retain literal evidence, negation, alias deduplication, human exclusion and content-edit invalidation without retired helper aliases.
+
+- Remove the duplicate writing-friction row from the folded full digest. The existing Idea/Evidence/Writing disclosure retains every original reason across compact, standard and full review; no new controls, policy, grade or source changes.
+
+- Add a literal writing-reason occurrence regression across compact, standard and full review. The qualified built-browser flow exposed the same reason twice; retain source text, signal/policy distinctions and input immutability while testing its single displayed home.
+
+- Make Reading browser positives use actual accepted synthetic production before API/UI reads. Preserve current-only refusal of legacy/incomplete artifacts and capped-plan reasons; keep source bytes explicit and never re-sign a mutated receipt or bypass admission.
+
+- Align Reading browser saved-view fixtures with complete explicit reading/writing inputs and the actual full-text-not-confirmed policy flag. Keep legacy/withheld states separate; these UI receipts do not certify current-source or native admission.
+
+- Port goal evidence, review-selection and source-error fixtures to accepted pre-bound records/current raw readers. Remove the selection validation-true stub; retain worker scope/order/no-scheduling guarantees and original-paper-only QA, including exclusion of unaudited digest context.
+
+- Validate cached abstract summaries strictly after identity/checksum admission: booleans and numeric strings cannot become typed score observations. Preserve failed-cache bytes and explicit generation ownership.
+
+- Publish hash-only source bindings and explicit retained optional-receipt references in new Weekly reports. Keep full private identities/receipts unchanged, omit source paths/focus input, and leave previously saved JSON/Markdown untouched.
+
+- Add an actual feed-publication export regression for private source paths and focus input. Require hash-only public source binding and an explicitly named retained receipt reference while preserving the complete private receipt and generation/verifier counts.
+
+- Port retired full-card cursor tests to current fresh-projection and abstract-cache owners. Preserve no-model cached reads, native/score guards, immutable reports, explicit retry, checksums, source/config identity and bounded retention without restoring replay metadata or removed helpers.
+
+- Complete the shared scripted skim fixture with original-only value and a positive saved minute estimate, alongside its exact source target. Keep actual generation admission active rather than suppressing the reading-contract failures exposed by the broader scenario run.
+
+- Classify malformed non-null retained digest values as per-paper errors after observing source availability, not ordinary pending qualification. Preserve genuine missing metadata and five owned scalar/list regression controls. Give the accepted skim fixture an exact target present in its source.
+
+- Move feed goal/quality variants before fixture binding and prepare history/ranking/native-admission review records before observed work. Preserve original Unicode, duplicates, false/zero, unknown, ranking and blocker assertions; keep deliberate post-binding tampering as refusal controls.
+
+- Extend the owned feed-consumer regression to malformed non-null digest lists/scalars. Require the existing per-paper failure home, unchanged bytes and observed source availability; keep genuine absent-review controls distinct. This records the remaining diagnostic gap before its correction.
+
+- Replace the shared feed fixture's fabricated hashes and proof-free digest with actual compute-only generation, source verification and audit binding over owned synthetic bytes. Keep patches call-local, records independent and inputs explicit before binding; no native/cache publication.
+
+- Strengthen explicit-feed regeneration and reproduction fixtures with actual accepted base publications. Supply blocker inputs before audit binding; retain missing-assessment regeneration, unknown effort, artifact preservation and blocker order without proof-free current-review stubs.
+
+- Preserve per-paper failure and partial-error behavior for rejected base proof after recording observed availability; do not demote corruption to ordinary pending work. Use an audited base-only fixture for code/novelty non-promotion controls without weakening prior failure assertions.
+
+- Admit retained base proof before feed consumers can return unassessed optional results; retain observed availability with explicit invalid/unqualified reasons and no rejected-claim card. Reject auditless retained-model reconstruction through no-digest placeholders without erasing source artifacts.
+
+- Add default-feed and direct-consumer regressions for changed, missing/null and malformed base proof without optional assessment. Cover retained-model reconstruction through no-digest placeholders, preserved source availability, normalized configuration and unchanged calls/bytes.
+
+- Align the owned grade-to-native source fixture with its declared section/figure targets. Real verification now produces accepted receipts without bypassing literal admission; retain all evaluator, grade, approval, native-note and no-replay assertions.
+
+- Run cache-identity and evaluator-to-native grade fixtures through real scripted generation, source verification and audit binding. Preserve source/config drift, exact grade/note/approval/replay assertions and source immutability instead of granting currentness to proof-free stubs.
+
+- Refuse current generated digests without audit evidence; keep legacy display and no-digest placeholders distinct. Copy/qualify raw publications before presentation, and hash only declared model policy fields while preserving unrelated subtype metadata and original receipts.
+
+- Cover missing/null proof downgrades, raw review copies, feed-loader projection mismatches and policy-unused subtype metadata in both digest snapshots. Retain exact receipts/revisions/bytes, source-unavailable placeholders and independent qualification of displayed views.
+
+- Move fleet orchestration mocks to the shared current-reader boundary and remove unused currentness stubs. Preserve all named batching, acquisition, latch, status and no-confirmed-label assertions; real worker/cache controls separately verify source admission.
+
+- Bind retained reading-policy inputs before current-cache reuse; admit raw artifacts before deriving single/bulk views and reuse that reader in the verdict fleet. Preserve raw audits, unknown quality, source/config checks, native consent and read-only cache bytes.
+
+- Add real worker/cache controls for retained-artifact admission before presentation, substituted reading-policy inputs, consistent single/bulk/fleet views, normalized unassessed quality and no-work empty keys. Preserve exact source/cache bytes and existing model-call counts.
+
+- Translate provider diagnostic fixtures to real inference preflight, the current deduplicated three-stage batch and independent inventory observations. Keep disabled no-work results distinct from capability failures; do not invent observed support, hardware safety or removed row fields.
+
+- Align supported provider text-route fixtures with typed preflight errors and fingerprinted client-cache identity. Preserve exact adapter wire options and all no-work sentinels; native-schema/resource/finality obligations remain separate. No production change.
+
+- Show unqualified Weekly reviews with reasons and no-auto-run paper links in the existing needs section. Validate optional pending rows before display/download; preserve unknown source state, legacy field absence and exact saved data without new work or writes.
+
+- Add Weekly regressions for hidden unqualified reviews and malformed pending rows. Preserve legacy absence, exact saved data, distinct source/review states, visible no-auto-run paper links and read-only downloads.
+
+- Preserve usable retained goal observations in Weekly’s existing note home, labelled unverified. Reuse exact-key/raw-state gates without inventing project fit, ideas or impact; preserve text/order/duplicates, current review qualification, old bundles and model-call counts.
+
+- Strengthen Weekly goal-observation controls for exact keys, strict raw states, literal text/order, no invented project actions and immutable published reports. Translate retired projection aliases/card-cache fixtures to current structured status and real recomputation observers.
+
+- Align Telegram export checks with the six documented public feed-assessment types and verify package-facade object identity. Retain the exact inventory and live-Telegram direct-only exclusions; no production, schema, migration or account behavior changes.
+
+- Cap legacy deep-reading advice to No at the shared live/Doctor abstract success boundary. Preserve raw refinement, triage input, PDF advice, scoring, error propagation and existing calls; no classifier, prompt change, cache rewrite or new API.
+
+- Expand abstract legacy-advice controls across live, Doctor and PDF first/repair paths, including bool, exact-token, prose, opaque and empty inputs. Preserve original regression IDs, raw refinement, triage prompts, other fields, call budgets and failure controls.
+
+- Forward retained model reading decisions from the owned PDF builder through the existing HTML writer. Already-projected capped reviews now label their unchanged time as saved; no inference from rationale, re-estimation, cache rewrite or new policy surface.
+
+- Bind reading-action/time assertions to parsed DOM text rather than obsolete HTML concatenation. Keep all scientific-grade/native receipts checks, and add a real owned-PDF builder regression for saved capped-time metadata already present in a projected cache.
+
+- Give standalone briefs one visible ordered reading plan beside the action; remove folded duplicates, preserve unknown/zero and saved capped estimates, and suppress stale withheld advice. Reuse existing HTML helpers and unchanged reading policy; no extra generation or cache mutation.
+
+- Strengthen HTML reading-plan controls: assessed skip versus unknown-goal withholding, stale advice suppression, ordered literal targets, blank hints, unknown/zero time, qualified READ/capped SKIM, saved estimates and immutable source/cache bytes. Preserve original failing fixture and causal probe.
+
+- Keep the native-write feature entry in the documented single-paragraph structure. Retain all verdict-history, backup, consent and uncertain-delivery wording; the full regression’s Markdown-structure failure is corrected without weakening its test.
+
+- Extend owned verdict controls to both partial-failure directions, failed/applying Pending refusals, domain-ACK retry without native replay, already-clear deletion, quoted manual markers, incomplete native partitions and malformed retained history. No production changes in these tests.
+
+- Bind verdict mirrors to invocation lookup and selected source, validate canonical HTML/case-folded effects plus lifecycle metadata before history projection, and recheck native completion before every ACK. Lift the formatter below services; remove obsolete formatter re-exports, preserving bytes.
+
+- Extend verdict regressions to legacy-alias remapping, post-native deletion ACK races and intent-inconsistent HTML/case-variant label removals. Keep the independently reproduced terminal-metadata admission defect separate from the corrected alias-fixture setup error.
+
+- Add owned verdict-mirror boundary controls for claim-gap source/alias/target/native-plan changes, whole-batch tampering, foreign uncertainty, native/terminal ACK loss, partial retry, cross-source receipts and malformed history projection. No live native or distributed guarantees are inferred.
+
+- Port verdict route/retraction/audit tests to committed-intent mirrors and transparent real native dispatch. Preserve external-native-edit race fixtures, backup/closed-claim checks and failure propagation. Admit retained null tombstone comments without changing their frozen provenance.
+
+- Reuse the system-mirror owner for committed verdict note/label effects: closed positive claims and backup precede dispatch, current source/target/plan and full claims are rechecked, and native history precedes explicit deletion ACK. Unknown delivery blocks replay; remove raw ID-zero helpers.
+
+- Add an independent, non-vacuous verdict-mirror history authority regression after real native note/tag writes. Require closed system origin, committed terminal rows and no Pending preview/apply authority; distinguish it from positive IDs alone and retain absent-verdict zero work.
+
+- Align raw RSS read-state tests with mandatory backup-first behavior. Verify real backup integrity, original read timestamps and item clocks in raw/typed success and trigger-abort controls; preserve raw rollback, typed per-row outcomes and empty-batch zero I/O.
+
+- Port Doctor runtime-identity controls to bounded inventory diagnostics and the defining inference coordinator. Preserve failing provider/model/endpoint, both provider orders, no sibling Ollama command, exact retained receipts and disabled no-inventory behavior.
+
+- Replace the inactive Search fixture with current opt-in source/policy execution. Preserve pre-cutoff checks, occurrence identity, unknown failures, private/cache exclusion, zero extra work and concurrent keys; model status cannot substitute for independent verification.
+
+- Port joint Search/Discovery checks to authentic retained Discovery state, fingerprinted Find and explicit Review claims. Separate public/provider outcome observation from ordinary screening; preserve concurrent operation keys, paired question budgets and current prompt fields.
+
+- Port Search encoding probes to raw answer/quote, actual verifier, acquired source and ScreenRequest boundaries; reuse real Related comment observation states for private-context isolation. Keep valid Unicode, ordinary review and receipt persistence controls without supplied-request DTOs.
+
+- Share the existing real Search evidence fixture and port policy checks to acquired-text, current binding, paired attempt budgets and actual HTTP/store owners. Keep independent occurrence/hash, no-work, cancellation and stale-display oracles; retired supplied-range APIs remain unimplemented.
+
+- Close the owned Related fixture's setup SQLite connection after its transaction. Prevent delayed WAL checkpointing from contaminating GET byte snapshots; preserve original database/history/no-model oracles, with no production GET or storage relaxation.
+
+- Add a deterministic shared Related-fixture connection-retirement regression. A live setup handle must not checkpoint prior WAL work during a later read-only byte oracle; track only the owned synthetic database and keep the original no-write assertions.
+
+- Initialize owned question storage for the five QA history route vectors through existing migrations. Preserve literal prompt/grounding/compaction oracles, saved receipts and honest unavailable native delivery; pure QA tests stay storage-free.
+
+- Validate model answer/quote UTF-8 at the shared parser; encoding failures propagate without JSON repair. Ask HTTP preserves its saved-question failure receipt and Search keeps evidence unknown while ordinary review continues. Valid Unicode and existing malformed-JSON repair remain.
+
+- Add grounded QA service/HTTP, Search persistence and shared-parser encoding regressions. Distinguish valid Unicode, malformed answer/quote strings and fabricated quotes; preserve question receipts and exact model/repair counts without an inactive fixture shortcut.
+
+- Treat omitted Priority title/abstract as unknown evidence through existing zero-dispatch missing-input handling, preserving raw key presence. Reject native readouts on operational result states while retaining threshold/model-mismatch observations; no new DTO or parser.
+
+- Port Priority contracts to real Paper/Config, native wire and artifact owners; reuse admitted development calibration and fixed canonical ordinals. Preserve omitted-evidence and intrinsic DTO requirements, independent replay negatives and raw-byte retention without retired facades.
+
+- Pass Support/Priority caller remaining time to the existing native total-deadline primitive, matching Collection. Preserve idle-read caps, timeout-prefix retention and unscored results; no new timer, replay, refund or blocked-read/remote-stop guarantee.
+
+- Add full Support/Priority/Collection run deadline controls with admitted one-entity inputs, actual retained artifacts and a shared synthetic trickle clock; distinguish aggregate remaining-run expiry from idle gaps without sleeps or real-latency claims.
+
+- Validate native request bytes, callable retention and finite positive time overrides before reserving a call or HTTP. Preserve configured caps, raw ACK ordering and real runtime-failure accounting without refunds, retries or a second task parser.
+
+- Port native adapter controls to current task payloads, Config/Arm and raw-retention status contracts; share the existing admitted fixture, preserve named intents and add direct-call pre-accounting probes without compatibility DTOs or live-model claims.
+
+- Reuse one native transport replay check across comparisons, reject boolean counters, and join Support/Priority publications to admitted file roles plus Support's reservation count. Preserve recorded/missing-baseline states; no authentication or resource-qualification claim.
+
+- Add Collection native boolean-counter replay controls and retain actual paper-timing inputs when resealing reports, so metadata corruption is distinguished from a fixture-created timing mismatch without changing model evaluation.
+
+- Add current Support/Priority replay discriminators for boolean/zero native counts, contradictory dispatch/bytes/HTTP and manifest-listed unadmitted files; preserve admitted inputs, raw terminals and healthy reopen controls with self-consistent derived hashes.
+
+- Port Support contracts to current policy, full native transport/retention and actual typed artifact owners; retain all named test intents and add resealed native attempt/reservation/inventory checks without restoring retired DTOs or claiming semantic quality.
+
+- Replace Discovery's receipt-less SQL writer fixture with transparent actual owned-SQLite materialization, backup and ACK/readback; retain explicit Add, public-only payload, stale next GET and no-second-write replay without inspecting desktop processes.
+
+- Keep Related private state behind the existing storage-only serialization flag. Generic Search reads no longer replay snapshots, results or prior attempts; preserve exact stored history and consent-bound Related behavior without new work or a second policy owner.
+
+- Add actual generic-GET Related privacy regressions across unchanged, edited/deleted, native/model/unavailable context and failed/retried history; preserve stored bytes, ordinary Search metadata/ACKs and explicit consent without extra work.
+
+- Assert scientific-grade note byte identity against the actual Pending row's JSON payload and approved preview, retaining owned native readback and exact-replay controls rather than inventing a decoded response field.
+
+- Port article/PDF/audit controls to actual stage/native-writer boundaries; exercise scientific grade through the real worker, explicit Pending approval, owned SQLite note and no-redelivery replay without restoring retired note APIs.
+
+- Refuse Saved-news parent/directory/state symlinks before inputs or models and recheck before publication via one private owner predicate. Preserve request budgets, healthy CLI replay and private transport boundaries; no filesystem-race guarantee.
+
+- Add saved-news regressions for aliased parent/directory/state owners before input/model admission and a parent recheck before publication. Use only synthetic owned paths, preserving outside and database bytes without Telegram/session access.
+
+- Refuse pre-existing Weekly output-root/state symlinks after budget checks but before work; recheck shared publication roots before staging. Preserve optional-cache scope and outside targets without claiming symlink-swap or crash containment.
+
+- Add owned symlink regressions for Weekly state/root admission before source/model work and the shared publisher's custom-renderer path; preserve outside bytes and distinguish existing-link refusal from filesystem-race containment.
+
+- Retain the existing `weak_evidence` reading-policy flag separately from exact missing reproduction inputs in Weekly controls; do not suppress policy caveats while correcting their display-home expectations.
+
+- Align Weekly uncertainty controls with existing blocked-versus-unknown reproduction semantics: retain ordered missing inputs, no fabricated red flags or duration, and the six original blocker/artifact/serialization oracles.
+
+- Add exact reproduction-value single-home regressions before absent-field fallback, preserving canonical input and typed report admission; expose duplicate rendering independently of earlier legacy lookup failures.
+
+- Remove the duplicate Markdown reproduction row so existing labelled fields handle missing legacy values honestly; preserve exact text, unknowns and canonical saved JSON without changing typed report admission or scientific effort policy.
+
+- Move weekly cursor/projection fixtures to current feed-reader boundaries and trace actual projection functions, without restoring canonical aliases or mistaking injected observations and cheap projections for live freshness or model-work evidence.
+
+- Preserve explicit unverified effort while testing both blocked/no-artifact and positive/supplied-artifact projection. Synthetic artifact URLs are input contracts, not live repository or measured reproduction evidence.
+
+- Follow current five-home weekly records and complete ranking order in integration controls; distinguish unknown from observed-unavailable source and use explicit quality blockers and the actual accepted acquisition path without rewriting base audits.
+
+- Reuse actual source/audit production in engineering, publication, regression and startup fixtures; retain the counted scripted generator without Mock-only assumptions or attaching proposals to fabricated base reviews.
+
+- Supply the cached-reader fixture's actual resolved configuration to scripted generation before verification; preserve derived context settings and unchanged identity/audit checks instead of retroactively rebinding output.
+
+- Build standalone cached-reader fixtures from actual scripted review/audit production instead of replacing a fabricated source identity and rebinding proposals; preserve cached-only startup/client, unknown-history, source/config and immutable-report controls.
+
+- Reuse retained base-audit qualification for optional feed proposals and require matching original-text hash/extent. Missing, malformed or changed source receipts refuse per paper without new extraction/model work, cache mutation, or report replay.
+
+- Add independent feed qualification controls for changed/missing/malformed base audits and self-checksummed original-text/extent mismatch; retain no-positive, per-paper refusal, source observation and immutable-base assertions.
+
+- Port feed producer/cache controls to flat payload and actual qualification, error and context-snapshot owners; add omitted/null and real-worker cases while preserving original spans, no-retry/no-positive, immutable base/report and no-native invariants.
+
+- Move the feed producer fixture to actual one-paper `feed_out` and binding owners, removing a retired note callback without restoring combined experiment APIs or asserting worker/native acceptance from a unit fixture.
+
+- Remove review-cache-boolean “saved to Zotero” claims from compact and full review footers; preserve review timestamps and recorded errors without adding an acknowledgement API, changing native consent, or rewriting retained reviews.
+
+- Add review-mode and built-browser regressions that retain a legacy cache flag but require no native-delivery acknowledgement, while preserving date/error, cache bytes, GET-only requests and contrast/reflow controls.
+
+- Remove the now-unconsumed compatibility digest-note entry rather than allowlisting dead code; native backup controls call the actual staging owner and retain explicit approval before dispatch.
+
+- Port ordinary review controls to current factory, publication, renderer/cache and job-error owners; remove the retired note callback seam, retain real no-native sentinels, and distinguish explicit unassessed quality from legacy grade fallback.
+
+- Publish accepted reviews before staging exact-revision generated notes under the existing lock; remove prepublication note side effects/false native-write claims, retain cache on queue failure, and refuse late source identity changes for ordinary reviews.
+
+- Extend ordinary review regressions with a real Pending-insert failure and controlled final-identity source replacement; preserve the accepted cache, explicit failure, no-native-effects and unchanged-source countercontrols.
+
+- Add real-worker publication/staging regressions that inspect the cache snapshot at the actual staging call and reject a native-write claim before approval; retain all existing Pending/source/target/uncertainty oracles.
+
+- Detach ordinary generated-write/Pending/native fixtures from retired experiment imports; retain real worker/cache/staging and transparent native-write counters instead of a no-op service mock, without restoring combined APIs.
+
+- Retire verification-audit output before feed-context validation at each digest entry, alongside optional output; failed preflight cannot expose a prior attempt, while default calls and existing verification/retry/source bounds remain unchanged.
+
+- Reuse attempt-local feed-context preparation at all digest entries before source/config/MAP work, retaining default non-feed behavior; extend preflight controls to the independent verification-audit collector.
+
+- Add cross-entry source/context preflight regressions for attempt-local feed collectors, retaining no-generator/MAP-work controls, existing source/MAP failures, default-call identity and typed base-field admission.
+
+- Correct the new fixture migration assertion to the actual single namespace watermark, not a fabricated per-migration journal; keep the registry-derived current version and required audit-column checks.
+
+- Initialize weekly test databases through the real scoped migration owner instead of the baseline schema; preserve exact-signature, 5,000-row and concurrent idempotency oracles without changing production history or writeback policy.
+
+- Add a current-schema/migration-registry control for weekly SQLite fixtures after an actual queue diagnostic traced duplicate failures to an absent audit column, not idempotency logic or malformed user data.
+
+- Reject malformed non-null review source-status values at the shared observation boundary; keep unknown absence, strict boolean acquisition status and per-paper failure isolation distinct.
+
+- Retain all reproduction uncertainty oracles with a qualified base-review fixture, and add malformed source-status controls so numeric/string/container values cannot manufacture observed full-text availability.
+
+- Separate weekly source observation from review qualification, publish genuine pending-review homes, and reuse one strict base gate for direct cards; retain bound availability on later failure, native admission, budgets and separate confidence lanes.
+
+- Add independent direct-card source/generation refusal and unobserved-acquisition controls; retain the documented legacy triage confidence alongside unknown assessment confidence, without treating skipped work as unavailable full text.
+
+- Separate weekly native admission from pure projection, preserve exact recovered text and prebudget history facts, bound callback failures, and publish one-home source provenance without missing-cache prediction or source mutation.
+
+- Retain weekly admission oracles at current helper/card seams; distinguish cached-only refusal from legal pure projection, and add qualified-cache/native-unknown, whitespace and malformed/callback-warning controls.
+
+- Port audit-export regressions to the actual internal exporter and typed errors; retain source/currentness, subtype, native-WAL and read-only controls, and explicitly test absence of the retired HTTP route without an alias.
+
+- Reject blank/non-string consumed history payloads without losing missing/null or observed zero; bound numeric/parser failures and triage-stage diagnostics so malformed scalar values do not leak into reports or warnings.
+
+- Move numeric-history parser regressions to its actual source owner and add a non-vacuous warning/public-report leakage control with an unchanged healthy peer and stored rows.
+
+- Preserve supplied-key evidence during skip normalization so incomplete generated digests are refused across ordinary/feed/interpretation paths; retain legacy values, explicit empties and normal source/audit identity invalidation.
+
+- Add explicit input-presence regressions for every reading/writing key across raw, typed, copied, feed and interpretation paths, including omitted original-only value and bounded generation refusal.
+
+- Rehome all eight retired RelatedLibrary regression intents to current RelatedPapers, ACK, Search and backend owners; remove only the obsolete harness after its mapped owner cohort passes, without skips or compatibility aliases.
+
+- Reuse canonical safe paper links for ordinary and discovery Search, including identifier-only results and unsafe-address fallbacks; keep unsupported records non-clickable without starting Add or review.
+
+- Restore the approved synthetic channel fixture and retain saved-link evidence, independent admission, disabled assessment, loading states and backend three-family caps at current test owners.
+
+- Re-admit the question-cache HTTP-refusal control after explicit connection recovery, then require the real second dispatch and403 rejection. Preserve the preceding actual transport fallback; no production refusal or known-outage rule is relaxed.
+
+- Reuse known transport-outage admission for cached detail reads, not just writes. Durable local verdict deletion now refreshes without another blocking request while the browser advertises online; observed HTTP/protocol refusals and pending-field authority are unchanged.
+
+- Add an online-browser/known-transport-outage detail regression and keep deletion-refresh requests observable. Arrange reader connection explicitly, retain native-artifact withholding on outage, and align navigation tests with the authenticated-gateway and app-only acknowledgement boundaries.
+
+- Qualify local catalog copy at its shared owner: known models meet static floors; Existing-model runtime compatibility/capacity remains unverified. Selection flags, resource thresholds and UNKNOWN inference admission are unchanged. Keep the new model-input label at the house UI weight.
+
+- Add profile-copy controls across low/high synthetic RAM: zero-floor Existing eligibility must not claim model capacity, while known profiles retain explicit static-floor outcomes and refusals.
+
+- Use the real Doctor owner in Setup fixtures, retain cancellation exports and persisted run-status reads, and assert both named credential invalidation families. Verify AI and RSS recovery with actual browser keyboard navigation instead of invented component callbacks.
+
+- Bind local profile advice/progression to current stage routes and the shared preset cache, including resumed steps. Keep Existing models editable before nonloading listing, preserve real provider identity and static floors, and focus wizard headings. UNKNOWN inference admission is unchanged.
+
+- Add local-selection regressions for remembered-profile drift and resumed research steps. Verify current model compatibility through actual controls without model listing, credential work, verification or writes.
+
+- Fix the shared browser contrast probe's null/undefined argument boundary and reject empty measurements. Preserve explicit scopes, RGB calculations and WCAG thresholds; old empty arrays remain non-evidence rather than retroactive passes.
+
+- Add a real-browser contrast-probe regression for omitted Python arguments, explicit scopes and empty measurements. Preserve the actual failure before changing the shared probe; previous empty contrast arrays are not evidence of accessibility.
+
+- Align the orthogonal-signal neighbor oracle with the documented display labels. Assert exact per-band supplied-check vectors instead of permissive raw-key membership; retain N/A exclusion, empty-rubric and saved-policy checks.
+
+- Keep mixed goal remainders neutral instead of calling failed retrieval an observed miss. Complete matching React/HTML labels for supplied thesis/evidence/scope criteria; preserve applicability, case normalization, absent/unknown keys, scores and evidence.
+
+- Add schema-label parity and mixed remainder-state regressions without altering applicability or evidence. Align checklist tests with real typed destinations and collapsed optional outcomes while preserving scoped retry and actionable-only expansion.
+
+- Keep the Setup feature entry in its required single-paragraph task format; preserve recovery, uncertainty and UNKNOWN-admission boundaries.
+
+- Restore typed AI/RSS Settings recovery and post-load hash focus without automatic checks. Fold duplicate pending rows while retaining IDs/reasons and optional statuses; show structured UNKNOWN admission. Forward definite-rejection outcomes from wizard/path saves to the existing health owner.
+
+- Add current-checklist recovery, collapsed pending-state and structured-UNKNOWN regressions; retain real navigation/no-verification oracles and extend definite-rejection coverage to403. Add read-only typed RSS-recovery coverage before its correction.
+
+- Align current-run Doctor fixture status reads with the actual persisted run result. Preserve delayed obsolete-run and every original Ready/missing-source oracle; no production mutation-result fallback is restored.
+
+- Show supplied pending Doctor reasons in existing rows. Reuse its cache owner to preserve unchanged reports after definite403/422 config/RSS rejection; successful/uncertain writes still invalidate and never automatically replay.
+
+- Add Doctor pending-reason and definite403/422 report/owner preservation regressions. Keep all existing uncertainty, no-retry, callback-order and source-invalidation assertions after the fixture interface is repaired.
+
+- Make the question receipt browser scenario explicitly direct-first without weakening its assertions. Add actual sync-first/no-op-first coverage via transparent request ordering; no synthetic responses or production sync-policy changes.
+
+- Repair Doctor/RSS fixture interfaces with the existing cancelDoctor mock export. Preserve the real checklist and every original race/invalidation assertion; explicit Stop still binds the current run and cannot certify backend termination.
+
+- Align two strict review-context test expectations with the existing explicit False light/map thinking policy. Keep digest/provider routing, exact objects, schema and callback-order oracles; no production client or cache behavior changes.
+
+- Add a Doctor Stop regression that forwards only the current run ID and rereads unresolved ownership without accepting Ready. Keep original Settings race and RSS health assertions; fixture/export mismatch is diagnosed separately.
+
+- Keep eligible rail/compact question owners mounted across transient server availability. Reuse existing local capture, explicit retry and receipt/navigation fences; native-editor/reader gates and source/PDF eligibility remain unchanged.
+
+- Add rail/compact question-owner transition regressions for sync, held acknowledgements and offline capture without automatic server replay. Model the compact fixture's existing availability-hook exports; retain original assertions and eligibility fences.
+
+- Restore the documented optional interpretation input on the digest-note renderer. Reuse Library's qualified projection before the final ownership footer; default bytes and independent native-write consent remain unchanged.
+
+- Add optional-note regressions with pre-fix A/B HTML byte fingerprints, omitted/None/disabled inputs, immutable qualified records and native-writer sentinels. Preserve all existing interpretation consumers/refusal oracles.
+
+- Preserve running review jobs atomically when another request's context/item setup fails. New targets still expose errors; ordinary worker completion remains unchanged. Reuse the registry lock and remove duplicated start-doc prose.
+
+- Add deterministic review-admission failure regressions: active A survives context/item-resolution failures and a start-during-setup race while new B reports its own error. Held submissions require no model, thread or new timeout.
+
+- Refuse model prefetch through the shared offline policy before flag mutation, config reads or acquisition. Preserve direct/CLI refusal, online acquisition behavior and the nonloading --check inventory path.
+
+- Add offline prefetch refusal, unchanged-flag, online-path and CLI inventory regressions using I/O sentinels; no model downloads or loads. Isolate the dataset offline flag with the existing offline test fixture.
+
+- Treat stored weekly summary/aux_context nulls as unobserved objects, preserving healthy cohort members, malformed non-null refusal, numeric zero and original payload bytes. Reuse the existing reader; no new scoring or fallback lane.
+
+- Add regressions distinguishing nullable weekly history objects from malformed non-null fields without rewriting stored payloads or inventing observed scores.
+
+- Keep Setup's screen-reader progress states inside their truncated label's containing block, preventing 320/390px horizontal overflow without removing assistive text or hiding page-wide overflow.
+
+- Add built-app regressions for initial Setup reflow at 320/390px while retaining assistive progress states. Existing browser assertions and model/native isolation remain unchanged.
+
+- Isolate startup regressions from ambient Zotero/PDF/log paths and background workers. Keep real offline initialization and lazy-client spies; add synthetic path/scheduling guards without touching production behavior.
+
+- Fix atomic v2 sync migrations by executing complete SQL statements on the caller's connection. Add real-runner rollback/replay regressions while preserving triggers and later migration behavior.
+- Move lazy stage-client resolution into the LLM factory while retaining runtime cache/consent/invalidation fences; update callers and test seams, add runtime/startup regressions, and link services to the canonical architecture map.
+- Pending reuses shared JSON decoding and shows HTTP 409 as stale only after the response body is fully read; unreadable responses remain unconfirmed.
+- Enforce runtime import boundaries and centralize architecture/domain ownership guidance; synchronize the ignored local AGENTS guide with tracked CLAUDE.
+
 - Cut CONTRIBUTING to a short setup/change/check guide and group feature paragraphs by user task. Remove internal helpers and benchmark details from the feature map; preserve owner/test links and validate grouped headings.
 
 - Consolidate docs into architecture, one-paragraph feature contracts with code/test links, and generated overrides. Move development/testing instructions to their owners; archive old local evidence, repair links, and test the three-file/link contract.

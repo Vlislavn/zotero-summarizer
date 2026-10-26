@@ -33,9 +33,16 @@ def test_attachable_figures_returns_only_audited_images(tmp_path, monkeypatch) -
             paper_render_dir=tmp_path / "render", pdf_root=tmp_path, pdf_cache_dir=tmp_path / "cache",
         ),
     )
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"OWNED_SOURCE_BYTES")
+    presentation = tmp_path / "brief.html"
+    presentation.write_text("<article>Owned synthetic artifact</article>")
+    monkeypatch.setattr(paper_render, "_item_detail", lambda _: {"pdf_path": str(source)})
+    monkeypatch.setattr(paper_render, "_JOBS", {})
     paper_render._write_state("ANYKEY", {
         "status": "completed", "audit": {"status": "passed", "blocking": []},
-        "outputs": {"figures_dir": str(figs)},
+        "pdf_key": paper_render._pdf_key(source),
+        "outputs": {"figures_dir": str(figs), "presentation": str(presentation)},
         "figures": [{"name": "fig1_intro.png"}, {"name": "fig2_method.png"}],
     })
     out = paper_figures.attachable_figures("ANYKEY")

@@ -6,6 +6,7 @@ from math import isfinite
 from pathlib import Path
 from time import monotonic
 
+from . import decision_adapter
 from .decision_adapter import admit_native, evaluate_support, payload, project
 from .support import (BaselineArtifact, Config, FrozenSupportInput, OWNERS, SupportResult, admit, digest,
                       encoded, gold_identity, loads, read_bound, sha)
@@ -139,7 +140,8 @@ def run(cfg, raw_config, *, transport=None):
                     else:
                         name = f'terminal-{len(rows)}.bin'
                         reply = evaluate_support(case, arm, cfg, lambda raw: retain(name, raw),
-                            recorded=recording, transport=transport, timeout=min(left, cfg.idle_timeout_seconds))
+                            recorded=recording, transport=transport, timeout=min(left, cfg.idle_timeout_seconds),
+                            max_elapsed_seconds=left)
                         row.update(status=reply.status, readout=reply.readout, telemetry=reply.telemetry,
                                    terminal=name, support=(reply.readout['label'] == 'supports'
                                        if reply.status == 'decision' else None))
@@ -216,6 +218,9 @@ def reopen(owner):
     expected_pairs = [(key, arm) for key in cases for arm in (*cfg.arms, *cfg.baselines)]
     if len(rows) != len(expected_pairs):
         raise ValueError('incomplete pair/arm outcomes')
+    reserved = sum(a.kind == 'native' and not a.blockage() for a in cfg.arms) * len(cases)
+    if type(manifest['reserved_calls']) is not int or manifest['reserved_calls'] != reserved:
+        raise ValueError('native reservation differs from admitted workload')
     for index, (row, (key, arm)) in enumerate(zip(rows, expected_pairs)):
         SupportResult.model_validate(row)
         name = f'terminal-{index}.bin'
@@ -231,19 +236,28 @@ def reopen(owner):
             if arm.blockage():
                 raise ValueError('blocked arm cannot own a dispatched terminal')
             terminal = saved[row['terminal']]
+            request = payload(cases[key], cfg)
             if arm.kind == 'recorded':
                 recording = recordings.get((arm.arm_id, key))
                 if terminal != recording or row['telemetry']['terminal_status'] != 'received':
                     raise ValueError('recording input/terminal binding mismatch')
                 terminal = recording
+            else:
+                decision_adapter.check_native_transport(row['telemetry'], terminal, request, cfg)
             status, readout = project(terminal, arm, cfg, row['telemetry']['terminal_status'])
-            if (status != row['status'] or readout != row['readout'] or row['request_sha256'] != sha(payload(cases[key], cfg))
+            if (status != row['status'] or readout != row['readout'] or row['request_sha256'] != sha(request)
                     or row['support'] != (readout['label'] == 'supports' if status == 'decision' else None)):
                 raise ValueError('native projection mismatch')
         else:
             check_unattempted(row, base, arm, payload(cases[key], cfg), recordings.get((arm.arm_id, key)))
-    if {n for n in saved if n.startswith('terminal-')} != {r['terminal'] for r in rows if 'terminal' in r}:
-        raise ValueError('unreferenced terminal inventory')
+    expected = {'config.original.json', 'config.json', 'inputs.json', 'report.json', 'report.md'}
+    expected.update(f'baseline-{i}.json' for i, arm in enumerate(cfg.baselines)
+                    if arm.artifact and f'baseline-{i}.json' in saved)
+    expected.update(f'recording-{i}.bin' for i in range(len(bundle.recordings)))
+    expected.update(f'pair-{i}.json' for i in range(len(expected_pairs)))
+    expected.update(r['terminal'] for r in rows if 'terminal' in r)
+    if set(saved) != expected:
+        raise ValueError('foreign/missing admitted publication inventory')
     result = report(rows, cfg, bundle)
     if encoded(result) != saved['report.json'] or readable(result).encode() != saved['report.md']:
         raise ValueError('report projection mismatch')

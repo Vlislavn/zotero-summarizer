@@ -13,7 +13,7 @@ import useNoteDelivery from '../../../hooks/useNoteDelivery.js';
 // editors verbatim; the chat reuses AskPaperBox in its always-open "rail" variant
 // (same grounded/abstaining logic, no re-generation).
 export default function ActionRail({
-  itemKey, detail, collections, verdict, onTagsChanged, onCollectionsChanged, hasPdf, canAsk = hasPdf,
+  itemKey, detail, collections, verdict, onTagsChanged, onCollectionsChanged, hasPdf,
   onNoteSaved = () => {}, onNotesDirtyChange = () => {}, serverAvailable = false,
 }) {
   const remoteAllowed = serverAvailable && !detail.offline_snapshot;
@@ -59,11 +59,9 @@ export default function ActionRail({
         </Disclosure>
       </div>
       </fieldset>}
-      {canAsk && remoteAllowed && (
-        <div className="border-t border-slate-200/60 pt-4">
-          <AskPaperBox itemKey={itemKey} variant="rail" allowRawPdfModes={hasPdf} onSaved={onNoteSaved} onMirrorStart={beginNoteDelivery} />
-        </div>
-      )}
+      <div className="border-t border-slate-200/60 pt-4">
+        <AskPaperBox itemKey={itemKey} variant="rail" allowRawPdfModes={hasPdf} onSaved={onNoteSaved} onMirrorStart={beginNoteDelivery} />
+      </div>
     </div>
   );
 }

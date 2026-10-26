@@ -37,8 +37,8 @@ class RuntimeState:
     # The validated config holder (``AppState.config`` is the GoalsConfig).
     app_state: "AppState | None" = None
 
-    # PDF + embedding singletons. (LLM clients are not stored here — they are
-    # resolved per stage on demand via ``resolve_stage_client``.)
+    # PDF + embedding singletons. Stage clients are cached below;
+    # services.llm.factory owns their lazy resolution and construction.
     pdf_extractor: "OnPremPdfExtractor | None" = None
     embedding_cache: "EmbeddingCache | None" = None
 
@@ -74,62 +74,6 @@ class RuntimeState:
     _stage_clients: dict[Any, Any] = field(default_factory=dict)
     _stage_clients_generation: int = 0
     _stage_clients_lock: Any = field(default_factory=Lock, repr=False)
-
-    def resolve_stage_client(
-        self, stage: str, *, enable_thinking: bool | None = None,
-        expected_identity: str | None = None,
-    ) -> Any:
-        """Return the LLM client for ``stage`` ('feed'|'backlog'|'deep_review'),
-        building + caching it on first use from ``app_state.config.llm_routing``.
-
-        ``enable_thinking=False`` disables declared chat thinking or minimizes
-        active three-level reasoning to low. Deep review retains configured effort
-        for its digest and minimizes verification/light calls. It is a
-        no-op for providers that advertise neither ``chat_template_kwargs``
-        nor a configured ``reasoning_effort`` parameter.
-        ``expected_identity`` binds a caller's consent to the owned snapshot,
-        including when current config changes away and back around resolution.
-
-        Raises (APIError / provider error) only here, on first use — never at
-        startup. Callers run inside their own worker boundaries, so a missing
-        key or unreachable endpoint degrades that stage without crashing the app.
-        """
-        from zotero_summarizer.api.errors import APIError
-        from zotero_summarizer.models.providers import resolve_stage
-
-        with self._stage_clients_lock:
-            config = self.app_state.config
-            if not config.llm_enabled:
-                raise APIError(
-                    "llm_disabled",
-                    "AI features are disabled; enable AI in Settings to run this action",
-                    status_code=409,
-                )
-            resolved = resolve_stage(config.llm_routing, stage).model_copy(deep=True)
-            identity = resolved.fingerprint()
-            if expected_identity is not None and identity != expected_identity:
-                raise APIError("processing_boundary_changed", "Resolved stage differs from the requested processing boundary", status_code=409)
-            cache_key = (stage, enable_thinking, identity)
-            generation = self._stage_clients_generation
-            cached = self._stage_clients.get(cache_key)
-            if cached is not None:
-                return cached
-        from zotero_summarizer.services.llm.factory import (
-            build_client_for_provider,
-            build_client_for_stage,
-        )
-
-        # Provider/credential construction must not block config invalidation.
-        if enable_thinking is None:
-            client = build_client_for_stage(resolved)
-        else:
-            client = build_client_for_provider(
-                resolved.provider, resolved.model, enable_thinking=enable_thinking
-            )
-        with self._stage_clients_lock:
-            if generation == self._stage_clients_generation:
-                return self._stage_clients.setdefault(cache_key, client)
-        return client
 
     def resolve_stage_provider(self, stage: str) -> Any:
         """Return the resolved ``ProviderConfig`` for ``stage`` — the provider

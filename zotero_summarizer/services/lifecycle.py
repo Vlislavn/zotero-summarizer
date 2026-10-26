@@ -52,7 +52,7 @@ def _init_models(
     """Wire the PDF extractor + embedding cache singletons.
 
     LLM clients are NOT built here: each pipeline stage resolves its own client
-    lazily on first use via ``RuntimeState.resolve_stage_client`` (so a missing
+    lazily on first use via ``services.llm.factory.resolve_stage_client`` (so a missing
     key/unreachable endpoint never blocks startup)."""
     app_state.app_state = AppState(config=config)
     app_state.invalidate_stage_clients()

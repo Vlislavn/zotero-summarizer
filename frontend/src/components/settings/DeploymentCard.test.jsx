@@ -40,9 +40,11 @@ it('keeps only actionable hosted results expanded', async () => {
   renderChecklist();
 
   expect(await screen.findByText('Inference failed')).toBeTruthy();
-  expect(screen.getByText('2 checks passed')).toBeTruthy();
+  const otherChecks = screen.getByText('2 checks passed · 1 unavailable').closest('details');
+  expect(otherChecks.open).toBe(false);
   expect(screen.queryByText('Local inference')).toBeNull();
-  expect(screen.queryByText('Browser automation is optional')).toBeNull();
+  expect(screen.getByText('Browser automation is optional').closest('details')).toBe(otherChecks);
+  expect(screen.getByText('Inference failed').closest('details')).toBeNull();
   expect(screen.getByText('Technical details')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Retry inference' }));
   await waitFor(() => expect(runDoctor).toHaveBeenCalledWith(['llm_inference']));
@@ -82,7 +84,7 @@ it('offers real settings recovery separately from a scoped retry for unknown loc
   }] });
   renderChecklist();
 
-  expect((await screen.findByRole('link', { name: /Review AI settings/ })).getAttribute('href')).toBe('/settings');
+  expect((await screen.findByRole('link', { name: /Review AI settings/ })).getAttribute('href')).toBe('/settings#ai-models');
   expect(runDoctor).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
   await waitFor(() => expect(runDoctor).toHaveBeenCalledWith(['llm_inference']));

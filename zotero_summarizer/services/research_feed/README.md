@@ -3,7 +3,9 @@
 One bounded command projects the existing app RSS and current deep-review
 artifacts into a project-specific engineering digest. Missing abstract triage
 reuses the existing abstract pipeline; project proposals share the existing review
-response. It adds no crawler, PDF extractor, judge or model backend.
+response. Missing abstract work resolves its lazy feed client through
+`services.llm.factory` with the existing runtime cache; cached-only reads never
+resolve clients. It adds no crawler, PDF extractor, judge or model backend.
 
 ```text
 rss_items → source/dedupe → prior triage → budget → existing deep_review
@@ -14,11 +16,11 @@ rss_items → source/dedupe → prior triage → budget → existing deep_review
 | file | responsibility |
 |---|---|
 | `profile.py` | Versioned user-editable profile and controlled topic taxonomy under `data/research_feed/profile.json`. |
-| `source.py` | Bounded date-range adapter over app-owned RSS plus DOI/source/title dedupe. |
+| `source.py` | Bounded RSS adapter/dedupe, history identity/text and native-state admission primitives, final one-home provenance. |
 | `cursor.py` | Source/profile/config/model/schema-bound successful abstract-stage cache; no derived-card/report replay. |
 | `ranking.py` | Continuous current-cohort relevance/goal/prestige ordering through the existing blend, before budgets. |
 | `runner.py` | Budgeted triage, optional missing deep reviews through `library.deep_review`, per-paper failure isolation, metrics/watermark, and dry-run/idempotent writeback. Tag idempotency looks up pending changes by target Zotero item, so unrelated older queue rows cannot push a matching writeback beyond a global scan cap. |
-| `card.py` | Pure engineering-card projection; only exact validated artifact URLs survive. |
+| `card.py` | Base-qualified engineering-card assembly; only exact validated artifact URLs survive. No extraction or model calls. |
 | `render.py` | Canonical JSON and compact Markdown persistence. |
 | `reports.py` | Read-only list/detail/download lookup of published v1 RSS bundles, validated with existing candidate/triage/card models. Reject malformed reports and symlink/path escapes; never generate or migrate artifacts. |
 
@@ -33,17 +35,29 @@ are staged together and published by one same-filesystem directory rename; the r
 `state.json` pointer is atomically updated only after publication. A state-write
 failure leaves the prior pointer and complete bundle intact. Independent runs ending
 on the same date keep separate artifacts. Reversed date windows fail before
-profile/source reads or writes. The sole RSS adapter is `load_candidates`;
+profile/source reads or writes. After budget admission, RSS output-root/state
+symlinks refuse before reader/source/model work, including native-history runs.
+The shared publisher rechecks its directory before staging, including custom
+news renderers. These existing-link checks are not symlink-swap race containment.
+The sole RSS adapter is `load_candidates`;
 the unused source protocol and state-only class wrapper are removed.
 
 Cards use original-quote-bound project assessments, not topical project-use or
 implementation-to-idea heuristics. Each positive proposal names mechanism,
 component, change and validation experiment; unknown/partial is not no-fit.
-Legacy reviews without assessments project no positive uses/ideas. Explicit
+Legacy reviews without assessments project no positive uses/ideas. Recorded goal
+observations with exact configured project keys, usable raw retrieval/boolean state,
+nonblank summary and recorded quotes remain in the existing note home, explicitly
+unverified. Text, order and duplicates are preserved; malformed/degraded observations
+are not copied. This does not re-authenticate quotes, change project assessment,
+score, impact or ideas, and never rewrites prior bundles or starts a model. Explicit
 impact/reproduction assessments are AI-generated and scientifically unverified;
 null impact means unassessed (legacy numeric zero fields are placeholders).
 Code availability alone never implies effort. Existing blockers and artifact URLs
 remain; an effort estimate cannot override missing verified code or critical inputs.
+Markdown gives tier, rationale, missing inputs and evidence gaps one labelled home
+each. Direct legacy presentation uses explicit unrecorded values for missing fields;
+this does not relax the typed saved-report reader or rewrite retained JSON/bundles.
 `tests/test_reproduction_uncertainty.py` preserves all six prior oracles.
 `tests/test_feed_engineering.py` covers producer, binding, cache, rank, error and
 CLI publication contracts using scripted models, not real usefulness evidence.
@@ -62,6 +76,30 @@ rejections. Optional cache errors affect only candidates needing that stage;
 valid history neighbors still publish. Generating runs may reacquire missing PDFs
 through existing headless sources, never a browser. V1 provenance keeps numeric
 triage confidence; assessment confidence remains separately unknown.
+
+Source availability and review qualification are independent observations. Missing
+reviews/provider failures stay unknown in `unqualified_reviews`, not the manual
+PDF list. Only observed `offline_uncached`, `needs_login`, `fetch_failed` or
+`no_oa_source` acquisition outcomes make that list; a skipped browser, missing
+browser capability or unknown code does not establish unavailable full text.
+Bound source identity remains available when generation/basis qualification or
+card projection fails. `full_text_evidence` retains the binding and qualification
+state; it is not a second source reader or scientific verification. Direct card
+projection shares the same retained-base-audit gate, including when optional feed
+assessment is absent. Missing/stale and malformed evidence remain explicitly
+unqualified without losing observed source availability or rendering rejected claims.
+Known rejected base proof remains a per-paper error in the existing failed home,
+not an ordinary pending/missing-review result; partial-error exit behavior is preserved.
+New report publication projects source bindings to their kind/source/generation
+hashes and replaces the full optional receipt with its status/origin/verification
+labels plus `retained_payload_sha256`, an explicit reference to private evidence.
+It exports neither original source paths nor focus input and never re-signs a view.
+Private reviews and invocation evidence remain intact; prior report reads/downloads
+still return their original saved JSON/Markdown without retroactive migration.
+Receipt qualification reads code-contract identities, not a second paper extraction.
+The default current-review reader still owns byte/config freshness; injected loaders only supply scoped
+observations. The existing Markdown pending section and one-home history ledger
+carry unqualified candidates without retry/backfill or automatic work.
 
 Offline acceptance is `uv run python tools/eval_research_feed.py --check`.
 The shipped 30-paper fixture records human inclusion and verified artifact labels
@@ -91,10 +129,37 @@ or abstract-stage caches requires the EXISTING valid goals config, read through
 qualification error, not unsupported science. It constructs no clients/classifier,
 creates no config, and performs no dotenv/keyring discovery. Source-current but
 config-unverified entries cannot qualify. Already-published report viewing is a
-separate outcome, not current card generation.
+separate outcome, not current card generation. Cached abstract summaries validate
+strictly: a matching input/checksum cannot coerce booleans or numeric strings into
+typed observations. Refusal preserves bytes and does not implicitly regenerate.
 Generation uses the existing no-background startup mode: no prewarm, server-job
 recovery, classifier retraining or slate rescoring. Enabled model prerequisites
 must already be prepared for generation; they do not apply to cached-only reads.
+
+Stored triage `summary` and `aux_context` may be absent or null: both mean an
+unobserved object, not a malformed paper. Non-null non-object values still refuse;
+numeric zero remains an observation and stored payload bytes are never rewritten.
+Only a missing/None top payload is unobserved; present blank/non-string JSON,
+non-object payloads and malformed consumed objects refuse. Consumed numeric values
+admit finite numeric strings within the caller's domain, not booleans/containers.
+Pure parse diagnostics are bounded; failed triage projection reports/logs
+`triage_history_invalid` without echoing the bad scalar or relabeling other stages.
+Operational triage defaults do not become invented ranking observations.
+
+History identity/text admission returns the effective candidate plus bounded facts;
+its caller retains every input before failures or budgets. Only identity-compatible
+native rows contribute typed row/run/model/time provenance, marked `not_attested`.
+Whitespace controls availability, not retained bytes: substantive stored text can
+replace blank RSS text; substantive RSS survives a blank stored observation.
+Native state admission is separate from the public three-positional descriptive
+projection. Consumed numbers/callbacks run before native disposition; valid native
+observations survive projection failure, while unknown raw states are withheld.
+Missing native history still requires the existing qualified abstract cache (or
+explicit generation); synthetic cache decisions never become native observations.
+Callback failures retain only their type and bounded triage diagnostic, isolating
+peers without inventing a result. Final `metadata.source_history` points to one
+exact existing candidate body or retains it inline, including failures/cuts; list
+order/duplicates matter. Saved v1 reports are not rewritten or recertified.
 
 Source admission is newest-first (row ID breaks equal-time ties), filters venue
 case-insensitively, then streams the existing DOI/source/title deduplication before
@@ -111,6 +176,11 @@ entries without hiding valid neighbors. Missing bundles/files are 404; malformed
 JSON is 422 `report_unavailable`, while unsupported schema/source is 422
 `report_unsupported`, including downloads. Card counts must match saved cards.
 A missing report folder is empty; directory scan failures are 503, never empty.
+Optional unqualified-review rows validate their existing candidate and nonblank
+reason before display/download. Legacy absence stays absent in returned JSON;
+valid saved text/order/duplicates are unchanged. The UI lists these rows with
+review-status reasons beside existing source needs, not as unavailable PDFs, and
+its existing paper links never auto-start review.
 Markdown is served verbatim only when canonical JSON validates. A missing Markdown file does not prevent
 reading valid JSON. There is no browser run/build endpoint or cached-card replay.
 
@@ -119,5 +189,9 @@ optional pending actions only; default runs are dry-run.
 
 The [Telegram source](../../../docs/features.md#telegram-news) has explicit CLI
 authorization, collection and saved-report paths. Transport/session state remains
-private; report reads do not activate an account or model. Live account/network
+private; report reads do not activate an account or model. Saved-input processing
+refuses symlinked known parent/news/state owners after request admission but before
+inputs or models, and rechecks before publication projection. Direct publisher
+leaf-directory checks remain separate; none is filesystem-race containment.
+Live account/network
 acceptance is separate from the synthetic contracts.

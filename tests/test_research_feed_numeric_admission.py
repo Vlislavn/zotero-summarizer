@@ -9,7 +9,7 @@ import pytest
 from tests.test_research_feed import _settings
 from tests.test_research_feed_history_source import TOPICAL, _body, _paper, _run
 from zotero_summarizer.models import ResearchCandidate, ResearchProfile
-from zotero_summarizer.services.research_feed import runner
+from zotero_summarizer.services.research_feed import runner, source
 
 
 def _input(tmp_path, *, summary=None, composite=4, priority="should_read",
@@ -163,7 +163,7 @@ def test_present_malformed_top_or_summary_is_failed_with_healthy_peer(tmp_path, 
 @pytest.mark.parametrize("raw", [False, 0, 1.0, {}, [], b"{}"])
 def test_nonstring_top_payload_is_not_coerced_or_preparsed(raw):
     with pytest.raises(ValueError, match="^stored triage summary is invalid JSON$"):
-        runner._summary({"shap_contribs_json": raw})
+        source.summary({"shap_contribs_json": raw})
 
 
 @pytest.mark.parametrize("field", ["composite_score", "triage_confidence"])
@@ -218,6 +218,21 @@ def test_valid_native_zero_retains_existing_descriptive_priority_mapping(tmp_pat
                          summary={"composite_relevance_score": False, "triage_confidence": 0.4})
     payload = _run(settings)
     assert _triage(payload)["score"] == 4 and payload["failed"] == []
+
+
+def test_invalid_consumed_number_does_not_echo_input_into_warning(tmp_path, caplog):
+    settings, bad = _input(tmp_path, summary={"triage_confidence": "private fixture value"})
+    good = _paper(settings, 2)
+    with caplog.at_level("WARNING", logger=runner.LOGGER.name):
+        payload = _run(settings)
+    warnings = [record for record in caplog.records if record.name == runner.LOGGER.name]
+    assert len(warnings) == 1
+    assert "private fixture value" not in warnings[0].getMessage()
+    assert warnings[0].getMessage() == f"research-feed triage failed source={bad}: triage_history_invalid"
+    assert warnings[0].exc_info is None
+    assert [record["candidate"]["source_id"] for record in payload["cards"]] == [good]
+    assert payload["failed"] == [{"source_id": bad, "error": "ValueError: triage_history_invalid"}]
+    assert "private fixture value" not in json.dumps(payload)
 
 
 def test_numeric_failure_is_bounded_and_does_not_block_healthy_peer(tmp_path):

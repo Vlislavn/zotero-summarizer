@@ -12,7 +12,6 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.models import SummarizeRequest
 from zotero_summarizer.models.providers import STAGES, ProviderConfig, ProviderType, resolve_stage
 from zotero_summarizer.services._common import (
     read_config,
@@ -34,9 +33,13 @@ from zotero_summarizer.services.setup.doctor_environment import (
 )
 from zotero_summarizer.settings import Settings, offline_requested
 from zotero_summarizer.services.setup.load_admission import (
-    ADMISSION_REVISION, refused_local_load, verification_row,
+    ADMISSION_REVISION, policy_configuration_signature, verification_row,
 )
 from zotero_summarizer.services.setup.load_attempt import SetupAttempt, checked_rows, current_attempt
+from zotero_summarizer.services.setup.doctor_dry_run import _dry_run
+from zotero_summarizer.services.setup.doctor_requests import (
+    OWNERSHIP_REVISION, request_attempts, save_doctor, withhold_local_ready,
+)
 
 _CHECKS = (
     "environment",
@@ -184,7 +187,7 @@ def _rss_source(settings: Settings) -> dict[str, Any]:
                 0
             ]
         )
-    return _row(
+    row = _row(
         "rss_source",
         "ready" if count else "needs_action",
         f"{count} RSS source{'s' if count != 1 else ''} enabled"
@@ -193,43 +196,10 @@ def _rss_source(settings: Settings) -> dict[str, Any]:
         "Today needs at least one source.",
         action="Add a source in Settings",
     )
+    row["recovery"]["action"] = "open_sources_settings"
+    return row
 
 
-def _dry_run(settings: Settings) -> dict[str, Any]:
-    from zotero_summarizer.services.llm.factory import build_client_for_stage
-    from zotero_summarizer.services.triage.summarization import run_abstract_dry
-
-    config = read_config(settings.config_path, settings.calibration_path)
-    if not config.llm_enabled:
-        return _row(
-            "dry_run",
-            "ready",
-            "LLM dry-run skipped by choice",
-            "The classifier-only backlog path does not call an LLM.",
-        )
-    resolved = resolve_stage(config.llm_routing, "feed")
-    refusal = refused_local_load(resolved.provider, resolved.model)
-    if refusal:
-        row = _row("dry_run", "needs_action", "Local dry-run was not submitted", refusal["detail"], action="Review AI settings")
-        row["recovery"]["action"] = "open_ai_settings"
-        row["load_receipts"] = [refusal]
-        return row
-    request = SummarizeRequest(
-        title="Dry-run paper: reproducible local research triage",
-        abstract=(
-            "We evaluate a reproducible paper-triage method with held-out data, "
-            "ablation studies, confidence intervals, and public code."
-        ),
-    )
-    client = build_client_for_stage(resolved, verification=True)
-    try:
-        result = run_abstract_dry(config, request, client)
-    finally:
-        client.close()
-    detail = f"priority={result.reading_priority}; score={result.relevance_score}"
-    return _row(
-        "dry_run", "ready", "Dry-run triage completed without a Zotero write", detail
-    )
 
 
 _RUNNERS: dict[str, Callable[[Settings], dict[str, Any]]] = {
@@ -248,7 +218,7 @@ _RUNNERS: dict[str, Callable[[Settings], dict[str, Any]]] = {
 
 
 def _save(settings: Settings, payload: dict[str, Any]) -> None:
-    write_json_atomic(settings.data_dir / "setup_doctor.json", payload)
+    save_doctor(settings, payload)
 
 
 def _invalidate_doctor_unlocked(settings: Settings) -> None:
@@ -276,7 +246,8 @@ def _config_signature(settings: Settings) -> str:
     import yaml
     from zotero_summarizer.services.llm.credentials import get_api_key
 
-    digest = hashlib.sha256()
+    digest = hashlib.sha256(OWNERSHIP_REVISION.encode())
+    digest.update(policy_configuration_signature(settings).encode())
     if settings.config_path.is_file():
         try:
             config = read_config(settings.config_path, settings.calibration_path)
@@ -321,7 +292,7 @@ def doctor_status(settings: Settings) -> dict[str, Any]:
         if restart:
             checks[0] = _row("environment", "needs_action", "Restart app to apply new Zotero/PDF paths",
                              action="Retry after restart")
-        return {
+        result = {
             "verification_revision": ADMISSION_REVISION,
             "status": "needs_action" if restart else "not_started",
             "ready": False,
@@ -331,6 +302,10 @@ def doctor_status(settings: Settings) -> dict[str, Any]:
             "config_signature": _config_signature(settings),
             **({"status": "running", "run_id": active.run_id, "attempt": active.receipt()} if active else {}),
         }
+        result["request_attempts"] = request_attempts(settings)
+        withhold_local_ready(settings, result)
+        result["modes"] = _modes(settings, result["checks"])
+        return result
     if active:
         payload["attempt"] = active.receipt()
     elif payload.get("status") == "running":
@@ -353,6 +328,8 @@ def doctor_status(settings: Settings) -> dict[str, Any]:
         row["id"] in _REQUIRED and row["status"] != "ready" for row in payload["checks"]
     ):
         payload["ready"] = False
+    withhold_local_ready(settings, payload)
+    payload["modes"] = _modes(settings, payload["checks"])
     return payload
 
 
@@ -367,11 +344,9 @@ def _modes(settings: Settings, rows: list[dict[str, Any]]) -> dict[str, str]:
     except Exception:  # noqa: BLE001 — invalid config is a diagnostic result, not a crash
         no_llm = False
         local = False
-    assets = next(row for row in rows if row["id"] == "ml_assets")["status"] == "ready"
-    inference = (
-        next(row for row in rows if row["id"] == "llm_inference")["status"] == "ready"
-    )
-    local_ready = local and inference
+    statuses = {row["id"]: row["status"] for row in rows}
+    assets = statuses["ml_assets"] == "ready"
+    local_ready = local and all(statuses[key] == "ready" for key in ("llm_inference", "dry_run"))
     strict = offline_requested()
     if no_llm:
         return {

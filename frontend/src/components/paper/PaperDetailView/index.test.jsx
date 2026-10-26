@@ -3,10 +3,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const mocks = vi.hoisted(() => ({ saveReviewNote: vi.fn(), queueQuestionSubmission: vi.fn(),
-  saveReviewQuestion: vi.fn(), askPaper: vi.fn() }));
+  saveReviewQuestion: vi.fn(), askPaper: vi.fn(), isServerAvailable: vi.fn() }));
 vi.mock('../../../api/goldenApi.js', () => ({ saveReviewNote: mocks.saveReviewNote }));
 vi.mock('../../../api/libraryApi.js', () => ({ saveReviewQuestion: mocks.saveReviewQuestion, askPaper: mocks.askPaper }));
-vi.mock('../../../offlineStore.js', () => ({ queueQuestionSubmission: mocks.queueQuestionSubmission }));
+vi.mock('../../../offlineStore.js', () => ({ queueQuestionSubmission: mocks.queueQuestionSubmission,
+  isServerAvailable: mocks.isServerAvailable, syncStatusEvent: 'zs-sync-status' }));
 vi.mock('../LinksRow.jsx', () => ({ default: () => null }));
 vi.mock('../DeepReviewSection.jsx', () => ({ default: () => null }));
 vi.mock('../TagOfInterestEditor.jsx', () => ({ default: () => null }));
@@ -18,6 +19,7 @@ import PaperDetailView from './index.jsx';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.isServerAvailable.mockReturnValue(true);
   mocks.saveReviewNote.mockResolvedValue({ saved: true });
   mocks.queueQuestionSubmission.mockResolvedValue({ saved_offline: true });
   mocks.saveReviewQuestion.mockImplementation(async (row) => ({ question_saved: true, question_submission: row }));
@@ -78,4 +80,24 @@ it('exposes compact Ask in one disclosure and refreshes questions without replac
   expect(screen.getByRole('list', { name: 'Saved review questions' }).textContent).toContain(submission.question);
   expect(screen.getByRole('textbox', { name: 'Manual notes' }).value).toBe('Dirty manual note');
   expect(mocks.askPaper).toHaveBeenCalledOnce();
+});
+
+it.each(['editable', 'readonly'])('keeps the %s question draft owner across actual availability notifications', (mode) => {
+  const props = { mode, itemKey: 'P1', detail: { has_pdf: true, user_note: '', questions: [] },
+    show: { reader: false, abstract: false, links: false, tags: false, collection: false, verdict: false } };
+  const { container } = render(<PaperDetailView {...props} />);
+  const input = container.querySelector('[aria-label="Question about this paper"]');
+  expect(input).not.toBeNull();
+  fireEvent.change(input, { target: { value: 'Draft survives a sync notification' } });
+  mocks.isServerAvailable.mockReturnValue(false);
+  fireEvent(window, new Event('zs-sync-status'));
+  expect(container.querySelector('[aria-label="Question about this paper"]')).toBe(input);
+  expect(input.value).toBe('Draft survives a sync notification');
+  mocks.isServerAvailable.mockReturnValue(true);
+  fireEvent(window, new Event('zs-sync-status'));
+  expect(container.querySelector('[aria-label="Question about this paper"]')).toBe(input);
+  expect(input.value).toBe('Draft survives a sync notification');
+  expect(mocks.queueQuestionSubmission).not.toHaveBeenCalled();
+  expect(mocks.saveReviewQuestion).not.toHaveBeenCalled();
+  expect(mocks.askPaper).not.toHaveBeenCalled();
 });

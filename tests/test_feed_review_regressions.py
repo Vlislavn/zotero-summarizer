@@ -28,12 +28,12 @@ def test_assessment_models_are_public_package_contracts(name):
     assert getattr(models, name) is getattr(research_feed, name)
 
 
-def test_omitted_projects_publish_explicit_unknowns(tmp_path):
+def test_omitted_projects_publish_explicit_unknowns(tmp_path, monkeypatch):
     settings = _settings(tmp_path)
     _seed(settings, "paper", "Agent evaluation")
     profile = load_profile(settings.data_dir)
     entry, generator, verifier = _generated_entry(
-        "paper", profile, content=_assessment("paper", projects=(profile.projects[0],)),
+        tmp_path, monkeypatch, "paper", profile, content=_assessment("paper", projects=(profile.projects[0],)),
     )
 
     result = runner.run_weekly(settings, start=START, end=END, review_loader=lambda _key: entry)
@@ -49,14 +49,14 @@ def test_omitted_projects_publish_explicit_unknowns(tmp_path):
 
 
 @pytest.mark.parametrize("quote", ["", "  ", "\n\t"])
-def test_blank_unknown_quote_retains_valid_neighbor(quote):
+def test_blank_unknown_quote_retains_valid_neighbor(tmp_path, monkeypatch, quote):
     profile = ResearchProfile(themes=[], projects=["agent harness", "activation oracle"])
     content = _assessment("paper", projects=tuple(profile.projects))
     content["projects"][1].update(
         assessment="unknown", use_kind=None, mechanism="", target_component="",
         proposed_change="", minimal_validation_experiment="", evidence_quote=quote,
     )
-    entry, generator, verifier = _generated_entry("paper", profile, content=content)
+    entry, generator, verifier = _generated_entry(tmp_path, monkeypatch, "paper", profile, content=content)
 
     assessment = feed.qualify(entry, feed.context_for("paper", profile))
 
@@ -68,19 +68,19 @@ def test_blank_unknown_quote_retains_valid_neighbor(quote):
 
 
 @pytest.mark.parametrize("blocker", ["code", "quality"])
-def test_effort_estimate_cannot_override_existing_blocker(blocker):
+def test_effort_estimate_cannot_override_existing_blocker(tmp_path, monkeypatch, blocker):
     profile = ResearchProfile(themes=[], projects=["agent harness"])
     content = _assessment("paper")
     content["reproduction"] = {
         "tier": "one_week", "rationale": "Scripted effort estimate", "missing_inputs": [],
         "evidence_quote": content["projects"][0]["evidence_quote"],
     }
-    entry, _, _ = _generated_entry("paper", profile, content=content)
+    quality = {'missing_critical': ['Dataset missing']} if blocker == 'quality' else None
+    entry, _, _ = _generated_entry(tmp_path, monkeypatch, "paper", profile, content=content, quality=quality)
     if blocker == "code":
         entry["code_link"] = {"found": False}
         expected = "No verified code URL"
     else:
-        entry["quality"]["missing_critical"] = ["Dataset missing"]
         expected = "Dataset missing"
     candidate = ResearchCandidate(source_id="paper", source="app_rss", title="Agent evaluation")
     triage = runner.triage_candidate(candidate, {"decision": "selected"}, profile)
@@ -132,7 +132,7 @@ def test_optional_corrupt_abstract_cache_does_not_abort_history_neighbors(tmp_pa
 def test_generation_reacquires_missing_pdf_but_not_denied_source(tmp_path, monkeypatch, error):
     settings = _settings(tmp_path)
     profile = ResearchProfile(themes=[], projects=["agent harness"])
-    entry, _, _ = _generated_entry("paper", profile)
+    entry, _, _ = _generated_entry(tmp_path, monkeypatch, "paper", profile)
     candidate = ResearchCandidate(source_id="paper", source="app_rss", title="Agent evaluation")
     monkeypatch.setattr(feed, "current_review", Mock(side_effect=[error, entry]))
     start = Mock()
@@ -155,14 +155,14 @@ def test_real_worker_limits_feed_acquisition_and_binds_owning_cache(tmp_path, mo
     set_context(AppContext(settings=settings))
     profile = ResearchProfile(themes=[], projects=["agent harness"])
     context = feed.context_for("paper", profile)
-    entry, _, _ = _generated_entry("paper", profile)
+    entry, _, _ = _generated_entry(tmp_path, monkeypatch, "paper", profile)
     envelope = {key: value for key, value in entry.pop("feed_assessment").items() if key not in {
         "payload_sha256", "review_identity", "digest_sha256", "provenance", "generated_at",
     }}
     reader = SimpleNamespace(get_item_detail=lambda _key: {
         "title": "Agent evaluation", "url": "https://example.test/paper", "has_pdf": False,
     })
-    acquired = _pdf_acquire.AcquireResult(path=tmp_path / "paper.pdf", outcome="acquired_direct")
+    acquired = _pdf_acquire.AcquireResult(path=Path(entry["review_identity"]["source_path"]), outcome="acquired_direct")
     restricted, interactive = Mock(return_value=acquired), Mock(return_value=acquired)
     monkeypatch.setattr(_pdf_acquire, "acquire_pdf_for", restricted)
     monkeypatch.setattr(_pdf_acquire, "acquire_for_item", interactive)

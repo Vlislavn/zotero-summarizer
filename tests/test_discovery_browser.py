@@ -1,5 +1,6 @@
 """Built React to real API/session/SQL; inert provider HTTP and no native writes."""
 from functools import partial
+import json
 import os
 from types import SimpleNamespace
 
@@ -7,6 +8,7 @@ import httpx
 import pytest
 
 from tests.test_application_browser_live import application_browser
+from tests.test_search_discovery_surfaces_browser import _discovery, _open, surface_browser
 from zotero_summarizer.integrations import arxiv, europepmc, openalex
 from zotero_summarizer.services.search import discovery, federate, session
 from zotero_summarizer.services.search._models import Candidate, QueryPlan, ResearchSession, SearchIntent
@@ -62,6 +64,7 @@ def test_built_find_partial_stale_and_real_ordinary_search(application_browser, 
         find.click()
         expect(page.get_by_role("region", name="Discovery status")).to_be_visible()
         expect(page.get_by_label("Retrieval status")).to_contain_text("partial")
+        _open(page, page.get_by_text('1 retained candidates ▾', exact=True))
         expect(page.get_by_role("article", name="External browser candidate")).to_be_visible()
         expect(page.get_by_role("button", name="Add to library", exact=True)).to_be_enabled()
         assert public_requests and all(private not in url for url in public_requests)
@@ -75,7 +78,9 @@ def test_built_find_partial_stale_and_real_ordinary_search(application_browser, 
         repositories.upsert_review_note(settings.triage_db_path, key, "Edited private context")
         page.get_by_role("button", name="Refresh session status", exact=True).click()
         expect(page.get_by_role("region", name="Discovery status")).to_contain_text("Freshness: stale")
-        page.get_by_text("1 retained candidates ▾", exact=True).click()
+        retained = page.get_by_text('1 retained candidates ▾', exact=True)
+        if not retained.evaluate('element => element.parentElement.open'):
+            _open(page, retained)
         expect(page.get_by_role("button", name="Add to library", exact=True)).to_be_disabled()
         expect(page.get_by_role("button", name="Review retained candidates", exact=True)).to_be_disabled()
         expect(page.get_by_text(private, exact=True)).to_have_count(0)
@@ -85,10 +90,72 @@ def test_built_find_partial_stale_and_real_ordinary_search(application_browser, 
                                intent=SearchIntent(raw_query="Ordinary"), plan=QueryPlan(), status="reviewed",
                                candidates=[Candidate(title="Ordinary browser candidate", candidate_id="ordinary")])
     session.save(ordinary)
-    assert client.get("/api/search/ordinary-browser").json()["discovery"] == {}
+    assert 'discovery' not in client.get('/api/search/ordinary-browser').json()
     page.goto("http://127.0.0.1/search?session=ordinary-browser")
     expect(page.get_by_role("article", name="Ordinary browser candidate")).to_be_visible()
     expect(page.get_by_role("combobox", name="Sort by", exact=True)).to_be_visible()
     expect(page.get_by_role("button", name="Add to library", exact=True)).to_be_enabled()
     expect(page.get_by_role("region", name="Discovery status")).to_have_count(0)
     assert not [row for row in seen if row[0] == "POST" and row[1].endswith(("/review", "/materialize"))]
+
+
+@pytest.mark.parametrize("width", [390, 1440])
+def test_built_expanded_discovery_evidence_wraps_without_losing_text(surface_browser, width):
+    from patchright.sync_api import expect
+
+    state, page = surface_browser, surface_browser["page"]
+    dto = _discovery("partial")
+    seed = "feed:" + "a" * 64
+    context_id = f"{seed}:app_note:{seed}"
+    quote = "https://example.test/" + "evidence" * 32
+    dto["discovery"].update(seed_key=seed, comments_in_ranking=True, assessment={
+        "status": "assessed", "submitted_context_ids": [context_id], "items": [
+            {"item_key": candidate["candidate_id"], "sentence": "Synthetic metadata connection.",
+             "relevance": "relevant", "preference": "compatible", "used_context_ids": [context_id],
+             "evidence": {side: {"item_key": key, "field": "abstract", "start": 0,
+                                  "end": len(quote), "excerpt": quote}
+                          for side, key in (("seed", seed), ("candidate", candidate["candidate_id"]))}}
+            for candidate in dto["candidates"][:2]]}, seed_comments={
+                "availability": "available", "app_state": "observed", "native_state": "observed",
+                "records": [{"id": context_id, "text": "Synthetic private comment, not paper evidence.",
+                             "source": "app_note", "authorship": "user"}]})
+    state["gets"][("/api/search/surface-discovery", "")] = dto
+    page.set_viewport_size({"width": width, "height": 900})
+    page.goto("http://127.0.0.1/search?session=surface-discovery")
+    expect(page.get_by_role("region", name="Discovery status")).to_be_visible()
+    assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+    _open(page, page.locator("summary").filter(has_text="retained candidates"))
+    measured = []
+    for candidate in dto["candidates"][:2]:
+        card = page.get_by_role("article", name=candidate["title"], exact=True)
+        evidence = card.get_by_text("Metadata evidence", exact=True)
+        _open(page, evidence)
+        disclosure = evidence.locator("..")
+        expect(disclosure.get_by_text(f"Model-cited comment IDs: {context_id}.", exact=True)).to_be_visible()
+        assert disclosure.locator("blockquote").all_text_contents() == [
+            f'{side} · {key} · abstract [0, {len(quote)}]: “{quote}”'
+            for side, key in (("seed", seed), ("candidate", candidate["candidate_id"]))]
+        geometry = disclosure.evaluate("""element => {
+            const card = element.closest('article').getBoundingClientRect();
+            const range = document.createRange();
+            range.selectNodeContents(element);
+            const selection = window.getSelection();
+            selection.removeAllRanges(); selection.addRange(range);
+            const copy = selection.toString(); selection.removeAllRanges();
+            return {copy, text: element.textContent, card: {left: card.left, right: card.right},
+                client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth,
+                rects: [...range.getClientRects()].filter(r => r.width && r.height)
+                    .map(r => ({left: r.left, right: r.right}))};
+        }""")
+        measured.append(geometry)
+        assert context_id in geometry["copy"] and quote in geometry["copy"]
+        assert context_id in geometry["text"] and quote in geometry["text"]
+    (state["artifact"] / f"expanded-evidence-{width}.json").write_text(json.dumps(measured, indent=2), encoding="utf-8")
+    page.screenshot(path=str(state["artifact"] / f"expanded-evidence-{width}.png"), full_page=True, animations="disabled")
+    for geometry in measured:
+        assert geometry["scroll"] <= geometry["client"], geometry
+        assert geometry["rects"], geometry
+        assert all(rect["left"] >= max(0, geometry["card"]["left"]) - 1
+                   and rect["right"] <= min(geometry["client"], geometry["card"]["right"]) + 1
+                   for rect in geometry["rects"]), geometry
+    assert state["posts"] == []

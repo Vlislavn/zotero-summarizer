@@ -1,5 +1,14 @@
 import { expect, it } from 'vitest';
-import { decisiveRows } from './briefModel.js';
+import { decisiveRows, rubricLabel } from './briefModel.js';
+
+it.each([
+  ['thesis', 'States a clear thesis / position'],
+  ['evidence_cited', 'Supports premises with cited evidence'],
+  ['scope_match', 'Matches claim scope to the evidence offered'],
+])('labels the supplied schema identifier %s without changing unknown-key fallback', (key, label) => {
+  expect(rubricLabel(key)).toBe(label);
+  expect(rubricLabel('future_criterion')).toBe('future criterion');
+});
 
 it.each(['flag', 'neutral', 'highlight', 'uncertain'])('summarizes only supplied position-paper criteria (%s)', (band) => {
   const rubric = { thesis: 'yes', evidence_cited: 'no', counterarguments: 'na', scope_match: 'yes' };

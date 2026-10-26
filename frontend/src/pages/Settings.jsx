@@ -1,7 +1,7 @@
 // Basic Settings owns AI, research intent, Zotero and sources; operational
 // controls are disclosed separately and unsurfaced config round-trips unchanged.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchConfig, updateConfig } from '../api/settingsApi.js';
 import { configToFormState, formStateToConfig } from '../utils/configForm.js';
@@ -29,6 +29,24 @@ export default function Settings() {
   const [modelsOpen, setModelsOpen] = useState(false);
   const [universityOpen, setUniversityOpen] = useState(() => window.location.hash === '#university-access');
   const [pathForm, setPathForm] = useState({ zotero_data_dir: '', pdf_root: '' });
+  const settingsRef = useRef(null);
+  const formReady = Boolean(form);
+
+  useEffect(() => {
+    if (!formReady) return;
+    function adoptDestination() {
+      const hash = window.location.hash;
+      if (!['#ai-models', '#rss-feeds', '#university-access'].includes(hash)) return;
+      if (hash === '#ai-models') setModelsOpen(true);
+      if (hash === '#university-access') setUniversityOpen(true);
+      const target = settingsRef.current?.querySelector(hash);
+      target?.scrollIntoView?.({ block: 'start' });
+      target?.querySelector('button, input, select, textarea, summary, a[href]')?.focus();
+    }
+    adoptDestination();
+    window.addEventListener('hashchange', adoptDestination);
+    return () => window.removeEventListener('hashchange', adoptDestination);
+  }, [formReady]);
 
   const seededFormState = useMemo(
     () => configToFormState(configQuery.data),
@@ -64,7 +82,7 @@ export default function Settings() {
 
   const saveMutation = useMutation({
     mutationFn: (payload) => updateConfig(payload),
-    onSettled: () => invalidateSetupDoctor(queryClient),
+    onSettled: (_response, error) => invalidateSetupDoctor(queryClient, error),
     onSuccess: (resp) => {
       if (resp && resp.config) {
         queryClient.setQueryData(['runtime-config'], resp.config);
@@ -131,7 +149,7 @@ export default function Settings() {
   const saving = saveMutation.isPending;
 
   return (
-    <div className="pb-10 space-y-4">
+    <div ref={settingsRef} className="pb-10 space-y-4">
       <header className="glass rounded-2xl border border-slate-200 p-4">
         <h2 className="font-display text-xl font-light text-slate-900">Settings</h2>
         <p className="text-xs text-slate-500 mt-1">
@@ -170,7 +188,7 @@ export default function Settings() {
             Advanced · performance &amp; library access
           </summary>
           <div className="space-y-4 mt-4">
-            <UniversityAccessPanel form={form} onUpdate={updateField} />
+            <UniversityAccessPanel form={form} savedForm={seededFormState} saving={saving} onUpdate={updateField} />
             <CalibrationCard />
           </div>
         </details>

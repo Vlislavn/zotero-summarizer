@@ -115,10 +115,9 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
           <div className="mt-1.5"><DigestRows digest={digest} /></div>
         </div>
       )}
-      {compact && (deep.reviewed_at || deep.zotero_note_written) && (
+      {compact && deep.reviewed_at && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
-          {deep.reviewed_at && <span title={formatShortDate(deep.reviewed_at)}>reviewed {timeAgo(deep.reviewed_at)}</span>}
-          {deep.zotero_note_written && <span className="text-emerald-600">saved to Zotero ✓</span>}
+          <span title={formatShortDate(deep.reviewed_at)}>reviewed {timeAgo(deep.reviewed_at)}</span>
         </div>
       )}
     </div>
@@ -238,10 +237,9 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
         </>}
       </div>
 
-      {!compact && (deep.reviewed_at || deep.zotero_note_written || deep.zotero_note_error) && (
+      {!compact && (deep.reviewed_at || deep.zotero_note_error) && (
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
           {deep.reviewed_at && <span title={formatShortDate(deep.reviewed_at)}>reviewed {timeAgo(deep.reviewed_at)}</span>}
-          {deep.zotero_note_written && <span className="text-emerald-600">saved to Zotero ✓</span>}
           {deep.zotero_note_error && <span className="text-amber-600">note not written: {deep.zotero_note_error}</span>}
         </div>
       )}
@@ -447,7 +445,7 @@ function GoalBoard({ goals, goalLoc, foldReasons = false }) {
       {addressed.length > 0 && rest.length > 0 && (
         <details className="group">
           <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden text-[11px] font-semibold text-slate-400 hover:text-slate-600">
-            {rest.length} other goal{rest.length > 1 ? 's' : ''} not addressed ▾
+            {rest.length} other goal{rest.length > 1 ? 's' : ''} ▾
           </summary>
           <div className="mt-2 opacity-75">{grid(rest)}</div>
         </details>
@@ -704,9 +702,6 @@ function DigestRows({ digest, exclude = [] }) {
       <KeyVal label="Summary">{d.executive_summary}</KeyVal>
       {(d.key_findings || []).filter(Boolean).length > 0 && (
         <KeyVal label="Key findings"><Bullets items={d.key_findings} /></KeyVal>
-      )}
-      {(d.writing_reasons || []).filter(Boolean).length > 0 && (
-        <KeyVal label={`Writing friction · ${d.writing_friction}`}><Bullets items={d.writing_reasons} /></KeyVal>
       )}
       <KeyVal label="Relevance">{d.relevance}</KeyVal>
       <KeyVal label="Methods">{d.methods}</KeyVal>

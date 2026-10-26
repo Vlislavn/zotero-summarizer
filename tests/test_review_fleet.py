@@ -167,11 +167,6 @@ def _reset_fleet(tmp_path, monkeypatch):
     )
     # Run the "background" job inline so the test is deterministic.
     monkeypatch.setattr(fleet._flight, "run_in_background", lambda target: target())
-    monkeypatch.setattr(
-        fleet.deep_review, "review_is_current",
-        lambda entry, item_key="": bool(entry)
-        and entry.get("review_contract_version") == fleet.deep_review.REVIEW_CONTRACT_VERSION,
-    )
     yield
     fleet.finish(error=None)
 
@@ -202,7 +197,7 @@ def _cached_review(read_decision="read", grade="A"):
 def _stub_deep_review(monkeypatch, cache, *, status="ready", review=None):
     """Wire ``deep_review`` against a mutable ``cache`` dict: ``start`` records each call
     and reviews its keys INTO the cache (so the parallelism lives in one batched call),
-    ``get_cached_review`` reads the dict, ``status`` reports ``status``. ``review`` is an
+    ``get_current_review`` reads the dict, ``status`` reports ``status``. ``review`` is an
     optional ``(item_key, pdf_overrides) -> entry`` factory (default: a read/A digest).
     Returns the recorded ``start`` call args ``[{item_keys, pdf_overrides}]``."""
     starts: list[dict] = []
@@ -213,7 +208,7 @@ def _stub_deep_review(monkeypatch, cache, *, status="ready", review=None):
             cache[key] = review(key, pdf_overrides) if callable(review) else _cached_review()
         return {"accepted": True}
 
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: cache.get(key))
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: cache.get(key))
     monkeypatch.setattr(fleet.deep_review, "start", _start)
     monkeypatch.setattr(fleet.deep_review, "status", lambda: {"status": status})
     return starts
@@ -227,7 +222,7 @@ def test_status_idle_before_any_run():
 
 def test_run_uses_cached_review_without_starting_deep_review(monkeypatch):
     _stub_queue(monkeypatch, ["A", "B"])
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: _cached_review())
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: _cached_review())
 
     def _boom(**_kw):
         raise AssertionError("deep_review.start must not run when reviews are cached")
@@ -292,7 +287,7 @@ def test_run_skips_item_with_no_review(monkeypatch):
     """A paper that never produces a review (no PDF) is counted-complete but
     stores no proposal — never a guessed verdict."""
     _stub_queue(monkeypatch, ["A"])
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: None)
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: None)
     monkeypatch.setattr(fleet.deep_review, "start", lambda **_kw: {"accepted": True})
     monkeypatch.setattr(fleet.deep_review, "status", lambda: {"status": "ready"})
 
@@ -319,7 +314,7 @@ def test_fleet_retries_when_foreign_deep_review_holds_latch(monkeypatch):
                 cache[key] = _cached_review("read", "A")
         return {"accepted": acc}
 
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: cache.get(key))
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: cache.get(key))
     monkeypatch.setattr(fleet.deep_review, "start", _start)
     monkeypatch.setattr(fleet.deep_review, "status", lambda: {"status": "ready"})
     monkeypatch.setattr(fleet.time, "sleep", lambda _s: None)
@@ -345,7 +340,7 @@ def test_foreign_job_holding_latch_does_not_starve_own_review_budget(monkeypatch
                 cache[key] = _cached_review("read", "A")
         return {"accepted": acc}
 
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: cache.get(key))
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: cache.get(key))
     monkeypatch.setattr(fleet.deep_review, "start", _start)
     # foreign job runs 3 polls then settles; OUR batch settles on the first poll.
     statuses = iter(["running", "running", "running", "ready", "ready"])
@@ -446,7 +441,7 @@ def test_per_item_failure_is_isolated(monkeypatch):
             raise RuntimeError("review read blew up")
         return _cached_review()
 
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", _cached)
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", _cached)
     fleet.start(top_k=2)
     s = fleet.status()
     assert s["status"] == "ready"
@@ -467,7 +462,7 @@ def test_job_level_failure_sets_error_status(monkeypatch):
 
 def test_single_flight_second_start_is_noop(monkeypatch):
     _stub_queue(monkeypatch, ["A"])
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: _cached_review())
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: _cached_review())
     assert fleet.try_start() is True  # claim the slot manually
     # While the slot is held, start() must NOT run the job.
     monkeypatch.setattr(

@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
+import '../../testSetup.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, focusManager, onlineManager } from '@tanstack/react-query';
-import { Link, MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { createMemoryRouter, Link, Route, RouterProvider, Routes, useLocation, useParams } from 'react-router-dom';
 import RelatedPapers from './RelatedPapers.jsx';
 import PaperReviewPage from '../../pages/PaperReviewPage.jsx';
 import Search from '../../pages/Search.jsx';
@@ -29,11 +30,11 @@ function mount(handler, { initial = '/paper/SEED0001', realPage = false } = {}) 
   vi.stubGlobal('fetch', vi.fn((path, init = {}) => { requests.push({ path, init }); return handler(path, init); }));
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   clients.push(client);
-  const view = render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[initial]}>
-    <Link to="/paper/NEXT0001">Next fixture seed</Link><Location />
-    <Routes><Route path="/paper/:itemKey" element={realPage ? <PaperReviewPage /> : <Seed />} />
-      <Route path="/search" element={<Search />} /></Routes>
-  </MemoryRouter></QueryClientProvider>);
+  const view = render(<QueryClientProvider client={client}><RouterProvider router={createMemoryRouter([
+    { path: '*', element: <><Link to="/paper/NEXT0001">Next fixture seed</Link><Location />
+      <Routes><Route path="/paper/:itemKey" element={realPage ? <PaperReviewPage /> : <Seed />} />
+        <Route path="/search" element={<Search />} /></Routes></> },
+  ], { initialEntries: [initial] })} /></QueryClientProvider>);
   return { requests, ...view };
 }
 
@@ -73,6 +74,19 @@ it.each([{}, { ...metadata(), seed_key: 'OTHER000' }, { ...metadata(), admission
     expect(requests[0].init.method).toBeUndefined();
   },
 );
+
+it.each(['saved', 'not_saved'])('a failed saved-library read cannot decide independent discovery admission: %s', async state => {
+  const { requests } = mount(async path => path.endsWith('/discover') ? reply(metadata(state))
+    : reply({ message: 'fixture local corpus unavailable' }, 503));
+  await screen.findByText(state === 'saved' ? 'Find new relevant' : 'Save this paper before discovery.');
+  fireEvent.click(screen.getByRole('button', { name: 'Show related saved papers' }));
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toContain('fixture local corpus unavailable');
+  expect(alert.textContent).toContain('Review remains usable; previous comments stay hidden until a fresh read succeeds.');
+  expect(Boolean(screen.queryByRole('button', { name: 'Find new relevant' }))).toBe(state === 'saved');
+  expect(requests.map(row => row.path)).toEqual(['/api/library/related/SEED0001/discover', '/api/library/related/SEED0001']);
+  expect(requests.every(row => !row.init.method)).toBe(true);
+});
 
 it('saved admission with unavailable context is disabled and explicitly refreshable', async () => {
   const { requests } = mount(async () => reply({ ...metadata(), context_fingerprint: null, reason: 'source_unavailable' }));

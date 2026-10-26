@@ -15,7 +15,8 @@ export function doctorQueryOptions(client, fetchStatus) {
   } };
 }
 
-export function invalidateSetupDoctor(client) {
+export function invalidateSetupDoctor(client, error) {
+  if (error && [403, 422].includes(error.status)) return;
   retire(client);
   void client.cancelQueries({ queryKey: key });
   client.setQueryData(key, { ready: false, status: 'not_started', checks: [], modes: {} });

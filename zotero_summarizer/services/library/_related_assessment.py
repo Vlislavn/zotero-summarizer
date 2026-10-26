@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models.providers import resolve_stage
 from zotero_summarizer.services._common import state
+from zotero_summarizer.services.llm import factory
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.settings import offline_requested
 
@@ -83,7 +84,7 @@ def assess(seed, candidates, boundary):
     if len(prompt) > budgets()["input_chars"]:
         return {"status": "budget_exceeded", "input_characters": len(prompt), "items": []}
     # One stage invocation; the configured client may do parser/transport retries.
-    client = state().resolve_stage_client("deep_review", expected_identity=boundary["token"])
+    client = factory.resolve_stage_client(state(), "deep_review", expected_identity=boundary["token"])
     if model_boundary() != boundary:
         raise APIError("processing_boundary_changed", "Review model changed before assessment", status_code=409)
     parsed = client.pydantic_prompt(prompt=prompt, pydantic_model=Assessments)

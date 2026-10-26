@@ -22,8 +22,8 @@ class Paper(Frozen):
     paper_id: Text
     family: Text
     canonical_ids: tuple[Text, ...] = ()
-    title: str | None
-    abstract: str | None
+    title: str | None = None
+    abstract: str | None = None
     split: Literal['development', 'holdout']
     stratum: Literal['shown', 'borderline', 'gate_rejected']
     observed_at: AwareDatetime
@@ -115,8 +115,9 @@ class Result(Frozen):
             if self.capability != 'native_four_way' and self.baseline_native is None:
                 raise ValueError('baseline decision requires its original readout')
         if self.readout and (self.capability != 'native_four_way' or
+                self.status not in ('decision', 'threshold_abstention', 'model_mismatch') or
                 (self.status == 'decision' and self.label != self.readout.label)):
-            raise ValueError('preserved native choice/capability mismatch')
+            raise ValueError('preserved native choice/status/capability mismatch')
         return self
 
 

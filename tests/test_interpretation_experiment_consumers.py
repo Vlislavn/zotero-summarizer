@@ -168,3 +168,45 @@ def test_non_object_generation_still_gets_existing_single_parse_retry():
     client = NonObjectThenValid()
     assert run(client)['interpretation']['status'] == 'accepted'
     assert len(client.calls) == 4
+
+
+@pytest.mark.parametrize('condition', ['A', 'B'])
+@pytest.mark.parametrize('optional', ['omitted', 'none', 'disabled'])
+def test_native_renderer_absent_optional_preserves_original_html_bytes(condition, optional):
+    from hashlib import sha256
+    from zotero_summarizer.models import PaperDigest
+    from zotero_summarizer.services.zotero._notes import build_digest_note_html
+
+    record = run(ScriptedClient(), condition=condition)
+    before = deepcopy(record)
+    kwargs = {} if optional == 'omitted' else {'interpretation': None if optional == 'none' else record}
+    rendered = build_digest_note_html(PaperDigest.model_validate(record['digest']), **kwargs)
+    # Frozen ordinary A/B bytes captured before the optional-keyword correction.
+    assert sha256(rendered.encode()).hexdigest() == 'd7db809e6ba8208de77c7197a5e5335e951fb891ee277f9d2f613cbcc8cb61dc'
+    assert record == before
+
+
+@pytest.mark.parametrize('condition', ['A', 'C'])
+def test_optional_native_renderer_does_not_acquire_or_invoke_a_writer(monkeypatch, condition):
+    from zotero_summarizer.integrations import zotero_write
+    from zotero_summarizer.models import PaperDigest
+    from zotero_summarizer.services.library._interpretation_html import section
+    from zotero_summarizer.services.zotero import zotero
+    from zotero_summarizer.services.zotero._notes import build_digest_note_html, DIGEST_NOTE_MARKER
+
+    record = run(ScriptedClient(), condition=condition)
+    before = deepcopy(record)
+    acquired = []
+
+    def forbidden(*args, **kwargs):
+        acquired.append((args, kwargs))
+        raise AssertionError('HTML rendering must not acquire or invoke a native writer')
+
+    monkeypatch.setattr(zotero_write, 'ZoteroWriter', forbidden)
+    monkeypatch.setattr(zotero, 'get_zotero_writer_or_raise', forbidden)
+    digest = PaperDigest.model_validate(record['digest'])
+    rendered = build_digest_note_html(digest, interpretation=record)
+    assert section(record, digest) in rendered
+    assert rendered.endswith(f'{DIGEST_NOTE_MARKER};version=1</em></p>')
+    assert record == before
+    assert acquired == []

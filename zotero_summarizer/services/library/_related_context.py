@@ -7,9 +7,8 @@ import sqlite3
 from zotero_summarizer.integrations._zotero_write_tags import _owns_note
 from zotero_summarizer.integrations.zotero_read import ZoteroReadError
 from zotero_summarizer.services.library.app_library_reader import AppLibraryReader
-from zotero_summarizer.services.zotero._notes import (
-    DIGEST_NOTE_MARKER, USER_NOTE_MARKER, VERDICT_NOTE_MARKER,
-)
+from zotero_summarizer.models.zotero_actions import VERDICT_NOTE_MARKER
+from zotero_summarizer.services.zotero._notes import DIGEST_NOTE_MARKER, USER_NOTE_MARKER
 from zotero_summarizer.storage.library_context import read_context
 
 

@@ -20,6 +20,7 @@ from zotero_summarizer.models import (
 )
 from zotero_summarizer.domain import ReadingPriority
 from zotero_summarizer.services import corpus
+from zotero_summarizer.services.llm import factory
 from zotero_summarizer.services.model import scoring
 from zotero_summarizer.services.triage.prompts import DEFAULT_REFINE_PROMPT, DEFAULT_TRIAGE_PROMPT
 from zotero_summarizer.services.triage._execution import check_cancelled
@@ -131,7 +132,7 @@ def run_abstract_pipeline(
     """
     app_state = state()
     config: GoalsConfig = app_state.app_state.config
-    llm: LLMClient = llm_override if llm_override is not None else app_state.resolve_stage_client("feed")
+    llm: LLMClient = llm_override if llm_override is not None else factory.resolve_stage_client(app_state, "feed")
     prefix = log_prefix or build_log_prefix(req)
     pipeline_started = perf_counter()
 
@@ -204,9 +205,11 @@ def _score_abstract(
         composite_score,
         mapped_priority,
     )
-    return _assemble_summary_response(
+    response = _assemble_summary_response(
         refined, triage, composite_score, mapped_priority, corpus_context
     )
+    response.should_deep_read = "No"
+    return response
 
 
 def _abstract_only_empty_response(reason: str) -> SummarizeResponse:
@@ -357,7 +360,7 @@ def run_pipeline(
     check_cancelled(cancel_event)
     app_state = state()
     config: GoalsConfig = app_state.app_state.config
-    llm: LLMClient = app_state.resolve_stage_client("feed")
+    llm: LLMClient = factory.resolve_stage_client(app_state, "feed")
     prefix = log_prefix or build_log_prefix(req)
     pipeline_started = perf_counter()
 

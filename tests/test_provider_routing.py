@@ -439,13 +439,7 @@ def test_operational_check_reports_per_stage_status(monkeypatch):
     fake_state = types.SimpleNamespace(app_state=types.SimpleNamespace(config=types.SimpleNamespace(llm_routing=routing)))
     monkeypatch.setattr(operational_check, "state", lambda: fake_state)
 
-    class _OkClient:
-        def prompt(self, _p):
-            return "ok"
-
-        def close(self):
-            pass
-
+    from tests._setup_request_events import observed_client
     calls = []
 
     def _fake_build(provider, model, *, verification):
@@ -453,7 +447,7 @@ def test_operational_check_reports_per_stage_status(monkeypatch):
         calls.append((provider.name, model))
         if provider.type == ProviderType.anthropic:
             raise RuntimeError("connection refused")
-        return _OkClient()
+        return observed_client(provider, model)
 
     monkeypatch.setattr(operational_check, "build_client_for_provider", _fake_build)
 
@@ -463,7 +457,8 @@ def test_operational_check_reports_per_stage_status(monkeypatch):
     assert by_stage["feed"]["status"] == "operational"
     assert by_stage["backlog"]["status"] == "operational"
     assert by_stage["deep_review"]["status"] == "fail"
-    assert "connection refused" in by_stage["deep_review"]["detail"]
+    assert by_stage["deep_review"]["reason_code"] == "inference_failed"
+    assert by_stage["deep_review"]["ownership"] == "not_submitted"
     assert calls.count(("local", "base-model")) == 1
 
 

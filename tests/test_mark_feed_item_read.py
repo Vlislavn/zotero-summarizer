@@ -27,6 +27,16 @@ def _read_time_for(db: Path, item_id: int) -> str | None:
         conn.close()
 
 
+def _assert_backup_prestate(backup, feed_rows, clocks):
+    assert backup.is_file()
+    with closing(sqlite3.connect(backup)) as conn:
+        assert conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert conn.execute("SELECT itemID,readTime FROM feedItems ORDER BY itemID").fetchall() == feed_rows
+        assert conn.execute(
+            "SELECT itemID,dateModified,clientDateModified,version,synced FROM items ORDER BY itemID"
+        ).fetchall() == clocks
+
+
 def test_mark_feed_items_read_writes_timestamp(zotero_dir: Path):
     db = zotero_dir / "zotero.sqlite"
     a = add_feed_item(db, feed_library_id=2, guid="g1", title="A")
@@ -147,7 +157,8 @@ def test_feed_read_count_contracts_on_same_mixed_inputs(zotero_dir: Path, monkey
         ).fetchall() == before
     if mode == "raw":
         assert result == 1
-        assert not list(zotero_dir.glob("zotero.sqlite.backup_*"))
+        backup, = zotero_dir.glob("zotero.sqlite.backup_*")
+        _assert_backup_prestate(backup, [(a, None), (b, existing_time)], before)
     else:
         assert result["applied_ids"] == [1, 2]
         assert result["failed"] == [{
@@ -156,10 +167,7 @@ def test_feed_read_count_contracts_on_same_mixed_inputs(zotero_dir: Path, monkey
         assert result["failed"][0]["expected_io"] is False
         backup = Path(result["backup_path"])
         assert backup.is_file() and backup.is_relative_to(zotero_dir)
-        with closing(sqlite3.connect(backup)) as conn:
-            assert conn.execute("SELECT itemID,readTime FROM feedItems ORDER BY itemID").fetchall() == [
-                (a, None), (b, existing_time),
-            ]
+        _assert_backup_prestate(backup, [(a, None), (b, existing_time)], before)
 
 
 @pytest.mark.parametrize("mode", ["raw", "typed"])
@@ -199,7 +207,8 @@ def test_feed_read_trigger_abort_has_distinct_batch_atomicity(zotero_dir: Path, 
     if mode == "raw":
         assert caught.value.expected_io is False
         assert feed_rows == [(a, None), (b, None)]
-        assert not list(zotero_dir.glob("zotero.sqlite.backup_*"))
+        backup, = zotero_dir.glob("zotero.sqlite.backup_*")
+        _assert_backup_prestate(backup, [(a, None), (b, None)], before)
     else:
         assert [row[0] for row in feed_rows] == [a, b]
         assert feed_rows[0][1] is not None
@@ -209,10 +218,7 @@ def test_feed_read_trigger_abort_has_distinct_batch_atomicity(zotero_dir: Path, 
         assert result["failed"][0]["expected_io"] is False
         backup = Path(result["backup_path"])
         assert backup.is_file() and backup.is_relative_to(zotero_dir)
-        with closing(sqlite3.connect(backup)) as conn:
-            assert conn.execute("SELECT itemID,readTime FROM feedItems ORDER BY itemID").fetchall() == [
-                (a, None), (b, None),
-            ]
+        _assert_backup_prestate(backup, [(a, None), (b, None)], before)
 
 
 def test_empty_raw_feed_read_precedes_connector_and_database(zotero_dir: Path, monkeypatch):

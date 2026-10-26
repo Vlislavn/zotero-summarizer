@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchConfig, updateConfig } from '../api/settingsApi.js';
-import { configToFormState, formStateToConfig } from '../utils/configForm.js';
+import { configToFormState, formStateToConfig, isLocalProvider, localProfileForStage, resolveStage } from '../utils/configForm.js';
+import { useFocusOnChange } from '../hooks/useFocusOnChange.js';
 import { humanizeError } from '../utils/humanizeError.js';
 import { invalidateSetupDoctor } from '../utils/setupDoctorState.js';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
@@ -16,7 +17,7 @@ import StepDescribeResearch from '../components/setup/StepDescribeResearch.jsx';
 import StepDone from '../components/setup/StepDone.jsx';
 import { Banner } from '../components/form/Fields.jsx';
 import Button from '../components/ui/Button.jsx';
-import { validateSetup } from '../api/setupApi.js';
+import { fetchAiPresets, validateSetup } from '../api/setupApi.js';
 import { readStoredJson, writeStorage } from '../utils/safeStorage.js';
 
 const DEFAULT_TRIAGE_CRITERIA = [
@@ -34,22 +35,12 @@ function savedProgress() {
 function modeMatchesStages(routing, mode) {
   if (mode === 'none') return true;
   if (!routing?.default?.model) return false;
-  const providers = new Map((routing.providers || []).map((provider) => [provider.name, provider]));
   return ['default', 'feed', 'backlog', 'deep_review'].every((stage) => {
-    const selection = routing[stage] || {};
-    const provider = providers.get(selection.provider || routing.default.provider);
-    const model = selection.model || routing.default.model;
-    if (!provider || !model) return false;
+    const { provider, model } = resolveStage(routing, stage);
+    if (!provider || !String(model || '').trim()) return false;
     if (!provider.base_url && provider.type !== 'anthropic') return false;
-    let local = false;
-    if (provider.base_url) {
-      try {
-        const host = new URL(provider.base_url).hostname.replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
-        local = ['localhost', '0.0.0.0', '::', '::1', '::ffff:0:0'].includes(host)
-          || host.endsWith('.localhost') || /^127(?:\.\d{1,3}){3}$/.test(host)
-          || /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(host);
-      } catch { return false; }
-    }
+    if (mode === 'hosted' && !String(provider.api_key_env || '').trim()) return false;
+    const local = isLocalProvider(provider);
     return mode === 'local' ? local : !local;
   });
 }
@@ -72,6 +63,9 @@ export default function SetupFlow() {
   const [pathsChanged, setPathsChanged] = useState(Boolean(saved.pathsChanged));
 
   const [draftPaths, setDraftPaths] = useState(saved.draftPaths || { zotero_data_dir: '', pdf_root: '' });
+  const headingRef = useFocusOnChange(step);
+  const presetsQuery = useQuery({ queryKey: ['ai-presets'], queryFn: fetchAiPresets, enabled: mode === 'local' });
+  const localCatalog = presetsQuery.data?.local_profiles;
 
   useEffect(() => {
     if (configQuery.data && draft === null) {
@@ -98,20 +92,14 @@ export default function SetupFlow() {
 
   const validity = useMemo(() => {
     const zoteroOk = true;
-    const provider = (draft?.llm_routing?.providers || [])[0];
-    const llmOk = draft?.llm_enabled === false || Boolean(
-      provider
-        && provider.api_key_env && String(provider.api_key_env).trim()
-        && (provider.type !== 'openai' || (provider.base_url && String(provider.base_url).trim()))
-        && draft?.llm_routing?.default?.model
-        && String(draft.llm_routing.default.model).trim(),
-    );
+    const profilesOk = mode !== 'local' || ['default', 'feed', 'backlog', 'deep_review']
+      .every((stage) => localProfileForStage(draft?.llm_routing, localCatalog, stage)?.compatible === true);
     const goalsOk = Boolean(
       draft && draft.research_goals_text && draft.research_goals_text.trim().length > 0,
     );
     return [Boolean(mode), zoteroOk,
-      mode === 'none' || (llmOk && modeMatchesStages(draft?.llm_routing, mode)), goalsOk];
-  }, [draft, mode]);
+      mode === 'none' || (profilesOk && modeMatchesStages(draft?.llm_routing, mode)), goalsOk];
+  }, [draft, mode, localCatalog]);
 
   const allValid = validity.every(Boolean);
 
@@ -125,7 +113,7 @@ export default function SetupFlow() {
 
   const finishMutation = useMutation({
     mutationFn: (payload) => updateConfig(payload),
-    onSettled: () => invalidateSetupDoctor(queryClient),
+    onSettled: (_response, error) => invalidateSetupDoctor(queryClient, error),
     onSuccess: (resp) => {
       if (resp?.config) {
         queryClient.setQueryData(['runtime-config'], resp.config);
@@ -188,7 +176,7 @@ export default function SetupFlow() {
       <div className="glass rounded-2xl border border-slate-200 p-5 space-y-5">
         <header className="space-y-3">
           <div className="flex items-baseline justify-between gap-3">
-            <h2 className="text-lg font-bold text-slate-900">Set up Zotero Summarizer</h2>
+            <h2 ref={headingRef} tabIndex={-1} className="text-lg font-medium text-slate-900">Set up Zotero Summarizer</h2>
             {step < 4 && (
               <button
                 type="button"
@@ -249,6 +237,12 @@ export default function SetupFlow() {
         )}
         {step === 4 && <StepDone pathsChanged={pathsChanged} />}
 
+        {mode === 'local' && presetsQuery.isError && <Banner kind="error">
+          Local profile compatibility is unknown because the catalog could not be loaded.
+          <Button type="button" variant="secondary" onClick={() => presetsQuery.refetch()}>
+            Retry loading profiles
+          </Button>
+        </Banner>}
         {finishError && <Banner kind="error">{finishError}</Banner>}
 
         {step < 4 && (

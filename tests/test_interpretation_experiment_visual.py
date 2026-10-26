@@ -7,6 +7,7 @@ import pytest
 
 from tests._interpretation_experiment import ScriptedClient
 from tests.test_interpretation_experiment_core import run
+from tests.test_review_reading_browser import CONTRAST
 
 pytestmark = pytest.mark.skipif(
     os.environ.get('ZS_APPLICATION_BROWSER_SMOKE') != '1', reason='opt-in static interpretation Chromium inspection',
@@ -64,6 +65,7 @@ def test_actual_qualified_interpretation_html_geometry(chromium, tmp_path, width
         page = context.new_page()
         page.on('pageerror', lambda error: errors.append(str(error)))
         page.set_content(html, wait_until='load')
+        page.evaluate('() => Promise.all(document.getAnimations().map(animation => animation.finished))')
         if state == 'accepted':
             assert page.locator('section[data-interpretation="ai-draft"] h3').all_text_contents() == ['Finding', 'Scope', 'Unproven']
         else:
@@ -75,11 +77,24 @@ def test_actual_qualified_interpretation_html_geometry(chromium, tmp_path, width
                 const r=e.getBoundingClientRect(); return {left:r.left,right:r.right,width:r.width};})})''')
         assert geometry['scroll'] <= width
         assert all(row['left'] >= 0 and row['right'] <= width for row in geometry['sections'])
+        colors = page.evaluate(CONTRAST, 'body')
+        assert all(row['ratio'] >= 4.5 for row in colors), colors
         page.screenshot(path=str(artifact / (name + '.png')), full_page=True, animations='disabled')
+        if state == 'accepted':
+            disclosure = page.locator('details.interpretation-support')
+            assert disclosure.count() == 1 and disclosure.get_attribute('open') is None
+            disclosure.locator('summary').click()
+            assert disclosure.get_attribute('open') is not None
+            assert disclosure.get_by_text('Source selection', exact=True).is_visible()
+            assert page.evaluate('document.documentElement.scrollWidth') <= width
+            colors += page.evaluate(CONTRAST, 'body')
+            assert all(row['ratio'] >= 4.5 for row in colors), colors
+            page.screenshot(path=str(artifact / (name + '-support.png')), full_page=True, animations='disabled')
         assert requests == [] and errors == []
         (artifact / (name + '.json')).write_text(json.dumps({
             'geometry': geometry, 'sourceHTMLSHA256': hashlib.sha256(html.encode()).hexdigest(),
             'browserVersion': chromium.version, 'networkRequests': requests, 'pageErrors': errors,
+            'contrast': colors,
             'syntheticProtocolOnly': True, 'nativeApplicationAcceptance': False,
         }, indent=2) + '\n')
     finally:

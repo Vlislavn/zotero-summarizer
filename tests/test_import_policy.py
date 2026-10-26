@@ -48,6 +48,71 @@ def test_services_can_import_only_api_errors(tmp_path, monkeypatch, source, expe
     assert policy.main([str(path)]) == expected
 
 
+@pytest.mark.parametrize(("source", "forbidden"), [
+    (
+        "import zotero_summarizer.services.llm.factory",
+        [("zotero_summarizer.services.llm.factory", "zotero_summarizer.services")],
+    ),
+    (
+        "from .api import errors",
+        [("zotero_summarizer.api.errors", "zotero_summarizer.api")],
+    ),
+    (
+        "def build():\n    from .services.llm import factory\n"
+        "    import zotero_summarizer.api.errors",
+        [
+            ("zotero_summarizer.services.llm.factory", "zotero_summarizer.services"),
+            ("zotero_summarizer.api.errors", "zotero_summarizer.api"),
+        ],
+    ),
+    (
+        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n"
+        "    from .services.llm import factory\n"
+        "    from .api.errors import APIError",
+        [
+            ("zotero_summarizer.services.llm.factory", "zotero_summarizer.services"),
+            ("zotero_summarizer.api.errors.APIError", "zotero_summarizer.api"),
+        ],
+    ),
+])
+def test_runtime_rejects_services_and_api_imports_at_any_scope(
+    tmp_path, monkeypatch, capsys, source, forbidden
+):
+    monkeypatch.chdir(tmp_path)
+    path = Path("zotero_summarizer/runtime.py")
+    path.parent.mkdir(parents=True)
+    path.write_text(source)
+
+    assert policy.main([str(path)]) == 1
+
+    lines = capsys.readouterr().err.splitlines()
+    assert lines[0] == "Import / structure policy:"
+    assert sorted(lines[1:]) == sorted(
+        f"  - zotero_summarizer/runtime.py: '{name}' breaks layering "
+        f"(runtime must not import {prefix})"
+        for name, prefix in forbidden
+    )
+
+
+@pytest.mark.parametrize("source", [
+    "from .models.providers import resolve_stage\n"
+    "from .settings import Settings\n"
+    "from .domain import score_to_priority\n"
+    "from .contracts import PendingChange",
+    "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n"
+    "    from .integrations.openalex import OpenAlexClient\n"
+    "    from .storage.corpus import EmbeddingCache\n"
+    "    from .models import AppState",
+])
+def test_runtime_allows_documented_leaf_imports(tmp_path, monkeypatch, source):
+    monkeypatch.chdir(tmp_path)
+    path = Path("zotero_summarizer/runtime.py")
+    path.parent.mkdir(parents=True)
+    path.write_text(source)
+
+    assert policy.main([str(path)]) == 0
+
+
 @pytest.mark.parametrize("source", [
     "# from zotero_summarizer.services import config\npass",
     '"""Example:\nfrom zotero_summarizer.services import config\n"""',

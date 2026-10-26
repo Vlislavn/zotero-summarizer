@@ -76,9 +76,9 @@ def test_four_note_types_upsert_twice_preserve_manual_note_and_keys(tmp_path):
     from tests._zotero_fixtures import add_library_item, build_zotero_db
     from zotero_summarizer.integrations.zotero_write import ZoteroWriter
     from zotero_summarizer.models import PaperDigest
+    from zotero_summarizer.models.zotero_actions import VERDICT_NOTE_MARKER, build_verdict_note_html
     from zotero_summarizer.services.zotero._notes import (
-        DIGEST_NOTE_MARKER, USER_NOTE_MARKER, VERDICT_NOTE_MARKER,
-        build_digest_note_html, build_user_note_html, build_verdict_note_html,
+        DIGEST_NOTE_MARKER, USER_NOTE_MARKER, build_digest_note_html, build_user_note_html,
     )
 
     db = build_zotero_db(tmp_path / 'isolated-owner')

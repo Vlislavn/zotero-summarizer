@@ -237,13 +237,13 @@ def test_simultaneous_adds_share_one_saved_plan_and_native_call(monkeypatch, tmp
 def test_legacy_session_without_plan_keeps_its_wire_shape(monkeypatch, tmp_path):
     session, _materialize, _candidate_id, _db_path = _setup(monkeypatch, tmp_path)
     research = session.load("recovery")
-    raw = research.to_dict()
+    raw = research.to_dict(for_storage=True)
     assert "planned_zotero_key" not in raw["candidates"][0]
     path = tmp_path / "sessions" / "recovery.json"
     path.write_text(json.dumps(raw), encoding="utf-8")
     restored = session.load("recovery")
     assert restored.candidates[0].planned_zotero_key == ""
-    assert restored.to_dict() == raw
+    assert restored.to_dict(for_storage=True) == raw
     session.save(restored)
     assert json.loads(path.read_text(encoding="utf-8")) == raw
 

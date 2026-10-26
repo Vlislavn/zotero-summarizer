@@ -2,11 +2,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import { MemoryRouter } from 'react-router-dom';
 
 const api = vi.hoisted(() => ({ fetchConfig: vi.fn(), updateConfig: vi.fn(), listModels: vi.fn(),
   fetchAiPresets: vi.fn(), saveAiCredential: vi.fn(), validateSetup: vi.fn(), detectZotero: vi.fn(),
-  updatePaths: vi.fn(), fetchDoctorStatus: vi.fn(), runDoctor: vi.fn() }));
+  updatePaths: vi.fn(), fetchDoctorStatus: vi.fn(), runDoctor: vi.fn(), cancelDoctor: vi.fn() }));
 vi.mock('../api/settingsApi.js', () => api);
 vi.mock('../api/setupApi.js', () => api);
 vi.mock('../hooks/useSetupStatus.js', () => ({ useSetupStatus: () => ({ status: null }) }));
@@ -34,14 +34,10 @@ const unknown = { ready: false, status: 'needs_action', checks: [
     recovery: { action: 'open_ai_settings', label: 'Review endpoint settings' } },
 ], modes: { local_inference: 'needs_action', offline_ready: 'needs_action', strict_offline: 'not_started' } };
 
-function Location() {
-  const location = useLocation();
-  return <output aria-label="Current route">{location.pathname}{location.hash}</output>;
-}
 function show() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const view = render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/setup']}>
-    <SetupFlow /><Location />
+    <SetupFlow />
   </MemoryRouter></QueryClientProvider>);
   return { ...view, client };
 }
@@ -60,7 +56,10 @@ beforeEach(() => {
     return { config };
   });
   api.fetchDoctorStatus.mockResolvedValue({ ready: false, status: 'not_started', checks: [], modes: {} });
-  api.runDoctor.mockResolvedValue(unknown);
+  api.runDoctor.mockImplementation(async () => {
+    api.fetchDoctorStatus.mockResolvedValue(unknown);
+    return unknown;
+  });
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -126,13 +125,27 @@ it('wires Full local through safe profile, save, real-check request, honest UNKN
     expect(screen.getByText(/Local load safety is not established/)).toBeTruthy();
     expect(api.runDoctor).toHaveBeenCalledWith(null);
     expect(screen.getByRole('button', { name: 'Open Today' }).disabled).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Review endpoint settings' }));
-    expect(screen.getByLabelText('Current route').textContent).toBe('/settings#ai-models');
+    expect(screen.getByRole('link', { name: 'Review endpoint settings' }).getAttribute('href')).toBe('/settings#ai-models');
     expect(api.runDoctor).toHaveBeenCalledTimes(1);
   } finally {
     view.unmount();
     view.client.clear();
   }
+});
+
+it.each([['qwen3:8b', false], ['qwen3:30b', true]])('revalidates a resumed research step for model %s without mounting the model editor', async (model, blocked) => {
+  localStorage.setItem('zs_setup_progress_v1', JSON.stringify({ mode: 'local', step: 3,
+    draft: { llm_enabled: true, research_goals_text: 'Synthetic goal', triage_criteria_text: '', output_language: 'English',
+      llm_routing: { providers: [provider], default: { provider: 'local', model } } } }));
+  const view = show();
+  try {
+    const finish = await screen.findByRole('button', { name: 'Finish' });
+    await waitFor(() => expect(api.fetchAiPresets).toHaveBeenCalled());
+    await waitFor(() => expect(finish.disabled).toBe(blocked));
+    expect(api.runDoctor).not.toHaveBeenCalled();
+    expect(api.listModels).not.toHaveBeenCalled();
+    expect(api.updateConfig).not.toHaveBeenCalled();
+  } finally { view.unmount(); view.client.clear(); }
 });
 
 it.each([undefined, 503, 404, 422])('wizard path save status %s retires only uncertain health without calling checks', async (status) => {

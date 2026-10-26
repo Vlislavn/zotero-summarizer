@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 from time import monotonic
 
+from . import decision_adapter
+from ._collection_lineage import lineage_audit
 from .collections import (BaselineArtifact, Config, Inputs, PaperTiming, Readout, Result, Truth,
                           admit, identity, payload, project, reference_safe)
 from .collections_report import readable, report
@@ -61,7 +63,7 @@ def prepare(cfg, snapshots=None):
                 errors[digest([key, node])] = error.args[0]
                 if error.args[0] == 'missing_input':
                     errors[digest([key, None])] = 'missing_input'
-    baselines = {}
+    baselines, artifacts = {}, {}
     for index, arm in enumerate(cfg.baselines):
         rows = {}
         if arm.artifact:
@@ -75,10 +77,20 @@ def prepare(cfg, snapshots=None):
                 raise ValueError('corpus-backed baseline requires reference lineage inventory')
             for paper in artifact.reference_papers:
                 reference_safe(paper, inputs, truth, artifact.frozen_at)
+            artifacts[arm.arm_id] = artifact
             rows = {r.get('case_sha256'): r for r in artifact.rows}
             if len(rows) != len(artifact.rows) or not rows.keys() <= papers.keys():
                 raise ValueError('duplicate/unmatched normalized baseline identity')
         baselines[arm.arm_id] = rows
+    audit, lineage_work = lineage_audit(cfg, inputs, truth, artifacts)
+    if audit is not None:
+        raw = encoded(audit)
+        admitted_bytes += len(raw)
+        if admitted_bytes > cfg.max_snapshot_bytes:
+            raise ValueError('lineage audit/snapshot budget exceeded')
+        if snapshots is not None and saved.get('lineage-audit.json') != raw:
+            raise ValueError('immutable lineage removal audit mismatch')
+        saved['lineage-audit.json'] = raw
     recordings = {}
     allowed = {(u, a.arm_id) for u, _, _, a in units(papers, questions, cfg) if a.kind == 'recorded'}
     for index, recording in enumerate(inputs.recordings):
@@ -88,7 +100,7 @@ def prepare(cfg, snapshots=None):
         recordings[key] = read(f'recording-{index}.bin', recording.terminal, cfg.max_response_bytes)
     calls = len(papers) * len(questions)
     admit_native(cfg.arms, calls, cfg)
-    work = count + calls * sum(a.forward_passes_bound for a in cfg.arms
+    work = count + lineage_work + calls * sum(a.forward_passes_bound for a in cfg.arms
                                if a.kind == 'native' and not a.blockage())
     if work > cfg.max_work_units:
         raise ValueError('whole-workload call/physical-work reservation exceeds budget')
@@ -260,31 +272,12 @@ def verify_row(index, row, plan, prepared, cfg, saved):
             if telemetry != expected:
                 raise ValueError('recorded transport telemetry mismatch')
         else:
-            check_native_transport(telemetry, terminal, requests[unit], cfg)
+            decision_adapter.check_native_transport(telemetry, terminal, requests[unit], cfg)
         status, readout = project(terminal, arm, cfg, telemetry['terminal_status'])
         base.update(status=status, readout=readout, telemetry=telemetry, terminal=name,
                     request_sha256=sha(requests[unit]), label=readout['label'] if status == 'decision' else None)
     if base != row:
         raise ValueError('outcome/admitted projection mismatch')
-
-
-def check_native_transport(telemetry, terminal, request, cfg):
-    state = telemetry.get('terminal_status')
-    size = telemetry.get('retained_bytes')
-    observed = telemetry.get('observed_bytes_lower_bound')
-    complete = telemetry.get('raw_complete')
-    http_status = telemetry.get('http_status')
-    if (telemetry.get('reserved') is not True or telemetry.get('dispatched') is not True
-            or telemetry.get('client_retries') != 0 or telemetry.get('attempt') != 1
-            or type(size) is not int or size != len(terminal) or size > cfg.max_response_bytes
-            or type(observed) is not int or observed < size or type(complete) is not bool
-            or telemetry.get('request_bytes') != len(request)):
-        raise ValueError('native transport byte/dispatch telemetry mismatch')
-    if (state == 'received' and (http_status != 200 or not complete or observed != size)
-            or state in ('timeout', 'response_too_large') and complete
-            or state == 'response_too_large' and (size != cfg.max_response_bytes or observed <= size)
-            or state == 'unavailable' and complete and http_status == 200):
-        raise ValueError('native transport status/completion mismatch')
 
 
 def checked_timings(raw, rows, plans, questions):
@@ -338,6 +331,8 @@ def reopen(owner):
         verify_row(index, row, plan, prepared, cfg, saved)
     expected = {'config.original.json', 'config.json', 'inputs.json', 'gold.json',
                 'paper-times.json', 'report.json', 'report.md'}
+    if inputs.lineage is not None:
+        expected.add('lineage-audit.json')
     expected.update(f'baseline-{i}.json' for i, arm in enumerate(cfg.baselines) if arm.artifact)
     expected.update(f'recording-{i}.bin' for i in range(len(inputs.recordings)))
     expected.update(f'case-{i}.json' for i in range(len(plans)))

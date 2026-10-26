@@ -79,7 +79,7 @@ export default function PaperDetailView({
   const showLinks = show.links ?? true;
   const showDeepReview = show.deepReview ?? true;
   const showReader = (show.reader ?? true) && serverAvailable;
-  const showAsk = (show.ask ?? true) && hasPdf && serverAvailable;
+  const showAsk = (show.ask ?? true) && hasPdf;
   const showAbstract = show.abstract ?? true;
   const showTags = show.tags ?? true; // both surfaces render the tag editor
   const showCollection = (show.collection ?? editable) && editable;

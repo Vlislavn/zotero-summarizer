@@ -97,12 +97,17 @@ def read_run(directory):
     paths = {str(p.relative_to(root)) for p in root.rglob('*') if p.is_file() and p != root / 'manifest.json'}
     if manifest['contract'] != 'interpretation-experiment-v1' or paths != set(manifest['files']):
         raise ValueError('Missing/foreign experiment inventory')
+    saved = {}
     for name, expected in manifest['files'].items():
         path = root / name
-        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()) or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
             raise ValueError('Experiment artifact identity changed')
-    inputs = json.loads((root / 'inputs.json').read_text())
-    plan = json.loads((root / 'plan.json').read_text())
+        raw = path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != expected:
+            raise ValueError('Experiment artifact identity changed')
+        saved[name] = raw
+    inputs = json.loads(saved['inputs.json'].decode('utf-8'))
+    plan = json.loads(saved['plan.json'].decode('utf-8'))
     validate_frozen(root, inputs)
     expected = {(key, arm) for key in inputs['evaluation'] for arm in inputs['recipe']['labels']}
     if len(plan) != len(expected) or {(row['paper'], row['condition']) for row in plan} != expected:
@@ -113,7 +118,7 @@ def read_run(directory):
         blind_ids.extend([assignment['review_blind_id'], assignment['card_blind_id'], *assignment['question_blind_ids'].values()])
         if assignment['directory'] != canonical_hash([assignment['paper'], assignment['condition']]):
             raise ValueError('Invalid experiment case identity')
-        record = json.loads((root / assignment['directory'] / 'record.json').read_text())
+        record = json.loads(saved[assignment['directory'] + '/record.json'].decode('utf-8'))
         questions = {item['item_id']: item['question'] for item in inputs['items']
                      if item['paper_item_key'] == assignment['paper']}
         if (record['assignment'] != assignment or len(record['questions']) != len(questions) or

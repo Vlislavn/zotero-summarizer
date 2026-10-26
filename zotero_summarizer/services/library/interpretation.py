@@ -1,5 +1,7 @@
 """Opt-in A/B/C review invocation; ordinary review caches and defaults are untouched."""
 from copy import deepcopy
+import hashlib
+from pathlib import Path
 
 from zotero_summarizer.integrations.llm import build_response_format
 from zotero_summarizer.models import PaperDigest
@@ -96,12 +98,23 @@ def selected_original(result):
     retained = deepcopy(audit) | {'post_verification_changes': []}
     for row in retained['claims']:
         row['matches_cached_field'] = verified[row['field']] == final.get(row['field'])
-    _validate_audit({'digest': verified}, retained)
+    try:
+        _validate_audit({'digest': verified}, retained)
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError('Invalid retained original-record audit') from exc
     for passage in audit['passages']:
         span = passage['selected_span']
         if passage['text'] != selected[span['start']:span['end']]:
             raise ValueError('Retained base evidence changed')
     return selected
+
+
+def _optional_contract_sha256():
+    root = Path(__file__).parents[2]
+    sources = ('models/interpretation.py', 'services/library/interpretation.py',
+               'services/library/_interpretation_trace.py')
+    return canonical_hash({'schema': InterpretationItem.model_json_schema(),
+                           'code': {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in sources}})
 
 
 def qualify(result, *, strict=True):
@@ -114,10 +127,12 @@ def qualify(result, *, strict=True):
             return card
         items = [InterpretationItem.model_validate(item).model_dump(mode='json') for item in card['items']]
         claims = scientific_claims(items, result['digest'])
-        if (not items or card['origin'] != 'ai_draft' or card['digest_sha256'] != canonical_hash(digest_contract_payload(result['digest'])) or
+        if (not items or canonical_hash(items) != canonical_hash(card['items']) or card['origin'] != 'ai_draft' or
+            card['contract_sha256'] != _optional_contract_sha256() or
+            card['digest_sha256'] != canonical_hash(digest_contract_payload(result['digest'])) or
             card['source'] != result['verification_audit']['source'] or claims != card['claims'] or
             result['scientific_call']['scientific_binding'] != canonical_hash(
-                [claims, card['source'], chunk_text(selected), card['checks']]) or _unsupported_literals(claims, selected)):
+                [claims, card['source'], chunk_text(selected), card['checks'], card['contract_sha256']]) or _unsupported_literals(claims, selected)):
             raise ValueError('Interpretation proof binding changed')
         checks = _parse_checks(_ScientificChecks.model_validate(card['checks']), len(claims), chunk_text(selected), selected)
         if any(not check.supported for check in checks.checks):
@@ -132,6 +147,7 @@ def qualify(result, *, strict=True):
 def review(paper, config, clients, budget, condition, trace):
     if condition not in {'A', 'B', 'C'}:
         raise ValueError('Unknown interpretation condition')
+    optional_contract = _optional_contract_sha256() if condition == 'C' else None
     wrapped = {id(client): _Client(client, condition, trace) for client in clients}
     mapper, reducer = (wrapped[id(client)] for client in clients)
     audit = {}
@@ -156,10 +172,12 @@ def review(paper, config, clients, budget, condition, trace):
             status = 'invalid'
         result['interpretation'] = {'status': status, 'failure_type': type(exc).__name__, 'draft': reducer.draft}
         return result
-    trace.calls[-1]['scientific_binding'] = canonical_hash([claims, audit['source'], chunk_text(selected), checks.model_dump(mode='json')])
+    trace.calls[-1]['scientific_binding'] = canonical_hash(
+        [claims, audit['source'], chunk_text(selected), checks.model_dump(mode='json'), optional_contract])
     result['scientific_call'] = deepcopy(trace.calls[-1])
     result['interpretation'] = {'status': 'accepted', 'origin': 'ai_draft', 'items': items, 'claims': claims,
                                 'checks': checks.model_dump(mode='json'), 'source': audit['source'],
-                                'digest_sha256': canonical_hash(digest_contract_payload(result['digest']))}
-    qualify(result)
+                                'digest_sha256': canonical_hash(digest_contract_payload(result['digest'])),
+                                'contract_sha256': optional_contract}
+    result['interpretation'] = qualify(result, strict=False)
     return result

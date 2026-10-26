@@ -12,7 +12,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { fetchUniversityAccessStatus, runUniversityLogin } from '../../api/libraryApi.js';
 import Button from '../ui/Button.jsx';
 
-export default function UniversityAccessPanel({ form, onUpdate }) {
+export default function UniversityAccessPanel({ form, savedForm, saving = false, onUpdate }) {
   const statusQuery = useQuery({
     queryKey: ['university-access-status'],
     queryFn: fetchUniversityAccessStatus,
@@ -39,7 +39,9 @@ export default function UniversityAccessPanel({ form, onUpdate }) {
   const status = statusQuery.data || {};
   const browserMissing = status.browser_available === false;
   const loggedIn = Boolean(status.logged_in);
-  const canLogin = !browserMissing && Boolean(form.ua_login_url);
+  const accessDirty = !savedForm || ['ua_enabled', 'ua_login_url', 'ua_ezproxy_prefix', 'ua_cookie_browser']
+    .some((key) => form[key] !== savedForm[key]);
+  const canLogin = !browserMissing && !accessDirty && !saving && Boolean(savedForm?.ua_login_url?.trim());
 
   return (
     <div className="glass rounded-2xl border border-slate-200 p-4 space-y-3">
@@ -123,12 +125,13 @@ export default function UniversityAccessPanel({ form, onUpdate }) {
         <Button
           variant="secondary"
           size="sm"
-          onClick={() => loginMutation.mutate()}
+          onClick={() => { if (canLogin) loginMutation.mutate(); }}
           disabled={!canLogin || loginMutation.isPending}
           title={canLogin ? 'Open a browser window to log into your library' : 'Set a login URL (and install the browser extra), Save, then log in'}
         >
           {loginMutation.isPending ? 'Opening…' : 'Log in to library'}
         </Button>
+        {(saving || accessDirty) && <span className="text-xs text-slate-600">{saving ? 'Wait for Save to finish before logging in.' : 'Save university access changes before logging in.'}</span>}
         {loginNote && <span className="text-xs text-slate-500">{loginNote}</span>}
       </div>
     </div>

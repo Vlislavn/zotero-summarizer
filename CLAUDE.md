@@ -13,15 +13,9 @@ RSS ─> [triage] ─gate─> [model] ─> SQLite ─> [api] ─> React UI ─> 
                                     approved changes ─> [zotero] ─> Zotero (backup first)
 ```
 
-`services/` holds the logic in 6 domains: **model** (ML gate), **golden**
-(labels), **triage** (feed daemon), **library** (reading + the paper brief &
-ask-paper Q&A), **zotero** (writes), and **faithbench** (the faithfulness
-benchmark that validates the abstention/grounding prompt + chunk index
-`library.qa` reuses). Each package has a `README.md` with an ASCII sketch — read
-it before editing. Note: `library.qa` imports `faithbench` and
-`faithbench._build_claims` imports `library.quality_review` — a lazy-resolved
-cycle; the clean long-term move is to lift the shared grounding primitives into a
-neutral module both import (follow-up, not required now).
+The canonical product/runtime diagram and service-domain ownership map live in
+[docs/architecture.md](docs/architecture.md). Each package's `README.md` owns its
+implementation contract; read it before editing.
 
 ## Hard rules (pre-commit enforces these)
 
@@ -31,10 +25,11 @@ neutral module both import (follow-up, not required now).
 2. **≤500 LOC per `.py`, with no exceptions or allowlist.** Touched production
    functions also block above 88 body lines, 6 required parameters, or 5
    control-flow levels. Split by responsibility, not metrics.
-3. **Layering:** `api → services → storage/integrations → models`. `mcp/` is an
-   HTTP client (imports none of those). `integrations/`/`storage/` never import
-   `services/`/`api/`; `services/` may import only `api.errors`. New service
-   modules live in a domain subpackage.
+3. **Layering:** `api → services → storage/integrations → models`. `runtime.py`
+   is foundational and must not import `services/` or `api/`, including
+   `api.errors`. `mcp/` is an HTTP client (imports none of those).
+   `integrations/`/`storage/` never import `services/`/`api/`; `services/` may
+   import only `api.errors`. New service modules live in a domain subpackage.
 4. **Touch a package's code → update its `README.md` in the same commit.**
 5. **All app state lives under `data/`** (gitignored). Paths come from
    `Settings` — never hardcode `project_root / "..."`. *Sanctioned exception:*

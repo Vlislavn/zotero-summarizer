@@ -65,7 +65,7 @@ def test_ordinary_http_wire_fixture(journey, tmp_path):
     response = journey.client.get("/api/search/ordinary-wire")
     assert response.status_code == 200
     wire = response.json()
-    assert wire["discovery"] == {}
+    assert "discovery" not in wire
     assert wire["candidates"][0]["title"] == "Public ordinary candidate"
     comparison = deepcopy(wire)
     assert comparison.pop("evidence_policy", "baseline") == "baseline"

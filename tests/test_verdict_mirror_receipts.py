@@ -1,7 +1,7 @@
-"""Proposed verdict/label receipt predicates; source-only, runtime RED/GREEN UNRUN.
+"""Real owned native effects require committed, closed system-mirror history.
 
-Raw committed action rows do not establish closed system-history classification,
-Pending approval, native-target consent, crash safety or whole-issue acceptance.
+Receipt and authority controls are separate; neither establishes crash safety,
+remote finality, live native-editor behavior or whole-issue acceptance.
 """
 from copy import deepcopy
 from contextlib import closing
@@ -19,13 +19,14 @@ from tests._zotero_fixtures import (
 )
 from tests.test_review_questions import _database
 from zotero_summarizer.domain import LABEL_TAG_PREFIX, VERDICT_SOURCE_USER
+from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.runtime import AppContext, RuntimeState, set_context
 from zotero_summarizer.services.golden import verdict_effects
-from zotero_summarizer.services.zotero import zotero
-from zotero_summarizer.services.zotero._notes import VERDICT_NOTE_MARKER
-from zotero_summarizer.storage import repositories
+from zotero_summarizer.services.zotero import pending_confirmation, zotero
+from zotero_summarizer.models.zotero_actions import VERDICT_NOTE_MARKER
+from zotero_summarizer.storage import pending_actions, repositories
 
 KEY = "V222AAAA"
 OTHER = "V222BBBB"
@@ -245,6 +246,35 @@ def test_verdict_native_effect_has_committed_app_receipts(verdict_resources, rec
         (KEY,)) == [(KEY, "verdict", "must_read", COMMENT, VERDICT_SOURCE_USER)]
     _assert_backups(b, before)
     _assert_committed_receipts(b, history_before, history_after)
+
+
+def test_verdict_native_history_is_closed_and_not_pending_authority(verdict_resources):
+    b = verdict_resources
+    repositories.insert_or_update_label_verdict(
+        b.queue_db, item_key=KEY, original_derived_priority="could_read",
+        user_priority="must_read", comment=COMMENT, source=VERDICT_SOURCE_USER,
+    )
+    assert verdict_effects.mirror_current_verdict(b.queue_db, KEY) == {
+        "label_written": True, "note_written": True,
+    }
+    rows = _history(b.queue_db)
+    assert len(rows) == len(b.dispatches) == 2, "Real effects need non-vacuous closed history"
+    origins = [pending_actions.history_request(row) for row in rows]
+    assert all(origin is not None and origin["actor"] == "system" and origin["source"] == "mirror_verdict"
+               for origin in origins)
+    assert {row["change_type"] for row in rows} == set(ACTIONS)
+    assert all(row["status"] == "applied" and row["applied_at"] and row["error_message"] == "" for row in rows)
+    before = native(b.db)
+    dispatches, backups = len(b.dispatches), len(b.backups)
+    presented = pending_confirmation.present_changes(rows, b.writer)
+    assert all(row["approval_preview"] is None for row in presented)
+    with pytest.raises(ValueError):
+        pending_actions.ensure_pending(rows)
+    with pytest.raises(APIError) as refused:
+        pending_confirmation.require_pending_actions(rows)
+    assert refused.value.error == "pending_write_conflict" and refused.value.status_code == 409
+    assert native(b.db) == before and len(b.dispatches) == dispatches and len(b.backups) == backups
+    assert _history(b.queue_db) == rows
 
 
 def test_absent_verdict_has_no_native_effect(verdict_resources, monkeypatch, record_property):

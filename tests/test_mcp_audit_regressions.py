@@ -32,6 +32,61 @@ def test_find_similar_papers_uses_hybrid_search_and_excludes_seed(monkeypatch):
     assert calls[1][2]["include_read"] is False
 
 
+@pytest.mark.parametrize("seed", [{}, {"title": None}, {"title": " \t\n"}])
+def test_similar_blank_seed_query_refuses_before_queue_request(monkeypatch, seed):
+    calls = []
+
+    async def api_request(method, path, **kwargs):
+        calls.append(path)
+        assert path == "/api/zotero/items/SEED0001"
+        return {"ok": True, "data": seed}
+
+    monkeypatch.setattr(search, "_api_request", api_request)
+    result = asyncio.run(search.find_similar_papers(item_key="SEED0001", query=" \t"))
+    assert result["ok"] is False
+    assert result["error"]["code"] == "validation_error"
+    assert calls == ["/api/zotero/items/SEED0001"]
+
+
+@pytest.mark.parametrize("flags", [
+    {}, {"semantic": False}, {"semantic": None}, {"semantic": 0},
+    {"semantic": 1}, {"semantic": "true"},
+    {"semantic": True, "semantic_unavailable": True},
+])
+def test_similar_requires_actual_semantic_confirmation(monkeypatch, flags):
+    async def api_request(method, path, *, params=None, **kwargs):
+        assert path == "/api/library/reading-queue"
+        assert params["search"] == "synthetic topic" and params["semantic"] is True
+        return {"ok": True, "data": {
+            "semantic_unavailable": False, "items": [{"item_key": "ORDINARY1"}], **flags,
+        }}
+
+    monkeypatch.setattr(search, "_api_request", api_request)
+    result = asyncio.run(search.find_similar_papers(query="synthetic topic"))
+    assert result["ok"] is False
+    assert result["error"]["code"] == "semantic_search_unavailable"
+    assert "items" not in result
+
+
+def test_similar_explicit_query_works_with_untitled_seed_and_empty_semantic_results(monkeypatch):
+    calls = []
+
+    async def api_request(method, path, *, params=None, **kwargs):
+        calls.append((path, params))
+        if path == "/api/zotero/items/SEED0001":
+            return {"ok": True, "data": {"title": ""}}
+        assert params["search"] == "synthetic topic"
+        assert params["include_read"] is False
+        return {"ok": True, "data": {"semantic": True, "semantic_unavailable": False,
+                                      "items": [], "total_unread": 0}}
+
+    monkeypatch.setattr(search, "_api_request", api_request)
+    result = asyncio.run(search.find_similar_papers(item_key="SEED0001", query="  synthetic topic  "))
+    assert result["ok"] is True and result["items"] == [] and result["total"] == 0
+    assert result["seed"]["query"] == "synthetic topic"
+    assert len(calls) == 2
+
+
 def test_get_paper_scopes_pending_rows_by_item_key(monkeypatch):
     from zotero_summarizer.mcp.tools import search as tool
 

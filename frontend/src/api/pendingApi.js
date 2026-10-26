@@ -1,30 +1,6 @@
-// Thin fetch wrappers for the /api/pending/* endpoints.
-// Mirrors the Alpine code in zotero_summarizer/web/ui.html (pending tab).
+import { request } from './client.js';
 
-async function request(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options,
-  });
-  const text = await res.text();
-  let data = null;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = { _raw: text };
-    }
-  }
-  if (!res.ok) {
-    const message = (data && (data.message || data.detail))
-      || `HTTP ${res.status} ${res.statusText}`;
-    const err = new Error(message);
-    err.status = res.status;
-    err.body = data;
-    throw err;
-  }
-  return data;
-}
+// Thin fetch wrappers for the /api/pending/* endpoints.
 
 /** GET /api/pending?status=...&limit=... */
 export async function fetchPending({ status = 'pending', limit = 500 } = {}) {

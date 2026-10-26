@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { Link, MemoryRouter } from 'react-router-dom';
 import Search from './Search.jsx';
 import ordinaryWire from '../../../tests/fixtures/discovery-ordinary-wire.json';
+import channelCandidates from '../components/paper/fixtures/discoveryChannelCandidates.json';
 
 const reply = (dto, status = 200) => new Response(JSON.stringify(dto), { status });
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
@@ -84,6 +85,42 @@ it('shows three ordered recommendations, retains the pool, and separates review/
   fireEvent.click(screen.getByText('2 retained candidates ▾'));
   expect(screen.getAllByRole('article')).toHaveLength(5);
   expect(requests.filter(r => r.init.method === 'POST')).toEqual([]);
+});
+
+it.each(['discovery', 'ordinary'])('canonical safe links preserve channel identifiers and no-effect admission in %s Search', async mode => {
+  const rows = [...channelCandidates,
+    { candidate_id: 'unsafe-with-doi', title: 'Unsafe URL with identifier fallback', url: 'javascript:alert(1)', doi: '10.1234/safe-fallback' },
+    { candidate_id: 'unsupported', title: 'No supported identifier or address', url: 'data:text/html,unsafe', pmid: '../not-a-pmid', openalex_id: 'https://example.org/W123' },
+    { candidate_id: 'arxiv-only', title: 'Synthetic arXiv identifier', arxiv_id: '2501.12345', url: '' },
+    { candidate_id: 'existing-url', title: 'Existing HTTPS address', url: 'https://example.test/paper/unchanged' },
+  ].map(row => ({ ...row, in_library: null, review: {} }));
+  const dto = mode === 'discovery' ? session() : { ...structuredClone(ordinaryWire), id: 'discovery-one' };
+  dto.candidates = rows;
+  if (mode === 'discovery') {
+    dto.discovery.recommended_ids = rows.slice(0, 3).map(row => row.candidate_id);
+    dto.discovery.unresolved_membership = rows.map(row => row.candidate_id);
+    dto.discovery.assessment = { status: 'not_requested', items: [], submitted_context_ids: [] };
+    dto.discovery.comments_in_ranking = false;
+  }
+  const { requests } = mount(async () => reply(dto));
+  await screen.findByRole('article', { name: rows[0].title });
+  if (mode === 'discovery') fireEvent.click(screen.getByText('4 retained candidates ▾'));
+  const expected = ['https://doi.org/10.1234/fixture-doi', 'https://pubmed.ncbi.nlm.nih.gov/12345678/',
+    'https://openalex.org/W1234567890', 'https://doi.org/10.1234/safe-fallback', null,
+    'https://arxiv.org/abs/2501.12345', 'https://example.test/paper/unchanged'];
+  rows.forEach((row, index) => {
+    const card = within(screen.getByRole('article', { name: row.title }));
+    if (expected[index]) {
+      const link = card.getByRole('link', { name: row.title });
+      expect(link.getAttribute('href')).toBe(expected[index]);
+      expect(link.getAttribute('target')).toBe('_blank');
+      expect(link.getAttribute('rel')).toBe('noreferrer');
+    } else {
+      expect(card.queryByRole('link', { name: row.title })).toBeNull();
+      expect(card.getByText('No supported link available.')).toBeTruthy();
+    }
+  });
+  expect(requests.every(r => !r.init.method)).toBe(true);
 });
 
 it.each(['observed', 'partial', 'failed', 'unknown', 'not_attempted'])('renders typed retrieval %s without inferring it from candidate counts', async status => {
@@ -366,8 +403,10 @@ it('new owners retire obsolete loading authority as well as obsolete responses',
   expect(screen.getByRole('article', { name: 'Public ordinary candidate' })).toBeTruthy();
   expect(screen.queryByRole('article', { name: 'Obsolete replacement read' })).toBeNull();
   expect(screen.queryByRole('region', { name: 'Discovery status' })).toBeNull();
-  expect(view.requests.filter(row => ['/api/search/discovery-one', '/api/search/next'].includes(row.path))
-    .every(row => row.init.signal.aborted)).toBe(true);
+  const obsoleteReads = view.requests.filter(row => ['/api/search/discovery-one', '/api/search/next'].includes(row.path));
+  expect(obsoleteReads.every(row => row.init.signal.aborted), JSON.stringify(obsoleteReads.map(row => ({
+    path: row.path, aborted: row.init.signal.aborted,
+  })))).toBe(true);
 });
 
 it('a held ordinary restoration never blocks a new explicit screen owner', async () => {
@@ -390,7 +429,7 @@ it('a held ordinary restoration never blocks a new explicit screen owner', async
 
 it.each(['screen', 'url', 'storage'])('actual ordinary HTTP wire stays ordinary through %s adoption and poll failure', async mode => {
   vi.useFakeTimers();
-  expect(ordinaryWire.discovery).toEqual({});
+  expect(ordinaryWire).not.toHaveProperty('discovery');
   if (mode === 'storage') sessionStorage.setItem('zs.searchSession', JSON.stringify({ id: ordinaryWire.id }));
   let reads = 0;
   await act(async () => {

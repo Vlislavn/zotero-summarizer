@@ -245,17 +245,22 @@ _NULL_STRINGS = frozenset({"null", "none", "n/a"})
 
 def parse_answer(raw: str) -> dict[str, Any]:
     """``{"answer": str|None, "abstained": bool, "quote": str|None}``.
-    Raises ``ValueError`` when no JSON object is recoverable."""
+    Raises ``ValueError`` when no JSON object is recoverable, and ``UnicodeError``
+    when parsed output strings cannot be encoded as UTF-8."""
     payload = extract_json_blob(raw)
     answer = payload.get("answer")
     answer_text = None if answer is None else str(answer).strip() or None
     if answer_text is not None and answer_text.lower() in _NULL_STRINGS:
         answer_text = None
     quote = payload.get("quote")
+    quote_text = None if quote is None else str(quote)
+    for value in (answer_text, quote_text):
+        if value is not None:
+            value.encode("utf-8")
     return {
         "answer": answer_text,
         "abstained": answer_text is None,
-        "quote": None if quote is None else str(quote),
+        "quote": quote_text,
     }
 
 
@@ -263,6 +268,8 @@ def answer_with_retry(llm: Any, prompt: str) -> tuple[dict[str, Any], str]:
     raw = to_text(llm.prompt(prompt))
     try:
         return parse_answer(raw), raw
+    except UnicodeError:
+        raise
     except ValueError:
         LOGGER.warning("faithbench run: answer JSON parse failed, retrying once")
         retry_raw = to_text(

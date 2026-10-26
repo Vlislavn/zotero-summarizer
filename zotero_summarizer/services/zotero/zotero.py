@@ -5,7 +5,7 @@ from typing import Any
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
-from zotero_summarizer.integrations.zotero_write import ZoteroWriter, ZoteroWriteError
+from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.models import (
     ZoteroAttachFiguresRequest,
     ZoteroCollectionsResponse,
@@ -18,7 +18,6 @@ from zotero_summarizer.models import (
 from zotero_summarizer.services._common import settings, state
 from zotero_summarizer.services.corpus import refresh_corpus_items_by_keys
 from zotero_summarizer.services.zotero import direct_actions
-from zotero_summarizer.services.zotero.pending import build_label_tag_change
 
 
 def get_zotero_reader_or_raise() -> ZoteroReader:
@@ -213,47 +212,6 @@ async def zotero_update_item_tags(item_key: str, req: ZoteroItemTagUpdateRequest
     writer = get_zotero_writer_or_raise()
     result = await asyncio.to_thread(direct_actions.apply_tag_edit, item_key, req, reader, writer)
     return await _finish_direct_edit(result, reader)
-
-
-def _apply_mirror_change(item_key: str, change_type: str, payload: dict[str, Any]) -> None:
-    writer = get_zotero_writer_or_raise()
-    if writer.is_connector_running():
-        raise ZoteroWriteError("Zotero is open; close it to save changes.", expected_io=True)
-    result = writer.apply_changes(
-        [{"id": 0, "item_key": item_key, "change_type": change_type, "payload_json": payload}],
-        True,
-    )
-    if result["failed"]:
-        failure = result["failed"][0]
-        raise ZoteroWriteError(failure["error"], expected_io=failure.get("expected_io") is True)
-
-
-def zotero_upsert_verdict_note(item_key: str, user_priority: str, comment: str) -> None:
-    """Mirror the verdict comment; refuse an open Zotero, back up, then upsert."""
-    from zotero_summarizer.services.zotero.pending import VERDICT_NOTE_MARKER, build_verdict_note_html
-
-    _apply_mirror_change(
-        item_key, "upsert_note",
-        {"note_html": build_verdict_note_html(user_priority, comment),
-         "marker": VERDICT_NOTE_MARKER, "note_title": f"Verdict: {user_priority}"},
-    )
-
-
-def zotero_set_label_tag(item_key: str, priority: str | None) -> None:
-    """Mirror a human label (``None`` clears it); preserve unrelated tags."""
-    detail = get_zotero_reader_or_raise().get_item_detail(item_key)
-    if detail is None:
-        raise ZoteroWriteError(f"item {item_key!r} not found in Zotero")
-    payload = build_label_tag_change(detail["tags"], priority)
-    if payload["add_tags"] or payload["remove_tags"]:
-        _apply_mirror_change(item_key, "tag_changes", payload)
-
-
-def zotero_upsert_digest_note(item_key: str, digest: Any) -> None:
-    """Compatibility entry: propose the exact published digest; never auto-write."""
-    from zotero_summarizer.services.zotero.generated_notes import stage_current_digest
-
-    stage_current_digest(item_key, digest)
 
 
 async def zotero_update_item_collections(item_key: str, req: ZoteroItemCollectionUpdateRequest) -> dict[str, Any]:

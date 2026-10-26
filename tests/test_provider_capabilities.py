@@ -14,6 +14,7 @@ from zotero_summarizer.models.providers import (
     StageModelConfig,
     resolve_stage,
 )
+from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.runtime import RuntimeState
 from zotero_summarizer.services.llm import factory
 from zotero_summarizer.services.triage import summarization
@@ -74,10 +75,11 @@ def test_production_feed_rejects_incompatible_before_credentials_or_transport(
 ):
     io = _wire_feed(monkeypatch, _provider(type=kind, capabilities=capabilities))
 
-    with pytest.raises(ValueError) as failure:
+    with pytest.raises(APIError) as failure:
         _run_feed()
 
-    assert str(failure.value) == "provider 'selected' lacks required capabilities: text"
+    assert failure.value.error == "unsupported_capabilities"
+    assert failure.value.status_code == 422
     io.key.assert_not_called()
     io.openai.assert_not_called()
     io.anthropic.assert_not_called()
@@ -95,13 +97,14 @@ def test_production_feed_compatible_and_legacy_preserve_route_and_wire(monkeypat
     provider = _provider(type=kind, max_tokens=8192, temperature=0.25, **declaration)
     io = _wire_feed(monkeypatch, provider)
 
+    identity = resolve_stage(io.app.app_state.config.llm_routing, "feed").fingerprint()
     first, second = _run_feed(), _run_feed()
 
     assert first.executive_summary == second.executive_summary == "Synthetic overview"
     assert first.should_deep_read == second.should_deep_read == "No"
     assert io.client.prompt.call_count == io.client.pydantic_prompt.call_count == 2
     io.key.assert_called_once_with("SYNTHETIC_KEY")
-    assert io.app._stage_clients == {("feed", None): io.client}
+    assert io.app._stage_clients == {("feed", None, identity): io.client}
     if kind == ProviderType.openai:
         io.anthropic.assert_not_called()
         io.openai.assert_called_once_with(
@@ -126,10 +129,11 @@ def test_feed_capability_change_observed_after_existing_cache_invalidation(monke
     io.openai.reset_mock()
     io.client.reset_mock()
 
-    with pytest.raises(ValueError) as failure:
+    with pytest.raises(APIError) as failure:
         _run_feed()
 
-    assert str(failure.value) == "provider 'selected' lacks required capabilities: text"
+    assert failure.value.error == "unsupported_capabilities"
+    assert failure.value.status_code == 422
     io.key.assert_not_called()
     io.openai.assert_not_called()
     io.client.prompt.assert_not_called()
@@ -144,11 +148,13 @@ def test_resolution_retains_feed_requirements_and_independent_inheritance():
 
     assert resolved.provider is provider
     assert resolved.model == "default-model"  # no cross-provider model guessing
-    assert resolved.required_capabilities == frozenset({"text"})
+    assert resolved.provider.available_capabilities == frozenset({'text'})
+    assert set(resolved.model_dump()) == {'stage', 'provider', 'model'}
     for stage in ("backlog", "deep_review"):
         other = resolve_stage(routing, stage)
         assert other.provider.name == "other" and other.model == "default-model"
-        assert other.required_capabilities == frozenset()
+        assert other.provider.available_capabilities == frozenset({'text'})
+        assert set(other.model_dump()) == {'stage', 'provider', 'model'}
 
 
 def test_stage_factory_rechecks_retained_requirement_before_credentials(monkeypatch):
@@ -160,10 +166,11 @@ def test_stage_factory_rechecks_retained_requirement_before_credentials(monkeypa
     monkeypatch.setattr(factory, "resolve_api_key", credentials)
     monkeypatch.setattr(factory, "build_llm", transport)
 
-    with pytest.raises(ValueError) as failure:
+    with pytest.raises(APIError) as failure:
         factory.build_client_for_stage(resolved)
 
-    assert str(failure.value) == "provider 'selected' lacks required capabilities: text"
+    assert failure.value.error == "unsupported_capabilities"
+    assert failure.value.status_code == 422
     credentials.assert_not_called()
     transport.assert_not_called()
 
@@ -180,50 +187,41 @@ def test_stage_factory_rechecks_retained_requirement_before_credentials(monkeypa
     ("openai", True, [], set()),
 ])
 def test_native_schema_requires_declaration_and_enabled_adapter(kind, structured, declaration, expected):
-    from zotero_summarizer.models.providers import LLMCapability
-
     provider = _provider(type=kind, structured_output=structured, capabilities=declaration)
-
     assert provider.available_capabilities == frozenset(expected)
-    resolved = ResolvedStage(stage="feed", provider=provider, model="feed-model",
-                             required_capabilities=frozenset({LLMCapability.native_json_schema}))
-    if "native_json_schema" in expected:
-        assert resolved.require_capabilities() is None
-    else:
-        with pytest.raises(ValueError) as failure:
-            resolved.require_capabilities()
-        assert str(failure.value) == "provider 'selected' lacks required capabilities: native_json_schema"
+    resolved = ResolvedStage(stage='feed', provider=provider, model='feed-model')
+    assert resolved.provider.available_capabilities == frozenset(expected)
+    restored = ResolvedStage.model_validate_json(resolved.model_dump_json())
+    assert restored.provider.available_capabilities == frozenset(expected)
+    assert restored.fingerprint() == resolved.fingerprint()
+    assert set(restored.model_dump()) == {'stage', 'provider', 'model'}
 
 
 def test_native_requirement_is_rejected_before_factory_credentials(monkeypatch):
-    from zotero_summarizer.models.providers import LLMCapability
+    from pydantic import ValidationError
 
-    provider = _provider(structured_output=True)  # opt-in wire alone is not a declaration
-    resolved = ResolvedStage(stage="feed", provider=provider, model="feed-model",
-                             required_capabilities=frozenset({LLMCapability.native_json_schema}))
-    credentials = Mock()
-    transport = Mock()
+    provider = _provider(structured_output=True)
+    credentials, transport = Mock(), Mock()
     monkeypatch.setattr(factory, "resolve_api_key", credentials)
     monkeypatch.setattr(factory, "build_llm", transport)
-
-    with pytest.raises(ValueError) as failure:
-        factory.build_client_for_stage(resolved)
-
-    assert str(failure.value) == "provider 'selected' lacks required capabilities: native_json_schema"
-    credentials.assert_not_called()
-    transport.assert_not_called()
+    for key, value in [('required_capabilities', ['native_json_schema']),
+                       ('unsupported_operation', 'image'), ('provider_route', 'foreign')]:
+        with pytest.raises(ValidationError) as failure:
+            factory.build_client_for_stage(ResolvedStage(
+                stage='feed', provider=provider, model='feed-model', **{key: value}))
+        assert failure.value.errors()[0]['type'] == 'extra_forbidden'
+        assert failure.value.errors()[0]['loc'] == (key,)
+        credentials.assert_not_called()
+        transport.assert_not_called()
 
 
 @pytest.mark.parametrize("kind", [ProviderType.openai, ProviderType.anthropic])
 def test_declared_native_schema_uses_existing_factory_path(monkeypatch, kind):
-    from zotero_summarizer.models.providers import LLMCapability
-
     provider = _provider(type=kind, structured_output=True,
                          capabilities=["text", "native_json_schema"])
     io = _wire_feed(monkeypatch, provider)
-    resolved = ResolvedStage(stage="feed", provider=provider, model="feed-model",
-                             required_capabilities=frozenset({LLMCapability.native_json_schema}))
-
+    resolved = ResolvedStage(stage='feed', provider=provider, model='feed-model')
+    assert resolved.provider.available_capabilities == frozenset({'text', 'native_json_schema'})
     assert factory.build_client_for_stage(resolved) is io.client
 
     io.key.assert_called_once_with("SYNTHETIC_KEY")
@@ -242,6 +240,23 @@ def test_declared_native_schema_uses_existing_factory_path(monkeypatch, kind):
         )
 
 
+@pytest.mark.parametrize('kind', [ProviderType.openai, ProviderType.anthropic])
+def test_legacy_wire_toggle_is_not_a_declaration_or_hardware_certificate(monkeypatch, kind):
+    provider = _provider(type=kind, structured_output=True)
+    io = _wire_feed(monkeypatch, provider)
+    assert provider.available_capabilities == frozenset({'text'})
+    resolved = ResolvedStage(stage='feed', provider=provider, model='feed-model')
+    assert factory.build_client_for_stage(resolved) is io.client
+    io.key.assert_called_once_with('SYNTHETIC_KEY')
+    if kind == ProviderType.openai:
+        assert io.openai.call_args.kwargs['structured_output'] is True
+        io.anthropic.assert_not_called()
+    else:
+        io.anthropic.assert_called_once_with(model='feed-model', api_key='synthetic-secret', max_tokens=4096,
+                                             base_url='https://selected.example/v1', thinking_budget=None)
+        io.openai.assert_not_called()
+
+
 @pytest.mark.parametrize("entry", ["_probe_stage", "_probe_stage_bounded", "_reach_stage",
                                    "_reach_stage_bounded", "check_routing_stages"])
 def test_unsupported_feed_diagnostics_are_structured_without_io(monkeypatch, entry):
@@ -249,32 +264,41 @@ def test_unsupported_feed_diagnostics_are_structured_without_io(monkeypatch, ent
     from zotero_summarizer.services.llm import model_list, operational_check
 
     io = _wire_feed(monkeypatch, _provider(capabilities=[]))
-    listing, probe = Mock(), Mock(return_value={"status": "operational", "detail": ""})
+    listing = Mock(return_value=[])
+    probe = Mock(wraps=operational_check.probe_provider)
     monkeypatch.setattr(model_list, "list_models_for_provider", listing)
+    monkeypatch.setattr(operational_check, "probe_provider", probe)
     routing = io.app.app_state.config.llm_routing
     if entry == "check_routing_stages":
-        report = asyncio.run(operational_check.check_routing_stages(
-            routing, stages=("feed",), probe=probe,
-        ))
+        routing.default = DefaultModelConfig(provider="selected", model="feed-model")
+        report = asyncio.run(operational_check.check_routing_stages(routing))
         assert report["status"] == "degraded"
-        assert len(report["stages"]) == 1
+        assert [row["stage"] for row in report["stages"]] == ["feed", "backlog", "deep_review"]
         row = report["stages"][0]
+        assert all({**item, "stage": "feed"} == row for item in report["stages"])
     else:
         result = getattr(operational_check, entry)(routing, "feed")
         row = asyncio.run(result) if entry.endswith("bounded") else result
 
-    assert row == {
-        "stage": "feed", "provider": "selected", "type": "openai", "model": "feed-model",
-        "base_url": "https://selected.example/v1", "status": "fail", "reachable": False,
-        "reason_code": "unsupported_capabilities",
-        "detail": "provider 'selected' lacks required capabilities: text",
-        "required_capabilities": ["text"], "declared_capabilities": [],
-    }
+    identity = {"stage": "feed", "provider": "selected", "type": "openai", "model": "feed-model",
+                "configured": True, "capable": False}
+    if entry.startswith("_reach"):
+        assert row == {**identity, "base_url": "https://selected.example/v1", "reachable": True, "detail": ""}
+        listing.assert_called_once_with(routing.provider_by_name("selected"))
+        probe.assert_not_called()
+        assert "observed_operational" not in row and "hardware_safe" not in row
+    else:
+        assert row == {**identity, "status": "fail", "reason_code": "unsupported_capabilities",
+                       "attempted": False, "detail": "Selected provider does not declare text support"}
+        listing.assert_not_called()
+        probe.assert_called_once_with(routing.provider_by_name("selected"), "feed-model")
     io.key.assert_not_called()
     io.openai.assert_not_called()
     io.anthropic.assert_not_called()
-    listing.assert_not_called()
-    probe.assert_not_called()
+    io.client.prompt.assert_not_called()
+    io.client.pydantic_prompt.assert_not_called()
+    io.corpus.assert_not_called()
+    assert io.app._stage_clients == {}
 
 
 @pytest.mark.parametrize("inference", [False, True], ids=["reachability", "inference"])
@@ -287,10 +311,12 @@ def test_disabled_diagnostics_do_not_become_capability_errors(monkeypatch, infer
                                                inference=inference)
 
     assert report["status"] == "disabled"
+    assert [row["stage"] for row in report["stages"]] == ["feed", "backlog", "deep_review"]
+    assert all(row["enabled"] is False for row in report["stages"])
     row = report["stages"][0]
     assert row["stage"] == "feed" and row["enabled"] is False
     assert row["detail"] == "AI features are disabled by choice"
-    assert row["reason_code"] == "llm_disabled"
+    assert row.get("reason_code") not in {"unsupported_capabilities", "inference_failed"}
     if inference:
         assert row["status"] == "disabled" and "reachable" not in row
     else:

@@ -210,14 +210,11 @@ def assess_digest(
     from zotero_summarizer.services.library._source_admission import admit_source
     from zotero_summarizer.services.library._review_attempt import identity, observed_client, record
 
-    if feed_context is not None:
-        from zotero_summarizer.models.research_feed import FeedReviewContext
-        feed_context = FeedReviewContext.model_validate(feed_context)
-        if not isinstance(feed_out, dict):
-            raise ValueError("feed context requires an attempt-local output collector")
-        feed_out.clear()
     if verification_audit is not None:
         verification_audit.clear()
+    if feed_context is not None:
+        from zotero_summarizer.services.library._feed_assessment import prepare_context
+        feed_context = prepare_context(feed_context, feed_out)
     record('config', identity(config.model_dump_json()), kind='identity')
     admit_source(full_text if verification_text is None else verification_text)
     template = config.prompts.paper_digest or _DEFAULT_DIGEST_PROMPT

@@ -53,6 +53,21 @@ def test_catalog_blocks_unsafe_profile_and_names_download(monkeypatch, tmp_path)
     assert "32 GB memory" in rows["balanced"]["compatibility_detail"]
 
 
+@pytest.mark.parametrize("memory_gb", [8, 64])
+def test_catalog_does_not_claim_existing_model_capacity_from_zero_static_floors(monkeypatch, tmp_path, memory_gb):
+    from zotero_summarizer.services.setup import profiles
+
+    monkeypatch.setattr(profiles, "hardware_snapshot", lambda _s: {"memory_gb": memory_gb, "disk_free_gb": 100})
+    rows = {row["id"]: row for row in local_profile_catalog(SimpleNamespace(data_dir=tmp_path))["profiles"]}
+    assert rows["existing"]["compatible"] is True
+    assert rows["existing"]["model"] is None
+    assert rows["existing"]["compatibility_detail"] == "Runtime compatibility and capacity are unverified"
+    if memory_gb >= 12:
+        assert rows["light"]["compatibility_detail"] == "Meets static profile floors"
+    else:
+        assert "needs 12 GB memory" in rows["light"]["compatibility_detail"]
+
+
 def test_set_local_profile_refuses_unsafe_hardware(monkeypatch, tmp_path):
     from zotero_summarizer.services.setup import profiles
 

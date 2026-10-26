@@ -53,7 +53,8 @@ function Card({ record, index }) {
 }
 
 export default function WeeklyDigest({ report }) {
-  const { metadata, cards, rejected_near_threshold: rejects, manual_full_text_required: missing, failed, research_ideas_by_project: ideas = {} } = report;
+  const { metadata, cards, rejected_near_threshold: rejects, manual_full_text_required: missing,
+    unqualified_reviews: unqualified = [], failed, research_ideas_by_project: ideas = {} } = report;
   return <div className="space-y-6 min-w-0">
     <header><h2 className="font-display text-2xl">Research Intelligence digest</h2>
       <p className="break-words">{metadata.from} → {metadata.to}</p>
@@ -73,8 +74,12 @@ export default function WeeklyDigest({ report }) {
     </section>
     <section><h3 className="font-display text-xl">Needs a current review / full text</h3>
       <p className="text-sm text-slate-600">A missing saved review does not prove the PDF is unavailable. Open the paper to check its current review and source.</p>
-      {!missing.length && <p>None recorded.</p>}
-      <ul>{missing.map((candidate) => <li key={candidate.source_id}><PaperLink id={candidate.source_id}>{candidate.title}</PaperLink></li>)}</ul>
+      {!missing.length && !unqualified.length && <p>None recorded.</p>}
+      <ul>{missing.map((candidate) => <li key={candidate.source_id}><PaperLink id={candidate.source_id}>{candidate.title}</PaperLink></li>)}
+        {unqualified.map(({ candidate, reason }, index) => <li key={`unqualified-${index}`}>
+          <PaperLink id={candidate.source_id}>{candidate.title}</PaperLink> — Review not qualified: {reason}
+        </li>)}
+      </ul>
     </section>
     <details><summary className="cursor-pointer">Why rejected near the threshold ({rejects.length})</summary>
       {!rejects.length && <p>No near-threshold rejects recorded (not a complete rejection audit).</p>}

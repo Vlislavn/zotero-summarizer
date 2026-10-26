@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from time import monotonic
 
+from . import decision_adapter
 from .decision_adapter import NativeDecisionAdapter, ProviderReply, admit_native
 from .priority import (BaselineArtifact, BaselineReadout, Config, Inputs, Readout, Result,
                        Truth, admit, payload, project)
@@ -132,7 +133,8 @@ def evaluate(row, arm, cfg, request, retain, *, recording=None, transport=None, 
         reply = ProviderReply(recording, status, readout, {'reserved': False, 'dispatched': False,
             'terminal_status': 'received', 'elapsed_seconds': None, 'client_retries': 0})
     else:
-        reply = NativeDecisionAdapter(arm, cfg, transport=transport, projector=project)(
+        reply = NativeDecisionAdapter(arm, cfg, transport=transport, projector=project,
+                                      max_elapsed_seconds=remaining)(
             request, retain, timeout=min(remaining, cfg.idle_timeout_seconds))
     row.update(status=reply.status, readout=reply.readout, telemetry=reply.telemetry,
                label=reply.readout['label'] if reply.status == 'decision' else None)
@@ -245,14 +247,22 @@ def reopen(owner):
                 if terminal != recording or row['telemetry']['terminal_status'] != 'received':
                     raise ValueError('recording input/terminal binding mismatch')
                 terminal = recording
+            else:
+                decision_adapter.check_native_transport(row['telemetry'], terminal, requests[key], cfg)
             status, readout = project(terminal, arm, cfg, row['telemetry']['terminal_status'])
             if (status != row['status'] or readout != row['readout'] or row['request_sha256'] != sha(requests[key])
                     or row['label'] != (readout['label'] if status == 'decision' else None)):
                 raise ValueError('native projection mismatch')
         else:
             check_unattempted(row, base, arm, requests[key], recordings.get((arm.arm_id, key)))
-    if {n for n in saved if n.startswith('terminal-')} != {r['terminal'] for r in rows if 'terminal' in r}:
-        raise ValueError('unreferenced terminal inventory')
+    expected = {'config.original.json', 'config.json', 'inputs.json', 'gold.json', 'report.json', 'report.md'}
+    expected.update(f'baseline-{i}.json' for i, arm in enumerate(cfg.baselines)
+                    if arm.artifact and f'baseline-{i}.json' in saved)
+    expected.update(f'recording-{i}.bin' for i in range(len(inputs.recordings)))
+    expected.update(f'case-{i}.json' for i in range(len(pairs)))
+    expected.update(r['terminal'] for r in rows if 'terminal' in r)
+    if set(saved) != expected:
+        raise ValueError('foreign/missing admitted publication inventory')
     result = report(rows, cfg, inputs, truth)
     if encoded(result) != saved['report.json'] or readable(result).encode() != saved['report.md']:
         raise ValueError('report projection mismatch')

@@ -8,6 +8,7 @@ from zotero_summarizer.models import SummarizeRequest, SummarizeResponse
 from zotero_summarizer.models.providers import resolve_stage
 from zotero_summarizer.services._common import now_iso_z, read_config, state, write_json_atomic
 from zotero_summarizer.services.library._feed_assessment import fingerprint
+from zotero_summarizer.services.llm import factory
 
 
 class CandidateCursor:
@@ -43,7 +44,7 @@ class CandidateCursor:
                 raise ValueError("abstract unavailable for triage")
             from zotero_summarizer.services.triage.summarization import run_abstract_dry
             summary = run_abstract_dry(config, SummarizeRequest(title=candidate.title, abstract=candidate.abstract,
-                                      doi=candidate.doi), app.resolve_stage_client("feed"))
+                                      doi=candidate.doi), factory.resolve_stage_client(app, "feed"))
             entry = {"input_sha256": identity, "summary": summary.model_dump(mode="json"),
                      "generated_at": now_iso_z(), "model": resolved.model, "provider": resolved.provider.name,
                      "basis": "abstract_only"}
@@ -55,7 +56,7 @@ class CandidateCursor:
             write_json_atomic(self.path, self.entries)
         if entry.get("payload_sha256") != fingerprint({k: v for k, v in entry.items() if k != "payload_sha256"}):
             raise ValueError("feed triage cache checksum mismatch")
-        summary = SummarizeResponse.model_validate(entry["summary"]).model_dump(mode="json")
+        summary = SummarizeResponse.model_validate(entry["summary"], strict=True).model_dump(mode="json")
         return {"decision": "triaged_pending", "composite_score": summary["composite_relevance_score"],
                 "reading_priority": summary["reading_priority"], "shap_contribs_json": json.dumps({"summary": summary}),
                 "triage_provenance": {key: entry[key] for key in ("input_sha256", "generated_at", "model", "provider", "basis")}}

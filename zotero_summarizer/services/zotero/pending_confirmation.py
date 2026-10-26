@@ -100,8 +100,8 @@ def require_pending_actions(rows: list[dict]) -> None:
 
 
 def check_uncertainty(conn, item_keys: list[str], target: ZoteroTargetIdentity, *,
-                      owned_claim: dict | None = None) -> None:
-    blockers = pending_actions.applying_blockers(conn, item_keys, target, owned_claim=owned_claim)
+                      owned_claims: list[dict] | None = None) -> None:
+    blockers = pending_actions.applying_blockers(conn, item_keys, target, owned_claims=owned_claims)
     if blockers:
         raise APIError(error="zotero_write_uncertain", message="Earlier delivery needs reconciliation",
                        status_code=409, details={"delivery_status": "uncertain", "blocking_action_ids": blockers})

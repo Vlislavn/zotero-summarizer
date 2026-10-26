@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 
+from tests._reading_contract import Document
 from zotero_summarizer.services.library import _paper_read_brief as brief
 from zotero_summarizer.services.library import _paper_read_html as h
 
@@ -48,6 +49,20 @@ def test_board_renders_all_states_and_gauge():
     assert "2/3 passes" in html  # self-consistency, surfaced on the gauge
     # the fired+relevant goal "takes the stain"; miss/not-retrieved stay unstained
     assert "state-hit stained" in html and "unstained" in html
+
+
+def test_position_rubric_labels_preserve_actual_applicability_and_unknown_keys():
+    labels = {
+        "thesis": "States a clear thesis / position",
+        "evidence_cited": "Supports premises with cited evidence",
+        "scope_match": "Matches claim scope to the evidence offered",
+    }
+    for key, label in labels.items():
+        _, rows, caption = brief._decisive_rows({key: "NO", "absent": "na"}, "flag")
+        assert rows == [(False, label)]
+        assert caption == "0/1 applicable checks met"
+    assert brief._decisive_rows({"future_criterion": "no"}, "flag")[1] == [(False, "future criterion")]
+    assert brief._decisive_rows({}, "flag")[1] == []
 
 
 def test_gauge_needle_position_tracks_band():
@@ -201,7 +216,7 @@ def test_digest_action_overrides_relevance_without_hiding_relevance():
     digest = {"read_decision": "skip", "read_why": "The digest captures the useful result.",
               "estimated_read_minutes": 4}
     html = brief.brief_html(CONTENT, digest=digest, quality=HIGHLIGHT_Q, goal_summaries=GOALS)
-    assert "DIGEST IS ENOUGH · 4 MIN" in html and "digest captures" in html
+    assert "DIGEST IS ENOUGH · 4 MIN" in Document(html).root.text() and "digest captures" in html
     assert "HIGH RELEVANCE" in html and "DEEP-READ" not in html
 
 
@@ -247,7 +262,8 @@ def test_presentation_qualified_original_read_keeps_explicit_read_action():
 
     html = h._render_presentation(CONTENT, digest, quality, GOALS)
 
-    assert '<div class="v-word">READ</div>' in html
+    words = [node.text() for node in Document(html).root.nodes() if node.attrs.get("class") == "v-word"]
+    assert words == ["READ · Time not estimated"]
     assert "basis" not in DIGEST and "read_parts" not in DIGEST
 
 

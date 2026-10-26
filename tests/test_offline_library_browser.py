@@ -110,7 +110,10 @@ def test_cold_offline_library_popup_ordered_verdict_note_restart_and_uuid_replay
     assert len(lab.server.receipts) == before_requests
     page.get_by_role("button").filter(has_text=TITLE).first.click()
     expect(questions._notes_editor(page)).to_have_value("Initial manual note")
-    expect(page.get_by_text("Compact synced context", exact=False)).to_be_visible()
+    notice = page.get_by_role('status').filter(has_text='Compact synced context —')
+    expect(notice).to_be_visible()
+    expect(notice).to_have_text(
+        'Compact synced context — summary and abstract may be abbreviated. The full review needs the Mac.')
     lab.context.on("page", lambda tab: tab.on("pageerror", lambda error: lab.page_errors.append(str(error))))
     with lab.context.expect_page() as opened:
         page.get_by_role("button", name="Open full review ↗", exact=True).click()

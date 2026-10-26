@@ -76,6 +76,12 @@ export default function useDeepReviewRunner(itemKey, { deep, onDone, autoRun = f
     run();
   }, [autoRun, itemKey, reachability.isPending, statusQuery.isSuccess, reviewed, running, deep, status.status, llmAvailable, run]);
 
+  const retryStatus = useCallback(() => {
+    autoRunFiredFor.current = itemKey;
+    return statusQuery.refetch();
+  }, [itemKey, statusQuery.refetch]);
+
   return { status, error: variables?.itemKey === itemKey ? runError?.message || null : null,
-    llm, llmAvailable, online, serverAvailable, llmChecked: reachability.isSuccess, running, run };
+    llm, llmAvailable, online, serverAvailable, llmChecked: reachability.isSuccess, running, run,
+    retryStatus, checkingStatus: statusQuery.isFetching };
 }

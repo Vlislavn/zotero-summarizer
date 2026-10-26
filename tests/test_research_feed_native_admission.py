@@ -1,6 +1,7 @@
 """Native admission belongs to _assess, not the public pure triage projection."""
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import sqlite3
 
@@ -122,18 +123,19 @@ def test_consumed_invalid_input_precedes_unknown_native_state_without_exporting_
     assert "fixture-private-state" not in json.dumps(payload)
 
 
-def test_no_prior_history_keeps_public_operational_path_and_distinct_reason(tmp_path):
+def test_no_prior_history_keeps_pure_projection_separate_from_cached_only_admission(tmp_path):
     settings, key = _input(tmp_path)
     with sqlite3.connect(settings.triage_db_path) as conn:
         conn.execute("DELETE FROM processed_feed_items WHERE stable_feed_key=?", (key,))
     candidate = source.load_candidates(settings.triage_db_path, start=START, end=END, limit=1, venue="")[0]
-    expected = runner.triage_candidate(candidate, None, runner.load_profile(settings.data_dir)).model_dump(mode="json")
+    assert runner.triage_candidate(candidate, None, runner.load_profile(settings.data_dir)).include is False
     payload = _run(settings)
     entry = payload["metadata"]["source_history"][key]
     assert entry["history"] == "missing" and entry["reason"] == "no_prior_history"
-    assert entry["admission"] == {"status": "excluded", "reason": "no_prior_history", "native_decision": None}
-    assert payload["rejected_near_threshold"][0]["triage"] == expected
-    assert payload["failed"] == [] and _body(payload, key) == candidate.model_dump(mode="json")
+    assert entry["admission"] == {"status": "failed", "reason": "abstract_triage_unavailable", "native_decision": None}
+    assert payload["rejected_near_threshold"] == []
+    assert payload["failed"] == [{"source_id": key, "error": "ValueError: cached abstract triage unavailable"}]
+    assert _body(payload, key) == candidate.model_dump(mode="json")
 
 
 @pytest.mark.parametrize("decision", [fs.DECISION_USER_REJECTED, "fixture-private-state"])
@@ -196,7 +198,7 @@ def test_public_three_positional_callback_sees_exact_recovered_text_and_original
     assert payload["cards"][0]["provenance"]["basis"] == "full_text"
 
 
-def test_public_callback_failure_is_bounded_and_keeps_valid_native_observation(tmp_path, monkeypatch):
+def test_public_callback_failure_is_bounded_and_keeps_valid_native_observation(tmp_path, monkeypatch, caplog):
     settings, bad = _input(tmp_path, decision=fs.DECISION_USER_REJECTED)
     good = _paper(settings, 2)
     original = runner.triage_candidate
@@ -207,13 +209,33 @@ def test_public_callback_failure_is_bounded_and_keeps_valid_native_observation(t
         return original(candidate, row, profile)
 
     monkeypatch.setattr(runner, "triage_candidate", fail_one)
-    payload = _run(settings)
+    with caplog.at_level("WARNING", logger=runner.LOGGER.name):
+        payload = _run(settings)
+    warnings = [record for record in caplog.records if record.name == runner.LOGGER.name]
+    assert len(warnings) == 1 and warnings[0].exc_info is None
+    assert "PRIVATE" not in warnings[0].getMessage()
     assert [record["candidate"]["source_id"] for record in payload["cards"]] == [good]
     assert payload["failed"] == [{"source_id": bad, "error": "RuntimeError: triage_history_invalid"}]
     assert payload["metadata"]["source_history"][bad]["admission"] == {
         "status": "failed", "reason": "triage_history_invalid", "native_decision": fs.DECISION_USER_REJECTED,
     }
     assert "PRIVATE" not in json.dumps(payload)
+
+
+@pytest.mark.parametrize("bad_projection", [None, {}, False])
+def test_malformed_callback_projection_fails_one_paper_without_backfill(tmp_path, monkeypatch, bad_projection):
+    settings, bad = _input(tmp_path)
+    good = _paper(settings, 2)
+    project = runner.triage_candidate
+    monkeypatch.setattr(runner, "triage_candidate", lambda candidate, row, profile:
+                        bad_projection if candidate.source_id == bad else project(candidate, row, profile))
+    payload = _run(settings)
+    assert [row["candidate"]["source_id"] for row in payload["cards"]] == [good]
+    assert payload["failed"] == [{"source_id": bad, "error": "TypeError: triage_history_invalid"}]
+    assert payload["metadata"]["source_history"][bad]["admission"] == {
+        "status": "failed", "reason": "triage_history_invalid", "native_decision": fs.DECISION_TRIAGED_PENDING,
+    }
+    _assert_one_home(payload)
 
 
 def test_prebudget_metadata_is_one_addition_across_all_homes_failures_and_cuts(tmp_path):
@@ -230,13 +252,14 @@ def test_prebudget_metadata_is_one_addition_across_all_homes_failures_and_cuts(t
         conn.execute("UPDATE processed_feed_items SET source_type='zotero' WHERE stable_feed_key=?", (keys[24],))
     admitted = source.load_candidates(settings.triage_db_path, start=START, end=END, limit=100, venue="")
     rows = runner._latest_rows(settings.triage_db_path)
+    retained = {key: _review(key) for key in keys.values()}
 
     def loader(key):
         if key == keys[7]:
             return None
         if key == keys[6]:
             raise RuntimeError("owned downstream review failure")
-        return _review(key)
+        return deepcopy(retained[key])
 
     payload = _run(settings, shortlist_budget=5, card_budget=3, review_loader=loader)
     history = payload["metadata"]["source_history"]

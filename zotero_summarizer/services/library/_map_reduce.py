@@ -101,6 +101,9 @@ def digest_for_strategy(
     if verification_audit is not None:
         verification_audit.clear()
         extra['verification_audit'] = verification_audit
+    if feed_context is not None:
+        from zotero_summarizer.services.library._feed_assessment import prepare_context
+        feed_context = prepare_context(feed_context, feed_out)
     admit_source(full_text)
     strategy = config.quality_review.chunk_strategy
     if strategy == "map_reduce":
@@ -145,6 +148,9 @@ def map_reduce_digest(
 
     if verification_audit is not None:
         verification_audit.clear()
+    if feed_context is not None:
+        from zotero_summarizer.services.library._feed_assessment import prepare_context
+        feed_context = prepare_context(feed_context, feed_out)
     admit_source(full_text)
     recorded_map = observed_client(map_llm, 'map')
     chunks = split_chunks(full_text, chunk_chars)

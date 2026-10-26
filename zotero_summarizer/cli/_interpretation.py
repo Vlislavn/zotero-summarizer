@@ -48,11 +48,12 @@ def command(args):
             from zotero_summarizer.models import AppState
             from zotero_summarizer.runtime import RuntimeState
             from zotero_summarizer.services._common import read_config
+            from zotero_summarizer.services.llm import factory
 
             config = read_config(settings.config_path)
             runtime = RuntimeState(app_state=AppState(config=config))
             def build(role, profile):
-                return runtime.resolve_stage_client(profile.stage, enable_thinking=profile.provider.thinking_on if role == 'reduce' else None)
+                return factory.resolve_stage_client(runtime, profile.stage, enable_thinking=profile.provider.thinking_on if role == 'reduce' else None)
             root = execute(settings, snapshot, config, model_profiles(config), build)
             result = {'status': 'ASSIGNED_OUTCOMES_RECORDED_NOT_SCIENTIFIC_ACCEPTANCE', 'run_id': root.name}
     print(json.dumps(result, ensure_ascii=False, indent=2))

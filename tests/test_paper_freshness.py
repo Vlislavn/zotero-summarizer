@@ -126,8 +126,8 @@ def _qa_app(monkeypatch):
         app_state=SimpleNamespace(config=SimpleNamespace(
             quality_review=SimpleNamespace(max_text_chars=60_000), llm_routing=None,
         )),
-        resolve_stage_client=lambda stage: Model(),
     )
+    monkeypatch.setattr(qa.factory, "resolve_stage_client", lambda app, stage: Model())
     monkeypatch.setattr(qa, "state", lambda: app)
     monkeypatch.setattr(qa, "resolve_stage", lambda *args: SimpleNamespace(model="fake"))
     return prompts
@@ -211,7 +211,7 @@ def test_renderer_revision_does_not_hide_unreadable_source(monkeypatch):
 def test_empty_artifact_body_fails_before_resolving_model(monkeypatch, mode):
     monkeypatch.setattr(paper_render, "build_paper_read", lambda key: {"full_text": " "})
     _qa_app(monkeypatch)
-    qa.state().resolve_stage_client = lambda stage: pytest.fail("empty body must fail before model resolution")
+    monkeypatch.setattr(qa.factory, "resolve_stage_client", lambda app, stage: pytest.fail("empty body must fail before model resolution"))
     with pytest.raises(APIError) as caught:
         qa.ask_paper("KEY", "Which dataset?", mode=mode)
     assert caught.value.error == "extraction_empty"

@@ -1,4 +1,4 @@
-"""Accepted production verification -> correction/map -> cache -> HTTP export."""
+"""Accepted production verification -> bound cache -> internal read-only export."""
 from copy import deepcopy
 from dataclasses import replace
 import hashlib
@@ -11,11 +11,12 @@ from fastapi.testclient import TestClient
 
 from test_digest_verification import PAPER, _Verifier, _digest
 from test_review_source_boundary import _Mapper
-from zotero_summarizer.api.errors import install_error_handlers
+from zotero_summarizer.api.errors import APIError, install_error_handlers
 from zotero_summarizer.api.routes import library
 from zotero_summarizer.runtime import AppContext, set_context
 from zotero_summarizer.services.library import _review_cache, deep_review
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
+from zotero_summarizer.services.zotero import generated_notes
 from zotero_summarizer.settings import Settings
 
 KEY = 'feed:d:' + 'a' * 64
@@ -71,12 +72,12 @@ def publish(env, *, correction=False, strategy='rank', mapper=None, source=PAPER
     return entry, generator, path
 
 
-def get(env, url=URL, **kwargs):
+def http_get(env, url=URL, **kwargs):
     with TestClient(env.app, base_url='http://localhost', client=('127.0.0.1', 50000)) as client:
         return client.get(url, **kwargs)
 
 
-def test_actual_review_correction_cache_http_export_roundtrip(audit_env, monkeypatch):
+def test_actual_review_correction_cache_internal_export_roundtrip(audit_env, monkeypatch):
     entry, generator, path = publish(audit_env, correction=True)
     before = _review_cache._cache_path().read_bytes()
     source_before = path.read_bytes()
@@ -88,21 +89,18 @@ def test_actual_review_correction_cache_http_export_roundtrip(audit_env, monkeyp
     monkeypatch.setattr(deep_review, '_try_rebuild_render', forbidden)
     import keyring
     import sqlite3
-    from zotero_summarizer.runtime import RuntimeState
+    from zotero_summarizer.services.llm import factory
     from zotero_summarizer.services.library import _pdf_acquire
     from zotero_summarizer.services.zotero import zotero
-    monkeypatch.setattr(RuntimeState, 'resolve_stage_client', forbidden)
+    monkeypatch.setattr(factory, 'resolve_stage_client', forbidden)
     monkeypatch.setattr(keyring, 'get_password', forbidden)
     monkeypatch.setattr(sqlite3, 'connect', forbidden)
     monkeypatch.setattr(_pdf_acquire, 'acquire_for_item', forbidden)
     monkeypatch.setattr(zotero, 'get_library_reader', forbidden)
     monkeypatch.setattr(zotero, 'resolve_reader_for_key', forbidden)
-    monkeypatch.setattr(zotero, 'zotero_upsert_digest_note', forbidden)
+    monkeypatch.setattr(generated_notes, 'stage_current_digest', forbidden)
 
-    response = get(audit_env)
-
-    assert response.status_code == 200
-    payload = response.json()
+    payload = _review_cache.export_review_audit(KEY)
     assert payload['item_key'] == KEY and payload['digest'] == entry['digest']
     assert payload['audit_status'] == 'available' and payload['reason'] == ''
     audit = payload['verification_audit']
@@ -125,7 +123,6 @@ def test_actual_review_correction_cache_http_export_roundtrip(audit_env, monkeyp
     fragment = passage['original_fragments'][0]
     assert fragment['original_span'] == {'start': 0, 'end': len(PAPER)}
     assert fragment['text'] == PAPER
-    assert response.headers['cache-control'] == 'no-store'
     assert _review_cache._cache_path().read_bytes() == before and path.read_bytes() == source_before
     assert sorted(p.name for p in audit_env.root.iterdir()) == ['deep_reviews.json', 'source.pdf']
 
@@ -138,14 +135,13 @@ def test_map_fallback_is_retained_through_real_publication_and_export(audit_env)
 
     mapper = MalformedMapper('Generated notes are not original evidence.')
     entry, generator, _ = publish(audit_env, strategy='map_reduce', mapper=mapper)
-    response = get(audit_env)
-    assert response.status_code == 200
-    audit = response.json()['verification_audit']
+    payload = _review_cache.export_review_audit(KEY)
+    audit = payload['verification_audit']
     assert audit == entry['verification_audit']
     assert audit['lineage'][0]['verifier_route'] == 'generator_fallback'
     assert audit['lineage'][0]['unavailable_routes'] == ['primary']
     assert mapper.calls == 2 and generator.generated == generator.calls == 1
-    assert response.json()['digest']['basis'] == 'map_reduce'
+    assert payload['digest']['basis'] == 'map_reduce'
     assert audit['verified_digest']['basis'] == 'full_text'
     assert 'basis' in audit['post_verification_changes']
     assert all(row['matches_cached_field'] for row in audit['claims'])
@@ -157,7 +153,7 @@ def test_partial_selection_reports_actual_original_fragments_and_unknown_complet
     source = 'Background prose. ' * 250 + 'Methodology results findings evaluation. ' * 100
     audit_env.config.quality_review.max_text_chars = 700
     publish(audit_env, strategy=strategy, source=source)
-    payload = get(audit_env).json()
+    payload = _review_cache.export_review_audit(KEY)
     assert payload['audit_status'] == 'available'
     audit = payload['verification_audit']
     assert audit['source']['original_characters'] == len(source.strip())
@@ -182,7 +178,7 @@ def test_repeated_text_keeps_occurrence_coordinates_not_first_find(audit_env):
     source = ('Repeated source words demonstrate exact occurrence identity in text. ' * 220)
     audit_env.config.quality_review.max_text_chars = 2800
     publish(audit_env, mapper=SecondPassage('unused'), source=source)
-    audit = get(audit_env).json()['verification_audit']
+    audit = _review_cache.export_review_audit(KEY)['verification_audit']
     assert audit['passages'][0]['id'] == 1
     exact = [fragment for passage in audit['passages'] for fragment in passage['original_fragments']
              if fragment['original_span'] is not None]
@@ -218,7 +214,7 @@ def test_export_drift_invalidates_current_evidence_without_changing_stored_bytes
         audit_env.config.research_goals.append('Different reader preference')
         expected = 'review_configuration_changed'
     before = _review_cache._cache_path().read_bytes()
-    result = get(audit_env).json()
+    result = _review_cache.export_review_audit(KEY)
     assert result['audit_status'] == 'stale' and result['reason'] == expected
     assert result['verification_audit'] is None and result['retained_evidence'] is None
     assert not _review_cache.review_is_current(_review_cache._read_all(readonly=True)[KEY], KEY)
@@ -233,7 +229,7 @@ def test_legacy_and_missing_source_remain_unavailable_not_scientific_negatives(a
         _review_cache._write_one(KEY, entry)
     else:
         path.unlink()
-    result = get(audit_env).json()
+    result = _review_cache.export_review_audit(KEY)
     assert result['audit_status'] == 'unavailable' and result['verification_audit'] is None
     assert result['retained_evidence'] is None
     assert result['reason'] == ('legacy_audit_unavailable' if legacy else 'source_unavailable')
@@ -267,23 +263,27 @@ def test_structurally_malformed_receipts_are_errors_not_negative_labels(audit_en
     audit['identity']['audit_sha256'] = payload_hash(audit)
     _review_cache._write_one(KEY, entry)
     before = _review_cache._cache_path().read_bytes()
-    response = get(audit_env)
-    assert response.status_code == 422 and response.json()['error'] == 'audit_invalid'
+    with pytest.raises(APIError) as error:
+        _review_cache.export_review_audit(KEY)
+    assert (error.value.status_code, error.value.error) == (422, 'audit_invalid')
     assert _review_cache._cache_path().read_bytes() == before
 
 
 @pytest.mark.parametrize('raw', [b'{', b'[]', b'{"reviews":[]}', b'\xff'])
 def test_export_never_quarantines_or_repairs_malformed_cache(audit_env, raw):
     _review_cache._cache_path().write_bytes(raw)
-    response = get(audit_env)
-    assert response.status_code == 422 and response.json()['error'] == 'audit_invalid'
+    with pytest.raises(APIError) as error:
+        _review_cache.export_review_audit(KEY)
+    assert (error.value.status_code, error.value.error) == (422, 'audit_invalid')
     assert _review_cache._cache_path().read_bytes() == raw
     assert sorted(p.name for p in audit_env.root.iterdir()) == ['deep_reviews.json']
 
 
 @pytest.mark.parametrize('key', ['short', ' ABCDEFGH', 'feed:d:' + 'z' * 64])
 def test_export_requires_an_exact_valid_key(audit_env, key):
-    assert get(audit_env, '/api/library/deep-review/' + key + '/audit').status_code == 422
+    with pytest.raises(APIError) as error:
+        _review_cache.export_review_audit(key)
+    assert (error.value.status_code, error.value.error) == (422, 'validation_error')
     assert not _review_cache._cache_path().exists()
 
 
@@ -291,7 +291,7 @@ def test_materialization_cache_copy_preserves_exact_receipt_without_native_actio
     entry, _, _ = publish(audit_env)
     receipt = deepcopy(entry['verification_audit'])
     assert _review_cache.copy_review(KEY, 'ABCDEFGH')
-    copied = get(audit_env, '/api/library/deep-review/ABCDEFGH/audit').json()
+    copied = _review_cache.export_review_audit('ABCDEFGH')
     assert copied['audit_status'] == 'available' and copied['item_key'] == 'ABCDEFGH'
     assert copied['verification_audit'] == receipt
     assert _review_cache._read_all(readonly=True)[KEY] == entry
@@ -308,7 +308,8 @@ def test_changed_source_during_generation_never_reaches_note_or_cache(audit_env,
 
     def forbidden(*args, **kwargs):
         pytest.fail('Changed source must stop before note publication')
-    monkeypatch.setattr(deep_review, '_write_digest_note', forbidden)
+    monkeypatch.setattr(generated_notes, 'stage_current_digest', forbidden)
+    monkeypatch.setattr(deep_review, '_write_one', forbidden)
     reader = SimpleNamespace(get_item_detail=lambda key: {'title': 'Synthetic paper'})
     with pytest.raises(ValueError, match='source changed'):
         deep_review._review_one({'item_key': KEY, 'pdf_path': str(path)}, reader=reader,
@@ -333,7 +334,6 @@ def _publish_attached(env, monkeypatch):
                      (child, parent, 'application/pdf', str(path)))
     reader = ZoteroReader(db.parent)
     env.context.state.zotero_reader = reader
-    monkeypatch.setattr(deep_review, '_write_digest_note', lambda key, digest: (False, None))
     context = dict(reader=reader, config=env.config, extractor=SimpleNamespace(extract_text=lambda path: PAPER),
                    llm=ScriptedClient(), quality_enabled=True)
     deep_review._review_worker({'item_key': 'ABCDEFGH'}, context, '')
@@ -346,7 +346,7 @@ def test_native_export_retains_source_evidence_without_reader_access(audit_env, 
     import sqlite3
     import keyring
     from zotero_summarizer.integrations.zotero_read import ZoteroReader
-    from zotero_summarizer.runtime import RuntimeState
+    from zotero_summarizer.services.llm import factory
     from zotero_summarizer.services.library import _pdf_acquire
     from zotero_summarizer.services.zotero import zotero
 
@@ -379,19 +379,16 @@ def test_native_export_retains_source_evidence_without_reader_access(audit_env, 
         return conn
     monkeypatch.setattr(sqlite3, 'connect', readonly_connect)
     monkeypatch.setattr(ZoteroReader, '__init__', forbidden)
-    monkeypatch.setattr(RuntimeState, 'resolve_stage_client', forbidden)
+    monkeypatch.setattr(factory, 'resolve_stage_client', forbidden)
     monkeypatch.setattr(zotero, 'get_library_reader', forbidden)
     monkeypatch.setattr(zotero, 'resolve_reader_for_key', forbidden)
-    monkeypatch.setattr(zotero, 'zotero_upsert_digest_note', forbidden)
+    monkeypatch.setattr(generated_notes, 'stage_current_digest', forbidden)
     monkeypatch.setattr(keyring, 'get_password', forbidden)
     monkeypatch.setattr(_pdf_acquire, 'acquire_for_item', forbidden)
     monkeypatch.setattr(_review_cache, '_write_one', forbidden)
     before = {str(p.relative_to(audit_env.root)): p.read_bytes() for p in audit_env.root.rglob('*') if p.is_file()}
 
-    response = get(audit_env, '/api/library/deep-review/ABCDEFGH/audit')
-
-    assert response.status_code == 200
-    payload = response.json()
+    payload = _review_cache.export_review_audit('ABCDEFGH')
     assert (payload['audit_status'], payload['reason']) == ('unavailable', 'current_item_binding_unavailable')
     assert payload['verification_audit'] is None
     retained = payload['retained_evidence']
@@ -415,7 +412,7 @@ def test_current_cache_requires_actual_unchanged_initialized_attachment(audit_en
     monkeypatch.setattr(deep_review, '_review_worker', forbidden)
     assert _review_cache.get_current_review('ABCDEFGH') is not None
     assert 'ABCDEFGH' in _review_cache.current_review_keys()
-    assert get(audit_env, '/api/library/deep-review/ABCDEFGH/audit').json()['audit_status'] == 'unavailable'
+    assert _review_cache.export_review_audit('ABCDEFGH')['audit_status'] == 'unavailable'
     assert _review_cache.get_current_review('ABCDEFGH') is not None
     replacement = audit_env.root / 'new-attachment.pdf'
     replacement.write_bytes(b'Another synthetic source')
@@ -430,19 +427,36 @@ def test_current_cache_requires_actual_unchanged_initialized_attachment(audit_en
     assert _review_cache._cache_path().read_bytes() == before
 
 
-def test_missing_key_is_404_without_cache_creation(audit_env):
-    assert get(audit_env).status_code == 404
+def test_missing_key_is_not_found_without_cache_creation(audit_env):
+    with pytest.raises(APIError) as error:
+        _review_cache.export_review_audit(KEY)
+    assert (error.value.status_code, error.value.error) == (404, 'not_found')
     assert list(audit_env.root.iterdir()) == []
 
 
+def test_published_audit_has_no_http_surface_or_cache_read(audit_env, monkeypatch):
+    publish(audit_env)
+    before = _review_cache._cache_path().read_bytes()
+    def forbidden(*args, **kwargs):
+        pytest.fail('An absent HTTP surface cannot read the audit cache')
+    monkeypatch.setattr(_review_cache, '_read_all', forbidden)
+    response = http_get(audit_env)
+    assert response.status_code == 404 and response.json() == {'detail': 'Not Found'}
+    assert _review_cache._cache_path().read_bytes() == before
+
+
 @pytest.mark.parametrize('host,peer,origin', [
+    ('http://localhost', '127.0.0.1', None),
     ('http://example.org', '127.0.0.1', None),
     ('http://localhost', '192.0.2.10', None),
     ('http://localhost', '127.0.0.1', 'https://example.org'),
     ('http://localhost', '127.0.0.1', 'null'),
 ])
-def test_export_rejects_nonlocal_and_cross_origin_before_cache_read(audit_env, host, peer, origin):
+def test_audit_http_surface_is_absent_for_local_nonlocal_and_cross_origin(audit_env, monkeypatch, host, peer, origin):
+    def forbidden(*args, **kwargs):
+        pytest.fail('An absent HTTP surface cannot read the audit cache')
+    monkeypatch.setattr(_review_cache, '_read_all', forbidden)
     headers = {} if origin is None else {'Origin': origin}
     with TestClient(audit_env.app, base_url=host, client=(peer, 50000)) as client:
-        assert client.get(URL, headers=headers).status_code == 403
+        assert client.get(URL, headers=headers).status_code == 404
     assert list(audit_env.root.iterdir()) == []

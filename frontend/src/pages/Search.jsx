@@ -11,6 +11,7 @@ import QuestionEvidence, { EvidencePolicyStatus } from '../components/search/Que
 import { ErrorBanner, StatusBanner } from '../components/library/shared.jsx';
 import { humanizeError } from '../utils/humanizeError.js';
 import { sortSearchCandidates } from '../utils/searchSort.js';
+import { reviewPaperUrl } from './reviewHelpers.js';
 import { readStoredJson, writeStorage } from '../utils/safeStorage.js';
 import { Comments } from '../components/paper/RelatedPapers.jsx';
 import { pollSessionUntilDone } from '../searchPolling.js';
@@ -126,7 +127,7 @@ const ASSESSMENT = {
 
 function DiscoveryEvidence({ row }) {
   if (!row) return null;
-  return <div className="mt-2 text-sm">
+  return <div className="review-prose min-w-0 mt-2 text-sm">
     <p>{row.sentence}</p><p>Metadata-bound model judgment · relevance: {row.relevance}; preference: {row.preference}.</p>
     <details><summary>Metadata evidence</summary>
       <p>Quote membership is checked; entailment is not independently verified. Comments are context, not paper evidence.</p>
@@ -183,14 +184,16 @@ function CandidateCard({ cand, onAdd, questions = [], discovery, actionsAllowed 
       setAdding(false);
     }
   }, [onAdd, cand.candidate_id]);
+  const url = reviewPaperUrl(cand);
   const cardCls = cand.is_retracted ? 'bg-rose-50 border-rose-300' : (rel?.card || 'bg-white border-slate-200');
   return (
-    <article aria-label={cand.title} className={`border rounded-xl p-3 ${cardCls}`}>
+    <article aria-label={cand.title} className={`min-w-0 border rounded-xl p-3 ${cardCls}`}>
       <div className="flex items-baseline justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-slate-900">
-            {cand.url ? <a href={cand.url} target="_blank" rel="noreferrer" className="hover:underline">{cand.title}</a> : cand.title}
+            {url ? <a href={url} target="_blank" rel="noreferrer" className="hover:underline">{cand.title}</a> : cand.title}
           </div>
+          {!url && <p className="text-xs text-slate-600">No supported link available.</p>}
           {meta && <div className="text-[12px] text-slate-500">{meta}</div>}
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -284,7 +287,7 @@ function SearchSession({ urlSearch = '', onPointer }) {
   const begin = useCallback((id, busy = false) => {
     pollRef.current?.();
     ownerRef.current?.controller.abort();
-    const owner = { id, controller: new AbortController() };
+    const owner = { id, controller: new AbortController(), readGeneration: 0 };
     ownerRef.current = owner;
     setLoading(busy);
     setError(null);
@@ -317,17 +320,21 @@ function SearchSession({ urlSearch = '', onPointer }) {
   }, [current]);
 
   const readSession = useCallback(async owner => {
+    const readGeneration = ++owner.readGeneration;
+    pollRef.current?.();
+    setError(null);
+    const currentRead = () => current(owner) && owner.readGeneration === readGeneration;
     try {
       const fresh = await getSession(owner.id, { signal: owner.controller.signal });
-      if (!current(owner)) return;
+      if (!currentRead()) return;
       if (fresh.id !== owner.id) throw new Error('Session identity mismatch');
       savedIdRef.current = fresh.id;
       setSession(fresh);
       if (fresh.status === 'reviewing') pollUntilDone(owner, hasDiscovery(fresh));
     } catch (error) {
-      if (current(owner)) setError(error);
+      if (currentRead()) setError(error);
     } finally {
-      if (current(owner)) setLoading(false);
+      if (currentRead()) setLoading(false);
     }
   }, [pollUntilDone, current]);
 
@@ -346,8 +353,13 @@ function SearchSession({ urlSearch = '', onPointer }) {
       const res = await materializeApi(owner.id, candidateId, targetCollection);
       if (!current(owner)) return;
       if (hasDiscovery(session)) await readSession(owner);
-      else setSession(prev => prev?.id === owner.id ? { ...prev, candidates: prev.candidates.map(c =>
-        c.candidate_id === candidateId ? { ...c, materialized_zotero_key: res.zotero_key } : c) } : prev);
+      else {
+        owner.readGeneration += 1;
+        setSession(prev => prev?.id === owner.id ? { ...prev, candidates: prev.candidates.map(c =>
+          c.candidate_id === candidateId ? { ...c, materialized_zotero_key: res.zotero_key } : c) } : prev);
+        // Fence pre-ACK reads without freezing later review progress.
+        pollUntilDone(owner, false);
+      }
     } catch (error) {
       if (current(owner)) {
         setLoading(false);
@@ -409,12 +421,14 @@ function SearchSession({ urlSearch = '', onPointer }) {
           : 'Describe a research topic. We plan a query per source, federate the open literature, dedupe version families, rank by real relevance, then deep-read the best few.'}
       </p>
       <form onSubmit={runScreen} className="mb-4 grid gap-2">
-        <textarea
+        <label htmlFor="search-query" className="text-sm font-medium">Search query</label>
+        <textarea id="search-query"
           className="border border-slate-300 rounded-lg p-2 text-[14px]" rows={2}
           placeholder="e.g. LLM agents for clinical decision support in oncology"
           value={query} onChange={(e) => setQuery(e.target.value)}
         />
-        <textarea
+        <label htmlFor="search-questions" className="text-sm font-medium">Questions (optional)</label>
+        <textarea id="search-questions"
           className="border border-slate-200 rounded-lg p-2 text-[12px]" rows={2}
           placeholder="Optional — one specific question per line"
           value={questions} onChange={(e) => setQuestions(e.target.value)}
@@ -448,7 +462,11 @@ function SearchSession({ urlSearch = '', onPointer }) {
       {loading && <p role="status">Waiting for the current request…</p>}
       {error && <><ErrorBanner error={humanizeError(error)} />
         <p>Status unavailable; the server may still be working. This is not a cancellation or successful completion.</p>
-        {savedIdRef.current && <button type="button" onClick={() => readSession(begin(savedIdRef.current, hasDiscovery(session)))}>Retry session status</button>}
+        {savedIdRef.current && <button type="button" onClick={() => {
+          const owner = ownerRef.current;
+          const id = savedIdRef.current;
+          readSession(!hasDiscovery(session) && current(owner) && owner.id === id ? owner : begin(id, hasDiscovery(session)));
+        }}>Retry session status</button>}
       </>}
 
       {session && (
@@ -504,7 +522,7 @@ function SearchSession({ urlSearch = '', onPointer }) {
               actionsAllowed={!loading && (!discovery || !error) && (actionsAllowed || Boolean(c.planned_zotero_key))} />;
             return (
               <>
-                <div className="grid gap-3">
+                <div className="grid grid-cols-1 gap-3">
                   {strong.map(card)}
                 </div>
                 {weak.length > 0 && (
@@ -512,7 +530,7 @@ function SearchSession({ urlSearch = '', onPointer }) {
                     <summary className="cursor-pointer text-[12px] text-slate-500 font-semibold py-1">
                       {discovery ? `${weak.length} retained candidates` : `${weak.length} weaker match${weak.length === 1 ? '' : 'es'}`} ▾
                     </summary>
-                    <div className="grid gap-3 mt-2">
+                    <div className="grid grid-cols-1 gap-3 mt-2">
                       {weak.map(card)}
                     </div>
                   </details>

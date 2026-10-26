@@ -1,5 +1,6 @@
 """Machine/assembly contracts only: scripted judgments do not measure usefulness."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from copy import deepcopy
 import json
 import os
@@ -16,7 +17,8 @@ from zotero_summarizer.api.routes import library
 from zotero_summarizer.models.providers import LLMRoutingConfig
 from zotero_summarizer.services.library import related, _related_assessment as semantic, _related_context as context, _search
 from zotero_summarizer.services.search import session
-from zotero_summarizer.services.zotero._notes import build_user_note_html, build_verdict_note_html
+from zotero_summarizer.models.zotero_actions import build_verdict_note_html
+from zotero_summarizer.services.zotero._notes import build_user_note_html
 from zotero_summarizer.storage import repositories
 from zotero_summarizer.storage.library_context import read_context
 from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS, run_migrations
@@ -79,7 +81,7 @@ class Model:
 def journey(tmp_path, monkeypatch):
     db = tmp_path / "triage.db"
     run_migrations(db, "triage", TRIAGE_MIGRATIONS)
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("INSERT INTO processed_feed_items (feed_library_id, feed_item_id, stable_feed_key, "
                      "materialized_zotero_key, title, guid, decision, run_id) "
                      "VALUES (1, 42, ?, 'SEED0001', 'Seed paper', 'guid', 'selected', 'test')", (STABLE,))
@@ -95,8 +97,8 @@ def journey(tmp_path, monkeypatch):
                           corpus=SimpleNamespace(enabled=True, bm25_enabled=True, reranker_enabled=False))
     cfg.model_dump = lambda **kwargs: {"routing": routing.model_dump(mode="json"), "llm_enabled": cfg.llm_enabled}
     model, reader = Model(), Reader()
-    app = SimpleNamespace(app_state=SimpleNamespace(config=cfg), embedding_cache=None,
-                          resolve_stage_client=lambda stage, expected_identity=None: model)
+    app = SimpleNamespace(app_state=SimpleNamespace(config=cfg), embedding_cache=None)
+    monkeypatch.setattr(semantic.factory, "resolve_stage_client", lambda app, stage, expected_identity=None: model)
     paths = SimpleNamespace(triage_db_path=db, corpus_db_path=tmp_path / "corpus.db",
                             search_dir=tmp_path / "search", summary_timeout_seconds=30)
     monkeypatch.setattr(related, "settings", lambda: paths)
@@ -116,6 +118,28 @@ def journey(tmp_path, monkeypatch):
 
     monkeypatch.setattr(_search, "get_corpus_bm25", lambda path: SimpleNamespace(search=bm_search))
     return SimpleNamespace(db=db, reader=reader, model=model, paths=paths, config=cfg, queries=queries)
+
+
+def test_journey_finishes_owned_sqlite_handles_before_read_oracles(tmp_path, monkeypatch):
+    original_connect = sqlite3.connect
+    connections = []
+
+    def track(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        if str(args[0]) == str(tmp_path / 'triage.db'):
+            connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, 'connect', track)
+    try:
+        journey.__wrapped__(tmp_path, monkeypatch)
+        assert connections
+        for connection in connections:
+            with pytest.raises(sqlite3.ProgrammingError):
+                connection.execute('SELECT 1')
+    finally:
+        for connection in connections:
+            connection.close()
 
 
 def test_http_assembly_default_then_explicit_context_and_saved_receipt(journey):
@@ -147,6 +171,27 @@ def test_http_assembly_default_then_explicit_context_and_saved_receipt(journey):
     assert persisted.status == "related_complete"
     assert persisted.related["result"] == result
     assert session.list_sessions() == []  # no Search auto-review surface
+
+
+def test_baseline_and_assessed_results_cap_distinct_families_at_three(journey):
+    for n in range(2, 7):
+        key = f"GOOD000{n}"
+        journey.reader.rows[key] = {"item_key": key, "title": f"Distinct saved candidate {n}",
+                                    "abstract": f"Candidate {n} metadata about reliable evaluation.",
+                                    "notes": [], "annotations": [], "doi": f"10.1/good-{n}"}
+    journey.reader.rows["FAMILY01"] = {**journey.reader.rows["SEED0001"], "item_key": "FAMILY01"}
+    baseline = related.related_papers(STABLE)
+    assert len(baseline["items"]) == 3
+    assert journey.model.payloads == []
+    assessed = related.assess_related(STABLE, consent_token=baseline["boundary"]["token"])
+    eligible = [row for row in journey.model.payloads[0]["candidates"] if row["item_key"] not in {"BAD00001", "UNKNOWN1"}]
+    assert len(eligible) > 3
+    assert len(assessed["items"]) == 3
+    for result in (baseline, assessed):
+        keys = [row["item_key"] for row in result["items"]]
+        assert len(set(keys)) == 3
+        assert set(keys).isdisjoint({STABLE, "SEED0001", "FAMILY01", "HIDDEN01"})
+    assert len(journey.model.payloads) == 1
 
 
 def test_both_review_keys_exclude_self_alias_and_preserve_filters(journey):

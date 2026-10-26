@@ -23,6 +23,7 @@ from typing import Any
 
 from zotero_summarizer.models import GoalsConfig
 from zotero_summarizer.services._common import settings, state
+from zotero_summarizer.services.llm import factory
 from zotero_summarizer.services.search import session as session_store
 from zotero_summarizer.services.search import require_online
 from zotero_summarizer.services.search._fulltext import acquire_full_text
@@ -95,8 +96,8 @@ def default_deps() -> SearchDeps:
     # cross-source dedup yet (needs identifier columns on corpus_embeddings).
     # Wire build_library_finder here once those land; the pipeline is unchanged.
     return SearchDeps(
-        llm=app.resolve_stage_client("deep_review"),
-        llm_light=app.resolve_stage_client("feed"),
+        llm=factory.resolve_stage_client(app, "deep_review"),
+        llm_light=factory.resolve_stage_client(app, "feed"),
         config=config,
         reranker_model=config.corpus.reranker_model,
         openalex_client=_search_openalex_client(app, config),

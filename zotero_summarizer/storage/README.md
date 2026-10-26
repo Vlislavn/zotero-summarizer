@@ -46,6 +46,12 @@ services/ ─call→ storage/
 | `interleave.py` | `interleave_log` sidecar for the P3 quality-first online experiment: per-day, per-slot arm attribution (`team` ∈ `a0`/`a2`/`both` + competitive `pair_id`) written by the Today slate when `ZS_RANK_INTERLEAVE` is on. `record_interleave_slate` is DAY-level write-once (`BEGIN IMMEDIATE` existence check → first recorded slate of a day is the ONLY write; later same-day assemblies are complete no-ops) — row-level `INSERT OR IGNORE` alone would let intra-day pool drift mix two merges' per-merge `pair_id`s into one corrupt `(day, pair_id)` group and crash the scorer (adversarial review 2026-07-08). Attribution therefore never changes after the user may have seen the slate. `fetch_interleave_log` opens read-only and returns `[]` only when the table doesn't exist yet (experiment never ran — explicit `sqlite_master` check, not a swallowed error). Table is self-creating (sidecar, additive; no `migrations.py` step needed). Sole consumer: `tools/eval_interleave.py` |
 | `migrations.py` | `migrate_existing()` + `run_migrations()` — ordered, version-gated steps recorded in `schema_migrations`. Add a schema change as a new numbered `Migration`, never an inline ALTER. v3 reconciles databases whose old v1 marker predates later baseline/feed columns; routine feed connections skip those O(N) legacy backfills. |
 
+The v2 sync schema executes complete SQL statements, including intact trigger
+bodies, on the runner's connection without committing. Schema, data changes and
+the version marker therefore share the runner's transaction; a failed callback
+or marker write restores the populated v1 state. Successful upgrades and replays
+retain the existing verdict/note revision and tombstone behavior.
+
 `set_pending_changes_status(..., require_all=True)` validates all selected IDs and
 source statuses under BEGIN IMMEDIATE, then verifies the complete affected count
 before commit. A stale/missing row or trigger-shortened update raises and rolls
@@ -189,9 +195,14 @@ routine sync; goals, model-input embeddings and historical feedback are untouche
 
 `label_mirrors.py` reuses `sync_changes` as label intent. Migration v5 adds only
 `label_mirror_receipts`, keyed by the acknowledged deletion revision. `current_label`
-holds `BEGIN IMMEDIATE` over mirror delivery and records a receipt only after a
-successful exit with a resolved target; failures and unmaterialized feed keys leave
-the already-committed deletion retryable. Feed,
+yields its caller-owned transaction and current snapshot without acknowledging
+on normal exit. `snapshot` includes stored provenance; `acknowledge` accepts only
+an unchanged target-bearing current intent and records deletion revisions only.
+Original invocation lookup and selected source identity remain distinct, so alias
+remapping is re-resolved at admission and ACK. Closed mirror history validates
+lifecycle metadata before display or any Pending decision; verdict HTML must equal
+its canonical declared intent, and removal labels use native case-folded semantics.
+Failures and unmaterialized feed keys leave the already-committed deletion retryable. Feed,
 legacy and materialized library identities resolve to their newest shared revision.
 `states` supplies an uncapped snapshot per Zotero target, including pending deletion.
 Reconciliation UPSERTs and deletes pass `expected_revision`; the existing label
@@ -207,8 +218,12 @@ No new queue/worker or reviewed-pending-change behavior is involved.
 
 The same current-label snapshot includes the rationale. `current_label` yields
 the target and a separate `label_pending` flag: an acknowledged label deletion
-does not suppress clearing its old verdict note. Both mirrors run under the
-existing writer lock before the deletion receipt commits; no new receipt exists.
+does not suppress clearing its old verdict note. Both effects share the existing system-mirror claim owner. Positive action IDs,
+closed source/target/backup history commit before native dispatch; the caller then
+reacquires the writer lock and revalidates current intent and every unchanged claim.
+Native terminal history and explicit deletion ACK are separate commits. Unknown
+completion remains applying and blocks replay. The existing Pending table is reused;
+no new queue, migration or approval capability is introduced.
 
 `list_all_label_verdicts` is the sole full-row verdict-list reader: newest first,
 uncapped, shared by HTTP, training and the one-time Zotero transfer. The duplicate

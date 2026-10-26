@@ -375,3 +375,44 @@ def synthetic_lab(monkeypatch):
         assert all(lab.cdp_sessions_closed), "Owned CDP session not closed with context"
         assert lab.page_errors == [], lab.page_errors
         assert lab.blocked == [], lab.blocked
+
+
+def order_question_requests(lab, page, *, first):
+    """Hold two actual requests, dispatch one first, then release its peer after the reply."""
+    assert first in {"direct", "sync"}
+    paths = {"direct": "/api/library/questions", "sync": "/api/sync/push"}
+    follower = "sync" if first == "direct" else "direct"
+    routes = {}
+    state = {"first": first, "held": [], "leader_started": False, "follower_released": False}
+
+    def hold(route, kind):
+        if (state["follower_released"] or route.request.method != "POST"
+                or route.request.url != lab.server.origin + paths[kind]):
+            route.fallback()
+            return
+        if kind == "sync" and not any(row["field"] == "review_question"
+                                      for row in route.request.post_data_json["mutations"]):
+            route.fallback()
+            return
+        assert kind not in routes
+        routes[kind] = route
+        state["held"].append(kind)
+        if len(routes) == 2:
+            mutation = routes["sync"].request.post_data_json["mutations"]
+            assert len(mutation) == 1 and mutation[0]["value"] == routes["direct"].request.post_data_json
+            state["leader_started"] = True
+            routes[first].continue_()
+
+    def release_peer(response):
+        if (state["follower_released"] or response.request.method != "POST"
+                or response.url != lab.server.origin + paths[first]):
+            return
+        assert state["leader_started"] and follower in routes
+        state["leader_status"] = response.status
+        state["follower_released"] = True
+        routes[follower].continue_()
+
+    page.route("**/api/library/questions", lambda route: hold(route, "direct"))
+    page.route("**/api/sync/push", lambda route: hold(route, "sync"))
+    page.on("response", release_peer)
+    return state

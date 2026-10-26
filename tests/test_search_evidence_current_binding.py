@@ -11,6 +11,7 @@ from test_search_question_evidence import journey, stored_session
 from zotero_summarizer.api.routes import search
 from zotero_summarizer.models.providers import resolve_stage
 from zotero_summarizer.services import _common
+from zotero_summarizer.services.llm import factory
 from zotero_summarizer.services.search import _question_evidence as evidence
 from zotero_summarizer.services.search import _question_policy as policy
 from zotero_summarizer.services.search import pipeline, session
@@ -37,7 +38,7 @@ def get_without_work(monkeypatch, session_id):
     app.include_router(search.router)
     with monkeypatch.context() as guard:
         guard.setattr(search, "default_deps", forbidden)
-        guard.setattr(_common.state(), "resolve_stage_client", forbidden)
+        guard.setattr(factory, "resolve_stage_client", forbidden)
         guard.setattr(evidence, "acquire_full_text", forbidden)
         guard.setattr(evidence, "retrieve_original_passages", forbidden)
         guard.setattr(pipeline, "run_review", forbidden)

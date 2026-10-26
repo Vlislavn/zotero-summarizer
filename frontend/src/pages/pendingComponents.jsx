@@ -66,8 +66,9 @@ export function ChangeEditor({ change, drafts, setDrafts, flatCollections, savin
     return (
       <div className="ml-6 mt-2 grid md:grid-cols-2 gap-2 text-xs">
         <div>
-          <label className="text-slate-500">Add tags (comma-separated)</label>
+          <label htmlFor={`pending-${change.id}-add-tags`} className="text-slate-500">Add tags (comma-separated)</label>
           <input
+            id={`pending-${change.id}-add-tags`}
             type="text"
             value={getField('add_tags_text')}
             onChange={(e) => setField('add_tags_text', e.target.value)}
@@ -75,8 +76,9 @@ export function ChangeEditor({ change, drafts, setDrafts, flatCollections, savin
           />
         </div>
         <div>
-          <label className="text-slate-500">Remove tags (comma-separated)</label>
+          <label htmlFor={`pending-${change.id}-remove-tags`} className="text-slate-500">Remove tags (comma-separated)</label>
           <input
+            id={`pending-${change.id}-remove-tags`}
             type="text"
             value={getField('remove_tags_text')}
             onChange={(e) => setField('remove_tags_text', e.target.value)}
@@ -98,8 +100,9 @@ export function ChangeEditor({ change, drafts, setDrafts, flatCollections, savin
     return (
       <div className="ml-6 mt-2 grid gap-2 text-xs">
         <div>
-          <label className="text-slate-500">Target collection</label>
+          <label htmlFor={`pending-${change.id}-collection`} className="text-slate-500">Target collection</label>
           <select
+            id={`pending-${change.id}-collection`}
             value={getField('collection_key')}
             onChange={(e) => setField('collection_key', e.target.value)}
             className="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded"
@@ -126,8 +129,9 @@ export function ChangeEditor({ change, drafts, setDrafts, flatCollections, savin
     return (
       <div className="ml-6 mt-2 grid gap-2 text-xs">
         <div>
-          <label className="text-slate-500">Note title</label>
+          <label htmlFor={`pending-${change.id}-note-title`} className="text-slate-500">Note title</label>
           <input
+            id={`pending-${change.id}-note-title`}
             type="text"
             value={getField('note_title')}
             onChange={(e) => setField('note_title', e.target.value)}
@@ -135,8 +139,9 @@ export function ChangeEditor({ change, drafts, setDrafts, flatCollections, savin
           />
         </div>
         <div>
-          <label className="text-slate-500">Note HTML</label>
+          <label htmlFor={`pending-${change.id}-note-html`} className="text-slate-500">Note HTML</label>
           <textarea
+            id={`pending-${change.id}-note-html`}
             rows={5}
             value={getField('note_html')}
             onChange={(e) => setField('note_html', e.target.value)}

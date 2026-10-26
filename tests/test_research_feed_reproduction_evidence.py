@@ -17,13 +17,11 @@ def test_weekly_artifact_availability_does_not_authorize_reproduction_effort(
     _seed(settings, "evidence-paper", "Agent evaluation method")
     gap = "No held-out comparison is reported"
 
-    def reviewed(key):
-        result = _review(key)
-        if not has_code:
-            result["code_link"] = {"found": False, "exists": False, "relevance": "missing"}
-        if scientific_gap:
-            result["quality"]["missing_critical"] = [gap]
-        return result
+    review = _review('evidence-paper', quality={
+        'missing_critical': [gap] if scientific_gap else [], 'red_flags': []})
+    if not has_code:
+        review['code_link'] = {'found': False, 'exists': False, 'relevance': 'missing'}
+    reviewed = {'evidence-paper': review}.__getitem__
 
     result = run_weekly(
         settings, start=datetime(2026, 8, 20, tzinfo=timezone.utc),
@@ -33,9 +31,11 @@ def test_weekly_artifact_availability_does_not_authorize_reproduction_effort(
     payload = json.loads(Path(result["json_path"]).read_text())
     assert result["cards_generated"] == len(payload["cards"]) == 1
     card = payload["cards"][0]["card"]
-    assert card["reproducibility_tier"] == "unknown"
-    assert card["missing_reproduction_inputs"] == []
-    assert card["evidence_gaps"] == ([gap] if scientific_gap else [])
+    missing = ([gap] if scientific_gap else []) + ([] if has_code else ["No verified code URL"])
+    assert card["reproducibility_tier"] == ("blocked" if missing else "unknown")
+    assert card["reproduction_assessment"] is None
+    assert card["missing_reproduction_inputs"] == missing
+    assert card["evidence_gaps"] == (["weak_evidence"] if scientific_gap else [])
     assert card["code_urls"] == (["https://github.com/example/evidence-paper"] if has_code else [])
     assert card["worth_reading"] == "skim"
     assert result["writebacks_queued"] == 0

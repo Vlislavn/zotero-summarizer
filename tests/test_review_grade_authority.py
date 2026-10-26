@@ -23,9 +23,15 @@ def test_proposal_uses_the_available_independent_quality_grade(digest_grade, qua
     assert result.digest_read_decision == "skim"
 
 
-@pytest.mark.parametrize("quality", [None, {"grade": ""}, {"grade": "unassessed"}])
-def test_proposal_retains_digest_fallback_when_quality_grade_is_unavailable(quality):
-    result = propose_verdict(_digest(read_decision="skim", grade="A"), quality,
-                             goal_summaries=_goals(matched=True))
-    assert result.grade == "A"
-    assert result.proposed == "should_read"
+@pytest.mark.parametrize("quality,grade,priority", [
+    (None, "A", "should_read"),
+    ({"grade": ""}, "", "could_read"),
+    ({"grade": "unassessed"}, "", "could_read"),
+])
+def test_proposal_distinguishes_legacy_absence_from_explicit_unassessed_quality(quality, grade, priority):
+    digest = _digest(read_decision="skim", grade="A")
+    before = deepcopy((digest, quality))
+    result = propose_verdict(digest, quality, goal_summaries=_goals(matched=True))
+    assert result.grade == grade
+    assert result.proposed == priority
+    assert (digest, quality) == before

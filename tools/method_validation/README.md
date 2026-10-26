@@ -2,6 +2,8 @@
 
 ## Existing-collection comparison (part of #42)
 
+Optional declared version/derivation DAGs bind every reference channel, exclude heldout ancestors into an immutable replayed audit, and refuse contaminated active uses. Shortlists require frozen selection provenance. Declarations are unsigned; legacy lineage stays unknown.
+
 `python -m tools.method_validation collections --config FILE [--run]` uses the
 same optional admission/run/inspect grammar, transport/raw ACK and fresh-owner
 publication primitives. It asks independent existing-key membership questions,
@@ -48,6 +50,12 @@ Priority uses the same public native admission/TLS guard, retaining its four-way
 projector and outcome-work reservation. Its separate aggregate `max_snapshot_bytes`
 cap also bounds each input read before allocation. Priority rows without declared
 human provenance never enter paired estimates; blocked recordings stay unscored.
+Omitted or explicit-null title/abstract are unknown evidence and use the same
+per-paper `missing_input` path without a native call, while retained input bytes
+and received-key presence remain distinct. Intrinsic result validation forbids a
+native readout on operational failures; decision, threshold abstention and model
+mismatch retain their original native observation. Configured policy/raw/source
+joins still belong to verified artifact replay, not standalone DTO authentication.
 
 ## Support comparison (#37)
 
@@ -89,6 +97,15 @@ admitted blockage/recording presence and finite remaining-budget observation;
 `blocked` cannot hide an invalid response or shrink evaluated coverage. Actual
 wall exhaustion stays unscored, not blocked. Timing observations remain unsigned.
 
+All three comparison replayers reuse the native adapter's dispatch/byte/status
+consistency check; attempt and client-retry counters must be actual integers, not
+boolean aliases. Support also recomputes its existing reservation count from
+admitted native arms/cases. Support and Priority derive publication file roles from
+their admitted task inputs/rows, rather than letting a resealed manifest admit an
+unrelated file. Optional missing-baseline snapshots and legitimate recorded or
+terminal-free outcomes remain supported. These joins do not authenticate a server
+or qualify unknown physical work/resources; no new receipt store or model call is added.
+
 Regression sources: `tests/test_support_comparison.py`,
 `tests/test_native_decision_cli.py`, `tests/test_support_metrics.py`, with public
 on-disk fixtures in `tests/test_support_fixtures.py`. They exercise the real parser,
@@ -103,7 +120,17 @@ boundary: malformed Unicode aliases remain per-pair invalid responses, preservin
 raw bytes and allowing valid neighboring cases to finish.
 
 Direct native calls share the runner's consent/guard and next-call reservation check;
-adapter instances also bound cumulative work. Recorded evaluation rejects blocked or
+adapter instances also bound cumulative work. Actual bytes, a callable raw retainer
+and positive finite nonboolean time overrides are admitted before call accounting
+or HTTP. Invalid caller arguments spend no reusable adapter slot; valid overrides
+still use the existing configured caps. This does not add a task parser to transport
+or refund an operational/writer failure after a request. Support, Priority and
+Collection pass the caller's remaining total run budget to the existing native
+deadline independently of the idle-read cap. In-idle trickles cannot reset the
+total cap; expiry is checked at observed stream checkpoints, not a promise to
+interrupt a blocked read or terminate a remote backend.
+
+Recorded evaluation rejects blocked or
 wrong-kind arms. Remote endpoints require HTTPS (loopback HTTP is retained). All frozen
 input snapshots share `max_input_bytes`; paired inference excludes gold without human
 provenance while retaining descriptive labels and the full coverage denominator.

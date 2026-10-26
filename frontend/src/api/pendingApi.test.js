@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { applyPending, rejectPending } from './pendingApi.js';
+import { applyPending, fetchPending, rejectPending } from './pendingApi.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -41,4 +41,64 @@ it('keeps Reject ID-only and separate from Apply authority', async () => {
   expect(fetch).toHaveBeenCalledWith('/api/pending/reject', {
     headers: { 'Content-Type': 'application/json' }, method: 'POST', body: JSON.stringify({ change_ids: [7] }),
   });
+});
+
+it('does not retry a request rejected by the transport', async () => {
+  const fetch = vi.fn().mockRejectedValue(new Error('Network disconnected'));
+  vi.stubGlobal('fetch', fetch);
+
+  await expect(fetchPending()).rejects.toThrow('Network disconnected');
+
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  ['empty 204', 204, ''],
+  ['malformed successful body', 200, '{not json'],
+])('preserves %s decoding with one request', async (_label, status, text) => {
+  const fetch = vi.fn(async () => ({
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: 'STATUS',
+    text: async () => text,
+  }));
+  vi.stubGlobal('fetch', fetch);
+
+  await expect(fetchPending()).resolves.toEqual(status === 204 ? null : { _raw: text });
+
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it('preserves an ordinary decoded HTTP error with one request', async () => {
+  const fetch = vi.fn(async () => ({
+    ok: false,
+    status: 503,
+    statusText: 'Unavailable',
+    text: async () => JSON.stringify({ detail: 'Temporarily unavailable' }),
+  }));
+  vi.stubGlobal('fetch', fetch);
+
+  await expect(fetchPending()).rejects.toMatchObject({
+    message: 'Temporarily unavailable',
+    status: 503,
+    body: { detail: 'Temporarily unavailable' },
+  });
+
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it('retains a fully read empty HTTP error body as null with one request', async () => {
+  const fetch = vi.fn(async () => ({
+    ok: false,
+    status: 409,
+    statusText: 'Conflict',
+    text: async () => '',
+  }));
+  vi.stubGlobal('fetch', fetch);
+
+  const error = await applyPending([7], { previews: { 7: 'a'.repeat(64) } }).catch((failure) => failure);
+
+  expect(error).toMatchObject({ status: 409, body: null });
+  expect(Object.hasOwn(error, 'body')).toBe(true);
+  expect(fetch).toHaveBeenCalledTimes(1);
 });

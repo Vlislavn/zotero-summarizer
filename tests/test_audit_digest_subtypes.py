@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 import test_verification_audit_export as fixtures
-from test_verification_audit_export import audit_env, get, publish  # noqa: F401
+from test_verification_audit_export import audit_env, publish  # noqa: F401
 from zotero_summarizer.models import PaperDigest
 from zotero_summarizer.services.library import _digest_audit, _review_cache
 
@@ -27,10 +27,7 @@ def test_subtype_publication_and_export_preserve_metadata_outside_audit(audit_en
     entry, _, _ = publish(audit_env)
     original = deepcopy(entry)
 
-    response = get(audit_env)
-
-    assert response.status_code == 200
-    payload = response.json()
+    payload = _review_cache.export_review_audit(fixtures.KEY)
     assert payload['audit_status'] == 'available'
     assert payload['digest'] == original['digest'] and payload['digest']['unrelated_metadata'] == metadata
     audit = payload['verification_audit']
@@ -42,9 +39,10 @@ def test_subtype_publication_and_export_preserve_metadata_outside_audit(audit_en
     assert _review_cache._read_all(readonly=True)[fixtures.KEY] == original
 
     entry['digest']['unrelated_metadata'] = {'changed': 'still not verifier authority'}
+    entry['model_digest']['unrelated_metadata'] = {'changed': 'still not policy authority'}
     _review_cache._write_one(fixtures.KEY, entry)
     before = _review_cache._cache_path().read_bytes()
-    updated = get(audit_env).json()
+    updated = _review_cache.export_review_audit(fixtures.KEY)
     assert updated['audit_status'] == 'available'
     assert updated['digest'] == entry['digest']
     assert updated['verification_audit'] == audit

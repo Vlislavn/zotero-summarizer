@@ -223,9 +223,9 @@ def _prepare_review_context(
     app = types.SimpleNamespace(
         app_state=types.SimpleNamespace(config=config), pdf_extractor=extractor,
         unpaywall_client=None, openalex_cache=None, openalex_client=None, zotero_reader=reader,
-        resolve_stage_client=lambda *_args, **_kwargs: object(),
         resolve_stage_provider=lambda *_args, **_kwargs: provider,
     )
+    monkeypatch.setattr(deep_review.factory, "resolve_stage_client", lambda *_args, **_kwargs: object())
     _wire_acquisition(monkeypatch, app, tmp_path, render=render)
     monkeypatch.setattr(deep_review, "get_state", lambda: app)
     monkeypatch.setattr(deep_review, "_load_prestige_context", lambda: ({}, None))
@@ -233,9 +233,12 @@ def _prepare_review_context(
     monkeypatch.setattr(_review_cache, "_cache_path", lambda: tmp_path / "deep_reviews.json")
     monkeypatch.setattr(review_detail, "classify_item_key", lambda _key: "feed")
     note_writes = []
-    monkeypatch.setattr(
-        zotero_svc, "zotero_upsert_digest_note", lambda key, _digest: note_writes.append(key),
-    )
+
+    def forbidden_native_writer():
+        note_writes.append("native writer resolution")
+        pytest.fail("Feed article review must not resolve a native writer")
+
+    monkeypatch.setattr(zotero_svc, "get_zotero_writer_or_raise", forbidden_native_writer)
     deep_review._set_job("ARTICLE", status="running", started_at="test", completed=0, progress={})
     context = deep_review._build_ctx(reader=reader)
     context["_acquire_missing"] = True

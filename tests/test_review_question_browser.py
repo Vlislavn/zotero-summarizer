@@ -15,7 +15,7 @@ import pytest
 
 from tests._review_question_browser import (
     LIBRARY_KEY, PAGE_COUNT_QUESTION, db_rows, indexeddb, main_world, query_state,
-    synthetic_lab, write_json,
+    synthetic_lab, write_json, order_question_requests,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -298,6 +298,7 @@ def test_acknowledged_retry_preserves_the_composite_delivery_receipt(question_br
 
     lab = question_browser
     page = lab.open_browser()
+    ordering = order_question_requests(lab, page, first="direct")
     page.goto(lab.server.origin + "/paper/" + LIBRARY_KEY)
     expect(page.get_by_role("textbox", name="Question about this paper")).to_be_visible()
     with page.expect_response(lambda response: response.url.endswith("/api/library/questions")) as saved:
@@ -336,9 +337,43 @@ def test_acknowledged_retry_preserves_the_composite_delivery_receipt(question_br
         "first_mirror": first, "retry_mirror": second, "manual_mirror": current,
         "visible_caption": current_caption, "obsolete_caption_absent": True,
         "same_submission_rows": True, "same_native_note_id": native_note,
+        "actual_request_order": ordering,
         "boundary": "installed Chrome/actual API/owned synthetic Zotero; AI disabled",
     })
     print("QUESTION_BROWSER_ARTIFACT", lab.artifact)
+
+
+def test_sync_first_receipt_is_acknowledged_without_another_native_write(question_browser):
+    from patchright.sync_api import expect
+
+    lab = question_browser
+    page = lab.open_browser()
+    ordering = order_question_requests(lab, page, first="sync")
+    page.goto(lab.server.origin + "/paper/" + LIBRARY_KEY)
+    expect(page.get_by_role("textbox", name="Question about this paper")).to_be_visible()
+    with page.expect_response(lambda response: response.url.endswith("/api/library/questions")) as saved:
+        _submit(page, "Is there external validation?")
+    result = saved.value.json()
+    first = result["question_mirror"]
+    submission = result["question_submission"]
+    sync = next(row["body"] for row in lab.responses if row["url"].endswith("/api/sync/push")
+                and row["body"]["results"][0]["mutation_id"] == submission["submission_id"])
+    leader = sync["results"][0]["question_mirror"]
+    assert leader["note_written"] is True and leader["note_pending"] is False
+    assert leader["note_error"] is None and leader["target_key"] == LIBRARY_KEY
+    assert first == {**leader, "note_written": False}
+    caption = f'Zotero note delivery: acknowledged (revision {first["projection_revision"]}).'
+    expect(page.get_by_text(caption, exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="Retry answer", exact=True)).to_be_enabled()
+    assert ordering["leader_status"] == 200 and ordering["follower_released"] is True
+    assert sorted(ordering["held"]) == ["direct", "sync"]
+    assert _post_count(lab, "/api/library/ask") == 1
+    native_note = _assert_native_projection(lab, 1)
+    assert _questions(lab)[0]["submission_id"] == submission["submission_id"]
+    lab.checkpoint("sync-first-direct-noop-acknowledged", page)
+    write_json(lab.artifact / "sync-first-result.json", {"ordering": ordering,
+               "sync_mirror": leader, "direct_mirror": first, "same_native_note_id": native_note,
+               "transport": "actual requests continued without fulfillment/body/header substitution"})
 
 
 def test_local_storage_rejection_and_invalid_input_never_start_http(question_browser):

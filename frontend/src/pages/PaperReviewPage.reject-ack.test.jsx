@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
+import '../testSetup.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import PaperReviewPage from './PaperReviewPage.jsx';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -43,9 +44,9 @@ it.each(['success', 'failure'])('fences a primary dont_read ACK while its second
     return new Response(JSON.stringify(data), { status: 200 });
   }));
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/paper/P1']}>
-    <Routes><Route path="/paper/:itemKey" element={<PaperReviewPage />} /></Routes>
-  </MemoryRouter></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><RouterProvider router={createMemoryRouter([
+    { path: '/paper/:itemKey', element: <PaperReviewPage /> },
+  ], { initialEntries: ['/paper/P1'] })} /></QueryClientProvider>);
   fireEvent.click(await screen.findByRole('button', { name: 'Show related saved papers' }));
   await screen.findByText('OLD ACK-BOUND RELATED CONTEXT');
   fireEvent.click(screen.getByRole('button', { name: 'Edit', exact: true }));

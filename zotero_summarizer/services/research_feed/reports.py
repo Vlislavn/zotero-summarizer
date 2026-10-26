@@ -59,12 +59,25 @@ class _Failure(BaseModel):
     error: str
 
 
+class _Unqualified(BaseModel):
+    candidate: ResearchCandidate
+    reason: str = Field(min_length=1)
+
+    @field_validator("reason")
+    @classmethod
+    def _nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("review qualification reason is blank")
+        return value
+
+
 class _Report(BaseModel):
     metadata: _Metadata
     cards: list[_Card]
     rejected_near_threshold: list[_Selection]
     manual_full_text_required: list[ResearchCandidate]
     failed: list[_Failure]
+    unqualified_reviews: list[_Unqualified] = Field(default_factory=list)
     research_ideas_by_project: dict[str, list[ResearchIdea]] = Field(default_factory=dict)
 
     @model_validator(mode="after")

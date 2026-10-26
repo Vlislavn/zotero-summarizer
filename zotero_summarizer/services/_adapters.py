@@ -43,6 +43,7 @@ def build_llm(
     structured_output: bool = False,
     verification: bool = False,
     before_request: Any = None,
+    request_owner: Any = None,
 ) -> InstrumentedLLMClient:
     from zotero_summarizer.integrations.llm_callbacks import CompletionGuard
 
@@ -53,7 +54,15 @@ def build_llm(
         if (endpoint.scheme not in {"http", "https"} or not endpoint.hostname
                 or endpoint.path.lower().endswith((".gguf", ".bin"))):
             raise ValueError("Verification requires an HTTP API, not model weights")
-    guard = CompletionGuard(expected_model=model_name if verification else None)
+    if verification and request_owner is None:
+        from functools import partial
+        from uuid import uuid4
+        from zotero_summarizer.integrations.llm_requests import RequestInventory, _generation_endpoint
+
+        inventory = RequestInventory(uuid4().hex, before_start=before_request)
+        request_owner = partial(inventory.expect, "direct-verification", model_name,
+                                _generation_endpoint(model_url, "/chat/completions"), local=False)
+    guard = CompletionGuard(expected_model=model_name if verification else None, request_owner=request_owner)
     llm_cls, _ = _load_onprem()
     kwargs: dict[str, Any] = dict(
         model_url=model_url,
@@ -71,9 +80,9 @@ def build_llm(
         kwargs["timeout"] = request_timeout_seconds
     transport = None
     if verification:
-        import httpx
+        from zotero_summarizer.integrations.llm_requests import verification_http_client
 
-        transport = httpx.Client(follow_redirects=False, trust_env=False)
+        transport = verification_http_client(guard.transport_started)
         kwargs.update(max_retries=0, cache=False, http_client=transport)
     try:
         inner = llm_cls(**kwargs)

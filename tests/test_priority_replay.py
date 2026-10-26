@@ -8,6 +8,7 @@ from tools.method_validation import priority_run
 from tools.method_validation.priority import Config, Paper, identity
 from tools.method_validation.support import digest, encoded, loads, sha
 from test_priority_boundaries import wire
+from test_priority_replay_states import rewrite
 from test_priority_fixtures import fixture, write_ref
 
 
@@ -73,6 +74,40 @@ def test_reopen_recomputes_projection_even_after_self_consistent_file_hash_edit(
     (owner / 'ACK').write_bytes(sha(mraw).encode())
     with pytest.raises(ValueError, match='projection mismatch'):
         priority_run.reopen(owner)
+
+
+@pytest.mark.parametrize('mutation', ['attempt', 'attempt_bool', 'dispatched', 'retained', 'foreign'])
+def test_native_dispatch_bytes_and_inventory_match_admitted_work(tmp_path, mutation):
+    cfg, papers, _ = fixture(tmp_path, native=True)
+    config = Config.model_validate(cfg)
+    requests = []
+
+    def server(request):
+        requests.append(request.content)
+        return httpx.Response(200, content=encoded(wire()))
+
+    owner, report = priority_run.run(config, encoded(cfg), transport=httpx.MockTransport(server))
+    assert priority_run.reopen(owner) == report and len(requests) == len(papers)
+    row = loads((owner / 'case-0.json').read_bytes())
+    assert row['arm_id'] == config.arms[0].arm_id
+    terminal_before = (owner / row['terminal']).read_bytes()
+    if mutation in ('attempt', 'attempt_bool'):
+        row['telemetry']['attempt'] = True if mutation == 'attempt_bool' else 0
+    elif mutation == 'dispatched':
+        row['telemetry']['dispatched'] = False
+    elif mutation == 'retained':
+        row['telemetry']['retained_bytes'] = len(terminal_before) + 1
+    else:
+        foreign = owner / 'foreign.bin'
+        foreign.write_bytes(b'unadmitted private fixture file')
+        manifest = loads((owner / 'manifest.json').read_bytes())
+        manifest['files'][foreign.name] = sha(foreign.read_bytes())
+        (owner / 'manifest.json').write_bytes(encoded(manifest))
+    rewrite(owner, config, row)
+    assert (owner / row['terminal']).read_bytes() == terminal_before
+    with pytest.raises(ValueError):
+        priority_run.reopen(owner)
+    assert len(requests) == len(papers)
 
 
 def test_unqualified_native_and_work_limits_do_not_dispatch(tmp_path):

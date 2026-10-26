@@ -258,7 +258,8 @@ export default function Pending() {
       setMessage(`${data.applied} change(s) applied; ${data.failed} failed.${data.failed > 0 ? ' Open the Failed tab to retry.' : ''}`);
       setIsError(data.failed > 0);
     } catch (err) {
-      setMessage(err?.status === 409
+      // The shared client adds body only after the response text is fully read.
+      setMessage(err?.status === 409 && Object.prototype.hasOwnProperty.call(err, 'body')
         ? 'The selected changes are no longer current. Review the refreshed payload and target, then reselect.'
         : `${humanizeError(err)} Delivery is unconfirmed. Inspect the refreshed state before any new action.`);
       setIsError(true);

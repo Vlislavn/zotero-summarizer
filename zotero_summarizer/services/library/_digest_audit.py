@@ -136,6 +136,17 @@ def payload_hash(audit: dict) -> str:
     return canonical_hash(payload)
 
 
+def reading_policy_inputs_hash(entry: dict) -> str:
+    from zotero_summarizer.services.library.review_fleet.propose import project_review
+
+    view = project_review(entry)
+    inputs = {key: view.get(key) for key in (
+        'model_digest', 'quality', 'goal_summaries', 'model_read_decision')}
+    if inputs['model_digest'] is not None:
+        inputs['model_digest'] = digest_contract_payload(inputs['model_digest'])
+    return canonical_hash(inputs)
+
+
 def bind_cached_audit(entry: dict) -> dict:
     if not entry.get('verification_audit'):
         return entry
@@ -149,6 +160,7 @@ def bind_cached_audit(entry: dict) -> dict:
     review = result['review_identity']
     audit['source']['kind'] = review['source_kind']
     audit['identity'].update(cached_digest_sha256=canonical_hash(final),
+                             reading_policy_inputs_sha256=reading_policy_inputs_hash(result),
                              review_source_sha256=review['source_sha256'],
                              review_generation_sha256=review['generation_sha256'],
                              review_identity_sha256=canonical_hash(review))

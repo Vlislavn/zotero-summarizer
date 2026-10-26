@@ -94,12 +94,13 @@ def test_engineering_card_preserves_nonempty_missing_reproduction_inputs():
 def test_existing_model_exports_unchanged_and_new_contracts_direct_only():
     from zotero_summarizer import models
     from zotero_summarizer.models import research_feed
-
     assert research_feed.__all__ == [
         "TOPIC_TAXONOMY", "ResearchCandidate", "ResearchEngineeringCard",
         "ResearchFeedTriage", "ResearchIdea", "ResearchProfile",
-        "parse_run_budgets", "TelegramPost", "TelegramNewsVerdict",
+        "FeedReviewContext", "FeedProjectAssessment", "FeedReproduction", "FeedImpact",
+        "FeedAssessment", "FeedDigestResponse", "parse_run_budgets", "TelegramPost", "TelegramNewsVerdict",
     ]
+    assert all(getattr(models, name) is getattr(research_feed, name) for name in research_feed.__all__)
     for name in ("TelegramPage", "LiveTelegramChannelId", "validate_live_telegram_channel_id",
                  "normalize_telegram_username"):
         assert hasattr(research_feed, name)

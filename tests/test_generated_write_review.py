@@ -1,7 +1,6 @@
 """Owned native SQLite + actual generated publication/queue/confirmation contract."""
 from contextlib import closing
 from copy import deepcopy
-from types import SimpleNamespace
 from unittest.mock import Mock
 import asyncio
 import json
@@ -9,11 +8,7 @@ import sqlite3
 
 import pytest
 
-from tests._zotero_fixtures import add_library_item
-from tests._generated_write_fixtures import install_generated_writer
-from tests.test_interpretation_binding import config
-from tests.test_interpretation_producer import _base
-from tests.test_interpretation_review_one import paper_io
+from tests._generated_write_fixtures import base_digest, config, paper_io, published_review
 from tests.test_review_cache import _isolate_cache
 from tests.test_review_source_boundary import _Mapper
 from zotero_summarizer.api.errors import APIError
@@ -21,29 +16,81 @@ from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.models import PendingChangeApplyRequest, PendingChangeMutationRequest
 from zotero_summarizer.models.zotero_actions import GeneratedNoteProposal
 from pydantic import ValidationError
-from zotero_summarizer.services.library import _review_cache, deep_review
+from zotero_summarizer.services.library import _review_cache, _review_identity, deep_review
 from zotero_summarizer.services.zotero import generated_notes, pending
 from zotero_summarizer.storage import repositories
 
 
 @pytest.fixture
-def boundary(config, paper_io, tmp_path, monkeypatch):
-    key = "LIBR0038"
-    db, writer = install_generated_writer(tmp_path, monkeypatch)
-    add_library_item(db, item_key=key, title="Owned paper")
-    monkeypatch.setattr(deep_review, "_try_rebuild_render", Mock())
-    monkeypatch.setattr(writer, "remove_items_from_collection", Mock(side_effect=AssertionError("No implicit collection write")))
-    config.quality_review.chunk_strategy = "rank"
-    generator = Mock()
-    generator.pydantic_prompt.return_value = _base()
-    ctx = {"reader": paper_io.reader, "config": config, "extractor": paper_io.extractor,
-           "llm": generator, "llm_map": _Mapper("Generation context only."), "quality_enabled": True}
-    deep_review._review_worker({"item_key": key, "pdf_path": str(paper_io.source)}, ctx, "")
-    assert deep_review.status(key)["status"] == "ready"
-    row, = repositories.get_pending_changes(item_key=key)
-    presented, = asyncio.run(pending.list_pending_changes(item_key=key)).items
-    return SimpleNamespace(key=key, row=row, presented=presented, writer=writer, db=db, io=paper_io,
-                           entry=_review_cache._read_all(readonly=True)[key], ctx=ctx)
+def boundary(published_review):
+    value = published_review
+    assert value.job["status"] == "ready"
+    value.row, = repositories.get_pending_changes(item_key=value.key)
+    value.presented, = asyncio.run(pending.list_pending_changes(item_key=value.key)).items
+    return value
+
+
+def test_note_staging_observes_the_just_published_review_revision(published_review):
+    value = published_review
+    assert value.job["status"] == "ready"
+    entry, revision = _review_cache.publication_snapshot(value.key)
+    assert len(value.stage_snapshots) == 1
+    staged_entry, staged_revision = value.stage_snapshots[0]
+    assert staged_entry is not None
+    assert staged_revision == revision
+    assert staged_entry["digest"] == entry["digest"]
+    assert staged_entry["review_identity"] == entry["review_identity"]
+    value.writer.apply_changes.assert_not_called()
+
+
+def test_staging_does_not_claim_a_native_note_write(published_review):
+    value = published_review
+    assert value.job["status"] == "ready"
+    assert value.entry["zotero_note_written"] is False
+    assert value.entry["zotero_note_error"] is None
+    value.writer.apply_changes.assert_not_called()
+    assert not list(value.db.parent.glob(value.writer._BACKUP_GLOB))
+
+
+@pytest.mark.parametrize("published_review", ["stage_insert_failure"], indirect=True)
+def test_staging_failure_keeps_verified_publication_without_acknowledging_success(published_review):
+    value = published_review
+    assert value.job["status"] == "error"
+    assert "owned stage failure" in value.job["error"]
+    assert _review_cache.get_current_review(value.key) is not None
+    assert value.entry["digest"] is not None and value.entry["zotero_note_written"] is False
+    assert repositories.get_pending_changes(item_key=value.key) == []
+    value.writer.apply_changes.assert_not_called()
+    assert not list(value.db.parent.glob(value.writer._BACKUP_GLOB))
+
+
+@pytest.mark.parametrize("change_source", [False, True], ids=["unchanged", "late-replacement"])
+def test_final_identity_cannot_relabel_verified_original_bytes(config, paper_io, monkeypatch, change_source):
+    original = _review_identity.build_review_identity
+    calls = []
+
+    def identity(**kwargs):
+        if calls and change_source:
+            paper_io.source.write_bytes(b"R" * paper_io.source.stat().st_size)
+        result = original(**kwargs)
+        calls.append(result)
+        return result
+
+    monkeypatch.setattr(_review_identity, "build_review_identity", identity)
+    generator, mapper = Mock(), _Mapper("Generation context only.")
+    generator.pydantic_prompt.return_value = base_digest()
+    kwargs = dict(reader=paper_io.reader, config=config, extractor=paper_io.extractor,
+                  llm=generator, llm_map=mapper, quality_enabled=True)
+    if change_source:
+        with pytest.raises(ValueError, match="source changed"):
+            deep_review._review_one({"item_key": "LIBR0038", "pdf_path": str(paper_io.source)}, **kwargs)
+    else:
+        entry = deep_review._review_one({"item_key": "LIBR0038", "pdf_path": str(paper_io.source)}, **kwargs)
+        assert entry["review_identity"] == calls[0]
+        assert entry["verification_audit"]["identity"]["review_source_sha256"] == calls[0]["source_sha256"]
+    assert len(calls) == 2
+    assert generator.pydantic_prompt.call_count == mapper.calls == 1
+    assert not _review_cache._cache_path().exists()
 
 
 def approve(row, **kwargs):
@@ -55,7 +102,7 @@ def approve(row, **kwargs):
 def test_auto_review_stages_immutable_preview_with_zero_zotero_writes(boundary):
     b = boundary
     assert ZoteroReader(b.db.parent).get_item_notes(b.key) == []
-    b.io.writer.assert_not_called()
+    b.writer.apply_changes.assert_not_called()
     assert b.entry["zotero_note_written"] is False and b.entry["zotero_note_error"] is None
     preview = b.row["generated_preview"]
     assert preview["source"] == "deep_review" and preview["item_key"] == b.key

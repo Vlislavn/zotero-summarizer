@@ -13,7 +13,7 @@ from __future__ import annotations
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.integrations import llm_models
 from zotero_summarizer.models.providers import ProviderConfig, ProviderType
-from zotero_summarizer.services._common import state
+from zotero_summarizer.services._common import read_config, settings, state
 from zotero_summarizer.services.llm.factory import resolve_api_key
 from zotero_summarizer.services.llm.presets import PROVIDER_PRESET_REGISTRY, _compile_preset
 
@@ -32,10 +32,14 @@ def _allowed_remote_identities() -> set[tuple[ProviderType, str, str]]:
         for name in PROVIDER_PRESET_REGISTRY
         if name not in {"custom", "local"}
     }
-    try:
-        providers = state().app_state.config.llm_routing.providers
-    except (AttributeError, RuntimeError):
-        providers = []
+    holder = state().app_state
+    providers = []
+    if holder is not None:
+        providers = holder.config.llm_routing.providers
+    else:
+        selected = settings()
+        if selected.config_path.is_file():
+            providers = read_config(selected.config_path, selected.calibration_path).llm_routing.providers
     allowed.update(_identity(provider) for provider in providers if not provider.is_local)
     return allowed
 

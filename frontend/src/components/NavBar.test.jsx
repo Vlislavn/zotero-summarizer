@@ -27,7 +27,7 @@ it('does not claim a confirmed sync before evidence and offers an explicit retry
   } })));
   expect(screen.getByText(/2 pending/)).toBeTruthy();
   expect(screen.getByText(/Server unavailable/)).toBeTruthy();
-  expect(screen.getByText(/Start the Mac app at this same address/)).toBeTruthy();
+  expect(screen.getByText('Server unavailable. Device changes are retained. Check the app at this same address, then retry Sync now.')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Sync now' }));
   expect(syncNow).toHaveBeenCalledOnce();
 });
@@ -70,8 +70,8 @@ it('makes deployment limits and installation prerequisites visible without expos
   render(<MemoryRouter><NavBar /></MemoryRouter>);
   fireEvent.click(screen.getByText('Offline use & installation'));
   expect(screen.getByText(/iPhone\/iPad Safari/)).toBeTruthy();
-  expect(screen.getByText(/current server accepts same-machine loopback only/)).toBeTruthy();
-  expect(screen.getByText(/An app sync acknowledgement does not prove Zotero/)).toBeTruthy();
+  expect(screen.getByText('The local app is loopback-only by default. Another device needs a separately supported authenticated HTTPS gateway; exposing a LAN port or bypassing origin/TLS guards is not a setup step.')).toBeTruthy();
+  expect(screen.getByText('PDFs, figures, AI answers, acquisition and rescoring are not synced. An app acknowledgement does not prove Zotero or another device received your changes.')).toBeTruthy();
 });
 
 it('wraps long stable keys in both rejected drafts and conflicts on mobile', () => {

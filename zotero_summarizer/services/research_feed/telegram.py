@@ -188,11 +188,19 @@ def _import(conn, posts) -> dict:
     return counts
 
 
+def _output_dir(settings: Settings) -> Path:
+    parent = settings.data_dir / "research_feed"
+    directory = parent / "telegram"
+    if any(path.is_symlink() for path in (parent, directory, directory / "state.json")):
+        raise ValueError("saved news output owner cannot be a symlink")
+    return directory
+
+
 def _publish(settings: Settings, rows: list[dict], metadata: dict,
              identity: dict | None, card_budget: int, collect_only: bool) -> dict:
+    output_dir = _output_dir(settings)
     payload = telegram_render.payload(rows, metadata, identity,
                                       card_budget=card_budget, collect_only=collect_only)
-    output_dir = settings.data_dir / "research_feed" / "telegram"
     slug = "saved-news-" + uuid.uuid4().hex
     inputs = [row["post"].model_dump(mode="json") for row in rows]
     json_path, md_path = render.persist(payload, output_dir, slug,
@@ -226,6 +234,7 @@ def run_saved(
         raise ValueError("live news requires a completed collection receipt")
     if not cached_only and input_jsonl is None and live_collection is None:
         raise ValueError("provide saved input or a completed collection receipt")
+    _output_dir(settings)
     posts = [] if input_jsonl is None else read_posts(Path(input_jsonl), limit=source_limit)
     profile = (
         ResearchProfile.model_validate(

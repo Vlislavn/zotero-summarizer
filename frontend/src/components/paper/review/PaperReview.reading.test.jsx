@@ -213,6 +213,8 @@ it.each([
   { states: ['miss'] },
   { states: ['not_retrieved'] },
   { states: ['miss', 'not_retrieved'] },
+  { states: ['not_retrieved', 'miss'] },
+  { states: ['miss', 'miss', 'not_retrieved'] },
 ])('keeps the remainder disclosure neutral for $states', ({ states }) => {
   const { container } = render(<PaperReview flat deep={{ goal_summaries: [
     { goal: 'Located', retrieval_state: 'hit', relevant: true, summary: 'Located evidence.' },

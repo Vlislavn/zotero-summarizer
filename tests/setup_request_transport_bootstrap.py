@@ -1,4 +1,4 @@
-"""Run only the 17 actual-SDK cases in a fresh, guarded interpreter.
+"""Run only the 26 actual-SDK cases in a fresh, guarded interpreter.
 
 Parent execution only; see tests/README.md. This is not an OS sandbox or a
 production admission mechanism. No broader selectors or pytest args are accepted.
@@ -23,6 +23,16 @@ PREREQUISITE = "ZS_TEST_SETUP_NATIVE_SDK"
 TIMEOUT_ENV = "ZS_TEST_SETUP_NATIVE_SDK_TIMEOUT_SECONDS"
 DEFAULT_TIMEOUT_SECONDS = 120.0
 MAX_TIMEOUT_SECONDS = 120.0
+TIMING_ENV = "ZS_TEST_SETUP_NATIVE_TIMING_SECONDS"
+DEFAULT_TIMING_SECONDS = 1.0
+MAX_TIMING_SECONDS = 5.0
+
+
+def timing_seconds(raw=None):
+    value = DEFAULT_TIMING_SECONDS if raw is None else float(raw)
+    if not math.isfinite(value) or not 0 < value <= MAX_TIMING_SECONDS:
+        raise ValueError(f"{TIMING_ENV} must be finite, positive and <= {MAX_TIMING_SECONDS:g}")
+    return value
 
 
 def _timeout_seconds(raw):
@@ -64,11 +74,69 @@ def _environment(sandbox):
         "NO_PROXY": "*",
         "no_proxy": "*",
         PREREQUISITE: "1",
+        TIMING_ENV: str(timing_seconds(os.getenv(TIMING_ENV))),
     }
+
+
+class _OwnedLoopback:
+    """Test-only exact-listener capability; inactive means deny all TCP/UDP."""
+
+    def __init__(self):
+        import socket
+
+        self._socket = socket
+        self._connect = socket.socket.connect
+        self.listener = None
+        self.address = None
+        self.opening = False
+
+    def open(self):
+        assert self.listener is None and self.address is None
+        self.opening = True
+        try:
+            self.listener = self._socket.socket(self._socket.AF_INET, self._socket.SOCK_STREAM)
+            self.listener.bind(("127.0.0.1", 0))
+            self.listener.listen()
+            self.address = self.listener.getsockname()
+            return self.listener
+        except BaseException:
+            self.close()
+            raise
+        finally:
+            self.opening = False
+
+    def close(self):
+        if self.listener is not None:
+            self.listener.close()
+        self.listener = self.address = None
+
+    def resolve(self, host, port, *args, **kwargs):
+        if self.address is None or (host, port) != self.address:
+            raise AssertionError("Owned SDK fixture forbids DNS or another destination")
+        return [(self._socket.AF_INET, self._socket.SOCK_STREAM, 6, "", self.address)]
+
+    def connect(self, sock, address):
+        if self.address is None or address != self.address:
+            raise AssertionError("Owned SDK fixture permits only its exact listener")
+        return self._connect(sock, address)
+
+    def audit(self, event, args):
+        if event == "socket.__new__" and args[1] in (self._socket.AF_INET, self._socket.AF_INET6):
+            if not (args[1:3] == (self._socket.AF_INET, self._socket.SOCK_STREAM)
+                    and (self.opening or self.address is not None)):
+                raise AssertionError("Actual-SDK proof forbids unowned TCP/UDP sockets")
+        if event == "socket.bind":
+            if not (self.opening and args[0] is self.listener and args[1] == ("127.0.0.1", 0)):
+                raise AssertionError("Actual-SDK proof forbids another listener")
+        if event == "socket.connect" and (self.address is None or args[1] != self.address):
+            raise AssertionError("Actual-SDK proof forbids another destination")
 
 
 def _guards(sandbox):
     import socket
+
+    loopback = _OwnedLoopback()
+    sys._zs_setup_owned_loopback = loopback
 
     def refuse(*_args, **_kwargs):
         raise AssertionError("Actual-SDK proof forbids dotenv discovery/loading")
@@ -84,8 +152,7 @@ def _guards(sandbox):
     write_flags = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
 
     def audit(event, args):
-        if event == "socket.__new__" and args[1] in (socket.AF_INET, socket.AF_INET6):
-            raise AssertionError("Actual-SDK proof forbids TCP/UDP sockets")
+        loopback.audit(event, args)
         if event == "socket.getaddrinfo":
             raise AssertionError("Actual-SDK proof forbids DNS")
         if event in {"subprocess.Popen", "os.system", "os.posix_spawn", "os.exec", "os.fork"}:
@@ -110,6 +177,8 @@ def _installed_identity():
     from langchain_openai import ChatOpenAI
     from openai import OpenAI
     from openai.resources.chat.completions import Completions
+    from anthropic import Anthropic
+    from anthropic.resources.messages.messages import Messages
 
     assert LLM is base.LLM and base.ChatOpenAI is ChatOpenAI
     targets = (
@@ -118,6 +187,8 @@ def _installed_identity():
         ("langchain-openai", "langchain-openai", "langchain_openai/chat_models/base.py", ChatOpenAI._generate),
         ("openai", "openai", "openai/_client.py", OpenAI.__init__),
         ("openai-completions", "openai", "openai/resources/chat/completions/completions.py", Completions.create),
+        ("anthropic", "anthropic", "anthropic/_client.py", Anthropic.__init__),
+        ("anthropic-messages", "anthropic", "anthropic/resources/messages/messages.py", Messages.create),
     )
     identity = {}
     for name, distribution, relative, function in targets:
@@ -133,6 +204,7 @@ def _installed_identity():
 def _child(artifacts):
     # Direct internal entry must also reject invalid configuration before imports.
     _timeout_seconds(os.environ.get(TIMEOUT_ENV))
+    timing_seconds(os.environ.get(TIMING_ENV))
     sandbox = artifacts / "sandbox"
     assert sys.flags.isolated and sys.dont_write_bytecode
     assert os.environ.get(PREREQUISITE) == "1"
@@ -164,7 +236,7 @@ def _retain_cases(artifacts):
              "error": case.find("error") is not None,
              "skipped": case.find("skipped") is not None} for case in cases]
     (artifacts / "cases.json").write_text(json.dumps(rows, indent=2) + "\n")
-    return (len(rows) == 17 and len({(r["classname"], r["name"]) for r in rows}) == 17
+    return (len(rows) == 26 and len({(r["classname"], r["name"]) for r in rows}) == 26
             and all(r["classname"] == "tests.test_setup_request_transport" for r in rows)
             and not any(r["failed"] or r["error"] or r["skipped"] for r in rows))
 
@@ -175,6 +247,7 @@ def main():
     args = parser.parse_args()
     try:
         timeout = _timeout_seconds(os.environ.get(TIMEOUT_ENV))
+        timing_seconds(os.environ.get(TIMING_ENV))
     except ValueError as exc:
         parser.error(str(exc))
     allowed = (ROOT / "data/issue129-validation").resolve()
@@ -201,7 +274,7 @@ def main():
             return 124
     complete = _retain_cases(artifacts)
     if result.returncode == 0 and not complete:
-        print("Actual-SDK gate requires exactly 17 unique selected cases, zero failures/errors/skips", file=sys.stderr)
+        print("Actual-SDK gate requires exactly 26 unique selected cases, zero failures/errors/skips", file=sys.stderr)
         return 1
     return result.returncode
 

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
+import '../../testSetup.js';
 import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { createMemoryRouter, Route, RouterProvider, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { submitVerdict } from '../../api/goldenApi.js';
 import { cacheReviewDetail, cachedResponse, pendingMutations, publishStatus, savePapers } from '../../offlineStore.js';
@@ -33,9 +34,9 @@ afterEach(async () => {
 function mount(element, path = '/library') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   clients.push(client);
-  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}>
-    {element}
-  </MemoryRouter></QueryClientProvider>);
+  return render(<QueryClientProvider client={client}><RouterProvider router={createMemoryRouter([
+    { path: '*', element },
+  ], { initialEntries: [path] })} /></QueryClientProvider>);
 }
 function queue(item, onSaved = vi.fn()) {
   return mount(<ReadNextView items={[item]} totalUnread={1} rawCount={1}

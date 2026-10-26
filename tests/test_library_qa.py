@@ -55,8 +55,8 @@ def _fake_state(tmp_path, pdf, extractor, llm, monkeypatch):
         zotero_reader=_Reader(),
         pdf_extractor=extractor,
         app_state=types.SimpleNamespace(config=config),
-        resolve_stage_client=lambda stage: llm,
     )
+    monkeypatch.setattr(qa.factory, "resolve_stage_client", lambda app, stage: llm)
     monkeypatch.setattr(qa, "state", lambda: app)
     monkeypatch.setattr(
         qa, "resolve_stage",
@@ -211,7 +211,7 @@ def test_generated_review_is_context_but_not_paper_evidence(tmp_path, monkeypatc
 
     class _ReviewQuoteLLM:
         def prompt(self, prompt, **kwargs):
-            assert quote in prompt
+            assert (quote in prompt) is (in_pdf or review_field != 'digest')
             return json.dumps({"answer": "SecretSet", "quote": quote})
 
     _fake_state(tmp_path, tmp_path / "p.pdf", _Extractor(), _ReviewQuoteLLM(), monkeypatch)
@@ -229,6 +229,8 @@ def test_generated_review_is_context_but_not_paper_evidence(tmp_path, monkeypatc
         "review_identity": identity, review_field: review_value,
     })
 
+    if review_field == 'digest':
+        assert _review_cache.get_current_review('KEY1') is None
     result = qa.ask_paper("KEY1", "Which benchmark was evaluated?")
 
     assert result["abstained"] is (not in_pdf)
@@ -408,6 +410,59 @@ def test_explicit_whole_paper_counts_remain_deterministic(tmp_path, monkeypatch,
         "item_key", "question", "mode", "evidence_handle", "citation",
     }
     assert not llm.prompts
+
+
+@pytest.mark.parametrize('seam', ['service', 'http'])
+@pytest.mark.parametrize('kind', ['ascii', 'unicode', 'surrogate', 'unfounded_quote'])
+def test_grounded_output_encoding_retains_question_receipt(tmp_path, monkeypatch, seam, kind):
+    from uuid import uuid4
+    from fastapi.testclient import TestClient
+    from test_review_questions import _app, _database, _questions
+
+    settings = _database(tmp_path) if seam == 'http' else None
+    llm = _LLM()
+    _fake_state(tmp_path, tmp_path / 'unused.pdf', _Extractor(), llm, monkeypatch)
+    artifact = qa.paper_render.build_paper_read('KEY1')
+    unicode_answer = 'ImageNet café π e\u0301 😀'
+    body = PAPER_TEXT + '\nDataset label: ' + unicode_answer + '.'
+    artifact.update(full_text=body, pdf_key='encoding-owned-v1')
+    monkeypatch.setattr(qa.paper_render, 'build_paper_read', lambda key: artifact)
+    monkeypatch.setattr(qa.paper_render, 'artifact_text', lambda artifact, max_chars: body[:max_chars])
+    answer = 'ImageNet\ud800' if kind == 'surrogate' else unicode_answer if kind == 'unicode' else 'ImageNet'
+    llm.answer = answer
+    if kind == 'unfounded_quote':
+        def output(prompt, **kwargs):
+            llm.prompts.append(prompt)
+            return json.dumps({'answer': answer, 'quote': 'This sentence is absent from the paper.'})
+        monkeypatch.setattr(llm, 'prompt', output)
+    if seam == 'service':
+        if kind == 'surrogate':
+            with pytest.raises((UnicodeError, APIError)):
+                qa.ask_paper('KEY1', 'Which dataset?', mode='full_text')
+        else:
+            result = qa.ask_paper('KEY1', 'Which dataset?', mode='full_text')
+            assert result['answer'] == (None if kind == 'unfounded_quote' else answer)
+            assert result['abstained'] is (kind == 'unfounded_quote')
+            json.dumps(result, ensure_ascii=False).encode('utf-8')
+            if kind != 'unfounded_quote':
+                assert result['quote'] == 'We evaluated GlassNet on the ImageNet dataset.'
+                assert result['citation']['claimed'] is True
+    else:
+        submission = str(uuid4())
+        with TestClient(_app(), raise_server_exceptions=False) as client:
+            response = client.post('/api/library/ask', json={'item_key': 'KEY1',
+                'question': 'Which dataset?', 'mode': 'full_text', 'submission_id': submission})
+        assert response.status_code == (502 if kind == 'surrogate' else 200)
+        result = response.json()
+        if kind == 'surrogate':
+            assert result['error'] == 'qa_failed' and result['details']['question_saved'] is True
+        else:
+            assert result['question_saved'] is True
+            assert result['answer'] == (None if kind == 'unfounded_quote' else answer)
+            assert result['abstained'] is (kind == 'unfounded_quote')
+        assert len(_questions(settings.triage_db_path)) == 1
+        assert _questions(settings.triage_db_path)[0][0] == submission
+    assert len(llm.prompts) == 1
 
 
 def test_ask_paper_boundary_errors(tmp_path, monkeypatch):

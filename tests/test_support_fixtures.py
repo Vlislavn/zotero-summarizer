@@ -1,8 +1,14 @@
 """Public synthetic on-disk fixtures; never scientific labels or model evidence."""
 from pathlib import Path
+from types import SimpleNamespace
 
+import httpx
+import pytest
+
+from tools.method_validation import support_run
+from tools.method_validation.decision_adapter import payload
 from tools.method_validation.support import (
-    Config, OWNERS, SUPPORT_OPTIONS, SupportCase, digest, encoded, gold_identity, sha,
+    Config, OWNERS, SUPPORT_OPTIONS, SupportCase, admit_support_case, digest, encoded, gold_identity, sha,
 )
 
 MODEL = 'public-synthetic-alias-v1'
@@ -87,3 +93,24 @@ def validated(cfg):
 def rows_at(owner):
     from tools.method_validation.support import loads
     return [loads(path.read_bytes()) for path in sorted(owner.glob('pair-*.json'))]
+
+
+@pytest.fixture
+def native_env(tmp_path):
+    cfg, bundle, case, _ = fixture(tmp_path, kind='native')
+    original = next(s['text'] for s in bundle['sources'] if s['paper_key'] == case['paper_key'])
+    config = validated(cfg)
+    admitted = admit_support_case(case, original)
+    assert support_run.prepare(config)[2] == {digest(case): admitted}
+    env = SimpleNamespace(cfg=config, raw_config=cfg, case=admitted, original=original,
+                          request=payload(admitted, config), raw=encoded(native_wire()) + b'\n',
+                          status=200, headers=None, requests=[], retained=[], error=None)
+
+    def handler(request):
+        env.requests.append(request)
+        if env.error is not None:
+            raise env.error
+        return httpx.Response(env.status, content=env.raw, headers=env.headers)
+
+    env.transport = httpx.MockTransport(handler)
+    return env

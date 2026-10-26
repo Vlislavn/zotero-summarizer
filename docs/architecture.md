@@ -51,13 +51,19 @@ server/native acknowledgements remain distinct; see
 ## Dependency rules
 
 ```text
-api → services → storage / integrations → models · contracts · domain · settings · runtime
+api → services → storage / integrations → models · contracts · domain · settings
 mcp ──HTTP──→ api
+runtime.py → settings / models
+    TYPE_CHECKING-only annotations → integrations / storage
 ```
 
 - `integrations/` and `storage/` never import `services/` or `api/`.
 - `services/` may import only `api.errors` from the API layer, not `api.app` or
   `api.routes`. New service modules belong in a domain subpackage.
+- `runtime.py` is foundational process state and must not import `services/` or
+  any `api/` module, including `api.errors`. Leaf imports such as
+  `models.providers` are allowed; integration/storage type annotations remain
+  under `TYPE_CHECKING`.
 - `mcp/` imports none of those application layers; it is an HTTP client.
 
 The [static import checker](../tools/precommit/check_import_policy.py) enforces
@@ -67,7 +73,8 @@ prove the absence of indirect effects through callbacks or dynamic imports.
 ## Code map
 
 Paths below are relative to [`zotero_summarizer/`](../zotero_summarizer/README.md).
-Each package's README owns its detailed implementation contract.
+This is the canonical ownership map; each linked package README owns its detailed
+implementation contract.
 
 | Responsibility | Owner |
 |---|---|

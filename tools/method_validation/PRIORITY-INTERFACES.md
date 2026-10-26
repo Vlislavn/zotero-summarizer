@@ -39,10 +39,16 @@ silently retried or converted into semantic classes.
   using existing canonical JSON SHA-256/NFKC/casefold/whitespace primitives.
 - Native input: bounded title+abstract+goals only. Grader labels, provenance,
   sampling/family/split/paper identifiers never enter the generator request.
+  Omitted or null title/abstract remain unknown evidence and yield per-paper
+  `missing_input` with no native dispatch, not an implicit negative or whole-run
+  admission error. Stored raw inputs preserve omitted versus supplied-null keys.
 - Case statuses: decision, threshold_abstention, model_mismatch, invalid_response,
   timeout, unavailable, response_too_large, encoded_response, blocked, wall_budget,
   missing_input, input_too_large. Only decision carries a classified `label`.
   A threshold/mismatched native readout may be retained without becoming a label.
+  Intrinsic result validation permits native readout only for these two observed
+  states or decision; operational outcomes cannot carry a semantic readout.
+  Standalone validation is not authentication of configured policy or raw artifacts.
 - Rows have closed `native_four_way / ml_regression / llm_ordinal` capabilities.
   LLM ranking uses ordinal priority, never its retained confidence score; a missing
   ML regression score leaves ranking unavailable while retaining classification.

@@ -21,7 +21,7 @@ from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.runtime import get_context
 from zotero_summarizer.services import lifecycle
 from zotero_summarizer.services._common import read_config, write_user_config
-from zotero_summarizer.services.library import _review_cache, _review_identity, deep_review, paper_render
+from zotero_summarizer.services.library import _review_cache, deep_review, paper_render
 from zotero_summarizer.services.setup import bootstrap
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.storage import feeds, repositories, rss
@@ -324,16 +324,17 @@ def synthetic_lab(monkeypatch, width=390):
         try:
             server.start()
             assert get_context().state.app_state.config.quality_review.use_docling is False
-            identity = _review_identity.build_review_identity(
-                config=get_context().state.app_state.config,
-                pdf_path=str(settings.zotero_data_dir / "storage/ATTACH01/fixture.pdf"),
-                source_kind="library", focus_prompt="",
-            )
-            _review_cache._write_one(LIBRARY_KEY, {
-                "digest": {"tldr": "Compact synced context", "executive_summary": "Synthetic retained context, not model output."},
-                "quality": None, "goal_summaries": [], "review_identity": identity,
-                "review_contract_version": _review_cache.REVIEW_CONTRACT_VERSION,
-            })
+            from tests.test_research_feed import _review
+
+            entry = _review(LIBRARY_KEY,
+                source_path=settings.zotero_data_dir / "storage/ATTACH01/fixture.pdf",
+                config=get_context().state.app_state.config, quality=None, goal_summaries=[], code_link=None,
+                digest={"tldr": "Compact synced context", "executive_summary": "Synthetic retained context.",
+                        "read_decision": "skip", "read_why": "Owned storage fixture only.",
+                        "read_parts": [], "skip_parts": [], "estimated_read_minutes": 0,
+                        "original_value": "", "writing_friction": "low", "writing_reasons": [],
+                        "basis": "full_text"})
+            _review_cache._write_one(LIBRARY_KEY, entry)
             assert deep_review.get_current_review(LIBRARY_KEY)["digest"]["tldr"] == "Compact synced context"
             paper_render.build_paper_read(LIBRARY_KEY)
             paper_render.build_paper_read(stable, allow_acquire_missing=True)

@@ -87,12 +87,12 @@ def test_weekly_persisted_markdown_exposes_actual_card_uncertainty(
     settings = _settings(tmp_path)
     _seed(settings, "visible-owned", "Agent evaluation method", materialized="Z1")
     gap = "No held-out comparison is reported"
-    review = _review("visible-owned")
+    review = _review("visible-owned", quality={
+        'missing_critical': [gap] if scientific_gap else [], 'red_flags': []})
     if not has_code:
         review["code_link"] = {
             "found": False, "exists": False, "relevance": "missing",
         }
-    review["quality"]["missing_critical"] = [gap] if scientific_gap else []
     original_review = deepcopy(review)
     loader = Mock(return_value=review)
     queue_tags = Mock(side_effect=AssertionError("dry-run must not queue tags"))
@@ -118,20 +118,18 @@ def test_weekly_persisted_markdown_exposes_actual_card_uncertainty(
     assert payload == submitted[0]
     assert len(submitted) == result["cards_generated"] == len(payload["cards"]) == 1
     card = payload["cards"][0]["card"]
-    assert card["reproducibility_tier"] == "unknown"
-    assert card["reproducibility_rationale"] == (
-        "Reproduction effort and required inputs have not been assessed."
-    )
-    assert card["missing_reproduction_inputs"] == []
-    assert card["evidence_gaps"] == ([gap] if scientific_gap else [])
-    assert "**Reproducibility tier:** unknown" in text.splitlines()
+    missing = ([gap] if scientific_gap else []) + ([] if has_code else ["No verified code URL"])
+    tier = "blocked" if missing else "unknown"
+    assert card["reproducibility_tier"] == tier and card["reproduction_assessment"] is None
+    assert card["reproducibility_rationale"] == ("; ".join(missing) if missing else "Reproduction effort has not been assessed.")
+    assert card["missing_reproduction_inputs"] == missing
+    assert card["evidence_gaps"] == (["weak_evidence"] if scientific_gap else [])
+    assert f"**Reproducibility tier:** {tier}" in text.splitlines()
     assert (
         f"**Reproducibility rationale:** {card['reproducibility_rationale']}"
     ) in text.splitlines()
-    assert f"**Missing reproduction inputs:** {UNRECORDED}" in text.splitlines()
-    assert (
-        f"**Evidence gaps:** {gap if scientific_gap else UNRECORDED}"
-    ) in text.splitlines()
+    assert f"**Missing reproduction inputs:** {'; '.join(missing) if missing else UNRECORDED}" in text.splitlines()
+    assert f"**Evidence gaps:** {'weak_evidence' if scientific_gap else UNRECORDED}" in text.splitlines()
     assert card["code_urls"] == (
         ["https://github.com/example/visible-owned"] if has_code else []
     )
@@ -181,6 +179,22 @@ def test_each_field_keeps_full_unicode_order_and_duplicates(
     if field == "evidence_gaps":
         inputs_line = first_card.split("**Missing reproduction inputs:** ", 1)[1]
         assert expected not in inputs_line.split("\n\n", 1)[0]
+
+
+@pytest.mark.parametrize("field,label", FIELDS[:2])
+def test_reproduction_field_has_one_home_before_missing_value_fallback(typed_payload, field, label):
+    card = typed_payload["cards"][0]["card"]
+    value = card[field]
+    before = deepcopy(typed_payload)
+    text = render.markdown(typed_payload).split("## 2. ", 1)[0]
+    assert text.count(value) == 1
+    assert typed_payload == before
+    del card[field]
+    retained = deepcopy(typed_payload)
+    text = render.markdown(typed_payload).split("## 2. ", 1)[0]
+    assert f"**{label}:** {UNRECORDED}" in text.splitlines()
+    assert "**Reproduction:**" not in text
+    assert typed_payload == retained
 
 
 @pytest.mark.parametrize("tier", ["unknown", "blocked", "one_day", "one_week", "multi_week"])

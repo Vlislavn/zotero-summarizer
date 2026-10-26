@@ -36,6 +36,10 @@ Only an explicit, complete `miss` board permits a hide. Missing/malformed cells,
 relevant and non-abstained states together. A retrieval miss may legitimately
 abstain from generating a summary. Unknown-goal skips withhold the effective
 reading action and carry `goals_not_assessed`; raw model actions remain provenance.
+The fleet reuses the shared current-cache reader: retained-artifact/source and
+policy-input bindings are checked before presentation, rather than comparing a
+derived view with a raw cached-digest hash. Currentness does not authorize native
+writes or authenticate scientific claims.
 `project_review` is the single policy projection for cached review readers; new
 reviews retain `model_digest` and fleet proposals consume that raw validated output
 before applying the same cap. Full reading needs recorded full-text basis and exact

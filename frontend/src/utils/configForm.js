@@ -27,6 +27,23 @@ export function resolveStage(routing, stage) {
   return { stage, providerName, model, provider, inherits: !sel.provider && !sel.model };
 }
 
+export function isLocalProvider(provider) {
+  if (!provider?.base_url) return false;
+  try {
+    const host = new URL(provider.base_url).hostname.replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
+    return ['localhost', '0.0.0.0', '::', '::1', '::ffff:0:0'].includes(host)
+      || host.endsWith('.localhost') || /^127(?:\.\d{1,3}){3}$/.test(host)
+      || /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(host);
+  } catch { return false; }
+}
+
+export function localProfileForStage(routing, catalog, stage = 'default') {
+  const { provider, model } = resolveStage(routing, stage);
+  if (!isLocalProvider(provider)) return null;
+  return catalog?.profiles?.find((profile) => profile.model && profile.model === model)
+    || catalog?.profiles?.find((profile) => profile.id === 'existing') || null;
+}
+
 export function splitLines(text) {
   return String(text || '')
     .split('\n')

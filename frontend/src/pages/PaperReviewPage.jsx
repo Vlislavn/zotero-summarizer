@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useBeforeUnload, useBlocker, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { fetchCollections, fetchPaperRender, attachFiguresToZotero } from '../api/libraryApi.js';
 import { flattenCollections } from './pendingHelpers.js';
@@ -91,7 +91,7 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
         <button
           type="button"
           onClick={() => runner.run()}
-          disabled={!llmAvailable}
+          disabled={!llmAvailable || status.status === 'unavailable' || runner.checkingStatus}
           className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-[13px] font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
         >
           Generate review
@@ -99,11 +99,32 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
       )}
       <ReviewFailure status={status} />
       {online && status.status === 'unavailable' && status.error && (
-        <div className="text-[12px] text-amber-800" role="status">Review status unavailable: {status.error}</div>
+        <div className="space-y-1 text-[12px] text-amber-800" role="status">
+          <div>Review status unavailable: {status.error}. The server job may still be running.</div>
+          <button type="button" onClick={runner.retryStatus} disabled={runner.checkingStatus}
+            className="font-semibold underline disabled:opacity-50">
+            Retry status
+          </button>
+        </div>
       )}
       {error && <div className="text-[12px] text-rose-700">{error}</div>}
     </div>
   );
+}
+
+function useUnsavedNotesGuard(dirty) {
+  const blocker = useBlocker(useCallback(({ currentLocation, nextLocation }) =>
+    dirty && currentLocation.pathname !== nextLocation.pathname, [dirty]));
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return;
+    if (window.confirm('You have unsaved notes on this paper. Leave without saving them?')) blocker.proceed();
+    else blocker.reset();
+  }, [blocker]);
+  useBeforeUnload(useCallback(event => {
+    if (!dirty) return;
+    event.preventDefault();
+    event.returnValue = '';
+  }, [dirty]));
 }
 
 // Full-page, single-scroll deep review for one paper (opened from a Read-next row).
@@ -132,18 +153,16 @@ export default function PaperReviewPage() {
   const navIdx = reviewOrder.indexOf(itemKey);
   const prevKey = navIdx > 0 ? reviewOrder[navIdx - 1] : null;
   const nextKey = navIdx >= 0 && navIdx < reviewOrder.length - 1 ? reviewOrder[navIdx + 1] : null;
-  // Stepping to another paper unmounts this page (and the notes textarea), so an
-  // unsaved note would be silently lost — confirm first when there are unsaved edits.
   const [notesDirty, setNotesDirty] = useState(false);
+  useUnsavedNotesGuard(notesDirty);
   const [relatedRevision, setRelatedRevision] = useState(0);
   const fenceRelatedContext = useCallback(() => setRelatedRevision(value => value + 1), []);
   const goToKey = useCallback(
     (key) => {
       if (!key) return;
-      if (notesDirty && !window.confirm('You have unsaved notes on this paper. Leave without saving them?')) return;
       navigate(`/paper/${encodeURIComponent(key)}${autoRun ? '' : '?autoRun=false'}`);
     },
-    [navigate, notesDirty, autoRun],
+    [navigate, autoRun],
   );
   // j = next, k = prev (auto-disabled while typing in the notes / Ask fields).
   useKeyboardNav({
@@ -190,7 +209,6 @@ export default function PaperReviewPage() {
   const hasPdf = Boolean(detail?.has_pdf);
   const render = renderQuery.data || null;
   const renderCompleted = render?.status === 'completed';
-  const canAsk = hasPdf || renderCompleted;
   // Auto-generate on open only for papers with a local Zotero PDF (no silent PDF
   // fetch); a no-PDF paper shows the manual Generate path instead, even if an
   // acquired render artifact already exists.
@@ -312,7 +330,6 @@ export default function PaperReviewPage() {
             onNoteSaved={() => { fenceRelatedContext(); refreshDetail(); }}
             onNotesDirtyChange={setNotesDirty}
             hasPdf={hasPdf}
-            canAsk={canAsk}
             serverAvailable={runner.serverAvailable}
           />
         </aside>

@@ -54,8 +54,8 @@ def test_pdf_prefilter_uses_same_machine_producer_without_model_calls(monkeypatc
         "api_base": "https://example.invalid/v1", "api_key_env": "SYNTHETIC_API_KEY",
     })
     llm = Mock()
-    app = SimpleNamespace(app_state=SimpleNamespace(config=config),
-                          resolve_stage_client=lambda stage: llm)
+    app = SimpleNamespace(app_state=SimpleNamespace(config=config))
+    monkeypatch.setattr(summarization.factory, "resolve_stage_client", lambda app, stage: llm)
     # This is a controlled extraction boundary, not actual SDK/native acceptance.
     source = PdfSource("Synthetic original text", (), "a" * 64)
     extract = Mock(return_value=source)

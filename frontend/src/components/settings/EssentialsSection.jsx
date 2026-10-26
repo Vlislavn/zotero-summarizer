@@ -38,7 +38,7 @@ function ZoteroPaths({ form, onUpdate }) {
 
   const saveMutation = useMutation({
     mutationFn: updatePaths,
-    onSettled: () => invalidateSetupDoctor(queryClient),
+    onSettled: (_response, error) => invalidateSetupDoctor(queryClient, error),
     onSuccess: () => {
       setRestartBanner('Restart required to apply new paths.');
       queryClient.invalidateQueries({ queryKey: ['setup-status'] });

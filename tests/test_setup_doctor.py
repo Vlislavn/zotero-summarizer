@@ -290,6 +290,16 @@ def test_rss_check_never_runs_schema_writes(tmp_path, monkeypatch):
     assert doctor._rss_source(settings)["message"] == "1 RSS source enabled"
 
 
+def test_missing_rss_source_has_typed_settings_recovery_without_writes(tmp_path):
+    settings = _settings(tmp_path)
+    before = settings.triage_db_path.read_bytes()
+    row = doctor._rss_source(settings)
+    assert row["status"] == "needs_action"
+    assert row["recovery"]["action"] == "open_sources_settings"
+    assert row["recovery"]["label"] == "Add a source in Settings"
+    assert settings.triage_db_path.read_bytes() == before
+
+
 def test_runtime_check_reports_a_stopped_ollama_service(tmp_path, monkeypatch):
     settings = _settings(tmp_path)
     monkeypatch.setattr(

@@ -12,7 +12,7 @@ from zotero_summarizer.services.research_feed.profile import load_profile
 
 
 @pytest.mark.parametrize("applicable_neighbor", [True, False])
-def test_unknown_project_spans_survive_card_and_publication(tmp_path, applicable_neighbor):
+def test_unknown_project_spans_survive_card_and_publication(tmp_path, monkeypatch, applicable_neighbor):
     settings = _settings(tmp_path)
     _seed(settings, "paper", "Agent evaluation")
     profile = load_profile(settings.data_dir)
@@ -22,7 +22,7 @@ def test_unknown_project_spans_survive_card_and_publication(tmp_path, applicable
             project.update(assessment="unknown", use_kind=None, rationale="Source is insufficient",
                            mechanism="", target_component="", proposed_change="",
                            minimal_validation_experiment="", evidence_quote="")
-    entry, generator, verifier = _generated_entry("paper", profile, content=content)
+    entry, generator, verifier = _generated_entry(tmp_path, monkeypatch, "paper", profile, content=content)
 
     result = runner.run_weekly(settings, start=START, end=END, review_loader=lambda _key: entry)
     report = json.loads(Path(result["json_path"]).read_text())

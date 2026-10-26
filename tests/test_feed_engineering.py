@@ -11,14 +11,14 @@ from unittest.mock import Mock
 
 import pytest
 
-from tests.test_digest_verification import PAPER, _Verifier, _digest
+from tests.test_digest_verification import PAPER, _digest
+from tests.test_feed_assessment_producer import produce_review
 from tests.test_research_feed import _review, _seed, _settings
 from tests.test_research_feed_boundaries import START, END
 from zotero_summarizer import cli
 from zotero_summarizer.models import ResearchCandidate, ResearchProfile, SummarizeResponse
 from zotero_summarizer.models.research_feed import FeedDigestResponse, FeedProjectAssessment
-from zotero_summarizer.services.library import _feed_assessment as feed, deep_review, quality_review
-from zotero_summarizer.services.library import _map_reduce
+from zotero_summarizer.services.library import _feed_assessment as feed, deep_review
 from zotero_summarizer.services.research_feed import runner
 from zotero_summarizer.services.research_feed.cursor import CandidateCursor
 from zotero_summarizer.services.research_feed.ranking import rank_candidates
@@ -49,27 +49,18 @@ class Generator:
         return pydantic_model.model_validate(payload)
 
 
-def _generated_entry(key, profile, *, content=None, strategy="rank"):
-    config = _default_goals_config()
-    config.quality_review.chunk_strategy = strategy
-    generator, verifier, out = Generator(key, content), _Verifier(), {}
-    verifier.prompt = lambda _prompt: PAPER
-    digest = _map_reduce.digest_for_strategy(
-        "Agent evaluation", PAPER, config, map_llm=verifier, reduce_llm=generator,
-        budget=_map_reduce.ChunkBudget(8000, 8000, 1),
-        feed_context=feed.context_for(key, profile), feed_out=out,
-    )
-    entry = _review(key)
-    from zotero_summarizer.services.library.review_fleet.propose import apply_reading_policy
-    entry["digest"], entry["model_read_decision"], entry["reading_policy_flags"] = apply_reading_policy(
-        digest.model_dump(), entry["quality"], entry["goal_summaries"])
-    return feed.bind(entry, out), generator, verifier
+def _generated_entry(tmp_path, monkeypatch, key, profile, *, content=None, strategy="rank", quality=None):
+    generator = Generator(key, content)
+    entry, _context, _generator, verifier = produce_review(
+        tmp_path, monkeypatch, source_id=key, selected_profile=profile,
+        strategy=strategy, generator=generator, quality=quality)
+    return entry, generator, verifier
 
 
 @pytest.mark.parametrize("strategy", ["rank", "prefix", "map_reduce"])
-def test_same_review_call_generates_original_bound_project_proposal(strategy):
+def test_same_review_call_generates_original_bound_project_proposal(tmp_path, monkeypatch, strategy):
     profile = ResearchProfile(themes=["evaluation"], projects=["agent harness"])
-    entry, generator, verifier = _generated_entry("paper", profile, strategy=strategy)
+    entry, generator, verifier = _generated_entry(tmp_path, monkeypatch, "paper", profile, strategy=strategy)
     assessment = feed.qualify(entry, feed.context_for("paper", profile))
 
     assert len(generator.calls) == 1 and generator.models == [FeedDigestResponse]
@@ -84,9 +75,9 @@ def test_same_review_call_generates_original_bound_project_proposal(strategy):
     {"projects": []}, _assessment("wrong"),
     _assessment("paper", quote="Generated notes assert an unavailable result."),
 ])
-def test_failed_optional_assessment_keeps_verified_base_without_extra_model_calls(content):
+def test_failed_optional_assessment_keeps_verified_base_without_extra_model_calls(tmp_path, monkeypatch, content):
     profile = ResearchProfile(themes=[], projects=["agent harness"])
-    entry, generator, verifier = _generated_entry("paper", profile, content=content)
+    entry, generator, verifier = _generated_entry(tmp_path, monkeypatch, "paper", profile, content=content)
 
     assert entry["digest"]["tldr"] == _digest().tldr
     assert len(generator.calls) == verifier.calls == 1
@@ -94,12 +85,12 @@ def test_failed_optional_assessment_keeps_verified_base_without_extra_model_call
         feed.qualify(entry, feed.context_for("paper", profile))
 
 
-def test_unknown_partial_and_explicit_no_fit_remain_distinct():
+def test_unknown_partial_and_explicit_no_fit_remain_distinct(tmp_path, monkeypatch):
     profile = ResearchProfile(themes=[], projects=["agent harness", "activation oracle"])
     content = _assessment("paper", projects=("agent harness",))
     content["projects"][0].update(assessment="not_applicable", use_kind="not_applicable", mechanism="",
         target_component="", proposed_change="", minimal_validation_experiment="")
-    entry, _, _ = _generated_entry("paper", profile, content=content)
+    entry, _, _ = _generated_entry(tmp_path, monkeypatch, "paper", profile, content=content)
     result = feed.qualify(entry, feed.context_for("paper", profile))
     assert result["status"] == "partial"
     assert result["content"]["projects"][0]["assessment"] == "not_applicable"
@@ -108,9 +99,9 @@ def test_unknown_partial_and_explicit_no_fit_remain_distinct():
 
 
 @pytest.mark.parametrize("change", ["profile", "digest", "source", "evidence", "status"])
-def test_changed_binding_or_semantically_invalid_envelope_cannot_reuse_positives(change):
+def test_changed_binding_or_semantically_invalid_envelope_cannot_reuse_positives(tmp_path, monkeypatch, change):
     profile = ResearchProfile(themes=[], projects=["agent harness"])
-    entry, _, _ = _generated_entry("paper", profile)
+    entry, _, _ = _generated_entry(tmp_path, monkeypatch, "paper", profile)
     if change == "profile":
         profile.projects.append("activation oracle")
     elif change == "digest":
@@ -128,21 +119,25 @@ def test_changed_binding_or_semantically_invalid_envelope_cannot_reuse_positives
         feed.qualify(entry, feed.context_for("paper", profile))
 
 
-def test_explicit_effort_estimate_is_unverified_not_inferred_from_code():
+@pytest.mark.parametrize("artifact", [False, True])
+def test_explicit_effort_estimate_is_unverified_not_inferred_from_code(tmp_path, monkeypatch, artifact):
     profile = ResearchProfile(themes=[], projects=["agent harness"])
     content = _assessment("paper")
     content["reproduction"] = {"tier": "one_week", "rationale": "Author describes the setup",
                                "missing_inputs": [], "evidence_quote": PAPER}
-    entry, _, _ = _generated_entry("paper", profile, content=content)
-    candidate = ResearchCandidate(source_id="paper", source="app_rss", title="Agent evaluation")
+    entry, _, _ = _generated_entry(tmp_path, monkeypatch, "paper", profile, content=content)
+    candidate = ResearchCandidate(source_id="paper", source="app_rss", title="Agent evaluation",
+        code_urls=["https://example.test/owned-code"] if artifact else [])
     triage = runner.triage_candidate(candidate, {"decision": "selected"}, profile)
-    records, missing, failed = runner._records([(candidate, triage)], lambda _key: entry, profile)
+    records, missing, failed, unqualified, evidence = runner._records([(candidate, triage)], lambda _key: entry, profile)
     card = records[0]["card"]
-    assert card["reproducibility_tier"] == "one_week"
-    assert card["reproducibility_rationale"].startswith("AI estimate, unverified:")
+    assert card["reproduction_assessment"]["tier"] == "one_week"
+    assert card["reproducibility_tier"] == ("one_week" if artifact else "blocked")
+    assert "AI estimate, unverified:" in card["reproducibility_rationale"]
+    assert ("No verified code URL" in card["missing_reproduction_inputs"]) == (not artifact)
     assert card["research_ideas"][0]["target_project"] == "agent harness"
     assert card["impact_assessment"] is None
-    assert not missing and not failed
+    assert missing == failed == unqualified == [] and evidence["paper"]["qualified"] is True
 
 
 def test_warm_projection_never_suppresses_current_generation_error():
@@ -150,11 +145,13 @@ def test_warm_projection_never_suppresses_current_generation_error():
     candidate = ResearchCandidate(source_id="paper", source="app_rss", title="Agent evaluation")
     triage = runner.triage_candidate(candidate, {"decision": "selected"}, profile)
     for _ in range(2):
-        records, _, failed = runner._records([(candidate, triage)], _review, profile, {"paper": "provider failed"})
+        records, missing, failed, unqualified, evidence = runner._records(
+            [(candidate, triage)], _review, profile, {"paper": "provider failed"})
         assert len(records) == 1
         assert records[0]["card"]["project_uses"] == []
         assert records[0]["card"]["research_ideas"] == []
         assert failed == [{"source_id": "paper", "error": "provider failed"}]
+        assert missing == unqualified == [] and evidence["paper"]["availability"] == "available"
 
 
 @pytest.mark.parametrize("bad", [None, "abstract", "unbound"])
@@ -169,8 +166,15 @@ def test_unqualified_source_is_not_project_science(bad):
         review["digest"]["basis"] = "abstract_only"
     else:
         review["review_identity"] = {}
-    records, _, failed = runner._records([(candidate, triage)], lambda _key: review, profile)
-    assert not records and len(failed) == 1
+    records, missing, failed, unqualified, evidence = runner._records([(candidate, triage)], lambda _key: review, profile)
+    assert records == failed == [] and evidence["paper"]["qualified"] is False
+    if bad is None:
+        assert missing == [candidate.model_dump(mode="json")] and unqualified == []
+        assert evidence["paper"]["availability"] == "unavailable"
+    else:
+        reason = "digest_basis_unqualified" if bad == "abstract" else "review_source_unbound"
+        assert missing == [] and unqualified == [{"candidate": candidate.model_dump(mode="json"), "reason": reason}]
+        assert evidence["paper"]["availability"] == ("available" if bad == "abstract" else "unknown")
 
 
 def test_cli_generation_and_rerun_publish_v1_without_replaying_old_cards(tmp_path, monkeypatch, capsys):
@@ -183,7 +187,7 @@ def test_cli_generation_and_rerun_publish_v1_without_replaying_old_cards(tmp_pat
         starts.append(kwargs)
         for key in kwargs["item_keys"]:
             context = kwargs["feed_contexts"][key]
-            entry, generator, _ = _generated_entry(key, context.profile)
+            entry, generator, _ = _generated_entry(tmp_path, monkeypatch, key, context.profile)
             stored[key] = entry
             generators.append(generator)
         return {"accepted": True}
@@ -214,7 +218,8 @@ def test_abstract_success_cache_is_source_profile_and_config_bound(tmp_path, mon
     from zotero_summarizer.services.triage import summarization
     from zotero_summarizer.services.research_feed import cursor
     settings = _settings(tmp_path)
-    app = SimpleNamespace(app_state=SimpleNamespace(config=_default_goals_config()), resolve_stage_client=lambda _stage: object())
+    app = SimpleNamespace(app_state=SimpleNamespace(config=_default_goals_config()))
+    monkeypatch.setattr(cursor.factory, "resolve_stage_client", lambda app, stage: object())
     model = Mock(return_value=SummarizeResponse(
         executive_summary="A retained abstract result.", relevance_score=4,
         triage_rationale="Synthetic declared relevance.",
@@ -236,7 +241,8 @@ def test_abstract_success_cache_is_source_profile_and_config_bound(tmp_path, mon
 
 def test_source_access_error_propagates_instead_of_becoming_unsupported_science(monkeypatch):
     from zotero_summarizer.services.library import _review_cache, _review_identity
-    monkeypatch.setattr(_review_cache, "get_cached_review", _review)
+    entry = _review('paper')
+    monkeypatch.setattr(_review_cache, '_read_all', lambda *, readonly=False: {'paper': entry})
     monkeypatch.setattr(_review_identity, "current_review_identity", Mock(side_effect=PermissionError("denied")))
     with pytest.raises(PermissionError):
         feed.current_review("paper")
@@ -258,6 +264,6 @@ def test_current_cohort_blend_uses_continuous_not_rounded_relevance():
     candidates = [ResearchCandidate(source_id=key, source="app_rss", title=key) for key in ("a", "b")]
     rows = {key: {"decision": "selected", "composite_score": value} for key, value in (("a", 4.1), ("b", 4.4))}
     assessed = [(c, runner.triage_candidate(c, rows[c.source_id], profile)) for c in candidates]
-    ranked, metadata, failed = rank_candidates(assessed, rows)
+    ranked, metadata, failed = rank_candidates(assessed, rows, [candidate.source_id for candidate in candidates])
     assert [c.source_id for c, _ in ranked] == ["b", "a"]
     assert metadata["inputs"]["a"]["relevance"] == 4.1 and not failed

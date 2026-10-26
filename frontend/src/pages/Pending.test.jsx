@@ -37,6 +37,33 @@ function wire({ rows, apply, edit, reject }) {
   return { writes, reads };
 }
 
+it.each([
+  ['add_note', { note_title: 'Saved title', note_html: '<p>Saved body</p>' }, ['Note title', 'Note HTML']],
+  ['tag_changes', { add_tags: ['keep'], remove_tags: ['old'] }, ['Add tags (comma-separated)', 'Remove tags (comma-separated)']],
+  ['add_to_collection', { collection_key: '' }, ['Target collection']],
+  ['remove_from_collection', { collection_key: '' }, ['Target collection']],
+])('natively labels each field of repeated %s editors without changing selection or writing', async (type, payload, names) => {
+  const { writes } = wire({ rows: () => [presented(1, payload, type), presented(2, payload, type)] });
+  render(<Pending />);
+
+  for (const name of names) {
+    const controls = await screen.findAllByLabelText(name, { exact: true });
+    expect(controls).toHaveLength(2);
+    expect(new Set(controls.map((control) => control.id)).size).toBe(2);
+    for (const control of controls) {
+      expect(control.id).not.toBe('');
+      expect(control.labels).toHaveLength(1);
+      expect(control.labels[0].textContent).toBe(name);
+      expect(control.labels[0].control).toBe(control);
+    }
+  }
+  const checkboxes = screen.getAllByRole('checkbox');
+  expect(checkboxes).toHaveLength(2);
+  fireEvent.click(checkboxes[0]);
+  expect(checkboxes.map((checkbox) => checkbox.checked)).toEqual([true, false]);
+  expect(writes).toEqual([]);
+});
+
 it.each(['apply', 'reject'])('does not %s changes hidden by the title filter', async (action) => {
   const writes = [];
   vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {
@@ -155,6 +182,53 @@ it.each(['payload', 'target'])('submits A without a hidden GET, then retires sta
   expect(screen.getByRole('checkbox').checked).toBe(false);
   fireEvent.keyDown(window, { key: 'a' });
   expect(writes).toHaveLength(1);
+});
+
+it('keeps a received unreadable HTTP 409 as an unconfirmed delivery', async () => {
+  const row = presented();
+  const { reads, writes } = wire({
+    rows: () => [row],
+    apply: () => ({
+      ok: false,
+      status: 409,
+      statusText: 'Conflict',
+      text: async () => { throw new Error('Response body could not be read'); },
+    }),
+  });
+  render(<Pending />);
+  await screen.findByLabelText('Approval mutation preview');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: 'Apply selected' }));
+
+  expect(await screen.findByText(
+    'Response body could not be read Delivery is unconfirmed. Inspect the refreshed state before any new action.',
+  )).toBeTruthy();
+  expect(screen.queryByText('The selected changes are no longer current. Review the refreshed payload and target, then reselect.')).toBeNull();
+  await waitFor(() => expect(reads).toHaveLength(2));
+  expect(writes).toEqual([{ path: '/api/pending/apply', body: {
+    change_ids: [1], previews: { 1: row.approval_preview.preview_sha256 }, force: false, retry: false,
+  } }]);
+});
+
+it.each([
+  ['decoded', () => new Response(JSON.stringify({ detail: 'The preview is stale.' }), { status: 409 })],
+  ['empty-body', () => ({ ok: false, status: 409, statusText: 'Conflict', text: async () => '' })],
+])('treats a fully read %s HTTP 409 as a stale approval preview', async (_label, response) => {
+  const row = presented();
+  const { reads, writes } = wire({ rows: () => [row], apply: () => response() });
+  render(<Pending />);
+  await screen.findByLabelText('Approval mutation preview');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: 'Apply selected' }));
+
+  expect(await screen.findByText(
+    'The selected changes are no longer current. Review the refreshed payload and target, then reselect.',
+  )).toBeTruthy();
+  expect(screen.queryByText(/Delivery is unconfirmed/)).toBeNull();
+  await waitFor(() => expect(reads).toHaveLength(2));
+  expect(writes).toEqual([{ path: '/api/pending/apply', body: {
+    change_ids: [1], previews: { 1: row.approval_preview.preview_sha256 }, force: false, retry: false,
+  } }]);
 });
 
 it.each(['pending', 'failed'])('preserves the captured %s map through force confirmation', async (status) => {

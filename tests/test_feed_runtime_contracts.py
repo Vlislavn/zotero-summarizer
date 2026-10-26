@@ -46,8 +46,8 @@ def test_deep_context_separates_verifier_from_generator_effort(monkeypatch):
                                structured_output=False, name='synthetic')
     calls = []
     app = SimpleNamespace(app_state=SimpleNamespace(config=config), pdf_extractor=object(),
-                          resolve_stage_provider=lambda stage: provider,
-                          resolve_stage_client=lambda stage, **kwargs: calls.append((stage, kwargs)) or object())
+                          resolve_stage_provider=lambda stage: provider)
+    monkeypatch.setattr(deep_review.factory, 'resolve_stage_client', lambda app, stage, **kwargs: calls.append((stage, kwargs)) or object())
     monkeypatch.setattr(deep_review, 'get_state', lambda: app)
     monkeypatch.setattr(deep_review, '_load_prestige_context', lambda: ({}, None))
     deep_review._build_ctx(reader=object())

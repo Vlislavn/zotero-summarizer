@@ -44,14 +44,34 @@ def cached_runtime(monkeypatch):
     return app, config, builds
 
 
+def test_runtime_owns_only_metadata_and_cache_state(cached_runtime, monkeypatch):
+    import builtins
+
+    app, config, builds = cached_runtime
+    original_import = builtins.__import__
+
+    def foundational_import(name, *args, **kwargs):
+        assert not name.startswith(("zotero_summarizer.api", "zotero_summarizer.services"))
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", foundational_import)
+    fresh = RuntimeState(app_state=app.app_state)
+    assert fresh.resolve_stage_provider("feed") is config.llm_routing.providers[0]
+    fresh._stage_clients["synthetic"] = object()
+    fresh.invalidate_stage_clients()
+    assert fresh._stage_clients == {} and fresh._stage_clients_generation == 1
+    assert builds == []
+    assert "resolve_stage_client" not in RuntimeState.__dict__
+
+
 def test_clean_effective_routing_reuses_each_stage_and_thinking_variant(cached_runtime):
     app, config, builds = cached_runtime
     clients = {}
     for stage in ("feed", "backlog", "deep_review"):
         for thinking in (None, False, True):
             key = stage, thinking
-            clients[key] = app.resolve_stage_client(stage, enable_thinking=thinking)
-            assert app.resolve_stage_client(stage, enable_thinking=thinking) is clients[key]
+            clients[key] = factory.resolve_stage_client(app, stage, enable_thinking=thinking)
+            assert factory.resolve_stage_client(app, stage, enable_thinking=thinking) is clients[key]
     assert len({id(client) for client in clients.values()}) == len(builds) == 9
     assert builds[0][0].provider.name == "local"
     assert builds[6][0].provider.name == "hosted"
@@ -59,7 +79,7 @@ def test_clean_effective_routing_reuses_each_stage_and_thinking_variant(cached_r
     assert [row[1] for row in builds[:3]] == [None, False, True]
     assert "SYNTHETIC_KEY_NAME" not in repr(app._stage_clients)
     config.unrelated_display_setting = "not a model boundary"
-    assert app.resolve_stage_client("feed") is clients[("feed", None)]
+    assert factory.resolve_stage_client(app, "feed") is clients[("feed", None)]
 
 
 @pytest.mark.parametrize("field,value", [
@@ -74,22 +94,22 @@ def test_clean_effective_routing_reuses_each_stage_and_thinking_variant(cached_r
 ])
 def test_changed_effective_provider_settings_cannot_hit_old_client(cached_runtime, field, value):
     app, config, builds = cached_runtime
-    first = app.resolve_stage_client("feed")
+    first = factory.resolve_stage_client(app, "feed")
     setattr(config.llm_routing.providers[0], field, value)
-    second = app.resolve_stage_client("feed")
+    second = factory.resolve_stage_client(app, "feed")
     assert second is not first
-    assert app.resolve_stage_client("feed") is second
+    assert factory.resolve_stage_client(app, "feed") is second
     assert len(builds) == 2
     assert getattr(builds[0][0].provider, field) != getattr(builds[1][0].provider, field)
 
 
 def test_changed_default_does_not_replace_an_unchanged_stage_override(cached_runtime):
     app, config, builds = cached_runtime
-    review = app.resolve_stage_client("deep_review")
-    feed = app.resolve_stage_client("feed")
+    review = factory.resolve_stage_client(app, "deep_review")
+    feed = factory.resolve_stage_client(app, "feed")
     config.llm_routing.default.model = "new-default-model"
-    assert app.resolve_stage_client("feed") is not feed
-    assert app.resolve_stage_client("deep_review") is review
+    assert factory.resolve_stage_client(app, "feed") is not feed
+    assert factory.resolve_stage_client(app, "deep_review") is review
     assert len(builds) == 3
 
 
@@ -109,15 +129,15 @@ def test_invalidation_fences_an_inflight_build_even_with_unchanged_routing(cache
 
     monkeypatch.setattr(factory, "build_client_for_stage", build)
     with ThreadPoolExecutor(max_workers=1) as pool:
-        old = pool.submit(app.resolve_stage_client, "feed")
+        old = pool.submit(factory.resolve_stage_client, app, "feed")
         try:
             assert entered.wait(BARRIER_CAP_SECONDS), "test-owned builder was not entered"
             app.invalidate_stage_clients()  # Same metadata, e.g. credential replacement.
-            assert app.resolve_stage_client("feed") is second
+            assert factory.resolve_stage_client(app, "feed") is second
         finally:
             release.set()
         assert old.result(timeout=BARRIER_CAP_SECONDS) is first
-    assert app.resolve_stage_client("feed") is second
+    assert factory.resolve_stage_client(app, "feed") is second
     assert len(calls) == 2
 
 
@@ -132,9 +152,9 @@ def test_builder_uses_an_owned_snapshot_not_mutable_current_provider(cached_runt
 
     monkeypatch.setattr(factory, "build_client_for_stage", build)
     original = config.llm_routing.providers[0].max_tokens
-    first = app.resolve_stage_client("feed")
+    first = factory.resolve_stage_client(app, "feed")
     assert observed == [original]
-    assert app.resolve_stage_client("feed") is not first
+    assert factory.resolve_stage_client(app, "feed") is not first
     assert observed == [original, 8192]
 
 
@@ -151,12 +171,12 @@ def test_failed_construction_is_not_cached_and_disabled_ai_never_builds(cached_r
 
     monkeypatch.setattr(factory, "build_client_for_stage", build)
     with pytest.raises(ValueError, match="synthetic constructor failure"):
-        app.resolve_stage_client("feed")
-    assert app.resolve_stage_client("feed") is client
-    assert app.resolve_stage_client("feed") is client
+        factory.resolve_stage_client(app, "feed")
+    assert factory.resolve_stage_client(app, "feed") is client
+    assert factory.resolve_stage_client(app, "feed") is client
     config.llm_enabled = False
     with pytest.raises(APIError) as error:
-        app.resolve_stage_client("feed")
+        factory.resolve_stage_client(app, "feed")
     assert error.value.error == "llm_disabled"
     assert len(calls) == 2
 
@@ -256,16 +276,16 @@ def test_setup_credential_replacement_rebuilds_the_actual_cached_stage(cached_ru
     monkeypatch.setattr(factory, "build_client_for_stage", build)
     monkeypatch.setattr(get_context(), "state", app)
     monkeypatch.setattr(setup, "get_settings", lambda: Settings.load(project_root=tmp_path))
-    first = app.resolve_stage_client("deep_review")
+    first = factory.resolve_stage_client(app, "deep_review")
     server = FastAPI()
     server.include_router(setup.router)
     with TestClient(server, raise_server_exceptions=False) as client:
         response = client.put("/api/setup/ai-credential", json={
             "name": "SYNTHETIC_HOSTED_KEY_NAME", "api_key": "synthetic-B"})
     assert response.status_code == (500 if store_failure else 200)
-    second = app.resolve_stage_client("deep_review")
+    second = factory.resolve_stage_client(app, "deep_review")
     assert first.credential == "synthetic-A"
     assert second.credential == "synthetic-B"
     assert second is not first
-    assert app.resolve_stage_client("deep_review") is second
+    assert factory.resolve_stage_client(app, "deep_review") is second
     assert len(builds) == 2

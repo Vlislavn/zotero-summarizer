@@ -21,7 +21,7 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = 
   const queryClient = useQueryClient();
   const serverAvailable = useServerAvailable();
   const [allowArxivSource, setAllowArxivSource] = useState(false);
-  const staleRebuiltRef = useRef(false);
+  const staleRebuiltRef = useRef(new Set());
   const renderQuery = useQuery({
     queryKey: ['paper-render', itemKey],
     queryFn: () => fetchPaperRender(itemKey),
@@ -29,23 +29,26 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = 
     refetchInterval: (query) => (query.state.data?.status === 'running' ? 1500 : false),
   });
   const buildMutation = useMutation({
-    mutationFn: ({ force = false } = {}) =>
-      buildPaperRender(itemKey, { force, allowArxivSource, allowAcquireMissing: !hasPdf }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['paper-render', itemKey] }),
+    mutationFn: ({ itemKey: target, options }) => buildPaperRender(target, options),
+    onSuccess: (_result, { itemKey: target }) => queryClient.invalidateQueries({ queryKey: ['paper-render', target] }),
   });
+  const build = (force) => buildMutation.mutate({ itemKey, options: { force, allowArxivSource, allowAcquireMissing: !hasPdf } });
+  const ownsBuild = buildMutation.variables?.itemKey === itemKey;
   const render = renderQuery.data;
   const completed = render?.status === 'completed';
-  const running = render?.status === 'running' || buildMutation.isPending;
+  const current = completed && !render.stale;
+  const staleIdentity = JSON.stringify([itemKey, render?.pdf_key, render?.built_at]);
+  const running = render?.status === 'running' || (ownsBuild && buildMutation.isPending);
   const figures = (render?.figures || []).filter((f) => f && f.name);
   const version = render?.built_at || render?.pdf_key;
 
-  // A changed PDF, parser setting or renderer triggers one automatic rebuild.
+  // Attempt each stale item/publication once, including across cached navigation.
   useEffect(() => {
-    if (serverAvailable && render?.stale && !running && !staleRebuiltRef.current) {
-      staleRebuiltRef.current = true;
-      buildMutation.mutate({ force: true });
+    if (serverAvailable && render?.stale && !running && !staleRebuiltRef.current.has(staleIdentity)) {
+      staleRebuiltRef.current.add(staleIdentity);
+      build(true);
     }
-  }, [serverAvailable, render?.stale, running]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [serverAvailable, render?.stale, running, staleIdentity]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!serverAvailable) return <p className="text-xs text-slate-500">Figures &amp; full brief unavailable — needs the Mac. Cached review text remains available.</p>;
 
@@ -55,7 +58,7 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = 
       {render && (
         <span className="ml-1.5 normal-case tracking-normal text-slate-300">
           · {render.status}
-          {completed ? ` · ${render.figures_count || 0} fig · ${render.source_tier}` : ''}
+          {current ? ` · ${render.figures_count || 0} fig · ${render.source_tier}` : ''}
         </span>
       )}
     </>
@@ -75,7 +78,7 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = 
         )}
         {render?.status === 'missing' && (
           <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
-            No paper brief yet. Build will publish the HTML brief, figures and audit beside the source PDF only after the audit passes.
+            {render.stale ? render.message : 'No paper brief yet. Build will publish the HTML brief, figures and audit beside the source PDF only after the audit passes.'}
           </div>
         )}
         {render?.status === 'error' && (
@@ -95,7 +98,7 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = 
           </div>
         )}
 
-        {completed && figures.length > 0 && (
+        {current && figures.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
             {figures.map((fig, i) => (
               <a
@@ -120,7 +123,7 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = 
           </div>
         )}
 
-        {completed && (
+        {current && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-slate-500">
             <span>
               {render.sections_count || 0} sections · {render.figures_count || 0} figures · {render.references_count || 0} references
@@ -161,7 +164,7 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = 
           <button
             type="button"
             disabled={running}
-            onClick={() => buildMutation.mutate({ force: false })}
+            onClick={() => build(false)}
             className="rounded-lg bg-teal-700 px-3.5 py-2 text-[13px] text-white font-semibold hover:bg-teal-800 disabled:opacity-50"
           >
             {completed ? 'Refresh if changed' : hasPdf ? 'Build paper brief' : 'Fetch & build paper brief'}
@@ -170,7 +173,7 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = 
             <button
               type="button"
               disabled={running}
-              onClick={() => buildMutation.mutate({ force: true })}
+              onClick={() => build(true)}
               className="rounded-lg border border-slate-300 px-3.5 py-2 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
               Rebuild
@@ -182,7 +185,7 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = 
             Ran a deep review since this was built? Rebuild to bake the digest into the standalone brief.
           </p>
         )}
-        {buildMutation.error && (
+        {ownsBuild && buildMutation.error && (
           <div className="text-rose-700">Build start failed: {buildMutation.error.message || String(buildMutation.error)}</div>
         )}
       </div>

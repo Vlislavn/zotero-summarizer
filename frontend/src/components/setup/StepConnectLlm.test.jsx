@@ -71,6 +71,26 @@ it('does not mistake a hosted model name for a selected local profile', async ()
   expect(screen.queryByLabelText('API key')).toBeNull();
 });
 
+it('binds a remembered profile to the current routed model after an external configuration change', async () => {
+  api.fetchAiPresets.mockResolvedValue({ presets: [{ id: 'local', label: 'Local', provider: local }],
+    local_profiles: { hardware: { memory_gb: 16, disk_free_gb: 100 }, profiles: [
+      { id: 'light', label: 'Light', compatible: true, provider: local, model: 'qwen3:8b', features: [], tradeoff: 'Light' },
+      { id: 'balanced', label: 'Balanced', compatible: false, provider: local, model: 'qwen3:30b', features: [], tradeoff: 'Large' },
+    ] } });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const tree = (value) => <QueryClientProvider client={client}>
+    <StepConnectLlm mode="local" routing={value} onPatchRouting={vi.fn()} />
+  </QueryClientProvider>;
+  const view = render(tree(routing));
+  fireEvent.click(await screen.findByRole('button', { name: /^Light/ }));
+  view.rerender(tree({ ...routing, default: { provider: 'local', model: 'qwen3:30b' } }));
+  expect(screen.getByRole('button', { name: /^Balanced/ }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('button', { name: /^Light/ }).getAttribute('aria-pressed')).toBe('false');
+  expect(api.listModels).not.toHaveBeenCalled();
+  expect(api.saveAiCredential).not.toHaveBeenCalled();
+  client.clear();
+});
+
 it('withholds local progression for an incompatible saved profile and names the resource floors', async () => {
   api.fetchAiPresets.mockResolvedValue({ presets: [{ id: 'local', label: 'Local', provider: local }],
     local_profiles: { hardware: { memory_gb: 8, disk_free_gb: 100 }, profiles: [
@@ -78,10 +98,8 @@ it('withholds local progression for an incompatible saved profile and names the 
         size_gb: 5.2, min_memory_gb: 12, min_disk_gb: 8, compatibility_detail: 'needs 12 GB memory',
         features: ['summaries'], tradeoff: 'Fast' },
     ] } });
-  const valid = vi.fn();
-  show('local', routing, vi.fn(), { onValidityChange: valid });
+  show('local', routing, vi.fn());
   expect((await screen.findByRole('button', { name: /Light/ })).disabled).toBe(true);
-  await waitFor(() => expect(valid).toHaveBeenLastCalledWith(false));
   expect(screen.getByText(/12 GB memory.*8 GB free disk/)).toBeTruthy();
   expect(screen.getByRole('button', { name: 'List available models' }).disabled).toBe(true);
   expect(api.listModels).not.toHaveBeenCalled();
@@ -129,8 +147,7 @@ it.each([422, 403, 503, undefined])('retires health on credential-save failure %
   fireEvent.click(screen.getByRole('button', { name: 'List available models' }));
   await screen.findByText('Credential save failed');
   expect(client.getQueryData(['setup-doctor'])?.ready).toBe(false);
-  expect(invalidate).toHaveBeenCalledTimes(1);
-  expect(invalidate).toHaveBeenCalledWith({ queryKey: ['setup-doctor'] });
+  expect(invalidate.mock.calls.map(([options]) => options.queryKey)).toEqual([['setup-status'], ['setup-doctor']]);
   expect(api.saveAiCredential).toHaveBeenCalledTimes(1);
   expect(api.saveAiCredential).toHaveBeenCalledWith('HOSTED_KEY', 'new-secret');
   expect(api.listModels).not.toHaveBeenCalled();
@@ -152,7 +169,8 @@ it.each([false, true])('a model-list error does not add a write invalidation; cr
   await screen.findByText('Model list unavailable');
   expect(api.listModels).toHaveBeenCalledTimes(1);
   expect(api.saveAiCredential).toHaveBeenCalledTimes(replace ? 1 : 0);
-  expect(invalidate).toHaveBeenCalledTimes(replace ? 1 : 0);
+  expect(invalidate.mock.calls.map(([options]) => options.queryKey))
+    .toEqual(replace ? [['setup-status'], ['setup-doctor']] : []);
   expect(client.getQueryData(['setup-doctor'])?.ready).toBe(!replace);
   client.clear();
 });

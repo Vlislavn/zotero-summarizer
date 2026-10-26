@@ -11,8 +11,7 @@ from pydantic import ValidationError
 
 from tests._zotero_fixtures import add_library_item, build_zotero_db
 from tests.test_generated_write_review import approve, boundary
-from tests.test_interpretation_binding import config
-from tests.test_interpretation_review_one import paper_io
+from tests._generated_write_fixtures import config, paper_io, published_review
 from tests.test_review_cache import _isolate_cache
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.integrations.zotero_read import ZoteroReader

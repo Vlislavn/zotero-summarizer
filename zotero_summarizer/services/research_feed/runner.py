@@ -19,9 +19,13 @@ from zotero_summarizer.services.research_feed.cursor import CandidateCursor
 from zotero_summarizer.services.research_feed.card import build_card
 from zotero_summarizer.services.research_feed.profile import load_profile
 from zotero_summarizer.services.research_feed.render import persist
-from zotero_summarizer.services.research_feed.source import CandidateReader, admit_history, load_candidates, number, summary
+from zotero_summarizer.services.research_feed.source import (
+    CandidateReader, admit_history, load_candidates, native_admission, native_decision,
+    number, source_history_metadata, summary,
+)
 from zotero_summarizer.services.research_feed.ranking import rank_candidates
 from zotero_summarizer.settings import Settings
+from zotero_summarizer.storage import feeds as fs
 
 
 ReviewLoader = Callable[[str], dict[str, Any] | None]
@@ -78,12 +82,8 @@ def triage_candidate(candidate: ResearchCandidate, row: dict[str, Any] | None, p
     else:
         artifact = "unknown"
     decision = str((row or {}).get("decision") or "")
-    if decision not in {"", "selected", "black_swan", "user_approved", "user_rejected", "gate_rejected",
-                        "rejected_low_score", "rejected_dedup_library", "rejected_dedup_processed", "triaged_pending",
-                        "awaiting_review", "rejected_daily_cutoff", "rejected_elbow"}:
-        raise ValueError("prior triage decision failed or invalid")
-    veto = {"user_rejected", "gate_rejected", "rejected_low_score", "rejected_dedup_library", "rejected_dedup_processed"}
-    include = decision == "selected" or (decision not in veto and score >= 3 and bool(themes or projects))
+    veto = {fs.DECISION_USER_REJECTED, fs.DECISION_GATE_REJECTED}
+    include = decision == fs.DECISION_SELECTED or (decision not in veto and score >= 3 and bool(themes or projects))
     reason = str(stored.get("triage_rationale") or (row or {}).get("decision_reason") or "No prior triage evidence.")
     return ResearchFeedTriage(
         include=include, score=score,
@@ -138,29 +138,57 @@ def _queue_tags(
 def _assess(
     settings: Settings, start: datetime, end: datetime, source_limit: int, venue: str,
     *, generate: bool = False,
-) -> tuple[Any, list[ResearchCandidate], dict[str, dict[str, Any]], list[tuple[Any, Any]], list[dict[str, str]]]:
+) -> tuple[
+    Any, list[ResearchCandidate], dict[str, dict[str, Any]], list[tuple[Any, Any]],
+    list[dict[str, str]], dict[str, dict[str, Any]],
+]:
     profile = load_profile(settings.data_dir)
     candidates = load_candidates(
         settings.triage_db_path, start=start, end=end, limit=source_limit, venue=venue,
     )
     rows = _latest_rows(settings.triage_db_path)
-    assessed, failed = [], []
+    accepted_rows, source_history = {}, {}
+    effective, assessed, failed = [], [], []
     cursor = None
-    for candidate in candidates:
+    for original in candidates:
+        row = rows.get(original.source_id)
+        candidate, entry = admit_history(original, row)
+        effective.append(candidate)
+        source_history[candidate.source_id] = entry
+        if entry["history"] == "withheld":
+            entry["admission"] = {"status": "failed", "reason": "history_withheld", "native_decision": None}
+            failed.append({"source_id": candidate.source_id, "error": f"ValueError: {entry['reason']}"})
+            LOGGER.warning("research-feed triage failed source=%s: %s", candidate.source_id, entry["reason"])
+            continue
+        native = row is not None
+        decision = native_decision(row.get("decision")) if native else None
+        entry["admission"] = {"status": "failed", "reason": "abstract_triage_unavailable", "native_decision": decision}
         try:
-            row = rows.get(candidate.source_id)
-            candidate = admit_history(candidate, row)
-            if row is None:
+            if not native:
                 if cursor is None:
                     cursor = CandidateCursor(settings)
                 row = cursor.row(candidate, profile, generate=generate)
-                if row is not None:
-                    rows[candidate.source_id] = row
-            assessed.append((candidate, triage_candidate(candidate, row, profile)))
-        except Exception as exc:  # noqa: BLE001 — malformed history is isolated per paper.
+                if row is None:
+                    raise ValueError("cached abstract triage unavailable")
+            accepted_rows[candidate.source_id] = row
+            try:
+                triage = triage_candidate(candidate, row, profile)
+                if not isinstance(triage, ResearchFeedTriage):
+                    raise TypeError("invalid triage projection")
+            except Exception as exc:  # noqa: BLE001 - callback failure cannot expose raw input or stop peers.
+                entry["admission"] = {"status": "failed", "reason": "triage_history_invalid", "native_decision": decision}
+                failed.append({"source_id": candidate.source_id, "error": f"{type(exc).__name__}: triage_history_invalid"})
+                LOGGER.warning("research-feed triage failed source=%s: triage_history_invalid", candidate.source_id)
+                continue
+            entry["admission"] = native_admission(triage, decision, native=native)
+            if entry["admission"]["status"] == "failed":
+                raise ValueError(entry["admission"]["reason"])
+            triage = triage.model_copy(update={"include": entry["admission"]["status"] == "eligible"})
+            assessed.append((candidate, triage))
+        except Exception as exc:  # noqa: BLE001 - preserve source/cursor/native stage diagnostics per paper.
             LOGGER.warning("research-feed triage failed source=%s: %s", candidate.source_id, exc)
             failed.append({"source_id": candidate.source_id, "error": f"{type(exc).__name__}: {exc}"})
-    return profile, candidates, rows, assessed, failed
+    return profile, effective, accepted_rows, assessed, failed, source_history
 
 
 def _ensure_reviews(
@@ -229,31 +257,25 @@ def _records(
     review_loader: ReviewLoader,
     profile: Any,
     review_outcomes: dict[str, str] | None = None,
-    *, evidence: dict | None = None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, str]]]:
-    records: list[dict[str, Any]] = []
-    missing: list[dict[str, Any]] = []
-    failed: list[dict[str, str]] = []
+) -> tuple[list[dict], list[dict], list[dict], list[dict], dict]:
+    records, missing, failed, unqualified, evidence = [], [], [], [], {}
     for candidate, triage in shortlist:
-        if evidence is not None:
-            evidence[candidate.source_id] = {"availability": "unknown"}
+        evidence[candidate.source_id] = {"availability": "unknown", "qualified": False}
         failure = (review_outcomes or {}).get(candidate.source_id)
         if failure:
             failed.append({"source_id": candidate.source_id, "error": failure})
         try:
             review = review_loader(candidate.source_id)
-            if review is None:
-                if not failure:
-                    missing.append(candidate.model_dump(mode="json"))
-                continue
-            if review.get("needs_pdf"):
+            observed = _feed_assessment.projection_evidence(review)
+            evidence[candidate.source_id] = observed
+            if observed.get("reason") in {"review_audit_invalid", "review_audit_unqualified"}:
+                raise ValueError(observed["reason"])
+            if observed["availability"] == "unavailable":
                 missing.append(candidate.model_dump(mode="json"))
-                if evidence is not None:
-                    evidence[candidate.source_id] = {"availability": "unavailable"}
-                raise ValueError("source unavailable: " + str(review.get("acquire_outcome") or "not_observed"))
-            _feed_assessment.review_evidence(review)
-            if evidence is not None:
-                evidence[candidate.source_id] = {"availability": "available", "basis": review["digest"]["basis"]}
+                continue
+            if not observed["qualified"]:
+                unqualified.append({"candidate": candidate.model_dump(mode="json"), "reason": observed["reason"]})
+                continue
             assessment = _feed_assessment.qualify(review, _feed_assessment.context_for(candidate.source_id, profile))
             card = build_card(candidate, triage, review, profile, assessment=assessment)
             records.append({
@@ -282,22 +304,41 @@ def _records(
         except Exception as exc:  # noqa: BLE001 - one paper never fails the weekly run.
             if not failure:
                 failed.append({"source_id": candidate.source_id, "error": f"{type(exc).__name__}: {exc}"})
-    return records, missing, failed
+    return records, missing, failed, unqualified, evidence
+
+
+def _report_binding(identity):
+    return {key: identity[key] for key in ('source_kind', 'source_sha256', 'generation_sha256') if key in identity}
+
+
+def _report_provenance(provenance):
+    published = {**provenance, 'source_binding': _report_binding(provenance['source_binding'])}
+    retained = provenance['feed_generation']
+    if retained is not None:
+        published['feed_generation'] = {
+            'status': retained['status'], 'origin': retained.get('origin'),
+            'scientific_verification': retained.get('scientific_verification'),
+            'retained_payload_sha256': retained['payload_sha256']}
+    return published
 
 
 def _payload(
     metadata: dict[str, Any], records: list[dict[str, Any]], missing: list[dict[str, Any]],
-    failed: list[dict[str, str]], rejects: list[tuple[Any, Any]],
+    failed: list[dict[str, str]], rejects: list[tuple[Any, Any]], unqualified: list[dict],
 ) -> dict[str, Any]:
     return {
-        "metadata": metadata,
-        "cards": records,
+        "metadata": {**metadata, 'full_text_evidence': {
+            key: {**facts, **({'source_binding': _report_binding(facts['source_binding'])}
+                             if 'source_binding' in facts else {})}
+            for key, facts in metadata['full_text_evidence'].items()}},
+        "cards": [{**record, 'provenance': _report_provenance(record['provenance'])} for record in records],
         "rejected_near_threshold": [
             {"candidate": candidate.model_dump(mode="json"), "triage": triage.model_dump(mode="json")}
             for candidate, triage in rejects
         ],
         "research_ideas_by_project": _ideas_by_project(records),
         "manual_full_text_required": missing,
+        "unqualified_reviews": unqualified,
         "failed": failed,
     }
 
@@ -325,9 +366,12 @@ def run_weekly(
     shortlist_budget, card_budget, source_limit, review_timeout_seconds = parse_run_budgets(
         shortlist_budget, card_budget, source_limit, review_timeout_seconds,
     )
+    output_dir = settings.data_dir / "research_feed"
+    if output_dir.is_symlink() or (output_dir / "state.json").is_symlink():
+        raise ValueError("weekly output owner cannot be a symlink")
     if review_loader is None:
         review_loader = _feed_assessment.current_review if generate_reviews else _feed_assessment.cached_reader(settings)
-    profile, candidates, rows, assessed, assess_failed = _assess(
+    profile, candidates, rows, assessed, assess_failed, source_history = _assess(
         settings, start, end, source_limit, venue, generate=generate_reviews,
     )
     included, ranking, ranking_failed = rank_candidates(assessed, rows, [candidate.source_id for candidate in candidates])
@@ -338,8 +382,7 @@ def run_weekly(
         review_outcomes = _ensure_reviews(
             settings, [candidate for candidate, _triage in reviewed], review_timeout_seconds, profile,
         )
-    evidence = {}
-    records, missing, failed = _records(reviewed, review_loader, profile, review_outcomes, evidence=evidence)
+    records, missing, failed, unqualified, evidence = _records(reviewed, review_loader, profile, review_outcomes)
     failed = [*assess_failed, *ranking_failed, *failed]
     for record in records:
         row = rows.get(record["candidate"]["source_id"]) or {}
@@ -366,8 +409,11 @@ def run_weekly(
         },
         "writebacks": writebacks, "ranking": ranking, "full_text_evidence": evidence,
     }
-    payload = _payload(metadata, records, missing, failed, rejects)
-    output_dir = settings.data_dir / "research_feed"
+    payload = _payload(metadata, records, missing, failed, rejects, unqualified)
+    payload['metadata']["source_history"] = source_history_metadata(
+        candidates, source_history, records, missing, payload["rejected_near_threshold"],
+        unqualified,
+    )
     identity = {
         "start": start.isoformat(), "end": end.isoformat(), "venue": venue.casefold().strip(),
         "dry_run": dry_run, "queue_zotero": queue_zotero,

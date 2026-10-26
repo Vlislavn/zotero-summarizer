@@ -8,19 +8,30 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from zotero_summarizer.integrations import arxiv, europepmc, openalex
+from zotero_summarizer.integrations import arxiv, crossref, europepmc, openalex, semantic_scholar
 
 PUBLIC_QUERY = "public topic BAD_QUERY_MARKER"
 RAW_BODY = "RAW_BODY_MARKER credential=not-a-real-credential"
-EMPTY = {"openalex": {"results": []}}
+EMPTY = {
+    "arxiv": '<feed xmlns="http://www.w3.org/2005/Atom"/>',
+    "crossref": {"message": {"items": []}},
+    "europepmc": {"resultList": {"result": []}},
+    "semantic_scholar": {"data": []},
+    "openalex": {"results": []},
+}
 NONEMPTY = {
+    "arxiv": '<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>http://arxiv.org/abs/2501.12345v1</id>'
+             '<title>Public paper</title><summary>Public abstract.</summary></entry></feed>',
+    "crossref": {"message": {"items": [{"title": ["Public paper"], "DOI": "10.1234/fixture"}]}},
+    "europepmc": {"resultList": {"result": [{"title": "Public paper", "pmid": "12345"}]}},
+    "semantic_scholar": {"data": [{"title": "Public paper", "externalIds": {"DOI": "10.1234/fixture"}}]},
     "openalex": {"results": [{"id": "https://openalex.org/W1", "title": "A public paper"}]},
 }
 
 
 @pytest.fixture(autouse=True)
 def no_rate_wait(monkeypatch):
-    for module in (arxiv, europepmc, openalex):
+    for module in (arxiv, crossref, europepmc, openalex, semantic_scholar):
         monkeypatch.setattr(module, "_RATE_LIMITER", SimpleNamespace(acquire=lambda: None))
 
 
@@ -39,9 +50,15 @@ def leaf(provider, handler, *, allow_network=True):
             yield lambda query, **kw: arxiv.search_arxiv(query, http_client=http, **kw)
         elif provider == "europepmc":
             yield lambda query, **kw: europepmc.search_europepmc(query, http_client=http, **kw)
-        else:
+        elif provider == "crossref":
+            yield lambda query, **kw: crossref.search_crossref(query, http_client=http, **kw)
+        elif provider == "semantic_scholar":
+            yield lambda query, **kw: semantic_scholar.search_semantic_scholar(query, http_client=http, **kw)
+        elif provider == "openalex":
             client = openalex.OpenAlexClient(object(), http_client=http, allow_network=allow_network)
             yield client.search_works
+        else:
+            pytest.fail(f"Unknown provider fixture: {provider}")
 
 
 def assert_receipt(receipt, status, count=None, code=None):
@@ -93,6 +110,18 @@ def test_undecodable_200_is_parse_failure(provider):
 
 
 @pytest.mark.parametrize("provider,payload", [
+    ("arxiv", "<html/>"),
+    ("arxiv", '<feed xmlns="http://www.w3.org/2005/Atom"><entry/></feed>'),
+    ("crossref", {}),
+    ("crossref", {"message": {"items": None}}),
+    ("crossref", {"message": {"items": [{}]}}),
+    ("crossref", {"message": {"items": [None]}}),
+    ("europepmc", {}),
+    ("europepmc", {"resultList": {"result": None}}),
+    ("europepmc", {"resultList": {"result": [{}]}}),
+    ("semantic_scholar", {}),
+    ("semantic_scholar", {"data": None}),
+    ("semantic_scholar", {"data": [{}]}),
     ("openalex", {}),
     ("openalex", []),
     ("openalex", None),
@@ -198,6 +227,18 @@ def test_blank_leaf_query_stays_unknown_without_http(provider):
     assert_receipt(outcome, "unknown")
 
 
+@pytest.mark.parametrize("provider", EMPTY)
+def test_unexpected_programming_error_propagates_without_success_receipt(provider):
+    def fail(request):
+        raise RuntimeError("Owned programming failure")
+
+    outcome = {}
+    with leaf(provider, fail) as search:
+        with pytest.raises(RuntimeError, match="Owned programming failure"):
+            search(PUBLIC_QUERY, outcome=outcome)
+    assert_receipt(outcome, "unknown")
+
+
 def test_openalex_ordinary_search_preserves_narrow_get_override(monkeypatch):
     client = openalex.OpenAlexClient(object(), http_client=object())
     calls = []
@@ -221,7 +262,7 @@ def test_nonsearch_get_retains_legacy_status_and_payload_policy():
         assert client._get("/works") is None
 
 
-@pytest.mark.parametrize("provider", ["arxiv", "europepmc", "openalex"])
+@pytest.mark.parametrize("provider", EMPTY)
 def test_default_leaf_still_best_effort_for_http_and_decode_errors(provider):
     payloads = iter([response(RAW_BODY, 429), response(RAW_BODY)])
     with leaf(provider, lambda request: next(payloads)) as search:

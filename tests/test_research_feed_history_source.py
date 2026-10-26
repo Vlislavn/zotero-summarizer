@@ -1,6 +1,7 @@
 """Owned SQLite source-history regressions; fixture relevance is not a human label."""
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import sqlite3
 from datetime import datetime, timezone
@@ -49,7 +50,12 @@ def _source_rows(settings):
 
 def _run(settings, **options):
     before = _source_rows(settings)
-    args = dict(start=START, end=END, review_loader=_review)
+    if 'review_loader' not in options:
+        with sqlite3.connect(settings.triage_db_path) as conn:
+            keys = [row[0] for row in conn.execute('SELECT stable_feed_key FROM rss_items')]
+        retained = {key: _review(key) for key in keys if isinstance(key, str) and key}
+        options['review_loader'] = lambda key: deepcopy(retained[key])
+    args = dict(start=START, end=END)
     args.update(options)
     result = runner.run_weekly(settings, **args)
     assert _source_rows(settings) == before
@@ -97,9 +103,9 @@ def test_exact_recovery_precedes_triage_card_and_publication(tmp_path, monkeypat
         assert row["abstract"] == recovered
         return triage(candidate, row, profile)
 
-    def inspect_card(candidate, *args):
+    def inspect_card(candidate, *args, **kwargs):
         card_inputs.append(candidate.abstract)
-        return build(candidate, *args)
+        return build(candidate, *args, **kwargs)
 
     def forbidden(*_args, **_kwargs):
         pytest.fail("cached projection must not start review/model work")
@@ -148,23 +154,41 @@ def test_rss_bytes_and_missing_both_are_not_normalized(tmp_path, rss, stored, ba
 
 
 @pytest.mark.parametrize("rss", ["\t\u2003\n", TOPICAL])
-def test_missing_history_remains_original_pure_triage_none(tmp_path, rss):
+def test_missing_history_preserves_source_without_heuristic_cached_only_rescue(tmp_path, monkeypatch, rss):
     settings = _settings(tmp_path)
     key = _paper(settings, 1, rss=rss)
     with sqlite3.connect(settings.triage_db_path) as conn:
         conn.execute("DELETE FROM processed_feed_items WHERE stable_feed_key=?", (key,))
     candidate = source.load_candidates(settings.triage_db_path, start=START, end=END, limit=1, venue="")[0]
     profile = runner.load_profile(settings.data_dir)
-    expected = runner.triage_candidate(candidate, None, profile).model_dump(mode="json")
-    payload = _run(settings, queue_zotero=True, dry_run=False)
+    assert runner.triage_candidate(candidate, None, profile).include is False
+    def forbidden(*args, **kwargs):
+        pytest.fail("Missing qualified abstract cache cannot start clients or review work")
+    from zotero_summarizer.services.llm import factory
+    monkeypatch.setattr(factory, "resolve_stage_client", forbidden)
+    monkeypatch.setattr(runner, "_ensure_reviews", forbidden)
+    payload = _run(settings, queue_zotero=True, dry_run=False, review_loader=forbidden)
     entry = payload["metadata"]["source_history"][key]
     assert entry["history"] == "missing" and entry["reason"] == "no_prior_history"
     assert entry["currentness"] == entry["content_version"] == "not_attested"
     assert not {"row_id", "run_id", "model_version", "created_at", "updated_at"} & entry.keys()
     assert _body(payload, key) == candidate.model_dump(mode="json")
-    assert payload["rejected_near_threshold"][0]["triage"] == expected
-    assert payload["cards"] == [] and payload["failed"] == []
+    assert entry["admission"] == {"status": "failed", "reason": "abstract_triage_unavailable", "native_decision": None}
+    assert payload["rejected_near_threshold"] == [] and payload["cards"] == []
+    assert payload["failed"] == [{"source_id": key, "error": "ValueError: cached abstract triage unavailable"}]
     assert payload["metadata"]["writebacks"]["attempted"] == 0
+    _assert_one_home(payload)
+
+
+def test_substantive_rss_and_blank_stored_text_preserve_the_rss_bytes(tmp_path):
+    settings = _settings(tmp_path)
+    rss = " \nagent harness benchmark Δ\t"
+    key = _paper(settings, 1, rss=rss, stored=" \t")
+    payload = _run(settings)
+    entry = payload["metadata"]["source_history"][key]
+    assert entry["history"] == "accepted" and entry["text_basis"] == "rss"
+    assert "original_rss_abstract" not in entry
+    assert _body(payload, key)["abstract"] == rss and len(payload["cards"]) == 1
     _assert_one_home(payload)
 
 
@@ -282,18 +306,19 @@ def test_all_source_admissions_have_one_home_across_every_output_cut(tmp_path, m
         conn.execute("UPDATE processed_feed_items SET source_type='zotero' WHERE stable_feed_key=?", (keys[22],))
     admitted = source.load_candidates(settings.triage_db_path, start=START, end=END, limit=100, venue="")
     build = runner.build_card
+    retained = {key: _review(key) for key in keys.values()}
 
     def loader(key):
         if key == keys[7]:
             return None
         if key == keys[6]:
             raise RuntimeError("fixture review failure")
-        return _review(key)
+        return deepcopy(retained[key])
 
-    def build_one(candidate, *args):
+    def build_one(candidate, *args, **kwargs):
         if candidate.source_id == keys[5]:
             raise ValueError("fixture card failure")
-        return build(candidate, *args)
+        return build(candidate, *args, **kwargs)
 
     monkeypatch.setattr(runner, "build_card", build_one)
     payload = _run(settings, shortlist_budget=5, card_budget=4, review_loader=loader)
@@ -367,8 +392,8 @@ def test_pure_triage_decision_numeric_and_direct_fixture_api_are_preserved(decis
            "shap_contribs_json": NEUTRAL}
     result = runner.triage_candidate(candidate, row, ResearchProfile(themes=["agent"], projects=["harness"]))
     assert result.include is included and result.score == ordinal and result.confidence == 0.9
-    with pytest.raises(ValueError, match="JSON object"):
-        runner._summary({"shap_contribs_json": "[]"})
+    with pytest.raises(ValueError, match="^stored triage summary is invalid JSON$"):
+        source.summary({"shap_contribs_json": "[]"})
 
 
 def test_existing_selected_fixture_remains_usable(tmp_path):

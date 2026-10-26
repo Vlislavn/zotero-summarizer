@@ -10,9 +10,9 @@ import EssentialsSection from './EssentialsSection.jsx';
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
-it.each([true, false])('invalidates old Doctor Ready only after a successful Zotero path save: %s', async (saved) => {
+it.each([[true, undefined], [false, 422], [false, 403]])('invalidates old Doctor Ready only after a successful Zotero path save: %s status %s', async (saved, status) => {
   if (saved) updatePaths.mockResolvedValueOnce({ restart_required: true });
-  else updatePaths.mockRejectedValueOnce(Object.assign(new Error('path is not readable'), { status: 422 }));
+  else updatePaths.mockRejectedValueOnce(Object.assign(new Error('path is not readable'), { status }));
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   client.setQueryData(['setup-doctor'], { ready: true });
   render(<QueryClientProvider client={client}><EssentialsSection

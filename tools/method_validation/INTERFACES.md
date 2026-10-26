@@ -19,14 +19,20 @@ embedded in this document.
 - `ProviderReply`: frozen raw terminal bytes, typed status, native readout and one
   known attempt's telemetry. `NativeDecisionAdapter(arm, cfg, transport=None)` is
   serial caller-owned HTTP, with `adapter(request_bytes, retain, timeout=None)`.
-  The required retain callback must return before strict native parsing; callback
-  failure propagates. Both public native entrypoints require consent/guard and next-call
-  reservation; one adapter instance bounds cumulative calls/work. Whole-workload
-  reservation belongs to the runner, not a process-global counter. Off-host HTTP is
-  refused; HTTPS and explicit loopback HTTP are supported.
+  Request bytes, a callable retain callback and optional positive finite nonboolean
+  time budgets are admitted before call accounting or HTTP. Valid time overrides
+  retain configured caps. The required retain callback must return before strict
+  native parsing; runtime callback failure propagates without refund/retry.
+  Both public native entrypoints require consent/guard and next-call reservation;
+  one adapter instance bounds cumulative calls/work. Whole-workload reservation
+  belongs to the runner, not a process-global counter. Off-host HTTP is refused;
+  HTTPS and explicit loopback HTTP are supported.
 - `evaluate_support(case, arm, cfg, retain, recorded=None, transport=None,
-  timeout=None)`: actual native/recorded I/O and projection, not semantic grading.
-  Supplying a recording requires an unblocked recorded-kind arm.
+  timeout=None, max_elapsed_seconds=None)`: actual native/recorded I/O and projection,
+  not semantic grading. Supplying a recording requires an unblocked recorded-kind
+  arm. The optional remaining total cap forwards to the existing native constructor.
+  All three run consumers pass actual remaining time separately from the idle-read
+  min; no new timer, blocked-read interrupt or remote-stop API.
 - `SupportResult`: frozen validated per-pair/per-arm terminal projection. Gold is
   added by the runner after generator projection; a semantic decision requires its
   native readout or original binary artifact row. Unscored outcomes have no binary
@@ -76,7 +82,9 @@ Raw original/effective configuration, frozen inputs (including full original sou
 imported baseline bytes, recorded bytes and bounded native terminal bytes remain
 private. Every row has case/arm identity and request hash. The manifest hashes all
 owned files plus current Python source and validation schemas; ACK binds that manifest.
-Reopening verifies content and deterministic projections, not the truth of human
-labels, checkpoint claims, measured server activity, source acquisition or a maliciously
-rewritten self-consistent manifest. Keep private artifacts outside public repository
+Reopening joins native dispatch/byte/status observations, integer reservation counts
+and task-admitted file roles to the frozen inputs, rather than trusting a resealed
+manifest's own inventory or counters. It verifies content and deterministic projections,
+not the truth of human labels, checkpoint claims, measured server activity, source
+acquisition or a maliciously rewritten self-consistent set of admitted inputs. Keep private artifacts outside public repository
 artifacts and do not distribute them as a bundled production corpus.

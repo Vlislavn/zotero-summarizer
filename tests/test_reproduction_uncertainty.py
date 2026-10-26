@@ -1,6 +1,7 @@
 """Code availability is not a reproduction-duration measurement."""
 import pytest
 
+from test_verification_audit_export import KEY, audit_env, publish  # noqa: F401
 from zotero_summarizer.models import (
     ResearchCandidate, ResearchEngineeringCard, ResearchFeedTriage, ResearchProfile,
 )
@@ -20,11 +21,12 @@ def test_code_and_reported_gaps_do_not_supply_a_duration(urls, gaps, tier, missi
     assert _reproducibility({"quality": {"missing_critical": gaps}}, urls) == (tier, missing)
 
 
-def test_card_serializes_unknown_effort_without_losing_artifact_metadata():
-    review = {"code_link": {
+def test_card_serializes_unknown_effort_without_losing_artifact_metadata(audit_env):
+    review, _, _ = publish(audit_env)
+    review["code_link"] = {
         "found": True, "exists": True, "relevance": "matched", "url": CODE,
-    }}
-    source = ResearchCandidate(source_id="rss:reproduction", source="rss", title="Methods")
+    }
+    source = ResearchCandidate(source_id=KEY, source="rss", title="Methods")
     triage = ResearchFeedTriage(include=True, score=5, confidence=1, rationale="Fixture")
     profile = ResearchProfile(themes=["methods"], projects=["project"], topic_taxonomy=[])
 
@@ -39,9 +41,14 @@ def test_card_serializes_unknown_effort_without_losing_artifact_metadata():
     assert restored.reproducibility_tier == "unknown" and restored.code_urls == result.code_urls
 
 
-def test_card_keeps_existing_blockers_and_their_order():
-    review = {"quality": {"missing_critical": ["Dataset missing", "Dataset missing"]}}
-    source = ResearchCandidate(source_id="rss:blocked", source="rss", title="Methods")
+def test_card_keeps_existing_blockers_and_their_order(audit_env, monkeypatch):
+    from zotero_summarizer.services.library import deep_review
+
+    quality = {"missing_critical": ["Dataset missing", "Dataset missing"]}
+    monkeypatch.setattr(deep_review._deep_review_layers, 'extra_layers',
+                        lambda _ctx: (quality, None, None, None, None))
+    review, _, _ = publish(audit_env)
+    source = ResearchCandidate(source_id=KEY, source="rss", title="Methods")
     triage = ResearchFeedTriage(include=True, score=5, confidence=1, rationale="Fixture")
     profile = ResearchProfile(themes=["methods"], projects=["project"], topic_taxonomy=[])
 

@@ -87,6 +87,8 @@ def get_cached_review(item_key: str) -> dict[str, Any] | None:
     if not item_key:
         return None
     entry = _read_all().get(item_key)
+    if entry and not _entry_condition(entry, None):
+        return None
     from zotero_summarizer.services.library.review_fleet.propose import project_review
     return project_review(entry) if entry else entry
 
@@ -105,6 +107,9 @@ def export_review_audit(item_key: str) -> dict[str, Any]:
             raise APIError('not_found', 'No cached review for this item', 404)
         if not isinstance(entry, dict):
             raise ValueError('Invalid review entry')
+        if not _entry_condition(entry, None):
+            return {'item_key': item_key, 'digest': None, 'audit_status': 'unavailable',
+                    'reason': 'review_condition_mismatch', 'verification_audit': None, 'retained_evidence': None}
         if entry.get('digest') is not None:
             PaperDigest.model_validate(entry['digest'])
         status, reason = retained_audit_status(entry)
@@ -122,9 +127,13 @@ def export_review_audit(item_key: str) -> dict[str, Any]:
 
 
 def review_is_current(entry: dict[str, Any] | None, item_key: str = "") -> bool:
-    if not entry or entry.get("review_contract_version") != REVIEW_CONTRACT_VERSION:
+    if not entry or not _entry_condition(entry, None):
+        return False
+    if entry.get("review_contract_version") != REVIEW_CONTRACT_VERSION:
         return False
     if entry.get("digest") is None and not entry.get("needs_pdf"):
+        return False
+    if (entry.get("digest") is not None or entry.get("model_digest")) and entry.get("verification_audit") is None:
         return False
     stored = entry.get("review_identity")
     if not item_key or not isinstance(stored, dict):
@@ -143,13 +152,17 @@ def review_is_current(entry: dict[str, Any] | None, item_key: str = "") -> bool:
 
 
 def get_current_review(item_key: str) -> dict[str, Any] | None:
-    entry = get_cached_review(item_key)
-    return entry if review_is_current(entry, item_key) else None
+    if not item_key:
+        return None
+    entry = _read_all().get(item_key)
+    if not review_is_current(entry, item_key):
+        return None
+    from zotero_summarizer.services.library.review_fleet.propose import project_review
+    return project_review(entry)
 
 
 def cached_review_keys() -> set[str]:
-    """All item_keys with a stored deep review — one cache read (prewarm reuses this
-    instead of calling ``get_cached_review`` per row, which re-reads the whole file)."""
+    """All raw stored keys, not currentness or permission to skip ordinary review."""
     return set(_read_all())
 
 
@@ -169,7 +182,7 @@ def copy_review(src_key: str, dst_key: str) -> bool:
     src, dst = (src_key or "").strip(), (dst_key or "").strip()
     if not src or not dst or src == dst:
         return False
-    entry = get_cached_review(src)
+    entry = _read_all().get(src)
     if entry is None:
         return False
     _write_one(dst, entry)
@@ -228,6 +241,9 @@ def _entry_condition(entry: dict[str, Any], interpretation_schema: str | None) -
         return False
     if interpretation_schema is None:
         audit = entry.get("verification_audit")
-        return not ("interpretation" in entry or "interpretation_qualification" in entry or
-                    isinstance(audit, dict) and "interpretation_evidence" in audit)
+        return not (any(key in entry for key in ("interpretation", "interpretation_qualification", "scientific_call")) or
+                    any(isinstance(entry.get(key), dict) and "interpretation" in entry[key]
+                        for key in ("digest", "model_digest")) or
+                    isinstance(audit, dict) and any(key in audit for key in (
+                        "interpretation_evidence", "verified_interpretation", "interpretation_bindings")))
     return True

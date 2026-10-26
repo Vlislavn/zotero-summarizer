@@ -5,12 +5,12 @@ from math import fsum, isfinite
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, Field, StrictBool, model_validator
+from pydantic import AwareDatetime, Field, JsonValue, StrictBool, model_validator
 
 from .decision_adapter import TRANSPORT_STATES, fields, probability
 from .priority import admit as admit_papers, identity
 from .support import (Calibration, FileRef, Frozen, NativeUsage, Positive, Probability,
-                      Recording, Sha, SupportArm, Text, loads, normalized)
+                      Recording, Sha, SupportArm, Text, digest, loads, normalized)
 
 LABELS = ('belongs', 'does_not_belong', 'insufficient_evidence')
 Label = Literal['belongs', 'does_not_belong', 'insufficient_evidence']
@@ -18,6 +18,7 @@ Label = Literal['belongs', 'does_not_belong', 'insufficient_evidence']
 
 class Paper(Frozen):
     paper_id: Text
+    version_id: Text | None = None
     family: Text
     canonical_ids: tuple[Text, ...] = ()
     title: str | None
@@ -47,12 +48,48 @@ class Tree(Frozen):
     description_sources: tuple[Paper, ...]
     examples: tuple[Example, ...]
     selected_keys: tuple[Text, ...] | None = None
+    selection_provenance: Text | None = None
+
+
+class LineageEntry(Frozen):
+    entry_id: Text
+    paper: Paper | None
+    source_ids: tuple[Text, ...]
+    derivation: Text
+    observed_at: AwareDatetime
+    payload: JsonValue
+    payload_sha256: Sha
+    channel: Literal['description', 'example', 'calibration', 'shortlist', 'baseline'] | None = None
+
+    @model_validator(mode='after')
+    def coherent(self):
+        if digest(self.payload) != self.payload_sha256:
+            raise ValueError('original lineage payload/hash mismatch')
+        if (self.paper is None) != bool(self.source_ids):
+            raise ValueError('lineage entry requires either one paper-version or derived sources')
+        if len(set(self.source_ids)) != len(self.source_ids):
+            raise ValueError('duplicate lineage source')
+        return self
+
+
+class ReferenceUse(Frozen):
+    channel: Literal['description', 'example', 'calibration', 'shortlist', 'baseline']
+    owner: Text
+    entry_id: Text
+    binding_sha256: Sha
+
+
+class DeclaredLineage(Frozen):
+    entries: tuple[LineageEntry, ...]
+    inventory_ids: tuple[Text, ...]
+    uses: tuple[ReferenceUse, ...]
 
 
 class Inputs(Frozen):
     papers: tuple[Paper, ...]
     tree: Tree
     recordings: tuple[Recording, ...] = ()
+    lineage: DeclaredLineage | None = None
 
 
 class Gold(Frozen):
@@ -226,6 +263,8 @@ def admit(cfg, inputs, truth):
     questions = tuple(sorted(eligible)) if selected is None else selected
     if not questions or len(set(questions)) != len(questions) or not set(questions) <= eligible:
         raise ValueError('nonempty unique topical/project questions required')
+    if (selected is not None) != (inputs.tree.selection_provenance is not None):
+        raise ValueError('explicit shortlist requires frozen selection provenance only')
     if inputs.tree.frozen_at > truth.split_frozen_at:
         raise ValueError('taxonomy must be frozen before split/holdout opening')
     for g in truth.labels:
@@ -238,6 +277,8 @@ def admit(cfg, inputs, truth):
         reference_safe(example.paper, inputs, truth, inputs.tree.frozen_at)
         if example.node_key not in eligible:
             raise ValueError('example key outside eligible taxonomy')
+    from ._collection_lineage import lineage_audit
+    lineage_audit(cfg, inputs, truth)
     return papers, gold, nodes, paths, questions
 
 

@@ -55,8 +55,8 @@ def wire(monkeypatch, tmp_path, text):
     config = _default_goals_config()
     client = Mock()
     extractor = pdf.OnPremPdfExtractor(lambda path, **kwargs: [SimpleNamespace(page_content=text)])
-    app = SimpleNamespace(app_state=SimpleNamespace(config=config), pdf_extractor=extractor,
-                          resolve_stage_client=lambda stage: client)
+    app = SimpleNamespace(app_state=SimpleNamespace(config=config), pdf_extractor=extractor)
+    monkeypatch.setattr(summarization.factory, "resolve_stage_client", lambda app, stage: client)
     monkeypatch.setattr(summarization, "state", lambda: app)
     monkeypatch.setattr(summarization, "settings", lambda: SimpleNamespace(pdf_root=tmp_path))
     monkeypatch.setattr(_method_admission, "settings", lambda: SimpleNamespace(data_dir=tmp_path))

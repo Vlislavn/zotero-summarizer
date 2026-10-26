@@ -17,8 +17,8 @@ def test_long_source_reuses_configured_bounded_maps_without_losing_tail(monkeypa
     config.quality_review.map_chunk_chars = size
     llm = Mock()
     llm.prompt.return_value = 'Source evidence note.'
-    monkeypatch.setattr(summarization, 'state', lambda: SimpleNamespace(
-        app_state=SimpleNamespace(config=config), resolve_stage_client=lambda stage: llm))
+    monkeypatch.setattr(summarization, 'state', lambda: SimpleNamespace(app_state=SimpleNamespace(config=config)))
+    monkeypatch.setattr(summarization.factory, 'resolve_stage_client', lambda app, stage: llm)
     text = ('A source paragraph with methods and conditional results.\n' * 1700) + 'Unique final limitation.'
     source = PdfSource(text, (), 'a' * 64)
     monkeypatch.setattr(summarization, '_extract_pdf_source', lambda path: source)
@@ -51,8 +51,8 @@ def test_long_source_reuses_configured_bounded_maps_without_losing_tail(monkeypa
 def test_short_source_keeps_direct_refinement_without_map_calls(monkeypatch):
     config = _default_goals_config()
     llm = Mock()
-    monkeypatch.setattr(summarization, 'state', lambda: SimpleNamespace(
-        app_state=SimpleNamespace(config=config), resolve_stage_client=lambda stage: llm))
+    monkeypatch.setattr(summarization, 'state', lambda: SimpleNamespace(app_state=SimpleNamespace(config=config)))
+    monkeypatch.setattr(summarization.factory, 'resolve_stage_client', lambda app, stage: llm)
     source = PdfSource('Short original source.', (), 'a' * 64)
     monkeypatch.setattr(summarization, '_extract_pdf_source', lambda path: source)
     monkeypatch.setattr(corpus, 'run_corpus_match', lambda *args: corpus.empty_corpus_match_result())

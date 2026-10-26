@@ -38,6 +38,13 @@ def fingerprint(value) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False).encode()).hexdigest()
 
 
+def prepare_context(context, out):
+    if not isinstance(out, dict):
+        raise ValueError("feed context requires an attempt-local output collector")
+    out.clear()
+    return FeedReviewContext.model_validate(context)
+
+
 def context_for(source_id, profile) -> FeedReviewContext:
     return FeedReviewContext(source_id=source_id, profile=profile.model_copy(deep=True))
 
@@ -127,7 +134,11 @@ def bind(entry, assessment):
 
 def qualify(entry, context):
     """Current-review reader owns PDF/config freshness; no second extraction or model."""
-    if not entry or "feed_assessment" not in entry:
+    if not entry:
+        return {"status": "not_assessed"}
+    if entry.get("digest") is not None or "feed_assessment" in entry:
+        review_evidence(entry)
+    if "feed_assessment" not in entry:
         return {"status": "not_assessed"}
     payload = entry["feed_assessment"]
     if payload.get("status") in {"invalid", "not_assessed"}:
@@ -140,6 +151,11 @@ def qualify(entry, context):
             or payload.get("generated_at") != entry.get("reviewed_at")
             or payload.get("origin") != "ai_generated" or payload.get("scientific_verification") != "unverified"):
         raise ValueError("feed assessment binding changed")
+    source = entry["verification_audit"]["source"]
+    if (payload.get("original_text_sha256") != source["original_text_sha256"]
+            or type(payload.get("original_characters")) is not int
+            or payload["original_characters"] != source["original_characters"]):
+        raise ValueError("feed assessment original source changed")
     content = FeedAssessment.model_validate(payload["content"])
     keys, quotes = set(), {}
     for index, record in enumerate(content.projects):
@@ -188,7 +204,9 @@ def current_review(key, *, config=None):
     from zotero_summarizer.services.library import _review_cache
     from zotero_summarizer.services.library._review_identity import current_review_identity
 
-    entry = _review_cache.get_cached_review(key)
+    if not key:
+        return None
+    entry = _review_cache._read_all(readonly=True).get(key)
     if not entry:
         return None
     if entry.get("needs_pdf") and not entry.get("digest"):
@@ -204,17 +222,60 @@ def current_review(key, *, config=None):
     return entry
 
 
-def review_evidence(review):
+def _sha256(value):
+    return type(value) is str and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
+def projection_evidence(review):
+    """Reader owns freshness; qualify retained evidence without extraction or models."""
     from zotero_summarizer.services.library._review_cache import REVIEW_CONTRACT_VERSION
 
-    if not review:
-        raise ValueError("current review missing")
-    identity = review.get("review_identity") or {}
-    for field in ("source_sha256", "generation_sha256"):
-        value = identity.get(field)
-        if type(value) is not str or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
-            raise ValueError("review source identity unqualified")
-    if (review.get("needs_pdf") or identity.get("source_kind") not in {"library", "override"}
-            or not identity.get("source_path") or review.get("review_contract_version") != REVIEW_CONTRACT_VERSION
-            or not review.get("digest") or review["digest"].get("basis") not in {"full_text", "map_reduce"}):
-        raise ValueError("review source/basis unqualified")
+    evidence = {"availability": "unknown", "qualified": False, "reason": "review_missing"}
+    if review is None:
+        return evidence
+    if not isinstance(review, dict):
+        raise TypeError("review must be an object or null")
+    if review.get("needs_pdf") is not None and type(review["needs_pdf"]) is not bool:
+        raise TypeError("review needs_pdf must be a boolean")
+    if review.get("needs_pdf") is True:
+        outcome = review.get("acquire_outcome")
+        evidence["reason"] = "acquisition_not_observed"
+        if isinstance(outcome, str) and outcome in ("offline_uncached", "needs_login", "fetch_failed", "no_oa_source"):
+            evidence.update(availability="unavailable", reason="acquisition_unavailable", acquire_outcome=outcome)
+        return evidence
+    identity = review.get("review_identity")
+    evidence["reason"] = "review_source_unbound"
+    if (not isinstance(identity, dict) or not _sha256(identity.get("source_sha256"))
+            or identity.get("source_kind") not in ("library", "override")
+            or not isinstance(identity.get("source_path"), str) or not identity["source_path"].strip()):
+        return evidence
+    evidence.update(availability="available", source_binding=dict(identity))
+    if not _sha256(identity.get("generation_sha256")):
+        evidence["reason"] = "review_generation_unbound"
+    elif (type(review.get("review_contract_version")) is not int
+            or review["review_contract_version"] != REVIEW_CONTRACT_VERSION):
+        evidence["reason"] = "review_contract_unqualified"
+    elif review.get("digest") is not None and not isinstance(review["digest"], dict):
+        evidence["reason"] = "review_audit_invalid"
+    elif (not isinstance(review.get("digest"), dict)
+            or review["digest"].get("basis") not in ("full_text", "map_reduce")):
+        evidence["reason"] = "digest_basis_unqualified"
+    else:
+        from zotero_summarizer.services.library._digest_audit_export import retained_audit_status
+
+        try:
+            status, _ = retained_audit_status(review, current_identity=identity)
+        except ValueError:
+            evidence["reason"] = "review_audit_invalid"
+        else:
+            if status == "available":
+                evidence.update(qualified=True, reason=None, basis=review["digest"]["basis"])
+            else:
+                evidence["reason"] = "review_audit_unqualified"
+    return evidence
+
+
+def review_evidence(review):
+    evidence = projection_evidence(review)
+    if not evidence["qualified"]:
+        raise ValueError(evidence["reason"])

@@ -96,16 +96,13 @@ def test_built_application_mobile_verdict_survives_reload(application_browser):
     payload = {"item_key": key, "user_priority": "must_read", "comment": "critical rationale"}
     blocked = client.post("/api/golden/verdict", json=payload)
     assert blocked.status_code == 409 and blocked.json()["error"] == "review_required"
-    from zotero_summarizer.services.library import _review_cache, _review_identity
+    from tests.test_research_feed import _review
+    from zotero_summarizer.services.library import _review_cache
 
-    identity = _review_identity.build_review_identity(
-        config=read_config(settings.config_path), pdf_path="", source_kind="override", focus_prompt="",
-    )
-    _review_cache._write_one(key, {
-        "digest": {"tldr": "Synthetic browser paper contribution."},
-        "quality": {"grade": "B", "quality_band": "neutral"}, "goal_summaries": [],
-        "review_contract_version": _review_cache.REVIEW_CONTRACT_VERSION, "review_identity": identity,
-    })
+    entry = _review(key, quality=None, goal_summaries=[], code_link=None,
+                    digest={"tldr": "Synthetic browser paper contribution.", "read_decision": "skip"})
+    _review_cache._write_one(key, entry)
+    assert _review_cache.get_current_review(key) is not None
     response = client.post("/api/golden/verdict", json=payload)
     assert response.status_code == 200, response.text
     page.goto(f"http://127.0.0.1/paper/{key}")
@@ -173,20 +170,30 @@ def test_built_application_setup_routes_and_filtered_pending(application_browser
 
 
 def test_built_search_plan_and_same_title_adds_survive_reload(application_browser, monkeypatch):
-    from unittest.mock import Mock
     from patchright.sync_api import expect
+    from tests._zotero_fixtures import build_zotero_db
+    from zotero_summarizer.integrations.zotero_read import ZoteroReader
     from zotero_summarizer.services.search import materialize, session
     from zotero_summarizer.services.search._models import Candidate, QueryPlan, SearchIntent
 
-    page, _, _, seen = application_browser
+    page, _, settings, seen = application_browser
+    build_zotero_db(settings.zotero_data_dir)
     research = session.new_session(raw_query="Browser search", intent=SearchIntent(raw_query="Browser search"),
                                    plan=QueryPlan(arxiv_variants=['"tight topic"', "broad topic"],
                                                   openreview="peer-review topic"), questions=[])
     research.status = "reviewed"
     research.candidates = [Candidate(title="Same browser title", authors=[name]) for name in ("Alice", "Bob")]
     session.save(research)
-    writer = Mock()
-    monkeypatch.setattr(materialize, "ZoteroWriter", Mock(return_value=writer))
+    native_calls = []
+    apply = materialize.ZoteroWriter.apply_feed_materialization
+
+    def record_native(self, **kwargs):
+        receipt = apply(self, **kwargs)
+        native_calls.append((kwargs['feed_payload']['authors'], receipt))
+        return receipt
+
+    monkeypatch.setattr(materialize.ZoteroWriter, 'is_connector_running', lambda self: False)
+    monkeypatch.setattr(materialize.ZoteroWriter, 'apply_feed_materialization', record_native)
     page.goto("http://127.0.0.1/search")
     page.evaluate("id => sessionStorage.setItem('zs.searchSession', JSON.stringify({id}))", research.id)
     page.reload()
@@ -201,9 +208,13 @@ def test_built_search_plan_and_same_title_adds_survive_reload(application_browse
     expect(page.get_by_text("✓ In library", exact=True)).to_have_count(2)
     page.reload()
     expect(page.get_by_text("✓ In library", exact=True)).to_have_count(2)
-    assert [call.kwargs["feed_payload"]["authors"] for call in writer.apply_feed_materialization.call_args_list] == [
-        ["Alice"], ["Bob"]]
+    assert [authors for authors, _ in native_calls] == [["Alice"], ["Bob"]]
+    assert all(receipt['backup_path'] and os.path.isfile(receipt['backup_path'])
+               for _, receipt in native_calls)
     persisted = session.load(research.id).candidates
     assert len({candidate.candidate_id for candidate in persisted}) == 2
     assert len({candidate.materialized_zotero_key for candidate in persisted}) == 2
+    native = ZoteroReader(settings.zotero_data_dir)
+    assert [native.get_item_detail(candidate.materialized_zotero_key)['authors']
+            for candidate in persisted] == [['Alice'], ['Bob']]
     print("BROWSER_RECEIPT", json.dumps({"journey": "search-plan-two-adds-reload", "requests": seen}))

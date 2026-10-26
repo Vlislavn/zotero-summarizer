@@ -122,6 +122,26 @@ def project(raw, arm, cfg, status='received'):
         return 'invalid_response', None
 
 
+def check_native_transport(telemetry, terminal, request, cfg):
+    state = telemetry.get('terminal_status')
+    size = telemetry.get('retained_bytes')
+    observed = telemetry.get('observed_bytes_lower_bound')
+    complete = telemetry.get('raw_complete')
+    http_status = telemetry.get('http_status')
+    if (telemetry.get('reserved') is not True or telemetry.get('dispatched') is not True
+            or type(telemetry.get('client_retries')) is not int or telemetry['client_retries'] != 0
+            or type(telemetry.get('attempt')) is not int or telemetry['attempt'] != 1
+            or type(size) is not int or size != len(terminal) or size > cfg.max_response_bytes
+            or type(observed) is not int or observed < size or type(complete) is not bool
+            or telemetry.get('request_bytes') != len(request)):
+        raise ValueError('native transport byte/dispatch telemetry mismatch')
+    if (state == 'received' and (http_status != 200 or not complete or observed != size)
+            or state in ('timeout', 'response_too_large') and complete
+            or state == 'response_too_large' and (size != cfg.max_response_bytes or observed <= size)
+            or state == 'unavailable' and complete and http_status == 200):
+        raise ValueError('native transport status/completion mismatch')
+
+
 class NativeDecisionAdapter:
     def __init__(self, arm, cfg, *, transport=None, projector=project, max_elapsed_seconds=None):
         self.arm, self.cfg, self.transport = arm, cfg, transport
@@ -133,6 +153,12 @@ class NativeDecisionAdapter:
         admit_native((arm,), 1, cfg)
 
     def __call__(self, request: bytes, retain, *, timeout=None) -> ProviderReply:
+        max_elapsed_seconds = self.max_elapsed_seconds
+        if type(request) is not bytes or not callable(retain):
+            raise ValueError('native request bytes and callable retainer required before dispatch')
+        for value in (timeout, max_elapsed_seconds):
+            if value is not None and (type(value) not in (int, float) or not isfinite(value) or value <= 0):
+                raise ValueError('positive finite native time budgets required before dispatch')
         if (len(request) > self.cfg.max_request_bytes or self.calls >= self.cfg.max_calls
                 or (self.calls + 1) * self.arm.forward_passes_bound > self.cfg.max_work_units):
             raise ValueError('request/call/forward-pass budget exceeded before dispatch')
@@ -144,10 +170,6 @@ class NativeDecisionAdapter:
                      'declared_forward_passes_bound': self.arm.forward_passes_bound,
                      'server_peak_memory_bytes': None, 'cost': None, 'cold_seconds': None}
         started = monotonic()
-        max_elapsed_seconds = self.max_elapsed_seconds
-        if max_elapsed_seconds is not None and (type(max_elapsed_seconds) not in (int, float)
-                or not isfinite(max_elapsed_seconds) or max_elapsed_seconds <= 0):
-            raise ValueError('positive finite remaining run budget required before dispatch')
         budget = min(timeout, self.cfg.idle_timeout_seconds) if timeout is not None else self.cfg.idle_timeout_seconds
         run_budget = self.cfg.max_run_seconds if max_elapsed_seconds is None else min(max_elapsed_seconds, self.cfg.max_run_seconds)
         deadline = started + run_budget
@@ -188,7 +210,8 @@ class NativeDecisionAdapter:
         return ProviderReply(bytes(raw), status, readout, telemetry)
 
 
-def evaluate_support(case, arm, cfg, retain, *, recorded=None, transport=None, timeout=None):
+def evaluate_support(case, arm, cfg, retain, *, recorded=None, transport=None, timeout=None,
+                     max_elapsed_seconds=None):
     if arm.blockage() or (recorded is not None and arm.kind != 'recorded'):
         raise ValueError('blocked arm or incompatible recorded mode')
     request = payload(case, cfg)
@@ -198,4 +221,5 @@ def evaluate_support(case, arm, cfg, retain, *, recorded=None, transport=None, t
         return ProviderReply(recorded, status, readout, {'reserved': False, 'dispatched': False,
             'client_retries': 0, 'physical_retries': None, 'observed_forward_passes': None,
             'terminal_status': 'received', 'elapsed_seconds': None, 'raw_complete': True})
-    return NativeDecisionAdapter(arm, cfg, transport=transport)(request, retain, timeout=timeout)
+    return NativeDecisionAdapter(arm, cfg, transport=transport, max_elapsed_seconds=max_elapsed_seconds)(
+        request, retain, timeout=timeout)

@@ -18,6 +18,8 @@ from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.models import GoalsConfig
 from zotero_summarizer.services.library import _related_assessment as semantic
 from zotero_summarizer.services.library.app_library_reader import AppLibraryReader
+from zotero_summarizer.services.llm import factory
+from zotero_summarizer.services.llm.factory import resolve_stage_client
 from zotero_summarizer.services.search import discovery, session
 from zotero_summarizer.services.search._models import Candidate, ResearchSession
 from zotero_summarizer.services.zotero._notes import build_user_note_html
@@ -72,8 +74,8 @@ def journey(tmp_path, monkeypatch):
             "used_context_ids": [record["id"] for record in payload["seed"]["comments"]["records"]],
         } for row in payload["candidates"]]})
 
-    runtime = SimpleNamespace(app_state=SimpleNamespace(config=cfg), zotero_reader=reader, embedding_cache=None,
-                              resolve_stage_client=lambda *a, **kw: SimpleNamespace(pydantic_prompt=prompt))
+    runtime = SimpleNamespace(app_state=SimpleNamespace(config=cfg), zotero_reader=reader, embedding_cache=None)
+    monkeypatch.setattr(factory, "resolve_stage_client", lambda *a, **kw: SimpleNamespace(pydantic_prompt=prompt))
 
     def federate(plan, *, observe_outcomes=False, **kwargs):
         # Frozen bridge only: actual receipt adapters belong to the provider component.
@@ -170,7 +172,7 @@ def test_strict_post_rejects_before_work(journey, body):
 
 
 def test_metadata_constructs_no_clients_and_native_failure_is_unverified(journey, monkeypatch):
-    monkeypatch.setattr(journey.runtime, "resolve_stage_client", lambda *a, **kw: pytest.fail("model construction on GET"))
+    monkeypatch.setattr(factory, "resolve_stage_client", lambda *a, **kw: pytest.fail("model construction on GET"))
     monkeypatch.setattr(discovery, "_search_openalex_client", lambda *a: pytest.fail("provider construction on GET"))
     metadata = discovery.discovery_metadata("SEED0001")
     assert metadata["context_fingerprint"]
@@ -322,7 +324,7 @@ def test_complete_seed_comments_never_clipped_to_fit_model_budget(journey, monke
 
 @pytest.mark.parametrize("preference", ["unknown", "conflict"])
 def test_typed_preference_and_submitted_vs_cited_ids_are_not_positive_keywords(journey, monkeypatch, preference):
-    client = journey.runtime.resolve_stage_client("deep_review")
+    client = factory.resolve_stage_client(journey.runtime, "deep_review")
     original = client.pydantic_prompt
 
     def scripted(**kwargs):
@@ -330,7 +332,7 @@ def test_typed_preference_and_submitted_vs_cited_ids_are_not_positive_keywords(j
         return response.model_copy(update={"items": [row.model_copy(update={
             "preference": preference, "used_context_ids": []}) for row in response.items]})
 
-    monkeypatch.setattr(journey.runtime, "resolve_stage_client", lambda *a, **kw: SimpleNamespace(pydantic_prompt=scripted))
+    monkeypatch.setattr(factory, "resolve_stage_client", lambda *a, **kw: SimpleNamespace(pydantic_prompt=scripted))
     result = begin(journey, private=True).json()["discovery"]
     assert result["assessment"]["status"] == "assessed"
     assert result["assessment"]["submitted_context_ids"]
@@ -379,9 +381,9 @@ def test_empty_observed_seed_notes_are_not_unavailable(journey):
 def test_actual_runtime_client_cache_and_boundary_fence(journey, monkeypatch, during_build):
     from zotero_summarizer.models import AppState
     from zotero_summarizer.runtime import RuntimeState
-    from zotero_summarizer.services.llm import factory
 
-    inert = journey.runtime.resolve_stage_client("deep_review")
+    inert = factory.resolve_stage_client(journey.runtime, "deep_review")
+    monkeypatch.setattr(factory, "resolve_stage_client", resolve_stage_client)
     old_calls, built = [], []
     old_client = SimpleNamespace(pydantic_prompt=lambda **kw: old_calls.append(kw))
     app = RuntimeState(app_state=AppState(config=journey.config), zotero_reader=journey.reader)
@@ -397,7 +399,7 @@ def test_actual_runtime_client_cache_and_boundary_fence(journey, monkeypatch, du
     monkeypatch.setattr(factory, "build_client_for_stage", build)
     monkeypatch.setattr(discovery, "state", lambda: app)
     monkeypatch.setattr(semantic, "state", lambda: app)
-    assert app.resolve_stage_client("deep_review") is old_client
+    assert factory.resolve_stage_client(app, "deep_review") is old_client
     journey.config.llm_routing.default.model = "consented-replacement"
     result = begin(journey, private=True).json()["discovery"]
     assert built == ["synthetic", "consented-replacement"]

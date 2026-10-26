@@ -34,8 +34,7 @@ def test_unknown_board_withholds_negative_action_in_proposal_and_weekly_card(boa
     card = build_card(
         ResearchCandidate(source_id="paper", source="fixture", title="Agent evaluation"),
         ResearchFeedTriage(include=True, score=3, confidence=0.5, rationale="Fixture"),
-        {**_review("paper"), "digest": {**DIGEST, "basis": "full_text"},
-         "quality": QUALITY, "goal_summaries": board},
+        _review('paper', digest={**DIGEST, 'basis': 'full_text'}, quality=QUALITY, goal_summaries=board),
         ResearchProfile(themes=["Evaluation"], projects=["Harness"]),
     )
 

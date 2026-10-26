@@ -28,7 +28,10 @@ RECEIPT = {
     'answer': 'No improvement was observed.', 'source_kind': 'acquired_original',
     'complete': False, 'source_id': 'original-identity', 'source_version_id': 'extraction-version',
     'source_sha256': 'source-fingerprint', 'generator_id': 'configured-feed-generator',
-    'verifier_id': 'configured-deep-verifier', 'checked_scope': {'start': 0, 'end': 3000},
+    'verifier_id': 'configured-deep-verifier', 'input_id': 'input-fingerprint',
+    'evaluator_id': 'protocol-fingerprint', 'checked_scope': {'start': 0, 'end': 3000},
+    'checked_passages': [{'start': 1500, 'end': 1600}],
+    'capabilities': {'dense': False, 'bm25': True, 'reranker': False},
     'evidence': [{'passage_id': 'chars:1500:1600', 'start': 1500, 'end': 1600, 'quote': QUOTE}],
 }
 
@@ -41,7 +44,8 @@ def _search_session(policy):
               'candidates': [topic]}
     if policy:
         result.update(evidence_policy='question_evidence', evidence_status={
-            'state': 'complete', 'promoted_candidate_ids': ['answer'], 'topic_floor': 0.35})
+            'state': 'complete', 'promoted_candidate_ids': ['answer'], 'topic_floor': 0.35,
+            'calls_used': 2, 'calls': 2})
         result['candidates'] += [
             {'candidate_id': 'answer', 'title': 'Lower-ranked answer',
              'url': 'https://example.org/answer', 'query_score': 0.5, 'relevance_band': 'weak',
@@ -53,27 +57,29 @@ def _search_session(policy):
              'question_evidence': [{**deepcopy(RECEIPT), 'candidate_id': 'miss', 'state': 'unknown',
                                     'reason': 'unchecked_remainder', 'answer': None, 'evidence': []}]},
         ]
+        result['candidates'] = [result['candidates'][1], result['candidates'][0], *result['candidates'][2:]]
     return result
 
 
-def _related():
-    comments = {'availability': 'available', 'app_available': True, 'native_available': True,
-                'used_for_ranking': False, 'used_context_ids': [], 'records': [
+def _related(assessed=False):
+    comments = {'availability': 'available', 'app_state': 'observed', 'native_state': 'observed',
+                'used_context_ids': [], 'records': [
                     {'id': 'native:n1', 'text': 'Не подходит. Not useful.', 'source': 'native_note',
                      'authorship': 'uncertain', 'revision': 'clock'},
                     {'id': 'app:n1', 'text': 'Synthetic app context only.', 'source': 'app_note',
                      'authorship': 'user', 'revision': 1}]}
-    item = {'item_key': 'PAPER001', 'title': 'Saved, already read paper', 'source_basis': 'abstract_only',
-            'relationship': {'sentence': 'Both metadata records mention “graph retrieval”; '
-                             'this is not confirmation or contradiction.'},
-            'evidence': {'seed': {'field': 'abstract', 'start': 0, 'end': 15, 'excerpt': 'Graph retrieval'},
-                         'candidate': {'field': 'title', 'start': 0, 'end': 15, 'excerpt': 'Graph retrieval'}},
-            'comments': comments}
-    return {'saved_seed': True, 'status': 'ready', 'items': [
-        {**deepcopy(item), 'item_key': f'PAPER00{n + 1}',
-         'title': item['title'] if n == 1 else f'Saved paper {n}'} for n in range(1, 5)],
-        'seed_comments': {'availability': 'absent', 'records': [],
-                          'app_available': True, 'native_available': True}}
+    items = [{'item_key': f'PAPER00{n + 1}', 'title': 'Saved, already read paper' if n == 1 else f'Saved paper {n}',
+              'source_basis': 'metadata_only_model_judgment' if assessed else 'abstract_only',
+              'relationship': 'Both metadata records mention graph retrieval; this is not confirmation or contradiction.',
+              'comments': deepcopy(comments)} for n in range(1, 4)]
+    if assessed:
+        for row in items:
+            row['evidence'] = {side: {'item_key': key, 'field': field, 'start': 0, 'end': 15, 'excerpt': 'Graph retrieval'}
+                               for side, key, field in [('seed', 'PAPER001', 'abstract'), ('candidate', row['item_key'], 'title')]}
+    return {'seed_key': 'PAPER001', 'status': 'ready', 'items': items, 'comments_in_ranking': False,
+            'context_fingerprint': 'c' * 64, **({'assessment_status': 'assessed'} if assessed else {}),
+            'boundary': {'enabled': True, 'token': 'b' * 64, 'provider': 'synthetic', 'model': 'scripted', 'endpoint': ORIGIN},
+            'seed_comments': {'availability': 'empty', 'records': [], 'app_state': 'observed', 'native_state': 'observed'}}
 
 
 def _detail(key):
@@ -81,9 +87,9 @@ def _detail(key):
             'authors': [], 'tags': [], 'collections': [], 'has_pdf': False, 'questions': [],
             'user_note': 'Synthetic manual note',
             'verdict': {'id': 1, 'item_key': key, 'user_priority': 'must_read', 'comment': 'critical rationale'},
-            'deep_review': {'model_read_decision': 'read', 'reading_policy_flags': ['abstract_only'],
-                            'digest': {'basis': 'abstract', 'read_decision': 'skim',
-                                       'read_why': 'A provisional abstract-only recommendation.',
+            'deep_review': {'model_read_decision': 'read', 'reading_policy_flags': [],
+                            'digest': {'basis': 'full_text', 'read_decision': 'skim',
+                                       'read_why': 'Synthetic source-present reading display.',
                                        'read_parts': ['Figure 3 — compare site splits'],
                                        'skip_parts': ['Appendix A — notation'], 'estimated_read_minutes': 8,
                                        'original_value': 'The exact held-out protocol.'}}}
@@ -97,8 +103,8 @@ def _bindings():
              'tests/test_review_reading_browser.py', 'zotero_summarizer/api/app.py',
              'frontend/src/pages/Search.jsx', 'frontend/src/pages/Search.evidence.test.jsx',
              'frontend/src/components/search/QuestionEvidence.jsx', 'frontend/src/utils/searchSort.js',
-             'frontend/src/components/paper/RelatedLibrary.jsx',
-             'frontend/src/components/paper/RelatedLibrary.test.jsx', 'frontend/src/pages/reviewHelpers.js',
+             'frontend/src/components/paper/RelatedPapers.jsx',
+             'frontend/src/components/paper/RelatedPapers.test.jsx', 'frontend/src/pages/reviewHelpers.js',
              'frontend/src/pages/PaperReviewPage.jsx', 'frontend/src/api/libraryApi.js',
              'frontend/src/api/searchApi.js', CHANNEL_FIXTURE)
     return {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in names}
@@ -139,8 +145,10 @@ def _check_served_build(state):
         if response.request.resource_type == 'document':
             state['instrumented_documents'][url.path] = hashlib.sha256(body).hexdigest()
             continue
-        source = (ROOT / 'frontend/dist' / url.path.lstrip('/')).resolve()
-        assert source.is_relative_to(ROOT / 'frontend/dist') and source.is_file(), source
+        from zotero_summarizer.api import app
+
+        source = (app._FRONTEND_DIST / url.path.lstrip('/')).resolve()
+        assert source.is_relative_to(app._FRONTEND_DIST) and source.is_file(), source
         assert body == source.read_bytes(), response.url
         state['served_build'][url.path] = hashlib.sha256(body).hexdigest()
     state['build_responses'].clear()
@@ -156,16 +164,23 @@ def surface_browser(application_browser, request, record_property):
     artifact = root / f'surfaces-{request.node.name}'
     artifact.mkdir(parents=True, exist_ok=False, mode=0o700)
     document = _client.get('/')
-    assert document.status_code == 200 and document.content == (ROOT / 'frontend/dist/index.html').read_bytes()
+    from zotero_summarizer.api import app
+
+    assert document.status_code == 200 and document.content == (app._FRONTEND_DIST / 'index.html').read_bytes()
     state = {'page': page, 'artifact': artifact, 'requests': [], 'posts': [], 'post': None,
              'gets': {}, 'unexpected': [], 'served_build': {}, 'sources': _bindings(), 'asgi': seen,
              'build_responses': [], 'instrumented_documents': {},
              'asgi_index_sha256': hashlib.sha256(document.content).hexdigest()}
-    for key in ('PAPER001', 'PAPER005'):
+    for key in ('PAPER001', 'PAPER003', 'PAPER005'):
         state['gets'].update({
             ('/api/golden/review-detail', f'item_key={key}'): _detail(key),
-            (f'/api/library/related/{key}', ''): _related() if key == 'PAPER001' else {
-                'saved_seed': False, 'status': 'empty', 'items': []},
+            (f'/api/library/related/{key}', ''): _related() if key == 'PAPER001' else {'status': 'empty', 'items': []},
+            (f'/api/library/related/{key}/discover', ''): {
+                'seed_key': key, 'seed_title': _detail(key)['title'],
+                'admission': {'state': 'saved' if key == 'PAPER001' else 'not_saved',
+                              'basis': 'native' if key == 'PAPER001' else None},
+                'context_fingerprint': 'a' * 64, 'boundary': _related()['boundary'],
+                'private_context': {'status': 'empty', 'record_count': 0}, 'reason': None},
             (f'/api/library/render/{key}', ''): {'status': 'completed', 'figures': []},
             ('/api/library/deep-review/status', f'item_key={key}'): {'status': 'idle'},
         })
@@ -248,7 +263,7 @@ def _screen(state, policy):
 
 
 def _card(page, title):
-    return page.locator('div.border.rounded-xl').filter(has=page.get_by_role('link', name=title, exact=True))
+    return page.get_by_role('article', name=title, exact=True)
 
 
 def _search_evidence(page):
@@ -260,19 +275,22 @@ def _search_evidence(page):
     expect(card.get_by_text('weak match', exact=True)).to_be_visible()
     _open(page, card.locator('summary').filter(has_text='Question evidence'))
     expect(card.get_by_text('Sufficient evidence (AI-verified)', exact=True)).to_be_visible()
-    expect(card.get_by_text(QUOTE, exact=True)).to_be_visible()
+    quote = card.locator('blockquote').first
+    expect(quote).to_be_visible()
+    assert quote.evaluate('node => node.firstChild.textContent') == QUOTE
     expect(card.get_by_text('Extracted characters 1500–1600', exact=False)).to_be_visible()
-    expect(card.get_by_text('extraction completeness is unknown', exact=False)).to_be_visible()
+    expect(card.get_by_text('extraction completeness and the remainder are unchecked', exact=False)).to_be_visible()
     _open(page, card.get_by_text('Source and evaluator provenance', exact=True))
-    for value in ('original-identity', 'extraction-version / source-fingerprint',
-                  'question-fingerprint', 'configured-feed-generator', 'configured-deep-verifier'):
-        expect(card.get_by_text(value, exact=True)).to_be_visible()
+    for value in ('original-identity', 'source-fingerprint', 'question-fingerprint',
+                  'configured-feed-generator', 'configured-deep-verifier', 'input-fingerprint'):
+        expect(card.get_by_text(value, exact=False)).to_be_visible()
     for title, label in (('Partial', 'Partial evidence'), ('Unchecked candidate', 'Unchecked')):
         other = _card(page, title)
         _open(page, other.locator('summary').filter(has_text='Question evidence'))
         expect(other.get_by_text(label, exact=True)).to_be_visible()
-    expect(page.get_by_text('Still uncovered: second outcome', exact=True)).to_be_visible()
-    expect(page.get_by_text('No answer located in retrieved passages; the rest is unchecked.', exact=True)).to_be_visible()
+    expect(page.get_by_text('Uncovered: second outcome', exact=True)).to_be_visible()
+    expect(_card(page, 'Unchecked candidate').get_by_text(
+        'Unavailable or missing passages do not establish absence.', exact=False)).to_be_visible()
     expect(page.get_by_text('Not found in checked text', exact=True)).to_have_count(0)
 
 
@@ -284,12 +302,11 @@ def test_built_search_explicit_policy_and_positive_evidence(surface_browser, wid
     page.set_viewport_size({'width': width, 'height': 900})
     page.goto(ORIGIN + '/search')
     expect(page.get_by_role('heading', name='Targeted Search', exact=True)).to_be_visible()
-    choice = page.get_by_role('checkbox', name='Promote evidence-backed answers', exact=False)
+    choice = page.get_by_role('checkbox', name='Experimental original-source question evidence', exact=False)
     expect(choice).not_to_be_checked()
-    expect(choice).to_be_disabled()
     assert state['posts'] == []
-    page.get_by_role('textbox', name='Research topic', exact=True).fill('treatment studies')
-    page.get_by_role('textbox', name='Questions', exact=True).fill(QUESTION)
+    page.get_by_placeholder('e.g. LLM agents for clinical decision support in oncology').fill('treatment studies')
+    page.get_by_placeholder('Optional — one specific question per line').fill(QUESTION)
     expect(choice).to_be_enabled()
     expect(choice).not_to_be_checked()
     _screen(state, False)
@@ -300,14 +317,17 @@ def test_built_search_explicit_policy_and_positive_evidence(surface_browser, wid
     expect(choice).to_be_checked()
     _screen(state, True)
     _search_evidence(page)
-    expect(page.get_by_text('Experimental question evidence: 1 answer-bearing candidates promoted.', exact=False)).to_be_visible()
+    expect(page.get_by_text('1 candidates promoted', exact=False)).to_be_visible()
     sort = page.get_by_role('combobox', name='Sort by', exact=False)
     expect(sort).to_have_count(1)
     expect(sort).to_have_value('recommended')
-    sort.select_option('question_evidence')
-    expect(page.locator('div.border.rounded-xl a[target="_blank"]').first).to_have_text('Lower-ranked answer')
-    assert page.locator('div.border.rounded-xl a[target="_blank"]').all_text_contents() == [
+    expect(page.locator('article a[target="_blank"]').first).to_have_text('Lower-ranked answer')
+    assert page.locator('article a[target="_blank"]').all_text_contents() == [
         'Lower-ranked answer', 'Top terminology match', 'Partial', 'Unchecked candidate']
+    sort.select_option('relevance')
+    expect(page.locator('article a[target="_blank"]').first).to_have_text('Top terminology match')
+    sort.select_option('recommended')
+    expect(page.locator('article a[target="_blank"]').first).to_have_text('Lower-ranked answer')
     _capture(state, 'positive-evidence', 'main > .max-w-3xl', {
         'main > .max-w-3xl form > label': '*',
         'main > .max-w-3xl > div:has(> [role="status"])': '[role="status"]',
@@ -326,22 +346,33 @@ def _discovery(availability):
         {'candidate_id': 'unsupported', 'title': 'No supported identifier or address', 'url': 'data:text/html,unsafe',
          'pmid': '../not-a-pmid', 'openalex_id': 'https://example.org/W123'},
     ]
-    outcomes = [{'provider': 'arxiv', 'variant': 0, 'status': 'success_empty', 'count': 0, 'error_code': None}]
-    if availability == 'partial_failure':
-        outcomes += [{'provider': 'semantic_scholar', 'variant': 0, 'status': 'failed',
-                      'count': None, 'error_code': 'rate_limited'}]
-    elif availability == 'unknown':
-        outcomes[0].update(status='unknown', count=None)
-    return {'status': 'screened', 'candidates': candidates if availability == 'partial_failure' else [],
-            'discovery': {'provider_availability': availability, 'source_outcomes': outcomes}}
+    statuses = [('success_empty', 0, None), ('success_nonempty', 5, None), ('failed', None, 'rate_limited')]
+    if availability != 'partial':
+        statuses = [(('success_empty', 0, None) if availability == 'observed' else ('unknown', None, None))] * 3
+        candidates = []
+    variants = [{'channel': channel, 'outcome': {'status': status, 'count': count, 'error_code': code}}
+                for channel, (status, count, code) in zip(['openalex_lexical', 'openalex_lexical', 'openalex_semantic'], statuses)]
+    return {'id': 'surface-discovery', 'status': 'discovery_failed' if availability == 'unknown' else 'discovery_ready',
+            'questions': [], 'candidates': candidates, 'discovery': {
+                'seed_key': 'PAPER001', 'seed_title': 'Synthetic saved seed', 'freshness': 'current',
+                'retrieval': {'status': availability, 'variants': variants,
+                              'empty_reason': 'providers_empty' if availability == 'observed' else None},
+                'assessment': {'status': 'not_requested', 'items': [], 'submitted_context_ids': []},
+                'recommended_ids': [candidates[0]['candidate_id']] if candidates else [],
+                'seed_comments': None, 'new_actions_allowed': availability != 'unknown'}}
 
 
 def _find(state, availability):
     page = state['page']
-    query = 'refresh=true' if state['posts'] else ''
-    expected = {'method': 'POST', 'path': '/api/library/related/PAPER001/discover', 'query': query, 'body': None}
-    state['post'] = (expected, _discovery(availability))
-    with page.expect_response(ORIGIN + expected['path'] + ('?' + query if query else '')) as response:
+    retry = any(row['path'].endswith('/discover') for row in state['posts'])
+    if retry:
+        page.get_by_role('link', name='Return to seed to explicitly retry discovery', exact=True).click()
+    expected = {'method': 'POST', 'path': '/api/library/related/PAPER001/discover', 'query': '',
+                'body': {'context_fingerprint': 'a' * 64, 'consent_token': None, 'retry': retry}}
+    result = _discovery(availability)
+    state['gets'][('/api/search/surface-discovery', '')] = result
+    state['post'] = (expected, result)
+    with page.expect_response(ORIGIN + expected['path']) as response:
         page.get_by_role('button', name='Find new relevant', exact=True).press('Enter')
     assert response.value.status == 200 and state['posts'][-1] == expected
 
@@ -349,23 +380,23 @@ def _find(state, availability):
 def _related_evidence(page):
     from patchright.sync_api import expect
 
-    related = page.locator('#related-library')
-    expect(related.locator('article')).to_have_count(3)
+    related = page.get_by_role('region', name='Related in my library', exact=True)
+    expect(related.locator('ol > li')).to_have_count(3)
     expect(related.get_by_text('Saved paper 4', exact=True)).to_have_count(0)
-    first = related.locator('article').first
+    first = related.locator('ol > li').first
     expect(first.get_by_role('link', name='Saved, already read paper', exact=True)).to_be_visible()
     expect(first.get_by_text('this is not confirmation or contradiction.', exact=False)).to_be_visible()
-    _open(page, first.get_by_text('Evidence · abstract only', exact=True))
-    expect(first.get_by_text('Public metadata only; original full-text relationships have not been assessed.', exact=True)).to_be_visible()
+    _open(page, first.get_by_text('Metadata evidence', exact=True))
+    expect(first.get_by_text('Quote membership is checked; entailment is not independently verified.', exact=True)).to_be_visible()
     assert first.locator('details').first.locator('blockquote').all_text_contents() == [
-        'seed · abstract · characters 0–15Graph retrieval', 'candidate · title · characters 0–15Graph retrieval']
-    _open(page, first.get_by_text('Saved paper comments — available', exact=True))
+        'seed · PAPER001 · abstract: “Graph retrieval”', 'candidate · PAPER002 · title: “Graph retrieval”']
+    _open(page, first.get_by_text('Comments · available', exact=True))
     for text in ('Не подходит. Not useful.', 'Synthetic app context only.',
-                 'native note · authorship uncertain', 'app note · user text',
-                 'Context only, not used for ranking or as evidence of a paper relationship.'):
+                 'native_note · uncertain · native:n1', 'app_note · user · app:n1'):
         expect(first.get_by_text(text, exact=True)).to_be_visible()
-    expect(related.get_by_text('semantic intent is unqualified', exact=False)).to_be_visible()
-    expect(related.get_by_role('checkbox')).to_have_count(0)
+    expect(first.get_by_text('Context, not paper evidence.', exact=False)).to_be_visible()
+    _open(page, related.get_by_text('Discovery processing and optional comments', exact=True))
+    expect(related.get_by_role('checkbox')).not_to_be_checked()
 
 
 def _safe_discovery_links(related):
@@ -385,8 +416,8 @@ def _safe_discovery_links(related):
     expect(related.get_by_text('No supported link available.', exact=True)).to_be_visible()
     assert all(url.startswith(('http://', 'https://')) for url in related.locator('a[target="_blank"]').evaluate_all(
         "links => links.map(link => link.getAttribute('href'))"))
-    expect(related.get_by_text('Not saved (identifier checked)', exact=False)).to_be_visible()
-    expect(related.get_by_text('Saved-library membership unknown — not confirmed new', exact=False).first).to_be_visible()
+    expect(related.get_by_text('Not saved in the checked membership snapshot.', exact=True)).to_be_visible()
+    expect(related.get_by_text('Membership unknown — not established new.', exact=True).first).to_be_visible()
 
 
 def _preserved_rail(page, note='Synthetic manual note'):
@@ -414,34 +445,18 @@ def test_built_related_positive_context_and_explicit_discovery(surface_browser, 
     page.goto(ORIGIN + '/paper/PAPER001')
     expect(page.get_by_role('heading', name='Synthetic saved seed', exact=True)).to_be_visible()
     _preserved_rail(page)
-    _related_evidence(page)
-    related = page.locator('#related-library')
-    find = related.get_by_role('button', name='Find new relevant', exact=True)
-    expect(find).to_be_enabled()
+    related = page.get_by_role('region', name='Related in my library', exact=True)
+    related.get_by_role('button', name='Show related saved papers', exact=True).click()
+    expect(related.get_by_role('link', name='Saved, already read paper', exact=True)).to_be_visible()
     assert state['posts'] == []
+    expected = {'method': 'POST', 'path': '/api/library/related/PAPER001/assess', 'query': '',
+                'body': {'consent_token': 'b' * 64, 'retry': False}}
+    state['post'] = (expected, _related(assessed=True))
+    page.once('dialog', lambda dialog: dialog.accept())
+    related.get_by_role('button', name='Try with comments — experimental', exact=True).click()
+    _related_evidence(page)
     notes = page.get_by_role('textbox', name='Manual notes', exact=True)
     notes.fill('Unsaved synthetic draft')
-    _find(state, 'partial_failure')
-    expect(related.get_by_text('Partial provider failure — available results are retained.', exact=False)).to_be_visible()
-    expect(related.get_by_text('No unsaved candidates returned', exact=False)).to_have_count(0)
-    _safe_discovery_links(related)
-    _open(page, related.get_by_text('Source outcomes', exact=True))
-    expect(related.get_by_text('arxiv · pass 1 · success empty · 0 returned', exact=True)).to_be_visible()
-    expect(related.get_by_text('semantic_scholar · pass 1 · failed · rate limited', exact=True)).to_be_visible()
-    expect(related.get_by_text('Discovery only — nothing added or reviewed.', exact=False)).to_be_visible()
-    expect(related.get_by_role('button', name='Add to library', exact=True)).to_have_count(0)
-    _capture(state, 'positive-related-and-discovery', '#related-library', {'#related-library': '*'})
-    _find(state, 'unknown')
-    expect(related.get_by_text('Some provider outcomes are unknown', exact=False)).to_be_visible()
-    expect(related.get_by_text('No unsaved candidates returned in this search. This is not proof that none exist.', exact=True)).to_be_visible()
-    expect(related.get_by_text('Partial provider failure', exact=False)).to_have_count(0)
-    _capture(state, 'unknown-empty', '#related-library', {'#related-library': '*'})
-    _find(state, 'observed')
-    expect(related.get_by_text('Source availability: observed.', exact=False)).to_be_visible()
-    expect(related.get_by_text('Some provider outcomes are unknown', exact=False)).to_have_count(0)
-    expect(related.get_by_text('No unsaved candidates returned', exact=False)).to_be_visible()
-    _capture(state, 'observed-empty', '#related-library', {'#related-library': '*'})
-    _preserved_rail(page, note='Unsaved synthetic draft')
     dialogs = []
 
     def dismiss(dialog):
@@ -454,10 +469,29 @@ def test_built_related_positive_context_and_explicit_discovery(surface_browser, 
     assert dialogs == ['You have unsaved notes on this paper. Leave without saving them?']
     expect(notes).to_have_value('Unsaved synthetic draft')
     notes.fill('Synthetic manual note')
-    _check_served_build(state)  # Response bodies retire on cross-document navigation.
+    _capture(state, 'positive-related', 'section[aria-label="Related in my library"]',
+             {'section[aria-label="Related in my library"]': '*'})
+    for availability in ('partial', 'unknown', 'observed'):
+        _find(state, availability)
+        status = page.get_by_role('region', name='Discovery status', exact=True)
+        expect(status.get_by_label('Retrieval status')).to_contain_text(f'Retrieval: {availability}.')
+        _open(page, status.get_by_text('Provider observations', exact=True))
+        if availability == 'partial':
+            _open(page, page.locator('summary').filter(has_text='retained candidates'))
+            _safe_discovery_links(page.locator('main'))
+            expect(status.get_by_text('openalex_semantic · failed · count: unknown · rate_limited', exact=True)).to_be_visible()
+            expect(status.get_by_text('openalex_lexical · success_empty · count: 0 ·', exact=True)).to_be_visible()
+        elif availability == 'unknown':
+            expect(status.get_by_text('Private evidence hidden:', exact=False)).to_be_visible()
+            expect(status.get_by_text('Scheduled providers successfully returned no candidates.', exact=True)).to_have_count(0)
+        else:
+            expect(status.get_by_text('Scheduled providers successfully returned no candidates.', exact=True)).to_be_visible()
+        _capture(state, availability, 'main > .max-w-3xl', {'section[aria-label="Discovery status"]': '*'})
+    assert len(state['posts']) == 4
+    assert all(row['path'].endswith(('/assess', '/discover')) for row in state['posts'])
+    _check_served_build(state)
     page.goto(ORIGIN + '/paper/PAPER005')
     expect(page.get_by_role('heading', name='Unsaved Today seed', exact=True)).to_be_visible()
-    expect(page.get_by_text('No related saved papers returned by this library search.', exact=True)).to_be_visible()
+    page.get_by_role('button', name='Show related saved papers', exact=True).click()
+    expect(page.get_by_text('No related saved papers found in this scope', exact=False)).to_be_visible()
     expect(page.get_by_role('button', name='Find new relevant', exact=True)).to_have_count(0)
-    assert len(state['posts']) == 3
-    assert all(row['path'] == '/api/library/related/PAPER001/discover' for row in state['posts'])

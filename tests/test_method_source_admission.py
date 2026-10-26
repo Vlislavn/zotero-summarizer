@@ -145,7 +145,8 @@ def test_bare_doi_does_not_authorize_manufactured_uri(config, receipt_path):
 
 
 def wire_pipeline(monkeypatch, config, client, source):
-    app = SimpleNamespace(app_state=SimpleNamespace(config=config), resolve_stage_client=lambda stage: client)
+    app = SimpleNamespace(app_state=SimpleNamespace(config=config))
+    monkeypatch.setattr(summarization.factory, "resolve_stage_client", lambda app, stage: client)
     monkeypatch.setattr(summarization, "state", lambda: app)
     monkeypatch.setattr(summarization, "_extract_pdf_source", lambda path: PdfSource(
         source, (), hashlib.sha256(b"synthetic PDF seam fixture").hexdigest()))

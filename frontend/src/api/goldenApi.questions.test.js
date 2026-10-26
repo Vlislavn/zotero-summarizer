@@ -216,7 +216,10 @@ it('keeps the established cached network fallback but does not hide HTTP rejecti
   vi.stubGlobal('fetch', fetch);
   const api = await import('./goldenApi.js');
   expect(await api.fetchReviewDetail(submission.item_key)).toEqual(cached);
+  expect(fetch).toHaveBeenCalledTimes(1);
 
+  await offline.publishStatus('', 'connected');
   fetch.mockResolvedValue({ ok: false, status: 403, json: async () => ({ detail: 'Forbidden' }) });
   await expect(api.fetchReviewDetail(submission.item_key)).rejects.toMatchObject({ status: 403 });
+  expect(fetch).toHaveBeenCalledTimes(2);
 });

@@ -64,6 +64,34 @@ def test_weekly_http_lists_opens_and_downloads_existing_publication_without_writ
     assert not any(route.path == "/api/research-feed/run" for route in app.routes)
 
 
+def test_new_report_keeps_private_receipt_but_exports_only_its_reference(tmp_path, monkeypatch):
+    from copy import deepcopy
+    from tests.test_feed_assessment_producer import produce_review
+    from zotero_summarizer.services.research_feed.profile import load_profile
+
+    settings = _settings(tmp_path)
+    _seed(settings, 'paper', 'Agent harness benchmark')
+    entry, _, generator, verifier = produce_review(
+        settings.data_dir, monkeypatch, selected_profile=load_profile(settings.data_dir),
+        focus_prompt='PRIVATE owned focus input')
+    original = deepcopy(entry)
+    result = run_weekly(settings, start=datetime(2026, 8, 20, tzinfo=timezone.utc),
+                        end=datetime(2026, 8, 29, tzinfo=timezone.utc), review_loader=lambda _key: entry)
+    raw = Path(result['json_path']).read_text()
+    payload = json.loads(raw)
+    public = payload['cards'][0]['provenance']
+    binding = {key: entry['review_identity'][key]
+               for key in ('source_kind', 'source_sha256', 'generation_sha256')}
+    assert str(settings.data_dir) not in raw and 'PRIVATE owned focus input' not in raw
+    assert public['source_binding'] == binding
+    assert payload['metadata']['full_text_evidence']['paper']['source_binding'] == binding
+    assert public['feed_generation'] == {
+        'status': entry['feed_assessment']['status'], 'origin': entry['feed_assessment']['origin'],
+        'scientific_verification': 'unverified',
+        'retained_payload_sha256': entry['feed_assessment']['payload_sha256']}
+    assert entry == original and generator.pydantic_prompt.call_count == verifier.calls == 1
+
+
 def test_weekly_http_empty_library_is_not_an_unreadable_report(tmp_path, monkeypatch):
     settings = _settings(tmp_path)
     monkeypatch.setattr(routes, "settings", lambda: settings)
@@ -81,6 +109,7 @@ def test_legacy_v1_optional_fields_remain_absent_and_artifacts_unchanged(saved_r
     payload = json.loads(path.read_text())
     del payload["cards"][0]["provenance"]
     del payload["research_ideas_by_project"]
+    payload.pop("unqualified_reviews", None)
     payload["cards"][0]["card"]["worth_reading"] = "unknown"
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     saved_bytes = path.read_bytes()
@@ -90,6 +119,44 @@ def test_legacy_v1_optional_fields_remain_absent_and_artifacts_unchanged(saved_r
     assert detail.status_code == 200
     assert detail.json() == payload
     assert path.read_bytes() == saved_bytes
+
+
+@pytest.mark.parametrize("bad", [
+    None, {}, "not a list", [None], [{"candidate": {}, "reason": "review_missing"}],
+    *[{"candidate": {"source_id": "feed:pending", "source": "app_rss", "title": "Waiting"}, "reason": reason}
+      for reason in (None, 0, False, [], "", " ")],
+])
+def test_malformed_unqualified_reviews_refuse_before_display_and_download(saved_report, bad):
+    _, app, path = saved_report
+    payload = json.loads(path.read_text())
+    payload["unqualified_reviews"] = bad
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    original = path.read_bytes()
+    base = f"/api/research-feed/runs/{path.parent.name}"
+
+    for suffix in ("", "/download?format=json", "/download?format=md"):
+        response = _request(app, base + suffix)
+        assert response.status_code == 422
+        assert response.json()["error"] == "report_unavailable"
+    assert _request(app, "/api/research-feed/runs").json()["items"][0]["available"] is False
+    assert path.read_bytes() == original
+
+
+def test_unqualified_review_roundtrip_preserves_unknown_reason_and_literal_candidate(saved_report):
+    _, app, path = saved_report
+    payload = json.loads(path.read_text())
+    pending = {"candidate": {"source_id": "feed:pending", "source": "app_rss",
+                             "title": " 原文 <not markup> ", "abstract": "Original observation."},
+               "reason": " review_missing 原文 "}
+    payload["unqualified_reviews"] = [pending, pending]
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    original = path.read_bytes()
+
+    response = _request(app, f"/api/research-feed/runs/{path.parent.name}")
+
+    assert response.status_code == 200 and response.json() == payload
+    assert response.json()["unqualified_reviews"] == [pending, pending]
+    assert path.read_bytes() == original
 
 
 @pytest.mark.parametrize(("location", "bad_value"), [

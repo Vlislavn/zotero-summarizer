@@ -95,20 +95,20 @@ def _supplied_review_input(lab, record_property):
         "read_parts": [], "skip_parts": [], "estimated_read_minutes": 0,
         "original_value": "", "writing_friction": "low", "writing_reasons": [],
     }
-    digest = quality_review._coerce_digest(json.dumps(raw))
-    _review_identity.assert_review_source_unchanged(identity)
-    entry = {"digest": digest.model_dump(mode="json"), "needs_pdf": False,
-             "review_contract_version": _review_cache.REVIEW_CONTRACT_VERSION,
-             "review_identity": identity}
+    from tests.test_research_feed import _review
+
+    entry = _review(lab.stable, source_path=pdf, source_text=text, config=state().app_state.config,
+                    digest=raw, quality=None, goal_summaries=[], code_link=None)
+    assert entry['verification_audit']['status'] == 'accepted_verifier_evidence'
     _review_cache._write_one(lab.stable, entry)
     current = _review_cache.get_current_review(lab.stable)
     assert current is not None and current["review_identity"] == identity
-    assert current["digest"]["tldr"] == digest.tldr
+    assert current["digest"]["tldr"] == raw['tldr']
     ready = review_eligibility.review_ready(original_row)
     assert ready
     assert _row(lab) == original_row, "Review input must not associate or label the row"
     receipt = {
-        "origin": "parent_supplied_synthetic_not_model_generated", "item_key": lab.stable,
+        "origin": "owned_actual_pdf_with_scripted_generation_and_verifier", "item_key": lab.stable,
         "source_url": helpers.FEED_URL, "pdf_path": str(pdf), "page_count": 1,
         "source_sha256": identity["source_sha256"], "review_identity": identity,
         "generation_sha256_meaning": "cache compatibility fingerprint; not generation attestation",
@@ -116,7 +116,7 @@ def _supplied_review_input(lab, record_property):
         "typed_input": entry["digest"], "current_contract_version": entry["review_contract_version"],
         "getter_observation": {"read_decision": current["digest"]["read_decision"],
                                "reading_policy_flags": current.get("reading_policy_flags", [])},
-        "review_ready_observation": ready, "verifier": "unavailable_not_run",
+        "review_ready_observation": ready, "verifier": "scripted_literal_source_verifier_not_live_semantics",
         "semantic_acceptance": False, "human_acceptance": False,
         "quality_fields": "schema defaults only; not measurements or expert ratings",
     }
@@ -326,14 +326,17 @@ def test_changed_source_after_extraction_rejects_before_cache_publication(
     pdf = pdf.resolve()
     assert pdf.is_relative_to(lab.settings.pdf_cache_dir.resolve())
     assert pdf.is_relative_to(lab.artifact.resolve())
-    assert _review_cache.export_review_audit(lab.stable) is None
-    real_coerce, real_write = quality_review._coerce_digest, _review_cache._write_one
-    observed = {"origin": "controlled_owned_source_replacement_not_product_failure",
-                "pdf_path": str(pdf), "coerce_calls": 0, "cache_writes": []}
+    from zotero_summarizer.services.library import deep_review
 
-    def replace_after_real_validation(raw):
-        typed = real_coerce(raw)
-        observed["coerce_calls"] += 1
+    assert _review_cache._read_all().get(lab.stable) is None
+    real_digest = deep_review._map_reduce.digest_for_strategy
+    real_write = _review_cache._write_one
+    observed = {"origin": "controlled_owned_source_replacement_not_product_failure",
+                "pdf_path": str(pdf), "generation_calls": 0, "cache_writes": []}
+
+    def replace_after_real_validation(*args, **kwargs):
+        typed = real_digest(*args, **kwargs)
+        observed["generation_calls"] += 1
         with fitz.open() as replacement:
             replacement.new_page().insert_text((50, 60), "Source-change regression B: replacement only.")
             pdf.write_bytes(replacement.tobytes())
@@ -343,17 +346,17 @@ def test_changed_source_after_extraction_rejects_before_cache_publication(
         observed["cache_writes"].append({"key": key, "entry": entry})
         return real_write(key, entry)
 
-    monkeypatch.setattr(quality_review, "_coerce_digest", replace_after_real_validation)
+    monkeypatch.setattr(deep_review._map_reduce, "digest_for_strategy", replace_after_real_validation)
     monkeypatch.setattr(_review_cache, "_write_one", record_real_publication)
     try:
         with pytest.raises(ValueError) as rejected:
             _supplied_review_input(lab, record_property)
         observed.update(exception_type=type(rejected.value).__name__, exception_message=str(rejected.value))
         assert type(rejected.value) is ValueError
-        assert str(rejected.value) == "PDF source changed during deep review"
-        assert observed["coerce_calls"] == 1 and observed["cache_writes"] == []
+        assert str(rejected.value) == "Review source changed during verification"
+        assert observed["generation_calls"] == 1 and observed["cache_writes"] == []
     finally:
-        observed["cache_after"] = _review_cache.export_review_audit(lab.stable)
+        observed["cache_after"] = _review_cache._read_all().get(lab.stable)
         helpers.write_json(lab.artifact / "source-change-regression.json", observed)
         record_property("source_change_observation", json.dumps(observed, sort_keys=True))
         print("SOURCE_CHANGE_REGRESSION_ARTIFACT", lab.artifact)

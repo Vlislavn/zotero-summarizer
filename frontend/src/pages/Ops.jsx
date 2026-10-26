@@ -7,7 +7,7 @@ import AdminSection from '../components/AdminSection.jsx';
 import ModelCard from '../components/ModelCard.jsx';
 
 function SystemOps() {
-  return <div className="space-y-4"><ModelCard /><AdminSection /></div>;
+  return <div className="space-y-4"><h2>System</h2><ModelCard /><AdminSection /></div>;
 }
 
 // Operator-only workflows share one tabbed surface; legacy deep links still work.

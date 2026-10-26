@@ -56,6 +56,9 @@ export const LEGEND = [
 
 // Plain-English labels for rubric keys (mirrors _paper_read_brief._RUBRIC_LABEL).
 const RUBRIC_LABEL = {
+  thesis: 'States a clear thesis / position',
+  evidence_cited: 'Supports premises with cited evidence',
+  scope_match: 'Matches claim scope to the evidence offered',
   external_validation: 'Validated on independent / held-out data',
   uncertainty: 'Reports uncertainty (CIs, error bars, seeds)',
   ablation: 'Ablations isolate what drives the result',

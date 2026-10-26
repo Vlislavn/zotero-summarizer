@@ -377,7 +377,8 @@ export default function AnnotationVerdict() {
   // guard so a fumbled key can't silently replace a deliberate verdict.
   const handlePriorityKey = useCallback(
     (priority) => {
-      const existing = detailQuery.data?.verdict ?? null;
+      if (!selectedKey || !detailQuery.isSuccess || detailQuery.data?.item_key !== selectedKey) return;
+      const existing = detailQuery.data.verdict ?? null;
       if (
         existing
         && existing.user_priority
@@ -390,7 +391,7 @@ export default function AnnotationVerdict() {
       }
       handleVerdictSubmit({ user_priority: priority, comment: existing?.comment ?? '' });
     },
-    [detailQuery.data, handleVerdictSubmit],
+    [selectedKey, detailQuery.isSuccess, detailQuery.data, handleVerdictSubmit],
   );
 
   useKeyboardNav({

@@ -16,7 +16,8 @@ not full#42 empirical acceptance. See [feature overview](../../docs/features.md#
 ## Code-owned API
 
 - `collections.Config`, `Inputs`, `Truth`, `Paper`, `Tree`, `Node`, `Example`,
-  `Gold`, `Baseline`, `BaselineArtifact`, `Readout`, `Result`, `PaperTiming`: closed/frozen Pydantic
+  `Gold`, `Baseline`, `BaselineArtifact`, `Readout`, `Result`, `PaperTiming`,
+  `LineageEntry`, `ReferenceUse`, `DeclaredLineage`: closed/frozen Pydantic
   boundaries. Unknown fields refuse; exact schemas via `model_json_schema()`.
 - `collections.identity(paper)` reuses priority's normalized title+abstract identity.
 - `admit(cfg,inputs,truth)` -> `(papers,gold,nodes,paths,questions)`; keyed normalized
@@ -42,16 +43,17 @@ are reused; membership/tree/baseline capabilities and reports remain task-specif
 
 ## Dataset and gold shapes
 
-`Inputs = {papers:[Paper], tree:Tree, recordings:[Recording]=[]}`.
-`Paper = {paper_id,family,canonical_ids:[text]=[],title,abstract,split,stratum,observed_at}`;
+`Inputs = {papers:[Paper], tree:Tree, recordings:[Recording]=[],lineage:DeclaredLineage|null=null}`.
+`Paper = {paper_id,version_id:text|null=null,family,canonical_ids:[text]=[],title,abstract,split,stratum,observed_at}`;
 observed timestamps are timezone-aware; split is development/holdout. Missing title/
 abstract is an explicit unscored input outcome. Tree evidence must fit in full.
 
 `Tree = {nodes:[Node],frozen_at,description_sources:[Paper],examples:[Example],
-selected_keys:[key]|null=null}`. `Node = {key,name,parent:key|null,
+selected_keys:[key]|null=null,selection_provenance:text|null=null}`. `Node = {key,name,parent:key|null,
 role:topical|project|workflow,description}`. `Example = {paper:Paper,node_key,belongs:bool}`.
 Full paths are derived, never guessed. Questions are all eligible stable keys sorted,
-or the explicit identical predeclared shortlist. Description sources/examples must
+or the explicit identical predeclared shortlist. A shortlist requires nonblank frozen
+`selection_provenance`; full-tree selection refuses that field. Description sources/examples must
 be development-only and predate their own tree freeze and split; declared lineage
 is not signed proof of how free text was authored.
 
@@ -66,6 +68,69 @@ tuning. Only eligible existing keys; no duplicate/unknown/workflow gold.
 Question identity is `digest([paper_identity,node_key])`. Baseline row identity is
 `digest([paper_identity,null])`. A recording can bind only an actual recorded arm's
 admitted independent question; raw bytes must match again during inspection.
+
+## Optional declared version/derivation exclusion
+
+Without `Inputs.lineage`, reports retain `lineage_qualification:unknown`; existing
+family/canonical/text/time refusal does not claim exhaustive purge. Opting in adds
+unsigned consistency evidence, never authenticated ancestry or scientific truth.
+Unknown declarations cannot authorize a claim of authoritative purge completeness.
+
+`DeclaredLineage = {entries:[LineageEntry],inventory_ids:[entry_id],uses:[ReferenceUse]}`.
+`LineageEntry = {entry_id,paper:Paper|null,source_ids:[entry_id],derivation:text,
+observed_at,payload:JSON,payload_sha256,channel:reference_channel|null=null}`.
+The exact original payload is retained and must hash to `payload_sha256`.
+Entries listed in `inventory_ids` require an explicit reference channel; only those
+entries carry that archival channel. A leaf owns exactly one full Paper and no sources;
+a derived entry has no Paper and nonempty exact sources. Source payload digests
+are `support.digest(paper.model_dump(mode='json'))`; source observation equals its
+Paper observation. Every candidate/source requires a nonnull version id. Version
+ids are distinct from normalized title/abstract identities: exact copies may have
+different paper ids but must retain the same version content (all other fields).
+Cross-content/version collisions, duplicate ids/edges, unknown sources, cycles,
+late development sources, cross-split families and derivations predating sources
+refuse. Every entry must be reachable from a candidate, original inventory or
+actual-use binding. Closure and outcome/native reservations share `max_work_units`;
+input, requests and audit share `max_snapshot_bytes`. No hidden graph budget.
+
+All declared holdout families/canonical aliases/normalized texts exclude source
+versions, exact copies, mixed-source entries and transitive descendants. The frozen
+original graph is not edited. `lineage-audit.json` separately retains original
+removed records (including channel, derivation and exact payload) plus exact heldout
+source ids, the clean `active_reference_ids`
+subset of the original inventory, and actual-use bindings. `prepare` computes it
+before owner creation; `reopen` recomputes and compares its exact bytes to refuse
+restored active references, missing removal evidence or forged audit records.
+
+`ReferenceUse = {channel:description|example|calibration|shortlist|baseline,
+owner:text,entry_id,binding_sha256}`. Each active use must have clean ancestry,
+`binding_sha256 == entry.payload_sha256 == digest(actual_value)`, and an entry
+observation no later than its owner freeze. Ancestor Papers must strictly predate
+the owner and split freeze, pass the existing reference firewall and match exact
+version content wherever repeated. Binding owners/values are:
+
+| Channel | Owner / actual value |
+|---|---|
+| description | stable node key / complete Node; each nonempty description required |
+| example | decimal example index / complete Example |
+| calibration | `calibration` / complete configured Calibration |
+| shortlist | `tree` / `{selected_keys,selection_provenance}` |
+| baseline | arm id / complete admitted BaselineArtifact with nonempty references |
+
+Description ancestry must use exactly the union of declared description sources;
+example, calibration and baseline ancestry must equal their declared Paper inventory
+(calibration uses the actual input development papers in its declared families).
+Shortlist ancestry must be explicitly development-only; it is not inferred from
+gold or folder names and is shared across arms. Missing or contaminated bindings
+refuse the dependent content: this tool does not regenerate descriptions,
+embeddings, calibration or selectors by merely deleting a reference. Empty-corpus
+baselines still need no invented source. Generator input contains only its existing
+candidate/path/description/development-example projection, not DAG/audit metadata.
+
+An unsigned graph can omit or falsely declare history. Hash/replay consistency does
+not authenticate a checkpoint, authoring process or the completeness of that graph.
+External authenticated ancestry and actual clean-artifact production remain separate
+requirements. Schema/code drift invalidates prior attempt replay as before.
 
 ## Existing similarity capability
 

@@ -26,6 +26,7 @@ describe('orthogonal reviewed signals', () => {
       digest.writing_reasons[0], '§2, Fig. 1', 'Appendix A', digest.original_value]) {
       expect(html).toContain(text);
     }
+    expect(html.split(digest.writing_reasons[0])).toHaveLength(2);
     expect(html).toContain('Argument quality (Wachsmuth)');
     expect(html).toContain('2/4 applicable items met');
     expect(html).not.toContain('Quality A');
@@ -39,7 +40,12 @@ describe('orthogonal reviewed signals', () => {
   it.each(['flag', 'uncertain', 'highlight', 'neutral'])('uses only supplied applicable checks for %s', band => {
     const summary = decisiveRows(quality.rubric, band);
     expect(summary.caption).toBe('1/3 applicable checks met');
-    expect(summary.rows.every(row => ['thesis', 'evidence cited', 'scope match'].includes(row.label))).toBe(true);
+    const thesis = { ok: true, label: 'States a clear thesis / position' };
+    const evidence = { ok: false, label: 'Supports premises with cited evidence' };
+    const scope = { ok: false, label: 'Matches claim scope to the evidence offered' };
+    const expected = { flag: [evidence, scope], neutral: [evidence, scope],
+      highlight: [thesis], uncertain: [thesis, evidence, scope] };
+    expect(summary.rows).toEqual(expected[band]);
     expect(summary.rows.some(row => row.label === 'counterarguments')).toBe(false);
     expect(decisiveRows({}, band).rows).toEqual([]);
   });
@@ -75,6 +81,27 @@ describe('orthogonal reviewed signals', () => {
     expect(html).not.toContain('Quality A');
     expect(html).toContain('Evidence: Uncertain');
     expect(deep.model_digest.grade).toBe('A');
+  });
+
+  it.each([{ compact: true }, {}, { flat: true }].flatMap(props =>
+    [null, '2026-10-14T00:00:00Z'].map(reviewedAt => ({ props, reviewedAt })),
+  ))('does not treat a retained review flag as a native write receipt %j', ({ props, reviewedAt }) => {
+    const deep = { digest, quality, reviewed_at: reviewedAt, zotero_note_written: true };
+    const before = JSON.stringify(deep);
+    const html = renderToStaticMarkup(<PaperReview deep={deep} {...props} />);
+    expect(html).not.toContain('saved to Zotero');
+    expect(html.includes('>reviewed ')).toBe(Boolean(reviewedAt));
+    expect(html).toContain('SKIM');
+    expect(JSON.stringify(deep)).toBe(before);
+  });
+
+  it('retains a recorded note error without inventing a successful native write', () => {
+    const deep = { digest, quality, zotero_note_written: true, zotero_note_error: 'Historical note error.' };
+    const before = JSON.stringify(deep);
+    const html = renderToStaticMarkup(<PaperReview deep={deep} flat />);
+    expect(html).toContain('note not written: Historical note error.');
+    expect(html).not.toContain('saved to Zotero');
+    expect(JSON.stringify(deep)).toBe(before);
   });
 
   it('does not reclassify the server-owned decision locally', () => {

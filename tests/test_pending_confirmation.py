@@ -16,8 +16,7 @@ from fastapi.testclient import TestClient
 
 from tests._zotero_fixtures import add_library_item
 from tests.test_generated_write_review import boundary as generated_boundary
-from tests.test_interpretation_binding import config
-from tests.test_interpretation_review_one import paper_io
+from tests._generated_write_fixtures import config, paper_io, published_review
 from tests.test_review_cache import _isolate_cache
 from tests.test_pending_approval_snapshot import KEY, _native_tags, _present, boundary
 from tests.test_pending_retry import counts, presented

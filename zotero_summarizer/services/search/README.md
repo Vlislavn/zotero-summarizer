@@ -4,7 +4,8 @@ Discovery reuses identifier union-find for seed families across native and
 unmaterialized app rows, including alternating app-alias and DOI/arXiv links until closure. Only that family's complete comments own
 freshness; unrelated notes do not. Candidate identity selects declared public
 metadata, not later operation/question-evidence fields. Ordinary HTTP sessions
-retain empty Discovery objects, distinguished from real Discovery state in the UI.
+omit an empty Discovery key; private storage retains `{}`. Real Discovery state
+remains distinct from ordinary results in the UI.
 
 The library/triage domains are *push*: papers arrive from feeds and you cull them.
 This domain is *pull*: you give a research topic, and it federates the open
@@ -13,6 +14,8 @@ a query-scoped research session, not a standing feed.
 
 Intent parsing and agentic refinement wrap user queries, questions and retrieved
 metadata with the shared escaped untrusted-input boundary before any LLM call.
+`pipeline.default_deps` resolves deep-review/feed clients through
+`services.llm.factory` using the existing `RuntimeState` cache and consent fences.
 
 ```
 topic + questions
@@ -53,7 +56,12 @@ Its `related` field holds full private context identity, snapshot, prior attempt
 and terminal result; `related_*` statuses never qualify for Search's screened
 review claim. The shared session directory is owner-only (0700), including existing
 directories; temporary files become 0600 before private bytes are written, and
-atomic replacement retains that mode. Existing files are protected by the directory. Related sessions are omitted from the Search sidebar. No federation,
+atomic replacement retains that mode. Existing files are protected by the directory.
+Related sessions are omitted from the Search sidebar. Default/wire serialization,
+including generic Search GET, exposes an empty `related` object, not private
+snapshots, results or prior attempts; only explicit storage retains that field.
+This neither rewrites history nor probes freshness or starts context/model work.
+The consent-bound Related action still owns its current result. No federation,
 Search review or materialization is started by that flow. See
 [related saved papers](../../../docs/features.md#related-saved-papers) for consent,
 work ceilings, invalidation and unqualified semantic judgments.
@@ -373,11 +381,21 @@ existing two-lexical-pass cap remains. No additional provider framework.
 Accounting snapshots observations before mutable family merging. Every scheduled
 variant records its query, allocation, observations and state, including zero hits.
 Ordinary calls keep best-effort empty states `unknown`. Opt-in
-`observe_outcomes=True` retains distinct per-request OpenAlex channel/outcome receipts;
-see [discovery boundary](../../../docs/features.md#saved-paper-discovery).
+`observe_outcomes=True` retains explicit per-request outcomes from arXiv, Crossref,
+Europe PMC, Semantic Scholar and the two OpenAlex modes. Each scheduled request
+owns its own dictionary; concurrent/nested work has no ambient capture scope.
+A silent adapter stays unknown even if candidates were returned; ordinary false
+mode still passes no receipt keywords. OpenReview/library remain uninstrumented,
+and saved-paper Discovery still plans only its declared OpenAlex modes.
+See [discovery boundary](../../../docs/features.md#saved-paper-discovery).
 Source family counts are
 cross-source attributed (not globally additive); type-unknown and other rejection
 counts survive persistence. Refinement stores its round's accounting separately.
+
+Ordinary public Search sessions omit the empty Discovery marker in both default
+and display projections. Populated Discovery projections keep their existing
+qualification; storage retains its current empty/nonempty dictionaries, with no
+migration or rewritten old file.
 
 Simplification check: reuse provider search leaves, identifier dedup, session
 serialization and existing plan display; no competing retrieval/ranking loop.

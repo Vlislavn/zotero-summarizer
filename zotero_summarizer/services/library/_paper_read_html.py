@@ -27,9 +27,11 @@ def write_outputs(
     goal_summaries: list[dict[str, Any]] | None = None,
     code_link: dict[str, Any] | None = None,
     interpretation: dict[str, Any] | None = None,
+    model_read_decision: str | None = None,
 ) -> dict[str, Any]:
     """Publish staged outputs only after all blocking checks pass."""
-    html_text = _render_presentation(content, digest, quality, goal_summaries, code_link, interpretation)
+    html_text = _render_presentation(content, digest, quality, goal_summaries, code_link, interpretation,
+                                     model_read_decision=model_read_decision)
     audit = _audit_presentation(html_text, content, staging / "figures")
     if not _audit_passed(audit):
         raise APIError(error="paper_audit_failed", message="Paper audit failed; rebuild after fixing extraction",
@@ -59,6 +61,8 @@ def _render_presentation(
     goal_summaries: list[dict[str, Any]] | None = None,
     code_link: dict[str, Any] | None = None,
     interpretation: dict[str, Any] | None = None,
+    *,
+    model_read_decision: str | None = None,
 ) -> str:
     from zotero_summarizer.services.library import _paper_read_brief as brief
     from zotero_summarizer.services.library.review_fleet.propose import apply_reading_policy
@@ -67,14 +71,18 @@ def _render_presentation(
     if interpretation is not None:
         from zotero_summarizer.services.library._interpretation_html import section
         interpretation_block = section(interpretation, digest, content=content)
+    saved_read_estimate = False
     if digest:
-        digest, _, _ = apply_reading_policy(digest, quality, goal_summaries)
+        digest, raw, _ = apply_reading_policy(digest, quality, goal_summaries)
+        original = raw if model_read_decision is None else model_read_decision
+        saved_read_estimate = original in {"read", "skim", "skip"} and original != str(digest.get("read_decision") or "")
     title = str(content.get("title") or "Untitled")
     authors = str(content.get("authors") or "")
     figures = [fig for fig in (content.get("figures") or []) if fig.get("name")]
     image_map = {f"ph-fig{i}": f"figures/{fig['name']}" for i, fig in enumerate(figures, 1)}
     code_link_block = brief.code_link_html(code_link)
-    brief_block = brief.brief_html(content, digest=digest, quality=quality, goal_summaries=goal_summaries)
+    brief_block = brief.brief_html(content, digest=digest, quality=quality, goal_summaries=goal_summaries,
+                                   saved_read_estimate=saved_read_estimate)
     quality_block = brief.quality_panel_html(quality)
     empty_state = (
         '<section class="fade-in"><div class="empty-state">No figures or review are available yet. '
@@ -122,6 +130,32 @@ def _render_presentation(
 """
 
 
+def _reading_plan_html(digest: dict[str, Any] | None) -> str:
+    if not digest:
+        return ""
+    decision = str(digest.get("read_decision") or "").lower()
+    if decision not in {"read", "skim", "skip"}:
+        return ""
+    opens_original = decision != "skip"
+    targets = [part for part in (digest.get("read_parts") or []) if part.strip()]
+    skips = [part for part in (digest.get("skip_parts") or []) if part.strip()]
+    if not opens_original and not skips:
+        return ""
+    rows = []
+    if opens_original:
+        body = ('<ol aria-label="Read parts" class="dbullets">' +
+                ''.join(f'<li>{_h(part)}</li>' for part in targets) + '</ol>' if targets else
+                'Exact reading targets not recorded in this saved review.')
+        rows.append(f'<div class="drow"><dt class="dlbl">Read parts</dt><dd>{body}</dd></div>')
+    if skips:
+        body = '<ul class="dbullets">' + ''.join(f'<li>{_h(part)}</li>' for part in skips) + '</ul>'
+        rows.append(f'<div class="drow"><dt class="dlbl">Skip parts</dt><dd>{body}</dd></div>')
+    if opens_original:
+        value = digest.get("original_value") or "Additional value not recorded in this saved review."
+        rows.append(f'<div class="drow"><dt class="dlbl">What the original adds</dt><dd>{_h(value)}</dd></div>')
+    return '<div role="region" aria-label="Reading plan" class="reading-plan"><dl>' + ''.join(rows) + '</dl></div>'
+
+
 def _digest_section_html(digest: dict[str, Any]) -> str:
     def _row(label: str, key: str) -> str:
         val = str(digest.get(key) or "")
@@ -149,7 +183,7 @@ def _digest_section_html(digest: dict[str, Any]) -> str:
     ]))
     strength = str(digest.get("key_strength") or "")
     weakness = str(digest.get("key_weakness") or "")
-    assess = [_row("Why read", "read_why"), _row("Controversies", "controversies")]
+    assess = [_row("Controversies", "controversies")]
     assess += [_row("Writing friction", "writing_friction"), _bullets("Writing reasons", "writing_reasons")]
     if strength:
         assess.append(f'<div class="drow"><span class="dlbl">Strength</span><span class="dpos">{_h(strength)}</span></div>')
@@ -165,8 +199,7 @@ def _digest_section_html(digest: dict[str, Any]) -> str:
     ]))
     impact_body = "".join(filter(None, [
         _row("Industry", "industry_impact"), _row("Academia", "academy_impact"),
-        _row("Unknown unknowns", "unknown_unknowns"), _row("Original adds", "original_value"),
-        _bullets("Read parts", "read_parts"), _bullets("Skip parts", "skip_parts"),
+        _row("Unknown unknowns", "unknown_unknowns"),
         _bullets("Implementation", "implementation"),
     ]))
     blocks = "".join(filter(None, [
@@ -287,6 +320,8 @@ body.dark{--bg:#0e140f;--card:#16201a;--text:#eef3ee;--muted:#9baf9f;--accent:#7
 .fold-tag{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.06em;color:var(--hema);background:var(--accent-soft);border-radius:5px;padding:2px 7px;flex-shrink:0}
 .digest-card{background:var(--card);border:1px solid var(--border);border-top:none;border-radius:0 0 12px 12px;padding:18px 20px;display:flex;flex-direction:column;gap:14px}
 .drow{display:grid;grid-template-columns:128px 1fr;gap:6px 16px;align-items:start;line-height:1.55}
+.reading-plan{margin-top:14px;overflow-wrap:anywhere}.reading-plan dl{margin:0;display:grid;gap:10px}
+.reading-plan dd{margin:0;min-width:0;font-size:15px}
 .dlbl{font-family:var(--font-mono);font-size:11px;letter-spacing:.02em;text-transform:uppercase;color:var(--muted);padding-top:1px}
 .drow span:not(.dlbl){font-size:15px}.dbullets{margin:0;padding-left:18px;font-size:15px;line-height:1.55}
 .dpos{color:var(--readout);font-size:15px}.dneg{color:var(--alert);font-size:15px}

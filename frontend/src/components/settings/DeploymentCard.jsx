@@ -12,6 +12,40 @@ const STATUS = {
   needs_action: ['!', 'Needs action', 'text-amber-800'],
   unavailable: ['—', 'Unavailable', 'text-slate-500'],
 };
+const RECOVERY_DESTINATIONS = {
+  open_ai_settings: '/settings#ai-models',
+  open_sources_settings: '/settings#rss-feeds',
+};
+
+function DoctorCheck({ check, running, onRetry }) {
+  const meta = STATUS[check.status] || STATUS.not_started;
+  const destination = RECOVERY_DESTINATIONS[check.recovery?.action];
+  return <li className="py-2 flex items-start gap-2">
+    <span className={`${meta[2]} font-medium w-4`} aria-hidden>{meta[0]}</span>
+    <div className="min-w-0 flex-1">
+      <p className="text-xs text-slate-500">
+        <span className={meta[2]}>{meta[1]}</span>{' · '}{check.id.replaceAll('_', ' ')}
+      </p>
+      <p className="text-sm text-slate-800">{check.message}</p>
+      {check.load_receipts?.some((receipt) => receipt.admission?.status === 'unknown') &&
+        <p className="text-sm text-amber-800">Local load safety is not established.</p>}
+      {check.detail && <details className="text-xs text-slate-500 mt-1">
+        <summary className="cursor-pointer">Technical details</summary>
+        <p className="break-words mt-1">{check.detail}</p>
+      </details>}
+      {check.status === 'needs_action' && <div className="mt-1 flex flex-wrap gap-2 items-center">
+        {destination && <a href={destination} className="text-teal-700 underline text-sm">
+          {check.recovery?.label || 'Review settings'}
+        </a>}
+        {(!destination || check.recovery?.action === 'open_ai_settings') &&
+          <Button type="button" variant="secondary" disabled={running} onClick={onRetry}>
+            {destination ? 'Retry' : check.recovery?.label || 'Retry'}
+          </Button>}
+        {check.recovery?.command && <code className="text-xs select-all break-words">{check.recovery.command}</code>}
+      </div>}
+    </div>
+  </li>;
+}
 
 export function DoctorChecklist() {
   const queryClient = useQueryClient();
@@ -27,11 +61,19 @@ export function DoctorChecklist() {
   const data = query.data;
   const running = mutation.isPending || data?.status === 'running';
   const checks = data?.checks || [];
-  const visible = checks.filter((check) => ['needs_action', 'running'].includes(check.status));
+  const pending = checks.filter((check) => check.status === 'not_started');
+  const visible = checks.filter((check) => ['needs_action', 'running'].includes(check.status) ||
+    (check.status === 'not_started' && pending.length === 1));
   const passed = checks.filter((check) => check.status === 'ready');
+  const unavailable = checks.filter((check) => check.status === 'unavailable');
+  const otherChecks = checks.filter((check) => ['ready', 'unavailable'].includes(check.status));
+  const otherLabel = [passed.length && `${passed.length} ${passed.length === 1 ? 'check' : 'checks'} passed`,
+    unavailable.length && `${unavailable.length} unavailable`].filter(Boolean).join(' · ');
   const showModes = Boolean(
     data?.modes?.local_inference && data.modes.local_inference !== 'unavailable',
   );
+  const row = (check) => <DoctorCheck key={check.id} check={check} running={running}
+    onRetry={() => mutation.mutate([check.id])} />;
 
   return (
     <div className="space-y-3">
@@ -57,46 +99,25 @@ export function DoctorChecklist() {
       {!running && !query.isFetching && data?.ready && <p className="text-sm font-medium text-emerald-700">
         ✓ Setup verified
       </p>}
-      {!mutation.isPending && !data?.ready && visible.length === 0 && (
+      {!mutation.isPending && !data?.ready && checks.length === 0 && (
         <p className="text-sm text-slate-500">Verification has not run yet.</p>
       )}
 
-      {visible.length > 0 && <ul className="divide-y divide-slate-100" aria-live="polite">
-        {visible.map((check) => {
-          const meta = STATUS[check.status] || STATUS.not_started;
-          return <li key={check.id} className="py-2 flex items-start gap-2">
-            <span className={`${meta[2]} font-medium w-4`} aria-hidden>{meta[0]}</span>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm text-slate-800">
-                <span className="sr-only">{meta[1]}: </span>{check.message}
-              </p>
-              {check.detail && <details className="text-xs text-slate-500 mt-1">
-                <summary className="cursor-pointer">Technical details</summary>
-                <p className="break-words mt-1">{check.detail}</p>
-              </details>}
-              {check.status === 'needs_action' && <div className="mt-1 flex flex-wrap gap-2 items-center">
-                {check.recovery?.action === 'open_ai_settings' && <a href="/settings" className="text-teal-700 underline text-sm">
-                  Review AI settings (Hosted or No LLM)
-                </a>}
-                <Button type="button" variant="secondary" disabled={running}
-                  onClick={() => mutation.mutate([check.id])}>
-                  {check.recovery?.action === 'open_ai_settings' ? 'Retry' : check.recovery?.label || 'Retry'}
-                </Button>
-                {check.recovery?.command && <code className="text-xs select-all">{check.recovery.command}</code>}
-              </div>}
-            </div>
-          </li>;
-        })}
+      {checks.length > 0 && <ul className="divide-y divide-slate-100" aria-label="Setup checks" aria-live="polite">
+        {visible.map(row)}
+        {pending.length > 1 && <li className="py-2">
+          <details className="text-xs text-slate-500">
+            <summary className="cursor-pointer">{pending.length} checks not started</summary>
+            <ul className="mt-1 divide-y divide-slate-100">{pending.map(row)}</ul>
+          </details>
+        </li>}
+        {otherChecks.length > 0 && <li className="py-2">
+          <details className="text-xs text-slate-500">
+            <summary className="cursor-pointer">{otherLabel}</summary>
+            <ul className="mt-1 divide-y divide-slate-100">{otherChecks.map(row)}</ul>
+          </details>
+        </li>}
       </ul>}
-
-      {passed.length > 0 && <details className="text-xs text-slate-500">
-        <summary className="cursor-pointer">
-          {passed.length} {passed.length === 1 ? 'check' : 'checks'} passed
-        </summary>
-        <ul className="mt-1 pl-5 list-disc space-y-1">
-          {passed.map((check) => <li key={check.id}>{check.message}</li>)}
-        </ul>
-      </details>}
 
       {(mutation.isError || cancellation.isError) && <Banner kind="error">{humanizeError(mutation.error || cancellation.error)}</Banner>}
       {data?.attempt?.ownership === 'unresolved' && <p role="status" className="text-sm text-amber-800">
@@ -104,7 +125,7 @@ export function DoctorChecklist() {
       </p>}
       <div className="flex flex-wrap gap-3 items-center">
         <Button type="button" variant="secondary" onClick={() => mutation.mutate(null)} disabled={running}>
-          {mutation.isPending ? 'Verifying…' : 'Verify setup'}
+          {running ? 'Verifying…' : 'Verify setup'}
         </Button>
         {running && data?.run_id && <Button type="button" variant="secondary" disabled={cancellation.isPending}
           onClick={() => cancellation.mutate(data.run_id)}>Stop verification</Button>}

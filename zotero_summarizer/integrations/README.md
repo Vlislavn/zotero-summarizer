@@ -4,6 +4,17 @@ Opt-in OpenAlex search receipts reject nonfinite decoded JSON as parse failure
 before publishing hits. Ordinary/no-receipt payload policy remains unchanged;
 malformed variants do not invalidate independently usable neighboring requests.
 
+Verification uses one explicit `llm_requests.py` inventory through native callbacks
+and the owned HTTPX pre-send hook. Exact model/run/terminal observations stay
+separate from callback return, cache/text and client close. Ordinary client options
+are unchanged; verification disables cache/retries/redirects. Pre-send entry is
+conservative ownership evidence, not remote acceptance, process termination or
+hardware safety. Persisted receipt policy remains service-owned; lower adapters
+import no services. Verification normalizes configured base prefixes with the
+native operation path: Anthropic uses `/v1/messages`, not an assumed OpenAI-style
+versioned base. Its unspecified verification base is explicitly the official
+native target, not an ambient SDK override. Ordinary client defaults stay intact.
+
 Thin, low-level clients for everything outside the app: the local Zotero
 SQLite DB, PDFs, the LLM, OpenAlex (prestige), Unpaywall (OA PDFs), and the
 Targeted Search sources (arXiv/EuropePMC/Crossref/Semantic Scholar + the
@@ -29,6 +40,7 @@ writers, typed approval or rollback-on-every-error. Other native ABIs are unchan
 
 | file | responsibility |
 |---|---|
+| `_search_http.py` | Shared request/owned-client lifecycle for arXiv, Crossref, Europe PMC and Semantic Scholar; optional request-local transport/parser receipts, with no ambient capture state or retry. Provider parsing and locked endpoint parameters remain in each adapter. |
 | `zotero_read.py` | `ZoteroReader`: read-only WAL-aware connections, bounded lock retries and user-library collection helpers. Persistent locks raise; no raw snapshot copy or immutable WAL-skipping mode. Statistics scope collections/tags to the user library and exclude trashed items/attachments. `get_collections` scopes its collection and item counts; `collection_name_for_key` validates picker keys. Collection sorting pins Inbox and read-next, then alphabetical, recursively. |
 | `_zotero_read_items.py` · `_zotero_read_lookup.py` · `_zotero_read_feeds.py` | reader query mixins (items/detail — now also selects Zotero `typeName` as `item_type`, a weak paper-type prior for deep-review type detection, and `publicationTitle` as `venue` so the Library can filter by journal · `get_items` (paged, 500/call) + `get_all_items` (whole-library passes) share one SQL builder (`_build_list_query`) + row mapper (`_row_to_item`); `get_all_items` runs that query UN-paged in a SINGLE `_execute_read`, so a whole-library read uses one connection/query rather than repeated 500-item pages · find/membership/tags — DOI dedup matches all `domain.normalize_doi` variants · feeds — incl. `get_unread_feed_guid_map` (guid → unread `feedItems.itemID`; the read-sync reconciler's join key, see `services/triage/feeds/_zotero_readsync.py`)) |
 | `app_rss.py` | `AppRssReader`: app-owned RSS items and rotating bounded refresh; offline returns before network/DB writes. Each feed commits independently; HTTP/DNS/document failures are recorded and the remaining feeds continue. Partial success returns `errors` with feed IDs and URLs; when every feed fails, the last exception propagates. Storage/programming failures still abort immediately with rollback. Counts include committed items only. Text is sanitized before DOI/key derivation and storage. `stream_public_url` is shared with PDF fetching: validated numeric destination + original Host/TLS identity on every hop. |
@@ -171,9 +183,17 @@ OpenAlex search retains declared DOI/arXiv aliases from work `locations` in
 are parsed for identity only, never followed; no title-based identity inference or
 extra lookup request is introduced. Missing locations preserve legacy empty aliases.
 
-OpenAlex search accepts optional request-local `outcome` receipts; ordinary calls
-and all other source leaves stay unchanged. HTTP, transport and malformed payloads are not successful empty
-responses. See [discovery boundary](../../docs/features.md#saved-paper-discovery).
+OpenAlex, arXiv, Crossref, Europe PMC and Semantic Scholar search accept optional
+request-local `outcome` receipts: status, returned count and bounded error code,
+never query, URL, response body or exception text. Observed empty results have
+count zero; failed/unknown requests have no count. Blank input does no HTTP and
+stays unknown. The four non-OpenAlex adapters reuse `_search_http` for request and
+owned-client cleanup; receipt parsing refuses malformed result containers/rows.
+Caller-owned clients remain open. Unexpected runtime failures propagate. Ordinary
+calls retain their list-returning best-effort interface, without a receipt or new
+work. Saved-paper Discovery still admits only its declared OpenAlex variants;
+this does not imply all-provider coverage, relevance or scientific correctness.
+See [discovery boundary](../../docs/features.md#saved-paper-discovery).
 
 Stored-attachment names strip separators and non-printable Unicode characters.
 Known PDF/PNG extensions are normalized and reserved before the 120-character

@@ -16,6 +16,15 @@ function CurrentSearch() {
   return <output data-testid="current-search">{location.search}</output>;
 }
 
+it('provides the System section h2 before its reusable cards', () => {
+  const view = render(<MemoryRouter initialEntries={['/ops?tab=system']}><Ops /></MemoryRouter>);
+  try {
+    expect(screen.getByRole('heading', { name: 'System', level: 2 })).toBeTruthy();
+  } finally {
+    view.unmount();
+  }
+});
+
 it('opens the deep-linked Ops tab and retains unrelated query state when switching tabs', async () => {
   render(
     <MemoryRouter initialEntries={['/ops?tab=triage&job=J42']}>

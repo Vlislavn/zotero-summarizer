@@ -325,8 +325,8 @@ class ResearchSession:
             "status": self.status,
             "screened_count": self.screened_count,
             "refinements": [dict(r) for r in self.refinements],
-            "related": dict(self.related),
-            "discovery": discovery,
+            "related": dict(self.related) if for_storage else {},
+            **({"discovery": discovery} if self.discovery or for_storage else {}),
         }
 
     @classmethod

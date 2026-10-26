@@ -38,7 +38,7 @@ def calibration_trial(tmp_path, monkeypatch):
             observe("prompt")
             return "Inert synthetic response"
 
-        client = SimpleNamespace(prompt=prompt)
+        client = SimpleNamespace(prompt=prompt, close=lambda: None)
         monkeypatch.setattr(factory, "build_llm", lambda *_a, **_k: observe("adapter") or client)
         from zotero_summarizer.integrations import llm_anthropic
         monkeypatch.setattr(llm_anthropic, "AnthropicLLMClient", lambda **_k: observe("adapter") or client)
@@ -138,3 +138,44 @@ def test_http_calibration_job_exposes_admission_refusal_not_ready(calibration_tr
     assert result["status"] == "error"
     assert result["result"] is None and seen == []
     assert not settings.calibration_path.exists()
+
+
+@pytest.mark.parametrize("kind", ["openai", "anthropic"])
+@pytest.mark.parametrize("cached", [False, True])
+def test_disabled_ai_calibration_cannot_construct_or_update_tier_state(calibration_trial, kind, cached):
+    settings, _provider, seen = calibration_trial(kind, "example.test", cached=cached)
+    config = _common.read_config(settings.config_path, settings.calibration_path)
+    config.llm_enabled = False
+    before = settings.calibration_path.read_bytes() if settings.calibration_path.exists() else None
+    progress = []
+    with pytest.raises(APIError) as error:
+        calibration.run_full_calibration(settings, item_keys=["SYNTHETIC1"], progress=progress.append)
+    assert error.value.error == "llm_disabled" and error.value.status_code == 409
+    assert seen == progress == []
+    assert (settings.calibration_path.read_bytes() if settings.calibration_path.exists() else None) == before
+
+
+def test_disabled_ai_calibration_refuses_before_retained_paper_read(calibration_trial, monkeypatch):
+    settings, _provider, seen = calibration_trial("openai", "example.test")
+    _common.read_config(settings.config_path, settings.calibration_path).llm_enabled = False
+    monkeypatch.setattr(calibration, "load_review_papers", lambda *_a, **_k: pytest.fail("Disabled AI read retained paper"))
+    with pytest.raises(APIError) as error:
+        calibration.run_full_calibration(settings, item_keys=["SYNTHETIC1"])
+    assert error.value.error == "llm_disabled" and seen == []
+
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_http_disabled_ai_calibration_job_fails_without_new_tier_stamp(calibration_trial, monkeypatch, cached):
+    from zotero_summarizer.api.routes import setup
+    from zotero_summarizer.services.setup import calibration_job
+
+    settings, _provider, seen = calibration_trial("openai", "example.test", cached=cached)
+    _common.read_config(settings.config_path, settings.calibration_path).llm_enabled = False
+    before = settings.calibration_path.read_bytes() if settings.calibration_path.exists() else None
+    monkeypatch.setattr(setup, "get_settings", lambda: settings)
+    monkeypatch.setattr(calibration_job, "_JOB", {"status": "idle"})
+    monkeypatch.setattr(calibration_job.threading, "Thread", lambda *, target, **_k: SimpleNamespace(start=target))
+    result = asyncio.run(setup.calibrate(setup.CalibrateRequest(papers=1)))
+    assert result["status"] == "error" and result["result"] is None
+    assert seen == []
+    assert (settings.calibration_path.read_bytes() if settings.calibration_path.exists() else None) == before

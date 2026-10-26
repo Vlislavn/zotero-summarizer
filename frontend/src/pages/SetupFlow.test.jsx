@@ -4,9 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-const api = vi.hoisted(() => ({ fetchConfig: vi.fn(), updateConfig: vi.fn(), validateSetup: vi.fn() }));
+const api = vi.hoisted(() => ({ fetchConfig: vi.fn(), updateConfig: vi.fn(), validateSetup: vi.fn(), fetchAiPresets: vi.fn() }));
 vi.mock('../api/settingsApi.js', () => api);
-vi.mock('../api/setupApi.js', () => ({ validateSetup: api.validateSetup }));
+vi.mock('../api/setupApi.js', () => ({ validateSetup: api.validateSetup, fetchAiPresets: api.fetchAiPresets }));
 vi.mock('../hooks/useSetupStatus.js', () => ({ useSetupStatus: () => ({ status: null }) }));
 vi.mock('../components/setup/SetupGate.jsx', () => ({ dismissSetup: vi.fn() }));
 vi.mock('../components/setup/StepConnectZotero.jsx', () => ({ default: () => <p>Zotero step</p> }));
@@ -34,6 +34,7 @@ const config = {
 beforeEach(() => {
   Object.values(api).forEach((mock) => mock.mockReset());
   api.fetchConfig.mockResolvedValue(config);
+  api.fetchAiPresets.mockResolvedValue({ local_profiles: { profiles: [{ id: 'existing', compatible: true }] } });
   api.validateSetup.mockResolvedValue({ valid: true, field_errors: [] });
   api.updateConfig.mockImplementation(async (payload) => ({ config: payload }));
 });

@@ -22,10 +22,11 @@ CREATE TABLE IF NOT EXISTS sync_changes (
     changed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
-SYNC_SCHEMA = SYNC_CHANGES_TABLE + """
-CREATE INDEX IF NOT EXISTS idx_sync_changes_item_field
-    ON sync_changes(item_key, field, revision);
-CREATE TABLE IF NOT EXISTS sync_mutations (
+_SYNC_STATEMENTS = (
+    SYNC_CHANGES_TABLE,
+    """CREATE INDEX IF NOT EXISTS idx_sync_changes_item_field
+    ON sync_changes(item_key, field, revision);""",
+    """CREATE TABLE IF NOT EXISTS sync_mutations (
     mutation_id TEXT PRIMARY KEY,
     device_id   TEXT NOT NULL,
     item_key    TEXT NOT NULL,
@@ -37,41 +38,43 @@ CREATE TABLE IF NOT EXISTS sync_mutations (
     result_json  TEXT NOT NULL,
     created_at   TEXT NOT NULL,
     processed_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_sync_mutations_resolution
-    ON sync_mutations(resolves_mutation_id);
-CREATE TRIGGER IF NOT EXISTS sync_label_insert AFTER INSERT ON label_verdicts BEGIN
+);""",
+    """CREATE INDEX IF NOT EXISTS idx_sync_mutations_resolution
+    ON sync_mutations(resolves_mutation_id);""",
+    """CREATE TRIGGER IF NOT EXISTS sync_label_insert AFTER INSERT ON label_verdicts BEGIN
   INSERT INTO sync_changes(item_key, field, value, comment, source)
   VALUES (NEW.item_key, 'verdict', NEW.user_priority, NEW.comment, NEW.source);
-END;
-CREATE TRIGGER IF NOT EXISTS sync_label_update AFTER UPDATE ON label_verdicts
+END;""",
+    """CREATE TRIGGER IF NOT EXISTS sync_label_update AFTER UPDATE ON label_verdicts
 WHEN OLD.user_priority IS NOT NEW.user_priority
   OR OLD.comment IS NOT NEW.comment OR OLD.source IS NOT NEW.source BEGIN
   INSERT INTO sync_changes(item_key, field, value, comment, source)
   VALUES (NEW.item_key, 'verdict', NEW.user_priority, NEW.comment, NEW.source);
-END;
-CREATE TRIGGER IF NOT EXISTS sync_label_delete AFTER DELETE ON label_verdicts BEGIN
+END;""",
+    """CREATE TRIGGER IF NOT EXISTS sync_label_delete AFTER DELETE ON label_verdicts BEGIN
   INSERT INTO sync_changes(item_key, field, value, comment, source)
   VALUES (OLD.item_key, 'verdict', NULL, NULL, OLD.source);
-END;
-CREATE TRIGGER IF NOT EXISTS sync_note_insert AFTER INSERT ON review_notes BEGIN
+END;""",
+    """CREATE TRIGGER IF NOT EXISTS sync_note_insert AFTER INSERT ON review_notes BEGIN
   INSERT INTO sync_changes(item_key, field, value)
   VALUES (NEW.item_key, 'review_note', NEW.note);
-END;
-CREATE TRIGGER IF NOT EXISTS sync_note_update AFTER UPDATE ON review_notes
+END;""",
+    """CREATE TRIGGER IF NOT EXISTS sync_note_update AFTER UPDATE ON review_notes
 WHEN OLD.note IS NOT NEW.note BEGIN
   INSERT INTO sync_changes(item_key, field, value)
   VALUES (NEW.item_key, 'review_note', NEW.note);
-END;
-CREATE TRIGGER IF NOT EXISTS sync_note_delete AFTER DELETE ON review_notes BEGIN
+END;""",
+    """CREATE TRIGGER IF NOT EXISTS sync_note_delete AFTER DELETE ON review_notes BEGIN
   INSERT INTO sync_changes(item_key, field, value)
   VALUES (OLD.item_key, 'review_note', NULL);
-END;
-"""
+END;""",
+)
 
 
 def apply_sync_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(SYNC_SCHEMA)
+    # executescript would implicitly commit the caller's migration transaction.
+    for statement in _SYNC_STATEMENTS:
+        conn.execute(statement)
 
 
 def _canonical(conn: sqlite3.Connection, item_key: str, field: str) -> dict[str, Any]:

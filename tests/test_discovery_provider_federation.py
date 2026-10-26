@@ -89,25 +89,27 @@ def test_real_leaves_concurrent_variants_keep_independent_receipts(monkeypatch):
         openalex_semantic="semantic-transport",
     )
     with httpx.Client(transport=httpx.MockTransport(handler), trust_env=False) as http:
-        monkeypatch.setattr(fed, "search_arxiv", partial(arxiv.search_arxiv, http_client=http))
-        monkeypatch.setattr(fed, "search_europepmc", partial(europepmc.search_europepmc, http_client=http))
+        monkeypatch.setattr(fed, "search_arxiv", track(partial(arxiv.search_arxiv, http_client=http)))
+        monkeypatch.setattr(fed, "search_europepmc", track(partial(europepmc.search_europepmc, http_client=http)))
         client = openalex.OpenAlexClient(object(), http_client=http)
         monkeypatch.setattr(client, "search_works", track(client.search_works))
         candidates = fed.federate(plan, openalex_client=client, quota=5, observe_outcomes=True)
 
     assert len(received) == 7
-    assert len(receipts) == len({id(receipt) for receipt in receipts}) == 3
+    assert len(receipts) == len({id(receipt) for receipt in receipts}) == 7
     rows = {row["query"]: row for row in variants(plan)}
     expected = {
+        "arxiv-empty": ("arxiv", "success_empty", 0, None),
+        "arxiv-rate": ("arxiv", "failed", None, "rate_limited"),
+        "epmc-hit": ("europepmc", "success_nonempty", 1, None),
+        "epmc-malformed": ("europepmc", "failed", None, "parse_error"),
         PUBLIC_QUERY: ("openalex_lexical", "success_nonempty", 2, None),
         "lexical-empty": ("openalex_lexical", "success_empty", 0, None),
         "semantic-transport": ("openalex_semantic", "failed", None, "transport_error"),
     }
-    ordinary = {"arxiv-empty": 0, "arxiv-rate": 0, "epmc-hit": 1, "epmc-malformed": 0}
-    assert set(rows) == set(expected) | set(ordinary)
-    for query, count in ordinary.items():
-        assert "outcome" not in rows[query] and "channel" not in rows[query]
-        assert rows[query]["observations"] == count
+    assert set(rows) == set(expected)
+    assert {query: rows[query]["observations"] for query in ("arxiv-empty", "arxiv-rate", "epmc-hit", "epmc-malformed")} == {
+        "arxiv-empty": 0, "arxiv-rate": 0, "epmc-hit": 1, "epmc-malformed": 0}
     for query, (channel, status, count, code) in expected.items():
         row = rows[query]
         assert row["channel"] == channel
@@ -147,13 +149,14 @@ def test_scheduled_openalex_disabled_or_missing_is_not_attempted(missing):
 
 @pytest.mark.parametrize("nonempty", [False, True])
 def test_uninstrumented_leaf_keeps_no_receipt_even_with_observations(monkeypatch, nonempty):
-    def silent_leaf(query, *, max_results):
+    def silent_leaf(query, *, max_results, outcome):
         return [arxiv.ArxivHit(arxiv_id="2501.00001", title="Public", abstract="")] if nonempty else []
 
     monkeypatch.setattr(fed, "search_arxiv", silent_leaf)
     plan = QueryPlan(arxiv="public")
     assert len(fed.federate(plan, observe_outcomes=True)) == int(nonempty)
-    assert "outcome" not in variants(plan)[0] and "channel" not in variants(plan)[0]
+    assert variants(plan)[0]["channel"] == "arxiv"
+    assert variants(plan)[0]["outcome"] == {"status": "unknown", "count": None, "error_code": None}
     assert variants(plan)[0]["observations"] == int(nonempty)
 
 
@@ -208,13 +211,18 @@ def test_default_false_preserves_narrow_clients_and_all_other_channels(monkeypat
 
 
 def test_opt_in_does_not_instrument_other_ordinary_channels(monkeypatch):
-    monkeypatch.setattr(fed, "search_crossref", lambda query, *, rows, mailto: [])
-    monkeypatch.setattr(fed, "search_semantic_scholar", lambda query, *, limit: [])
+    monkeypatch.setattr(fed, "search_crossref", lambda query, *, rows, mailto, outcome: [])
+    monkeypatch.setattr(fed, "search_semantic_scholar", lambda query, *, limit, outcome: [])
     monkeypatch.setattr(fed, "search_openreview", lambda client, query, *, limit: [])
     plan = QueryPlan(crossref="c", semantic_scholar="s", openreview="or", library_raw="lib")
     assert fed.federate(plan, openreview_client=object(), library_finder=lambda query: [], observe_outcomes=True) == []
     assert {row["source"] for row in variants(plan)} == {"crossref", "semantic_scholar", "openreview", "library"}
-    assert all("channel" not in row and "outcome" not in row for row in variants(plan))
+    for row in variants(plan):
+        if row["source"] in {"crossref", "semantic_scholar"}:
+            assert row["channel"] == row["source"]
+            assert row["outcome"] == {"status": "unknown", "count": None, "error_code": None}
+        else:
+            assert "channel" not in row and "outcome" not in row
 
 
 def test_only_nonzero_allocated_variants_receive_receipts(monkeypatch):
@@ -228,6 +236,55 @@ def test_only_nonzero_allocated_variants_receive_receipts(monkeypatch):
     assert [row["query"] for row in variants(plan)] == ["first"]
     assert variants(plan)[0]["outcome"]["status"] == "success_empty"
     assert "arxiv" not in plan.retrieval_accounting
+
+
+def test_real_five_provider_requests_keep_native_receipts_before_family_accounting(monkeypatch):
+    from zotero_summarizer.integrations import crossref, europepmc, semantic_scholar
+    from tests.test_discovery_provider_leaves import EMPTY
+
+    original = httpx.Client
+    clients, requests = [], []
+    modules = (arxiv, crossref, europepmc, openalex, semantic_scholar)
+    for module in modules:
+        monkeypatch.setattr(module._RATE_LIMITER, "acquire", lambda: None)
+
+    def handle(request):
+        requests.append(request)
+        hosts = {"export.arxiv.org": "arxiv", "api.crossref.org": "crossref",
+                 "www.ebi.ac.uk": "europepmc", "api.semanticscholar.org": "semantic_scholar",
+                 "api.openalex.org": "openalex"}
+        provider = hosts[request.url.host]
+        if provider == "semantic_scholar":
+            raise httpx.ReadTimeout("RAW_URL_OR_EXCEPTION")
+        if "search.semantic" in request.url.params:
+            return httpx.Response(429, text="RAW_URL_OR_EXCEPTION")
+        if request.url.params.get("search_query") == "all:second":
+            return httpx.Response(200, text="<broken")
+        return (httpx.Response(200, text=EMPTY[provider]) if provider == "arxiv"
+                else httpx.Response(200, json=EMPTY[provider]))
+
+    def create(*args, **kwargs):
+        client = original(*args, **kwargs, transport=httpx.MockTransport(handle), trust_env=False)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(httpx, "Client", create)
+    plan = QueryPlan(arxiv_variants=["first", "second"], europepmc="e", crossref="c",
+                     semantic_scholar="s", openalex_lexical="l", openalex_semantic="m")
+    with create() as http:
+        client = openalex.OpenAlexClient(object(), http_client=http)
+        assert fed.federate(plan, openalex_client=client, quota=4, observe_outcomes=True) == []
+    rows = {(row["channel"], row["query"]): row for row in variants(plan)}
+    assert len(requests) == len(rows) == 7
+    failures = {("arxiv", "second"): "parse_error", ("semantic_scholar", "s"): "transport_error",
+                ("openalex_semantic", "m"): "rate_limited"}
+    for key, row in rows.items():
+        code = failures.get(key)
+        assert row["outcome"] == {"status": "failed" if code else "success_empty",
+                                  "count": None if code else 0, "error_code": code}
+    assert {row["source"] for row in rows.values()} == set(EMPTY)
+    assert "RAW_URL_OR_EXCEPTION" not in json.dumps(plan.retrieval_accounting)
+    assert all(client.is_closed for client in clients)
 
 
 @pytest.mark.parametrize("observe", [False, True])

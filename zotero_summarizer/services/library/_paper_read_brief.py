@@ -17,7 +17,7 @@ import re
 from typing import Any
 
 from zotero_summarizer.services.library import _paper_type_checklists as pc, _quality_prompts as qp
-from zotero_summarizer.services.library._paper_read_html import _h
+from zotero_summarizer.services.library._paper_read_html import _h, _reading_plan_html
 
 _BAND_LABEL = {"flag": "FLAG", "neutral": "NEUTRAL", "highlight": "HIGHLIGHT", "uncertain": "UNCERTAIN", "": "—"}
 _STATE_LABEL = {"hit": "● addressed", "miss": "○ not addressed", "not_retrieved": "⚠ not retrieved"}
@@ -46,6 +46,9 @@ _LEGEND = (
 # Short plain-English labels for the decisive-signal list (the full prompt
 # questions live in _quality_prompts and drive the collapsed checklist).
 _RUBRIC_LABEL = {
+    "thesis": "States a clear thesis / position",
+    "evidence_cited": "Supports premises with cited evidence",
+    "scope_match": "Matches claim scope to the evidence offered",
     "external_validation": "Validated on independent / held-out data",
     "uncertainty": "Reports uncertainty (CIs, error bars, seeds)",
     "ablation": "Ablations isolate what drives the result",
@@ -90,6 +93,7 @@ def brief_html(
     digest: dict[str, Any] | None = None,
     quality: dict[str, Any] | None,
     goal_summaries: list[dict[str, Any]] | None,
+    saved_read_estimate: bool = False,
 ) -> str:
     """Verdict (loudest) → ARR spine → goal board. '' when no decision data
     exists (the brief silently degrades to the plain digest)."""
@@ -111,12 +115,13 @@ def brief_html(
         vkey = "deep" if decision == "read" else decision
         vlabel = {"read": "READ", "skim": "SKIM", "skip": "DIGEST IS ENOUGH"}[decision]
         minutes = (digest or {}).get("estimated_read_minutes")
-        if minutes is not None:
-            vlabel += f" · {int(minutes)} MIN"
+        hint = ' title="Saved reading-time estimate"' if saved_read_estimate else ""
+        vtime = (f' · <span{hint}>{int(minutes)} MIN</span>' if minutes is not None
+                 else ' · <span>Time not estimated</span>')
         vreason = str((digest or {}).get("read_why") or "")
     else:
-        vkey, vlabel = "skip", "REVIEW"
-        vreason = str((digest or {}).get("read_why") or "Reading decision unavailable; review the evidence.")
+        vkey, vlabel, vtime = "skip", "REVIEW", ""
+        vreason = "Reading decision unavailable; review the evidence."
     # Relevance folds INTO the diagnosis reason line (the separate chip is gone).
     rel_verdict = _relevance_verdict(n_fired, max_score)
     rel_line = (
@@ -129,8 +134,8 @@ def brief_html(
     axes = f'<div class="v-rel">Idea: {idea} · Evidence: {_h(evidence_label)} · Writing: {_h((digest or {}).get("writing_friction") or "not assessed")}</div>'
     verdict = (
         f'<div class="verdict v-{vkey}"><div class="v-eyebrow">Diagnosis</div>'
-        f'<div class="v-word">{_h(vlabel)}</div>'
-        f'<div class="v-why">{_h(vreason)}</div>{rel_line}{axes}</div>'
+        f'<div class="v-word">{_h(vlabel)}{vtime}</div>'
+        f'<div class="v-why">{_h(vreason)}</div>{rel_line}{axes}{_reading_plan_html(digest)}</div>'
     ) if (goals or quality or digest) else ""
 
     gauge = _gauge_html(band, agreed, total) if band else ""

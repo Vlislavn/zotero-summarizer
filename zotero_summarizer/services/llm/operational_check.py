@@ -32,8 +32,16 @@ def _stage_skeleton(routing: Any, stage: str) -> tuple[Any, dict[str, Any]]:
 
 
 def probe_provider(provider: ProviderConfig, model: str) -> dict[str, Any]:
-    """Probe one provider/model; failures are data so sibling stages still run."""
-    attempted = False
+    """Probe one provider/model; expected requests belong to this explicit scope."""
+    from zotero_summarizer.services.setup.load_attempt import SetupAttempt, current_attempt
+
+    attempt = current_attempt() or SetupAttempt()
+    with attempt.scope():
+        return _probe_provider(provider, model, attempt)
+
+
+def _probe_provider(provider, model, attempt):
+    before = attempt.requests.summary()["expected"]
     try:
         if LLMCapability.text not in provider.available_capabilities:
             return {"status": "fail", "reason_code": "unsupported_capabilities", "attempted": False,
@@ -43,21 +51,27 @@ def probe_provider(provider: ProviderConfig, model: str) -> dict[str, Any]:
             return refusal
         client = build_client_for_provider(provider, model, verification=True)
         try:
-            attempted = True
             output = client.prompt(_PROBE_PROMPT)
             if not isinstance(output, str) or not output.strip():
                 raise ValueError("Inference returned an empty response")
+            completion = attempt.requests.summary(start=before)
+            if not completion["successful"]:
+                raise ValueError("Inference has no coherent owned native request inventory")
             return {"status": "operational", "detail": "", "observed_operational": True,
-                    "attempted": True, "ownership": "observed_terminal", "hardware_safe": "not_applicable"}
+                    "attempted": True, "ownership": "completed", "request_completion": completion,
+                    "hardware_safe": "unknown" if provider.is_local else "not_applicable"}
         finally:
             client.close()
     except Exception as exc:  # noqa: BLE001 — probe status boundary (see docstring)
         LOGGER.warning(
-            "LLM probe failed for provider=%s model=%s: %s", provider.name, model, exc
+            "LLM probe failed for provider=%s model=%s: %s", provider.name, model, type(exc).__name__
         )
-        return {"status": "fail", "detail": f"{type(exc).__name__}: {exc}",
-                "reason_code": "inference_failed", "attempted": attempted,
-                "ownership": "unresolved" if attempted else "not_submitted"}
+        completion = attempt.requests.summary(start=before)
+        return {"status": "fail", "detail": f"{type(exc).__name__}: Inference verification failed; review endpoint settings.",
+                "reason_code": "request_output_truncated" if completion["coherent"] and not completion["successful"]
+                               else "inference_failed",
+                "attempted": bool(completion["started"]), "request_completion": completion,
+                "ownership": completion["ownership"]}
 
 
 def _probe_stage(routing: Any, stage: str) -> dict[str, Any]:
@@ -113,7 +127,8 @@ async def check_routing_stages(routing: Any, *, should_stop=None) -> dict[str, A
             cached[key] = ({**_row, "status": "fail", "reason_code": "batch_abandoned",
                             "attempted": False, "detail": "Batch abandoned; not submitted"}
                            if abandoned else await _probe_stage_bounded(routing, stage))
-            abandoned = abandoned or cached[key].get("reason_code") == "waiter_timeout"
+            abandoned = abandoned or (cached[key].get("reason_code") == "waiter_timeout"
+                                       and (should_stop is not None or resolved.provider.is_local))
         stages.append({**cached[key], "stage": stage})
     all_ok = all(row["status"] == "operational" for row in stages)
     return {"status": "ok" if all_ok else "degraded", "stages": stages}

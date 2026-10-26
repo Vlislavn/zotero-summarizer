@@ -1,363 +1,229 @@
-"""Mocked producer contracts only: no model/scientific/publication acceptance.
-
-Reuse the existing digest factory and semantic-verifier fake; Mock records scripted
-client returns without adding another LLM fake class or provider harness.
-"""
-from __future__ import annotations
-
+"""Current producer/decorator contracts; scripted checks are not scientific warrant."""
 import builtins
 import json
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
-from tests.test_digest_verification import PAPER, _Verifier, _claims, _digest
+from tests._interpretation_experiment import CARD, PAYLOAD, TEXT, ScriptedClient, inputs, reply, run_review
 from zotero_summarizer.integrations.llm import InstrumentedLLMClient, build_response_format
-from zotero_summarizer.models import PaperDigest, PaperParameters
-from zotero_summarizer.models.interpretation import InterpretationDigestResponse, InterpretationUnavailable
-from zotero_summarizer.services.library import _digest_audit, quality_review
-from zotero_summarizer.services.library._digest_verification import DigestVerifierUnavailable
-from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
-from zotero_summarizer.services.setup.bootstrap import _default_goals_config
+from zotero_summarizer.models import PaperDigest
+from zotero_summarizer.models.interpretation import InterpretationDigest, InterpretationItem
+from zotero_summarizer.services.library import interpretation, quality_review
+from zotero_summarizer.services.library._digest_audit import digest_contract_payload
+from zotero_summarizer.services.library._interpretation_trace import Trace
+from zotero_summarizer.services.library._prompt_security import untrusted_input
 
-
-REQUIRED = (
-    "read_decision", "read_why", "read_parts", "skip_parts", "estimated_read_minutes",
-    "original_value", "writing_friction", "writing_reasons",
-)
-SCIENTIFIC_FIELDS = {
-    "inference_strength", "rationale", "scope", "uncertainties", "unsupported_extrapolations",
-}
-
-
-def _base():
-    return _digest().model_copy(update={
-        "key_findings": ["The evaluation uses held-out data."],
-        "methods": "A carefully controlled evaluation.",
-        "limitations": "Transfer was not tested.",
-        "key_weakness": "One benchmark.",
-        "parameters": PaperParameters(dataset="ImageNet", external_validation=False),
-    })
-
-
-def _card(rationale="The held-out evaluation supports a limited inference."):
-    return {"items": [{
-        "finding_ref": "/key_findings/0", "inference_strength": "Limited comparative evidence.",
-        "rationale": rationale, "scope": "The studied ImageNet evaluation.",
-        "uncertainties": ["Transfer remains unknown."],
-        "unsupported_extrapolations": ["A causal or deployment recommendation is not established."],
-        "basis_refs": ["/methods", "/limitations", "/key_weakness", "/parameters/dataset"],
-    }]}
-
-
-def _payload(card):
-    return {**_base().model_dump(exclude_unset=True), "interpretation": card}
-
-
-def _reply(payload, form):
-    if form == "parsed":
-        return InterpretationDigestResponse.model_validate(payload)
-    if form == "dict":
-        return payload
-    text = json.dumps(payload)
-    if form == "fenced":
-        return "```json\n" + text + "\n```"
-    return "Here is the digest: " + text + " End." if form == "prose" else text
+REQUIRED = ('read_decision', 'read_why', 'read_parts', 'skip_parts', 'estimated_read_minutes',
+            'original_value', 'writing_friction', 'writing_reasons')
 
 
 def test_off_keeps_base_prompt_model_serialization_calls_and_no_extra_io(monkeypatch):
-    config = _default_goals_config()
-    template = "Title: {title}\nGoals: {research_goals}\nOriginal: {full_text}"
-    config.prompts.paper_digest = template
-    goals = "; ".join(g for g in (config.research_goals or []) if str(g).strip()) or "(not specified)"
-    expected = UNTRUSTED_INPUT_RULE + "\n\n" + (
-        "The original source is already supplied. Acquisition and authentication are operational "
-        "states owned by the caller, not scientific claims to invent in the digest. "
-        "Review the supplied evidence; do not claim it was never retrieved. "
-        "Source-stated limitations of external resources may still be reported faithfully.\n\n"
-    ) + template.format(title=untrusted_input("Paper"), full_text=untrusted_input(PAPER),
-                        research_goals=untrusted_input(goals)) + (
-        f"\n\nReader's focus note: {untrusted_input('Methods')}\n"
-        "Please adjust your review emphasis to highlight or downplay aspects matching this focus."
-    )
-    generator = Mock()
-    generator.pydantic_prompt.return_value = _digest()
-    verifier = _Verifier()
-    no_io = Mock(side_effect=AssertionError("unexpected file IO"))
+    _, config, _ = inputs()
+    config.prompts.paper_digest = 'Title: {title}\nGoals: {research_goals}\nOriginal: {full_text}'
+    client = ScriptedClient(cards=False)
+    forbidden = Mock(side_effect=AssertionError('ordinary generation must not import optional owners or read files'))
     original_import = builtins.__import__
 
-    def no_c_import(name, *args, **kwargs):
-        assert name != "zotero_summarizer.models.interpretation"
+    def guarded(name, *args, **kwargs):
+        assert 'interpretation' not in name
         return original_import(name, *args, **kwargs)
 
-    monkeypatch.setattr(builtins, "__import__", no_c_import)
-    monkeypatch.setattr("builtins.open", no_io)
-    monkeypatch.setattr(Path, "open", no_io)
-    monkeypatch.setattr(_digest_audit, "_contract_hashes", no_io)
-
-    result = quality_review.assess_digest(title="Paper", full_text=PAPER, config=config,
-                                         llm=generator, verifier_llm=verifier, focus_prompt="Methods")
-
-    assert generator.pydantic_prompt.call_args.kwargs == {"prompt": expected, "pydantic_model": PaperDigest}
-    assert type(result) is PaperDigest
-    assert result.model_dump(mode="json") == _digest().model_dump(mode="json")
-    assert "interpretation" not in PaperDigest.model_json_schema()["properties"]
-    assert "interpretation" not in result.model_dump()
-    assert generator.pydantic_prompt.call_count == verifier.calls == 1
-    no_io.assert_not_called()
+    monkeypatch.setattr(builtins, '__import__', guarded)
+    monkeypatch.setattr(Path, 'open', forbidden)
+    digest = quality_review.assess_digest(title='Paper', full_text=TEXT, config=config, llm=client,
+                                         focus_prompt='Methods')
+    goals = '; '.join(config.research_goals) or '(not specified)'
+    assert client.calls[0] == (quality_review._digest_prompt(config.prompts.paper_digest, 'Paper', TEXT, goals,
+                                                            'Methods'), PaperDigest, {})
+    assert digest.model_dump(mode='json') == PaperDigest.model_validate(PAYLOAD).model_dump(mode='json')
+    assert len(client.calls) == 2 and 'interpretation' not in digest.model_dump()
+    forbidden.assert_not_called()
 
 
-@pytest.mark.parametrize("format_arg", [None, {}, {"type": "json_object"}])
+@pytest.mark.parametrize('format_arg', [None, {}, {'type': 'json_object'}])
 def test_off_preserves_caller_response_format(format_arg):
-    generator = Mock()
-    generator.pydantic_prompt.return_value = _digest()
-    quality_review.assess_digest(title="Paper", full_text=PAPER, config=_default_goals_config(),
-                                 llm=generator, verifier_llm=_Verifier(), response_format=format_arg)
-    expected = {"response_format": format_arg} if format_arg else {}
-    assert {key: value for key, value in generator.pydantic_prompt.call_args.kwargs.items()
-            if key not in {"prompt", "pydantic_model"}} == expected
+    _, config, _ = inputs()
+    client = ScriptedClient(cards=False)
+    quality_review.assess_digest(title='Paper', full_text=TEXT, config=config, llm=client,
+                                 response_format=format_arg)
+    assert client.calls[0][2] == ({'response_format': format_arg} if format_arg else {})
 
 
 def test_c_schema_is_typed_and_cannot_authorize_origin_or_verification():
-    schema = InterpretationDigestResponse.model_json_schema()
-    item = schema["$defs"]["InterpretationItem"]
-    draft = schema["$defs"]["InterpretationDraft"]
-    assert set(item["properties"]) == SCIENTIFIC_FIELDS | {"finding_ref", "basis_refs"}
-    assert set(item["required"]) == set(item["properties"])
-    assert item["additionalProperties"] is False and draft["additionalProperties"] is False
-    assert draft["properties"]["items"]["minItems"] == 1
-    for field in ("uncertainties", "unsupported_extrapolations", "basis_refs"):
-        assert item["properties"][field]["items"]["type"] == "string"
-    assert "pattern" in item["properties"]["basis_refs"]["items"]
-    alternatives = schema["properties"]["interpretation"]["anyOf"]
-    assert {part.get("$ref", part.get("type")) for part in alternatives} == {
-        "#/$defs/InterpretationDraft", "#/$defs/InterpretationUnavailable", "null",
-    }
-    assert "origin" not in schema["properties"] and "scientific_verification" not in schema["properties"]
+    schema = InterpretationDigest.model_json_schema()
+    item = schema['$defs']['InterpretationItem']
+    assert set(item['properties']) == set(CARD)
+    assert set(item['required']) == set(CARD)
+    assert item['additionalProperties'] is False
+    assert item['properties']['basis_refs']['items']['enum'] == ['methods', 'limitations', 'parameters']
+    assert schema['properties']['interpretation']['anyOf'][0]['maxItems'] == 5
+    for name in ('origin', 'scientific_verification', 'status'):
+        with pytest.raises(ValueError):
+            InterpretationItem.model_validate(CARD | {name: 'author_approved'})
 
 
 def test_off_projects_an_unexpected_c_subclass_without_payload_leak():
-    raw = InterpretationDigestResponse.model_validate(_payload(_card()))
-    result = quality_review._coerce_digest(raw)
-    assert type(result) is PaperDigest
-    assert result.model_dump() == _base().model_dump()
-    assert "interpretation" not in result.model_dump()
+    raw = InterpretationDigest.model_validate(PAYLOAD | {'interpretation': [CARD]})
+    base = digest_contract_payload(raw)
+    assert base == digest_contract_payload(PaperDigest.model_validate(PAYLOAD))
+    assert 'interpretation' not in base
+    assert raw.interpretation == [CARD]  # retained subtype metadata is not base authority
 
 
-@pytest.mark.parametrize("form", ["dict", "json", "fenced", "prose", "parsed"])
+@pytest.mark.parametrize('form', ['dict', 'json', 'fenced', 'prose', 'parsed'])
 def test_c_capture_precedes_plain_base_projection_and_retains_explicit_presence(form):
-    out = {"stale": True}
-    result = quality_review._coerce_digest(_reply(_payload(_card()), form), interpretation_out=out)
-    assert type(result) is PaperDigest
-    assert result.model_dump(mode="json") == _base().model_dump(mode="json")
-    assert result.model_fields_set == _base().model_fields_set
-    assert "interpretation" not in result.model_dump() and "interpretation" not in result.model_json_schema()["properties"]
-    assert out == {"origin": "ai_generated", "scientific_verification": "unverified",
-                   "status": "schema_validated_ai_draft", **_card()}
-    assert result.key_findings[0] == "The evaluation uses held-out data."
-    assert "finding_text" not in out["items"][0]
+    raw = reply(PAYLOAD | {'interpretation': [CARD]}, form)
+    provider = ScriptedClient(cards=False, responses=[raw])
+    adapter = interpretation._Client(provider, 'C', Trace(max_calls=2))
+    digest = adapter.pydantic_prompt(prompt='Owned source', pydantic_model=PaperDigest)
+    assert type(digest) is PaperDigest and 'interpretation' not in digest.model_dump()
+    assert digest.model_fields_set == set(PAYLOAD)
+    assert digest.model_dump() == PaperDigest.model_validate(PAYLOAD).model_dump()
+    assert adapter.draft == [CARD]
 
 
-@pytest.mark.parametrize("form", ["dict", "json", "fenced", "prose", "parsed"])
-@pytest.mark.parametrize("card,reason", [
-    (None, "missing_interpretation"), ({"items": []}, "malformed_interpretation"),
-    ({"unavailable_reason": "missing_interpretation"}, "missing_interpretation"),
-    ({"items": [{key: value for key, value in _card()["items"][0].items() if key != "rationale"}]}, "malformed_interpretation"),
-    ({"items": [{**_card()["items"][0], "uncertainties": "unknown"}]}, "malformed_interpretation"),
-    ({"items": [{**_card()["items"][0], "rationale": 42}]}, "malformed_interpretation"),
-    ({"items": [{**_card()["items"][0], "finding_text": "Copied finding"}]}, "malformed_interpretation"),
-    ({"items": [{**_card()["items"][0], "basis_refs": ["/confidence"]}]}, "malformed_interpretation"),
-    ({"items": [{**_card()["items"][0], "finding_ref": "/key_findings/00"}]}, "malformed_interpretation"),
-    ({"items": [{**_card()["items"][0], "finding_ref": "/key_findings/99"}]}, "invalid_references"),
-    ({"items": [{**_card()["items"][0], "finding_ref": "/key_findings/" + "9" * 5000}]}, "invalid_references"),
-    ({"items": [{**_card()["items"][0], "basis_refs": ["/parameters/architecture"]}]}, "invalid_references"),
-    ({"items": _card()["items"] * 2}, "invalid_references"),
-    ({**_card(), "origin": "author_approved", "status": "accepted"}, "malformed_interpretation"),
+@pytest.mark.parametrize('form', ['dict', 'json', 'fenced', 'prose', 'parsed'])
+@pytest.mark.parametrize('card,status', [
+    (None, 'unavailable'), ([], 'invalid'), ({'items': [CARD]}, 'invalid'),
+    ([dict(CARD, rationale=42)], 'invalid'), ([dict(CARD, uncertainties='unknown')], 'invalid'),
+    ([dict(CARD, origin='author_approved')], 'invalid'), ([dict(CARD, basis_refs=['confidence'])], 'invalid'),
+    ([dict(CARD, finding_index=False)], 'invalid'), ([dict(CARD, finding_index=99)], 'invalid'),
+    ([dict(CARD, finding='different')], 'invalid'), ([CARD, CARD], 'invalid'),
+    ([dict(CARD, basis_refs=['methods', 'methods'])], 'invalid'),
 ])
-def test_optional_failure_preserves_known_valid_base_explicitly(form, card, reason):
-    out = {"stale": True}
-    result = quality_review._coerce_digest(_reply(_payload(card), form), interpretation_out=out)
-    assert type(result) is PaperDigest and result.model_dump() == _base().model_dump()
-    assert out == {"origin": "ai_generated", "scientific_verification": "unverified",
-                   "status": "unavailable", "unavailable_reason": reason}
+def test_optional_failure_preserves_known_valid_base_explicitly(form, card, status):
+    client = ScriptedClient(cards=False, responses=[reply(PAYLOAD | {'interpretation': card}, form)])
+    result = run_review(client)
+    assert result['interpretation']['status'] == status
+    assert result['digest']['key_findings'] == PAYLOAD['key_findings']
+    assert result['verification_audit']['status'] == 'accepted_verifier_evidence'
+    assert len(client.calls) == 2
 
 
-@pytest.mark.parametrize("form", ["dict", "parsed"])
+@pytest.mark.parametrize('form', ['dict', 'parsed'])
 def test_missing_optional_content_is_not_a_silent_empty_card(form):
-    out = {}
-    result = quality_review._coerce_digest(_reply(_base().model_dump(exclude_unset=True), form), interpretation_out=out)
-    assert result.model_dump() == _base().model_dump()
-    assert out["unavailable_reason"] == "missing_interpretation"
+    result = run_review(ScriptedClient(cards=False, responses=[reply(PAYLOAD, form)]))
+    assert result['interpretation'] == {'status': 'unavailable'}
+    assert result['digest']['key_findings'] == PAYLOAD['key_findings']
 
 
-@pytest.mark.parametrize("ref,field,value", [("/tldr", "tldr", ""),
-                                           ("/key_findings/0", "key_findings", [""])])
-def test_binding_requires_actual_nonempty_current_finding(ref, field, value):
-    card = _card()
-    card["items"][0]["finding_ref"] = ref
-    payload = {**_payload(card), field: value}
-    out = {}
-    result = quality_review._coerce_digest(payload, interpretation_out=out)
-    assert getattr(result, field) == value
-    assert out["status"] == "unavailable" and out["unavailable_reason"] == "invalid_references"
-
-
-@pytest.mark.parametrize("field", REQUIRED)
-@pytest.mark.parametrize("form", ["dict", "json", "parsed"])
-def test_c_does_not_fabricate_required_fields_from_typed_dump_defaults(field, form):
-    payload = _payload(_card())
-    del payload[field]
-    raw = _reply(payload, form)
-    if form == "parsed":
-        assert field not in raw.model_fields_set
-    out = {"stale": True}
-    with pytest.raises(quality_review.DigestGenerationFailed, match="omitted required"):
-        quality_review._coerce_digest(raw, interpretation_out=out)
-    assert out == {}
-
-
-@pytest.mark.parametrize("form", ["dict", "parsed"])
-@pytest.mark.parametrize("field,value", [("soundness", 0), ("read_decision", "maybe"),
-                                         ("writing_friction", "high")])
-def test_optional_failure_never_masks_invalid_base(form, field, value):
-    payload = _payload({"items": []})
-    payload[field] = value
-    out = {"stale": True}
+@pytest.mark.parametrize('finding,index', [('', 0), ('not current', 0), (CARD['finding'], 1)])
+def test_binding_requires_actual_nonempty_current_finding(finding, index):
     with pytest.raises(ValueError):
-        # Simulate a pre-parsed client object that bypassed validation: recheck it.
-        raw = InterpretationDigestResponse.model_construct(**{
-            **payload, "interpretation": InterpretationUnavailable(unavailable_reason="malformed_interpretation"),
-        }) if form == "parsed" else payload
-        quality_review._coerce_digest(raw, interpretation_out=out)
-    assert out == {}
+        interpretation.scientific_claims([dict(CARD, finding=finding, finding_index=index)], PAYLOAD)
 
 
-@pytest.mark.parametrize("format_route", ["prompt", "caller", "instrumented"])
+@pytest.mark.parametrize('ref,basis', [('methods', ''), ('limitations', ''), ('parameters', None),
+                                      ('parameters', {'external_validation': None})])
+def test_whole_referenced_basis_must_be_present_without_optional_retry(ref, basis):
+    payload = PAYLOAD | {ref: basis, 'interpretation': [dict(CARD, basis_refs=[ref])]}
+    client = ScriptedClient(cards=False, responses=[payload])
+    result = run_review(client)
+    assert result['interpretation']['status'] == 'invalid'
+    assert result['digest']['key_findings'] == PAYLOAD['key_findings'] and len(client.calls) == 2
+
+
+@pytest.mark.parametrize('field', REQUIRED)
+@pytest.mark.parametrize('form', ['dict', 'json', 'parsed'])
+def test_c_does_not_fabricate_required_fields_from_typed_dump_defaults(field, form):
+    payload = {key: value for key, value in PAYLOAD.items() if key != field} | {'interpretation': [CARD]}
+    client = ScriptedClient(cards=False, responses=[reply(payload, form)] * 2)
+    with pytest.raises(ValueError, match='omitted required'):
+        run_review(client)
+    assert len(client.calls) == 2
+
+
+@pytest.mark.parametrize('field,value', [('soundness', 0), ('read_decision', 'maybe'), ('writing_friction', 'high')])
+@pytest.mark.parametrize('form', ['dict', 'parsed'])
+def test_optional_failure_never_masks_invalid_base(form, field, value):
+    payload = PAYLOAD | {field: value, 'interpretation': []}
+    raw = InterpretationDigest.model_construct(**payload) if form == 'parsed' else payload
+    client = ScriptedClient(cards=False, responses=[raw, raw])
+    with pytest.raises(ValueError):
+        run_review(client)
+    assert len(client.calls) == 2
+
+
+@pytest.mark.parametrize('format_route', ['prompt', 'caller', 'instrumented'])
 def test_c_uses_same_selected_schema_on_generation_parse_retry_and_correction(format_route):
-    rejected = _payload(_card("First attempt rationale."))
-    rejected["tldr"] = "The result is 99999%."
-    corrected = _payload(_card("Corrected attempt rationale."))
-    generator = Mock()
-    generator.pydantic_prompt.side_effect = ["", rejected, InterpretationDigestResponse.model_validate(corrected)]
-    client = InstrumentedLLMClient(generator, structured_output=True) if format_route == "instrumented" else generator
-    response_format = build_response_format(PaperDigest) if format_route == "caller" else None
-    verifier, out = _Verifier(), {"stale": True}
-
-    result = quality_review.assess_digest(title="Paper", full_text=PAPER, config=_default_goals_config(),
-                                         llm=client, verifier_llm=verifier, interpretation_out=out,
-                                         response_format=response_format)
-
-    calls = generator.pydantic_prompt.call_args_list
-    assert len(calls) == 3 and verifier.calls == 1
-    assert all(call.kwargs["pydantic_model"] is InterpretationDigestResponse for call in calls)
-    for call in calls:
-        assert "Experimental AI-draft interpretation:" in call.kwargs["prompt"]
-        if format_route != "prompt":
-            assert call.kwargs["response_format"] == build_response_format(InterpretationDigestResponse)
-        else:
-            assert "response_format" not in call.kwargs
-    assert "previous reply was not valid" in calls[1].kwargs["prompt"]
-    assert "failed source verification" in calls[2].kwargs["prompt"]
-    assert type(result) is PaperDigest and result.model_dump() == _base().model_dump()
-    assert out["items"][0]["rationale"] == "Corrected attempt rationale."
-    assert out["scientific_verification"] == "unverified"
-    support = out["native_support"]
-    count = len(_claims(result))
-    assert support["base_count"] == count and support["global_indices"] == list(range(count, count + 5))
-    assert support["validated_checks"] == [{"index": index, "supported": True, "evidence": [0]}
-                                           for index in range(count, count + 5)]
-    assert "interpretation[0](/key_findings/0).rationale: Corrected attempt rationale." in support["optional_claims"]
-    assert all("First attempt" not in claim for claim in support["optional_claims"])
+    provider = ScriptedClient(cards=False, responses=['', PAYLOAD | {'tldr': 'Unreported 99999%',
+                'interpretation': [dict(CARD, rationale='First attempt')]}, PAYLOAD | {'interpretation': [CARD]}])
+    generator = InstrumentedLLMClient(provider, structured_output=True) if format_route == 'instrumented' else provider
+    adapter = interpretation._Client(generator, 'C', Trace(max_calls=10))
+    _, config, _ = inputs()
+    digest = quality_review.assess_digest(title='Paper', full_text=TEXT, config=config, llm=adapter,
+        response_format=build_response_format(PaperDigest) if format_route == 'caller' else None)
+    generated = [(prompt, model, kwargs) for prompt, model, kwargs in provider.calls if issubclass(model, PaperDigest)]
+    assert len(generated) == 3 and all(model is InterpretationDigest for _, model, _ in generated)
+    assert all(interpretation.CARD_REQUEST in prompt for prompt, _, _ in generated)
+    assert 'previous reply was not valid' in generated[1][0]
+    assert 'failed source verification' in generated[2][0]
+    if format_route != 'prompt':
+        assert all(kwargs['response_format'] == build_response_format(InterpretationDigest) for _, _, kwargs in generated)
+    assert digest.key_findings == PAYLOAD['key_findings'] and adapter.draft == [CARD]
 
 
-@pytest.mark.parametrize("card", [None, {"items": []}, _card()])
-@pytest.mark.parametrize("typed_client", [False, True])
+@pytest.mark.parametrize('card', [None, [], [CARD]])
+@pytest.mark.parametrize('typed_client', [False, True])
 def test_optional_content_never_adds_generator_retry(card, typed_client):
-    generator = Mock()
-    payload = _payload(card)
-    generator.pydantic_prompt.side_effect = (
-        lambda **kwargs: kwargs["pydantic_model"].model_validate(payload)
-    ) if typed_client else [payload]
-    verifier, out = _Verifier(), {}
-    result = quality_review.assess_digest(title="Paper", full_text=PAPER, config=_default_goals_config(),
-                                         llm=generator, verifier_llm=verifier, interpretation_out=out)
-    assert result.model_dump() == _base().model_dump()
-    assert generator.pydantic_prompt.call_count == verifier.calls == 1
-    assert out["scientific_verification"] == "unverified"
-    if card == _card():
-        count = len(_claims(result))
-        assert out["native_support"]["validated_checks"] == [{"index": index, "supported": True, "evidence": [0]}
-                                                            for index in range(count, count + 5)]
-    else:
-        assert out["status"] == "unavailable" and "native_support" not in out
+    payload = PAYLOAD | {'interpretation': card}
+    client = ScriptedClient(cards=False, responses=[reply(payload, 'parsed' if typed_client else 'dict')])
+    result = run_review(client)
+    assert result['digest']['key_findings'] == PAYLOAD['key_findings']
+    assert sum(issubclass(model, PaperDigest) for _, model, _ in client.calls) == 1
+    assert len(client.calls) == (3 if card else 2)
 
 
 def test_base_evidence_and_original_spans_cannot_certify_optional_scientific_content():
-    card = _card("An invented extrapolation reaches 99999%.")
-    card["items"].append({**card["items"][0], "finding_ref": "/tldr", "basis_refs": ["/parameters/external_validation"]})
-    generator = Mock()
-    generator.pydantic_prompt.return_value = _payload(card)
-    verifier, out, audit = _Verifier(), {}, {}
-    result = quality_review.assess_digest(title="Paper", full_text=PAPER, config=_default_goals_config(),
-                                         llm=generator, verifier_llm=verifier, interpretation_out=out,
-                                         verification_audit=audit)
-    assert generator.pydantic_prompt.call_count == verifier.calls == 1
-    assert all("99999" not in claim for claim in _claims(result))
-    count = len(_claims(result))
-    diagnostic = {"phase": "numeric", "base_count": count, "rejected_indices": [count + 1, count + 6]}
-    assert out == {"origin": "ai_generated", "scientific_verification": "unverified", "status": "unavailable",
-                   "unavailable_reason": "native_optional_support_not_established", "optional_rejection": diagnostic}
-    assert "items" not in out and "native_support" not in out
-    assert audit["status"] == "accepted_verifier_evidence"
-    assert audit["lineage"][0]["optional_rejection"] == diagnostic and audit["lineage"][0]["outcome"] == "accepted"
-    assert {claim["field"] for claim in audit["claims"]} == {"tldr", "key_findings"}
-    passage = audit["passages"][0]
-    assert passage["text"] == PAPER and passage["selected_span"] == {"start": 0, "end": len(PAPER)}
-    assert passage["original_fragments"] == [{"selected_span": {"start": 0, "end": len(PAPER)},
-                                              "original_span": {"start": 0, "end": len(PAPER)}, "mapping": "exact"}]
-    assert "interpretation" not in result.model_dump()
+    client = ScriptedClient(cards=False, responses=[PAYLOAD | {'interpretation': [dict(CARD, rationale='Unreported 99999%')]}])
+    result = run_review(client)
+    assert result['interpretation']['status'] == 'support_not_established'
+    audit = result['verification_audit']
+    assert audit['status'] == 'accepted_verifier_evidence'
+    assert {claim['field'] for claim in audit['claims']} == {'tldr', 'key_findings'}
+    assert len(client.calls) == 2 and 'scientific_call' not in result
+    for passage in audit['passages']:
+        span = passage['selected_span']
+        assert passage['text'] == TEXT[span['start']:span['end']]
 
 
-@pytest.mark.parametrize("failure", ["source", "parse", "generator", "base_rejected", "verifier", "correction", "second_verifier"])
-def test_assessment_failure_clears_existing_collector_and_never_exposes_first_attempt(monkeypatch, failure):
-    generator = Mock()
-    generator.pydantic_prompt.side_effect = [_payload(_card("First attempt.")), _payload(_card("Second attempt."))]
-    verifier = _Verifier()
-    text = PAPER
-    if failure == "source":
-        text = ""
-    elif failure == "parse":
-        generator.pydantic_prompt.side_effect = ["", ""]
-    elif failure == "generator":
-        generator.pydantic_prompt.side_effect = RuntimeError("generation failed")
-    elif failure == "base_rejected":
-        verifier = _Verifier(supported=False)
-    elif failure == "verifier":
-        monkeypatch.setattr(quality_review, "_verify_generated_digest", Mock(side_effect=DigestVerifierUnavailable("unavailable")))
-    else:
-        second = ValueError("unsupported") if failure == "correction" else DigestVerifierUnavailable("unavailable")
-        monkeypatch.setattr(quality_review, "_verify_generated_digest", Mock(side_effect=[ValueError("unsupported"), second]))
-        if failure == "correction":
-            generator.pydantic_prompt.side_effect = [_payload(_card("First attempt.")), ""]
-    out = {"origin": "ai_generated", "items": _card()["items"]}
+@pytest.mark.parametrize('failure', ['source', 'parse', 'generator', 'base_rejected', 'verifier', 'correction', 'second_verifier'])
+def test_assessment_failure_clears_existing_collector_and_never_exposes_first_attempt(failure):
+    # There is no public optional collector: a failed invocation cannot return a record.
+    client = ScriptedClient(cards=False, responses=[PAYLOAD | {'tldr': 'Unreported 99999%', 'interpretation': [CARD]}] * 2)
+    paper, _, _ = inputs()
+    if failure == 'source':
+        paper['text'] = ''
+    elif failure in {'parse', 'correction'}:
+        client.responses = ['', ''] if failure == 'parse' else [client.responses[0], '']
+    elif failure == 'generator':
+        client.pydantic_prompt = Mock(side_effect=RuntimeError('generator unavailable'))
+    elif failure in {'verifier', 'second_verifier'}:
+        client.responses = [PAYLOAD | {'interpretation': [CARD]}] * 2
+        original = client.pydantic_prompt
+        attempts = []
+        def unavailable(**kwargs):
+            value = original(**kwargs)
+            if issubclass(kwargs['pydantic_model'], PaperDigest):
+                return value
+            attempts.append(value)
+            if failure == 'second_verifier' and len(attempts) == 1:
+                value['checks'][0] = dict(value['checks'][0], supported=False, evidence=[])
+                return value
+            return {}
+        client.pydantic_prompt = unavailable
     with pytest.raises((ValueError, RuntimeError)):
-        quality_review.assess_digest(title="Paper", full_text=text, config=_default_goals_config(),
-                                     llm=generator, verifier_llm=verifier, interpretation_out=out)
-    assert out == {}
-    if failure == "source":
-        generator.pydantic_prompt.assert_not_called()
+        run_review(client, paper=paper)
+    if failure == 'source':
+        assert client.calls == []
 
 
 def test_correction_missing_card_replaces_not_reuses_first_attempt():
-    rejected = _payload(_card("First attempt."))
-    rejected["tldr"] = "The result is 99999%."
-    generator = Mock()
-    generator.pydantic_prompt.side_effect = [rejected, _base()]
-    out = {}
-    result = quality_review.assess_digest(title="Paper", full_text=PAPER, config=_default_goals_config(),
-                                         llm=generator, verifier_llm=_Verifier(), interpretation_out=out)
-    assert result.model_dump() == _base().model_dump() and type(result) is PaperDigest
-    assert out == {"origin": "ai_generated", "scientific_verification": "unverified",
-                   "status": "unavailable", "unavailable_reason": "missing_interpretation"}
-    assert generator.pydantic_prompt.call_count == 2
+    client = ScriptedClient(cards=False, responses=[PAYLOAD | {'tldr': 'Unreported 99999%', 'interpretation': [CARD]}, PAYLOAD])
+    result = run_review(client)
+    assert result['interpretation'] == {'status': 'unavailable'}
+    assert result['digest']['key_findings'] == PAYLOAD['key_findings']
+    assert len(client.calls) == 3

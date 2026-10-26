@@ -95,7 +95,7 @@ def test_generated_cli_uses_real_non_background_startup_and_only_selected_review
 
     def complete_review(**kwargs):
         for key in kwargs["item_keys"]:
-            entry = _generated_entry(key, kwargs["feed_contexts"][key].profile)[0] if assessment_present else _review(key)
+            entry = _generated_entry(tmp_path, monkeypatch, key, kwargs["feed_contexts"][key].profile)[0] if assessment_present else _review(key)
             _review_cache._write_one(key, entry)
         return {"accepted": True, "status": "ready"}
 

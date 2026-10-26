@@ -5,6 +5,26 @@ import { doctorQueryOptions, doctorVerificationOptions, invalidateSetupDoctor } 
 const key = ['setup-doctor'];
 const client = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
+it.each([403, 422])('keeps the unchanged report and current owner after definite rejection %s', async (status) => {
+  const cache = client();
+  const ready = { ready: true, status: 'ready' };
+  cache.setQueryData(key, ready);
+  cache.setQueryData(['setup-status'], ready);
+  const cancel = vi.spyOn(cache, 'cancelQueries');
+  const invalidate = vi.spyOn(cache, 'invalidateQueries');
+  await invalidateSetupDoctor(cache, { status });
+  expect(cache.getQueryData(key)).toBe(ready);
+  expect(cache.getQueryData(['setup-status'])).toBe(ready);
+  expect(cancel).not.toHaveBeenCalled();
+  expect(invalidate).not.toHaveBeenCalled();
+  const run = doctorVerificationOptions(cache, vi.fn());
+  const owner = run.onMutate();
+  await invalidateSetupDoctor(cache, { status });
+  run.onSuccess(ready, null, owner);
+  expect(cache.getQueryData(key).ready).toBe(true);
+  cache.clear();
+});
+
 it.each(['AI', 'credential', 'path', 'source'])('cannot revive Ready from a verification completed before a %s change', async () => {
   const cache = client();
   const options = doctorVerificationOptions(cache, vi.fn());

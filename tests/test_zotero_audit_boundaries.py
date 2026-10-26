@@ -8,10 +8,8 @@ import pytest
 from tests._zotero_fixtures import add_feed_item, add_library_item, add_tag_to_item, build_zotero_db
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter, ZoteroWriteError
-from zotero_summarizer.models import PaperDigest
 from tests.test_generated_write_review import boundary
-from tests.test_interpretation_binding import config
-from tests.test_interpretation_review_one import paper_io
+from tests._generated_write_fixtures import config, paper_io, published_review
 from tests.test_review_cache import _isolate_cache
 
 
@@ -223,17 +221,16 @@ def test_pending_note_retry_after_status_failure_does_not_duplicate(tmp_path, mo
 
 
 @pytest.mark.parametrize("operation,args", [
-    ("zotero_upsert_verdict_note", ("must_read", "Comment")),
+    ("mirror_verdict", ("must_read", "Comment")),
     ("mirror_review_note", ("My note",)),
-    ("zotero_set_label_tag", ("must_read",)),
-    ("zotero_upsert_digest_note", (PaperDigest(tldr="Digest"),)),
+    ("mirror_verdict", ("must_read", "")),
+    ("stage_current_digest", ()),
 ])
-def test_every_direct_mirror_requires_a_backup_before_dispatch(tmp_path, monkeypatch, operation, args, request):
-    from zotero_summarizer.services.zotero import mirror_notes, zotero
+def test_explicit_mirrors_and_confirmed_digest_require_backup_before_dispatch(tmp_path, monkeypatch, operation, args, request):
+    from zotero_summarizer.services.zotero import generated_notes, mirror_notes, zotero
     from zotero_summarizer.storage import repositories
 
-    digest_stage = zotero.zotero_upsert_digest_note
-    published = request.getfixturevalue("boundary") if operation == "zotero_upsert_digest_note" else None
+    published = request.getfixturevalue("boundary") if operation == "stage_current_digest" else None
     db = build_zotero_db(tmp_path / "Zotero #1")
     add_library_item(db, item_key="PARENT", title="Parent")
     writer = ZoteroWriter(db.parent)
@@ -251,12 +248,14 @@ def test_every_direct_mirror_requires_a_backup_before_dispatch(tmp_path, monkeyp
         with sqlite3.connect(backups[0]) as backup:
             assert backup.execute("SELECT COUNT(*) FROM itemNotes").fetchone()[0] == 0
             assert backup.execute("SELECT COUNT(*) FROM itemTags").fetchone()[0] == 0
-        if operation == "mirror_review_note":
+        if operation in {"mirror_review_note", "mirror_verdict"}:
             with sqlite3.connect(app_path) as app:
-                claim, = app.execute("SELECT id,status,audit_json FROM pending_changes").fetchall()
-            assert type(claim[0]) is int and claim[0] > 0 and claim[0] == change["id"]
+                claims = app.execute("SELECT id,status,audit_json FROM pending_changes").fetchall()
+            claim, = [row for row in claims if row[0] == change["id"]]
+            assert type(claim[0]) is int and claim[0] > 0
             assert claim[1] == "applying"
             assert [event["event"] for event in json.loads(claim[2])] == ["mirror_requested"]
+            assert json.loads(claim[2])[0]["source"] == operation.replace("mirror_review_note", "mirror_user_note")
         dispatch(conn, change, cols)
 
     monkeypatch.setattr(writer, "_dispatch_change", assert_backup)
@@ -280,15 +279,22 @@ def test_every_direct_mirror_requires_a_backup_before_dispatch(tmp_path, monkeyp
         assert [event["event"] for event in json.loads(audit)] == [
             "mirror_requested", "mirror_applied", "mirror_acknowledged",
         ]
-    elif published is None:
-        getattr(zotero, operation)("PARENT", *args)
+    elif operation == "mirror_verdict":
+        from zotero_summarizer.services.golden.verdict_effects import mirror_current_verdict
+        with repositories.with_db_path(app_path):
+            repositories.init_db()
+            repositories.insert_or_update_label_verdict(app_path, item_key="PARENT",
+                original_derived_priority="unknown", user_priority=args[0], comment=args[1])
+            result = mirror_current_verdict(app_path, "PARENT")
+        assert result == {"label_written": True, "note_written": bool(args[1])}
+        assert dispatched == ["PARENT"] * (2 if args[1] else 1)
     else:
         from zotero_summarizer.services.library import _review_cache
         from zotero_summarizer.services.zotero import pending
         from zotero_summarizer.models import PendingChangeApplyRequest
 
         _review_cache._write_one("PARENT", published.entry)
-        digest_stage("PARENT", PaperDigest.model_validate(published.entry["digest"]))
+        generated_notes.stage_current_digest("PARENT")
         assert dispatched == [] and not list(db.parent.glob(writer._BACKUP_GLOB))
         proposal, = asyncio.run(pending.list_pending_changes(item_key="PARENT")).items
         result = asyncio.run(pending.apply_pending_changes(PendingChangeApplyRequest(

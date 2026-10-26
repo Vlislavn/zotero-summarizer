@@ -23,6 +23,7 @@ from zotero_summarizer.services.library import (
     _deep_review_layers,
     _deep_review_progress,
     _map_reduce,
+    _review_cache,
     quality_review,
     reading_queue,
     _review_attempt,
@@ -42,6 +43,7 @@ from zotero_summarizer.services.library._review_cache import (  # noqa: F401
     review_is_current,
 )
 from zotero_summarizer.services._common import state as get_state
+from zotero_summarizer.services.llm import factory
 
 LOGGER = logging.getLogger(__name__)
 _DEFAULT_TOP_K = 5
@@ -85,12 +87,14 @@ def _trim_jobs_locked() -> None:
         _JOBS.pop(key, None)
 
 
-def _set_job(item_key: str, **fields: Any) -> None:
-    """Merge ``fields`` into ``_JOBS[item_key]`` and trim finished jobs (lock-guarded)."""
+def _set_job(item_key: str, *, preserve_running: bool = False, **fields: Any) -> None:
+    """Merge and trim under the registry lock; admission errors may preserve active work."""
     if fields.get('status') in {'ready', 'error'}:
         fields['attempt'] = _review_attempt.current_metadata()
     with _LOCK:
         job = _JOBS.get(item_key) or {}
+        if preserve_running and job.get("status") == "running":
+            return
         job.update(fields)
         _JOBS[item_key] = job
         _trim_jobs_locked()
@@ -164,19 +168,6 @@ def _try_rebuild_render(item_key: str) -> None:
         LOGGER.warning("auto-rebuild after deep review failed for %s: %s", item_key, exc)
 
 
-def _write_digest_note(item_key: str, digest: PaperDigest) -> tuple[bool, str | None]:
-    from zotero_summarizer.services.library import review_detail
-    if review_detail.classify_item_key(item_key) != review_detail.SOURCE_LIBRARY:
-        return False, None
-    try:
-        from zotero_summarizer.services.zotero.zotero import zotero_upsert_digest_note
-        zotero_upsert_digest_note(item_key, digest)
-        return True, None
-    except Exception as exc:  # noqa: BLE001 — note write must not fail the digest
-        LOGGER.warning("digest note write for %s failed: %s", item_key, exc)
-        return False, f"{type(exc).__name__}: {exc}"
-
-
 def _review_one(
     item: dict[str, Any],
     *,
@@ -201,6 +192,7 @@ def _review_one(
 
     Missing items return None; missing PDFs report needs_pdf without acquisition.
     Accepted original-source evidence accompanies the policy-adjusted digest.
+    Publication and generated-note staging belong to the worker, not computation.
     """
     from zotero_summarizer.services.library._review_identity import build_review_identity, _source_sha
     from zotero_summarizer.services.library._digest_audit import bind_cached_audit
@@ -218,8 +210,6 @@ def _review_one(
 
     model_digest = digest_dump = quality_dump = goal_dump = paper_type_dump = section_overlay = code_link_dump = None
     reading_policy_flags: list[str] = []
-    note_written = False
-    note_error: str | None = None
 
     if pdf_path and quality_enabled:
         sink = progress_sink if progress_sink is not None else (lambda _p: None)
@@ -252,16 +242,14 @@ def _review_one(
             digest_dump, _, reading_policy_flags = apply_reading_policy(
                 digest_dump, quality_dump, goal_dump,
             )
-            digest = PaperDigest.model_validate(digest_dump)
+            PaperDigest.model_validate(digest_dump)
             if _source_sha(pdf_path) != review_identity['source_sha256']:
                 raise ValueError('Review source changed during verification')
-            reporter.phase("note")
-            note_written, note_error = _write_digest_note(item_key, digest)
             reporter.summary()
 
     final_identity = build_review_identity(config=config, pdf_path=pdf_path, source_kind=source_kind, focus_prompt=focus_prompt)
-    if feed_context is not None and review_identity != final_identity:
-        raise ValueError("feed review source changed during generation")
+    if review_identity != final_identity:
+        raise ValueError("Review source changed during generation")
     return bind_cached_audit({
         "review_contract_version": REVIEW_CONTRACT_VERSION,
         "review_identity": final_identity,
@@ -281,8 +269,8 @@ def _review_one(
         "login_url": "",
         "gate_relevance": item.get("gate_relevance"),
         "reviewed_at": now_iso_z(),
-        "zotero_note_written": note_written,
-        "zotero_note_error": note_error,
+        "zotero_note_written": False,
+        "zotero_note_error": None,
     })
 
 
@@ -329,9 +317,9 @@ def _build_ctx(reader: Any = None) -> dict[str, Any]:
         "config": config,
         "extractor": extractor,
         "quality_enabled": bool(cfg.enabled and extractor is not None),
-        "llm": app.resolve_stage_client("deep_review", enable_thinking=False),
-        "llm_digest": app.resolve_stage_client("deep_review", enable_thinking=provider.thinking_on),  # DIGEST reasons unless provider thinking_effort=off
-        "llm_map": app.resolve_stage_client("feed", enable_thinking=False) if cfg.chunk_strategy == "map_reduce" else None,
+        "llm": factory.resolve_stage_client(app, "deep_review", enable_thinking=False),
+        "llm_digest": factory.resolve_stage_client(app, "deep_review", enable_thinking=provider.thinking_on),  # DIGEST reasons unless provider thinking_effort=off
+        "llm_map": factory.resolve_stage_client(app, "feed", enable_thinking=False) if cfg.chunk_strategy == "map_reduce" else None,
         "prestige_scores": prestige_scores,
         "prestige_floor_value": prestige_floor_value,
         "lean_tier": bool(getattr(provider, "lean_deep_review", False)),  # ollama=prefill-bound→lean; keyed on flag, not is_local
@@ -398,16 +386,17 @@ def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str)
                         "source_url": acquired.source_url,
                     },
                 })
-        from zotero_summarizer.services.library import _feed_assessment
         feed_out = {}
         if context is not None:
+            from zotero_summarizer.services.library import _feed_assessment
             kwargs.update(feed_context=context, feed_out=feed_out)
         entry = _review_one(
             item, focus_prompt=focus_prompt,
             progress_sink=lambda prog: _set_job_progress(item_key, prog), **kwargs,
         )
         if entry is not None:
-            _feed_assessment.bind(entry, feed_out)
+            if context is not None:
+                _feed_assessment.bind(entry, feed_out)
             if item.get("acquired_pdf"):
                 entry["acquired_pdf"] = item["acquired_pdf"]
             if acquired is not None and not item.get("pdf_path"):
@@ -416,7 +405,12 @@ def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str)
                     entry["needs_login"] = True
                     entry["login_url"] = acquired.login_url
             if _review_attempt.publishable_entry(entry, get_current_review(item_key), acquired):
-                _write_one(item_key, entry)
+                with _review_cache.review_publication_lock():
+                    _write_one(item_key, entry)
+                    if entry.get("digest"):
+                        from zotero_summarizer.services.zotero.generated_notes import stage_current_digest
+                        _set_job_progress(item_key, {"phase": "note", "phase_label": "Preparing note proposal…"})
+                        stage_current_digest(item_key)
                 _try_rebuild_render(item_key)
         _set_job(item_key, status="ready", completed=1, progress={}, error=None, diagnostic=None)
     except Exception as exc:  # noqa: BLE001 — per-item background boundary
@@ -448,25 +442,16 @@ def start(
     reader: Any = None,
     feed_contexts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Kick off deep review(s). With ``item_keys`` set, reviews exactly those papers
-    (the per-paper button / the review-fleet); otherwise the top-``top_k`` unread picks.
-    ``focus_prompt`` shapes the LLM's emphasis. ``pdf_overrides`` (``item_key -> local
-    PDF path``) lets the fleet review from an acquired cache file instead of a missing
-    Zotero attachment (honored only for the ``item_keys`` branch).
+    """Start explicit papers or top unread picks on the provider-aware per-item pool.
 
-    ``acquire_missing`` (the per-paper button): for a pick with no local Zotero PDF,
-    fetch one first via ``_pdf_acquire`` (arXiv/OA/PMC headless → the browser using your
-    session) and review FROM THAT — so a paper without a Zotero attachment is fetched,
-    not just flagged ``needs_pdf``. The fleet leaves this off (it pre-acquires + passes
-    ``pdf_overrides``). Keep it to small ``item_keys`` runs — acquisition is a single
-    stateful browser session, serialized by a module lock, so concurrent acquires queue.
-
-    Each paper runs as its own job on the shared provider-aware pool — concurrent for a
-    remote provider, queued for a local one. Already-running papers are not re-submitted.
-    Returns aggregate ``status()`` + ``accepted`` (False for an explicit empty list).
-    Duplicate keys are submitted once, in first-seen order. On a setup failure
-    (no Zotero reader / queue build) the targeted papers are marked errored so their
-    panels surface the cause."""
+    Reader/PDF overrides preserve caller-selected input; optional acquisition stays
+    worker-bound. Feed contexts must match the complete explicit key set.
+    Duplicate keys retain first-seen order; an empty list changes no jobs.
+    Running papers are not resubmitted or settled by another request's setup error;
+    genuinely inactive targets still receive that failure. Local work queues while
+    remote work may run concurrently. Return aggregate status plus ``accepted``
+    (False for an explicit empty list).
+    """
     from zotero_summarizer.models.research_feed import FeedReviewContext
     contexts = {key: FeedReviewContext.model_validate(value).model_copy(deep=True)
                 for key, value in (feed_contexts or {}).items()}
@@ -484,7 +469,7 @@ def start(
         msg = f"{type(exc).__name__}: {exc}"
         LOGGER.warning("deep_review start failed: %s", msg)
         for key in item_keys or []:
-            _set_job(str(key), status="error", completed=1, progress={}, error=msg,
+            _set_job(str(key), preserve_running=True, status="error", completed=1, progress={}, error=msg,
                      started_at=now_iso_z())
         return {**status(), "accepted": True, "error": msg}
     for item in items:

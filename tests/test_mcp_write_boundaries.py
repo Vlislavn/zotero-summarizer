@@ -74,7 +74,10 @@ def test_reserved_url_characters_remain_identifier_data(tool, kwargs, field):
 
     def backend(request):
         requests.append(request)
-        return httpx.Response(200, json={"active_items": [], "items": []})
+        payload = {"active_items": [], "items": []}
+        if request.url.path == "/api/library/reading-queue":
+            payload["semantic"] = True
+        return httpx.Response(200, json=payload)
 
     result = run_tool(backend, tool, **{**kwargs, field: key})
     assert result["ok"] is True

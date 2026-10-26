@@ -247,6 +247,20 @@ def _retained_refinements(monkeypatch):
     pytest.param("dry", "", id="dry-empty-string"),
     pytest.param("pdf", True, id="pdf-bool-true"),
     pytest.param("pdf", "Yes", id="pdf-string-yes"),
+    pytest.param("live", True, id="live-bool-true"),
+    pytest.param("live", "Yes", id="live-string-yes"),
+    pytest.param("live", "No", id="live-string-no"),
+    pytest.param("live", False, id="live-bool-false"),
+    pytest.param("dry", True, id="dry-bool-true"),
+    pytest.param("dry", "Yes", id="dry-string-yes"),
+    pytest.param("dry", "No", id="dry-string-no"),
+    pytest.param("dry", False, id="dry-bool-false"),
+    pytest.param("pdf", "No", id="pdf-string-no"),
+    pytest.param("pdf", False, id="pdf-bool-false"),
+    pytest.param("pdf", "Read the entire paper.", id="pdf-affirmative-prose"),
+    pytest.param("pdf", "Digest is enough", id="pdf-negative-prose"),
+    pytest.param("pdf", "legacy-mode-Δ", id="pdf-opaque-string"),
+    pytest.param("pdf", "", id="pdf-empty-string"),
 ])
 @pytest.mark.parametrize("repair", [False, True], ids=["first", "repair"])
 def test_legacy_advice_projection_depends_only_on_source_mode(

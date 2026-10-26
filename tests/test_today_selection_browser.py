@@ -2,13 +2,14 @@
 import json
 import os
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
 from tests.test_application_browser_live import application_browser  # noqa: F401
 from tests.test_review_reading_browser import CONTRAST, _keyboard_disclosure, _no_overflow
 from zotero_summarizer.runtime import get_context
-from zotero_summarizer.services.library import _review_cache, _review_identity
+from zotero_summarizer.services.library import _review_cache, deep_review
 from zotero_summarizer.storage import feeds
 from zotero_summarizer.storage.feed_identity import stable_feed_key_from_parts
 
@@ -47,22 +48,24 @@ def _seed(settings, variant):
                       json.dumps({"grade": "A"}) if variant == "legacy" else None, key))
         conn.commit()
     if variant in {"current-A", "current-D", "needs-pdf", "not-ready", "stale", "failed"}:
-        identity = _review_identity.build_review_identity(
-            config=config, pdf_path="", source_kind="override", focus_prompt="",
-        )
-        entry = {"review_contract_version": _review_cache.REVIEW_CONTRACT_VERSION,
-                 "review_identity": identity, "quality": {"grade": variant[-1] if variant.startswith("current") else "B"},
-                 "digest": {"tldr": "Synthetic supplied storage evidence.", "read_decision": "skim"}}
-        if variant == "needs-pdf":
-            entry.update(needs_pdf=True, digest=None)
-        elif variant == "not-ready":
-            entry["digest"] = {}
-        elif variant == "stale":
-            identity["generation_sha256"] = "synthetic-obsolete-generation"
-        elif variant == "failed":
-            entry.update(error="synthetic attempt failure", digest=None)
+        if variant == 'needs-pdf':
+            reader = SimpleNamespace(get_item_detail=lambda _key: {'title': 'Synthetic Today paper', 'pdf_path': ''})
+            entry = deep_review._review_one({'item_key': key}, reader=reader,
+                config=config, extractor=None, llm=None, quality_enabled=False)
+            assert entry['digest'] is None and entry['model_digest'] is None
+        else:
+            from tests.test_research_feed import _review
+
+            signals = {'digest': {'tldr': '', 'executive_summary': '', 'key_findings': []}} if variant == 'not-ready' else {}
+            entry = _review(key, config=config, quality={'grade': variant[-1] if variant.startswith('current') else 'B',
+                                                        'missing_critical': [], 'red_flags': []}, **signals)
+            assert entry['verification_audit']['status'] == 'accepted_verifier_evidence'
+            if variant == 'stale':
+                entry['review_identity']['generation_sha256'] = 'synthetic-obsolete-generation'
+            elif variant == 'failed':
+                entry.update(error='synthetic attempt failure', digest=None)
         _review_cache._write_one(key, entry)
-        assert _review_cache.review_is_current(entry, key) == (variant not in {"stale", "failed"})
+        assert _review_cache.review_is_current(entry, key) == (variant not in {'stale', 'failed'})
     return key
 
 

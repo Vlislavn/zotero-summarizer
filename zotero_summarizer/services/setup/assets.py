@@ -10,6 +10,7 @@ from typing import Any
 from unittest.mock import patch
 
 from zotero_summarizer.services._common import read_config
+from zotero_summarizer.settings import offline_requested
 
 
 def model_targets(config: Any) -> list[tuple[str, str, str | None]]:
@@ -82,6 +83,8 @@ def asset_report(settings: Any, *, load: bool = False) -> dict[str, Any]:
 
 
 def prefetch_assets(settings: Any) -> dict[str, Any]:
+    if offline_requested():
+        raise RuntimeError("Cannot prefetch models in offline mode; use --check for cache inventory.")
     for key in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
         os.environ.pop(key, None)
     config = read_config(settings.config_path, settings.calibration_path)

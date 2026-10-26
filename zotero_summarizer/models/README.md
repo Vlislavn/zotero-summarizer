@@ -29,6 +29,12 @@ triage.py ──(domain)        all three ──*──> __init__.py  ──>  f
 | `setup.py` | the FROZEN `/api/setup/*` contract: `SetupStatusResponse` separates saved `configured` state from operational `ready` health (+ nested `ConfigStatus`/`LlmStatus`/`PathStatus`/`PathEntry`/`ZoteroStatus`/`ClassifierStatus` + a `subsystems: list[SubsystemStatus]` runtime-readiness array, additive — a not-ready entry names the down subsystem + reason without affecting the top-level `ready`), `DetectedZoteroDir`/`DetectZoteroResponse`, `UpdatePathsRequest`/`UpdatePathsResponse`, `ValidateConfigRequest`/`ValidateConfigResponse` (+ `FieldError`/`ConnectionResult`). SECURITY: `api_key_env` is only ever an env-var NAME; key presence is the BOOL `api_key_present` — no model here carries a secret value |
 | `__init__.py` | re-exports all of the above (the public `models` surface) |
 
+`PaperDigest` skip normalization clears targets/original-only value without adding
+omitted keys to `model_fields_set`. Explicit empty inputs retain their presence;
+new-generation admission remains separate from legacy-compatible defaults.
+Intentional later assignment still has ordinary Pydantic tracking; this metadata
+is not authentication of an original raw response.
+
 `ProviderConfig.capabilities` is an optional declared set (`text`,
 `native_json_schema`), intersected with enabled adapter paths; omission preserves
 legacy text support without asserting optional support. Loopback detection is
@@ -41,6 +47,11 @@ not false or Ready. No ResourceEnvelope is fabricated from these declarations.
 
 `ResolvedStage.fingerprint()` is the shared opaque identity of effective stage,
 provider settings and model. It reads no environment/keyring credential values.
+The derived stage schema accepts only stage/provider/model; arbitrary extra fields
+(including removed per-stage requirement inputs) raise validation errors instead
+of disappearing before credential/transport admission. No legacy requirement
+property/method or second capability policy is restored. Known-field serialized
+bytes and fingerprint inputs are unchanged.
 Consent and runtime cache admission use the same definition; callers can bind
 `resolve_stage_client(expected_identity=...)` to their expected processing
 snapshot instead of treating current metadata as proof about an opaque client.
@@ -82,3 +93,17 @@ surrounding whitespace. Normal decoding without that context retains legacy whit
 cleanup; saved summaries are not revalidated against source membership.
 
 The private corpus-prefilter provenance marker supports the optional practitioner diagnostic; it is not an LLM/public JSON field.
+
+`SystemMirrorRequest` is the closed system-history origin for composite notes and
+verdict mirrors. Its frozen source-specific intent binds the lookup key, current
+revision/content and native target; verdicts retain both the invocation lookup
+and selected source-row identity plus stored provenance. The canonical verdict
+HTML/marker/glyph definition lives beside these payload models so generation and
+storage admission share identical bytes without a storage-to-service dependency.
+Nullable historical/tombstone comments remain null in that intent, while the
+native clear-note presentation is empty; normalization does not rewrite provenance.
+Verdict effects admit only owned verdict-note payloads or normalized reading-label
+deltas. These are delivery receipts, never Pending approval or observed scientific
+truth. The former internal note-only request name is removed without an alias.
+
+`setup.py` also owns the closed internal `SetupLoadApprovalPolicy`, `LoadPolicyIdentity` and `EffectiveLoadEnvelope` file contracts. Strict integers exclude booleans/coercions; exact runtime identity/envelope matching remains service-owned. These add no public setup request fields.

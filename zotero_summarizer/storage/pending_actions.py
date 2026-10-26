@@ -11,7 +11,7 @@ from zotero_summarizer.models.api import (
     ZoteroItemCollectionUpdateRequest, ZoteroItemPriorityUpdateRequest, ZoteroItemTagUpdateRequest,
 )
 from zotero_summarizer.models.zotero_actions import (
-    GeneratedNoteProposal, MirrorNoteRequest, UserNotePayload, ZoteroTargetIdentity,
+    GeneratedNoteProposal, SystemMirrorRequest, UserNotePayload, VerdictNotePayload, ZoteroTargetIdentity,
 )
 from zotero_summarizer.storage import repositories
 
@@ -212,7 +212,7 @@ def _mirror_events(events: list[dict]) -> None:
     ):
         raise ValueError("Invalid mirror audit sequence")
     for event in events:
-        if (event.get("actor") != "system" or event.get("source") != "mirror_user_note" or
+        if (event.get("actor") != "system" or event.get("source") != events[0].get("source") or
                 not isinstance(event.get("at"), str) or not event["at"]):
             raise ValueError("Invalid mirror audit identity")
     for event in events[1:]:
@@ -230,28 +230,47 @@ def _mirror_events(events: list[dict]) -> None:
             raise ValueError("Invalid mirror terminal audit fields")
 
 
+def _verdict_effect(row: dict, request: SystemMirrorRequest, payload: dict) -> bool:
+    intent = request.requested
+    if row["change_type"] == "upsert_note":
+        note = VerdictNotePayload.model_validate(payload, strict=True)
+        return note.model_dump() == payload and note == VerdictNotePayload.for_intent(intent)
+    if row["change_type"] != "tag_changes":
+        return False
+    normalized = _requested("direct_tags", payload)
+    label = label_tag_for_priority(intent.value) if intent.value is not None else None
+    return (normalized["add_tags"] in ([], [label]) and
+            all(tag.casefold() in LABEL_TAG_CASEFOLDED and (label is None or tag.casefold() != label.casefold())
+                for tag in normalized["remove_tags"]) and
+            not {t.casefold() for t in normalized["add_tags"]} & {t.casefold() for t in normalized["remove_tags"]})
+
+
 def mirror_request(row: dict) -> dict | None:
     events = _audit(row)
     if not any(str(event.get("event", "")).startswith("mirror_") or
                str(event.get("source", "")).startswith("mirror_") for event in events):
         return None
     first = {key: value for key, value in events[0].items() if key != "at"}
-    request = MirrorNoteRequest.model_validate(first, strict=True)
+    request = SystemMirrorRequest.model_validate(first, strict=True)
     payload = row["payload_json"]
     payload = json.loads(payload) if isinstance(payload, str) else payload
     if (first != request.model_dump() or row.get("proposal_json") is not None or
             type(row.get("id")) is not int or row["id"] <= 0 or
-            row["item_key"] != request.requested.target_key or row["change_type"] != "upsert_note" or
-            row.get("backup_path") != request.backup_path or
-            UserNotePayload.model_validate(payload, strict=True).model_dump() != payload):
+            row["item_key"] != request.requested.target_key or row.get("backup_path") != request.backup_path or
+            not (row["change_type"] == "upsert_note" and
+                 UserNotePayload.model_validate(payload, strict=True).model_dump() == payload
+                 if request.source == "mirror_user_note" else _verdict_effect(row, request, payload))):
         raise ValueError("Invalid mirror creation declaration or effect")
     _mirror_events(events)
     return events[0]
 
 
 def history_request(row: dict) -> dict | None:
-    """Only the closed direct-human or composite system-mirror families are history."""
-    return direct_request(row) or mirror_request(row)
+    """Admit complete closed origins and lifecycle metadata before projecting history."""
+    origin = direct_request(row) or mirror_request(row)
+    if origin is not None and origin["event"] == "mirror_requested":
+        mirror_state(row)
+    return origin
 
 
 def ensure_pending(rows) -> None:
@@ -262,16 +281,24 @@ def ensure_pending(rows) -> None:
 
 
 def applying_blockers(conn, item_keys: list[str], target: ZoteroTargetIdentity, *,
-                      owned_claim: dict | None = None) -> list[int]:
-    """Uncapped item selection; exclude only this owner's full unchanged mirror claim."""
+                      owned_claims: list[dict] | None = None) -> list[int]:
+    """Exclude only the complete unchanged claims owned by this mirror batch."""
+    owned = {row["id"]: row for row in owned_claims or []}
+    if len(owned) != len(owned_claims or []):
+        raise ValueError("Duplicate owned mirror claims")
+    for expected in owned.values():
+        origin = ensure_claim(conn, expected)
+        if (origin["event"] != "mirror_requested" or origin["target"] != target.model_dump()
+                or expected["item_key"] not in item_keys):
+            raise ValueError("Owned exclusion requires matching mirror claims")
     slots = ",".join("?" for _ in item_keys)
     rows = conn.execute(f"SELECT * FROM pending_changes WHERE status='applying' "
                         f"AND item_key IN ({slots}) ORDER BY id", item_keys)
     blocked = []
     for raw in rows:
         row = dict(raw)
-        if owned_claim is not None and row["id"] == owned_claim["id"]:
-            if row != owned_claim or owned_claim["status"] != "applying" or mirror_request(row) is None:
+        if row["id"] in owned:
+            if row != owned[row["id"]] or mirror_request(row) is None:
                 raise ValueError("Owned mirror claim changed before admission")
             continue
         try:
@@ -329,10 +356,8 @@ def claim_direct(conn, item_key: str, item_title: str, actions: list[dict], requ
     return claimed
 
 
-def claim_mirror(conn, item_title: str, request: MirrorNoteRequest, payload: UserNotePayload) -> dict:
-    return _insert_claims(conn, request.requested.target_key, item_title, [
-        {"change_type": "upsert_note", "payload_json": payload.model_dump()},
-    ], request.model_dump())[0]
+def claim_mirror(conn, item_title: str, request: SystemMirrorRequest, actions: list[dict]) -> list[dict]:
+    return _insert_claims(conn, request.requested.target_key, item_title, actions, request.model_dump())
 
 
 def native_partition(claimed: list[dict], result: dict) -> dict[int, dict]:
@@ -413,8 +438,9 @@ def acknowledge_mirror(conn, expected: dict) -> None:
         raise ValueError("Applied mirror receipt changed before acknowledgement")
     require_applied_mirror(actual)
     if _audit(actual)[-1]["event"] != "mirror_acknowledged":
+        origin = mirror_request(actual)
         record(conn, actual["id"], {"event": "mirror_acknowledged", "actor": "system",
-                                  "source": "mirror_user_note"})
+                                  "source": origin["source"]})
 
 
 def mirror_receipts(conn, item_key: str) -> Iterator[tuple[dict, dict]]:

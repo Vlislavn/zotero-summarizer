@@ -77,6 +77,8 @@ class Settings:
     # App-owned browser profile for university institutional access (persistent
     # login session). Default under data/; overridable via UniversityAccessConfig.
     browser_profile_dir: Path
+    setup_load_approval_policy_path: Path | None = None
+    setup_load_approved_policy_sha256: str | None = None
     feedback_schedule_enabled: bool = False
     feedback_schedule_max_windows: int = 2
     feedback_schedule_wall_cap_seconds: float = 240.0
@@ -148,5 +150,8 @@ class Settings:
             paper_render_dir=data_dir / "paper_render",
             search_dir=data_dir / "search",
             browser_profile_dir=data_dir / "browser_profile",
+            setup_load_approval_policy_path=(Path(os.environ["ZS_SETUP_LOAD_APPROVAL_POLICY_PATH"])
+                if "ZS_SETUP_LOAD_APPROVAL_POLICY_PATH" in os.environ else None),
+            setup_load_approved_policy_sha256=os.getenv("ZS_SETUP_LOAD_APPROVED_POLICY_SHA256"),
             **_feedback_schedule_env(),
         )

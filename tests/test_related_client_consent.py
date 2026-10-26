@@ -54,7 +54,7 @@ def test_private_payload_never_uses_client_built_before_actual_config_swap(tmp_p
 
     monkeypatch.setattr(factory, "build_client_for_stage", build)
     with ThreadPoolExecutor(max_workers=1) as pool:
-        old_build = pool.submit(app.resolve_stage_client, "deep_review")
+        old_build = pool.submit(factory.resolve_stage_client, app, "deep_review")
         try:
             assert entered_a.wait(BARRIER_CAP_SECONDS), "test-owned A builder was not entered"
             changed = asyncio.run(config_service.update_runtime_config(config_b))

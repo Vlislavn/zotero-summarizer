@@ -46,3 +46,33 @@ class ScriptedClient:
     def prompt(self, prompt):
         self.calls.append((prompt, None, {}))
         return '{"answer":null,"quote":null,"abstained":true}'
+
+
+def run_review(client, condition='C', *, strategy='rank', paper=None, config=None, budget=None, mapper=None, trace=None):
+    from zotero_summarizer.services.library.interpretation import review
+    from zotero_summarizer.services.library._interpretation_trace import Trace
+
+    original, default_config, default_budget = inputs()
+    if paper is not None and isinstance(paper.get('text'), str):
+        default_config.quality_review.max_text_chars = len(paper['text']) + 10
+        default_budget = default_budget._replace(max_chars=len(paper['text']) + 10)
+    config = config if config is not None else default_config
+    config.quality_review.chunk_strategy = strategy
+    return review(paper if paper is not None else original, config,
+                  (mapper if mapper is not None else client, client),
+                  budget if budget is not None else default_budget, condition,
+                  trace if trace is not None else Trace(max_calls=100))
+
+
+def reply(payload, form):
+    import json
+    from zotero_summarizer.models.interpretation import InterpretationDigest
+
+    if form == 'parsed':
+        return InterpretationDigest.model_validate(payload)
+    if form == 'dict':
+        return deepcopy(payload)
+    text = json.dumps(payload)
+    if form == 'fenced':
+        return '```json\n' + text + '\n```'
+    return 'Here is the digest: ' + text + ' End.' if form == 'prose' else text

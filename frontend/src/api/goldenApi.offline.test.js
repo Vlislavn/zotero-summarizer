@@ -62,6 +62,18 @@ it('refuses a received detail for a different paper without overwriting the owne
   expect(await offline.cachedResponse('review:P1')).toEqual(owned);
 });
 
+it('reads the durable local detail without dispatch after a known outage while the browser advertises online', async () => {
+  const offline = await import('../offlineStore.js');
+  const detail = { item_key: 'P1', user_note: 'Retained device note', verdict: null };
+  await offline.cacheResponse('review:P1', detail);
+  await offline.publishStatus('Owned transport unavailable', 'unavailable');
+  vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Unexpected repeated network attempt')));
+  const { fetchReviewDetail } = await import('./goldenApi.js');
+  expect(await fetchReviewDetail('P1')).toEqual(detail);
+  expect(fetch).not.toHaveBeenCalled();
+});
+
 it('captures explicit local intent without another blocking request after a known transport outage', async () => {
   const offline = await import('../offlineStore.js');
   await offline.publishStatus('Owned connection refused', 'unavailable');

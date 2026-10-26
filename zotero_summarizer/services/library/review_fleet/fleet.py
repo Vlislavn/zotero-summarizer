@@ -159,8 +159,7 @@ def _set_progress(progress: dict[str, Any]) -> None:
 
 
 def _current_cache(item_key: str) -> dict[str, Any] | None:
-    cached = deep_review.get_cached_review(item_key)
-    return cached if deep_review.review_is_current(cached, item_key) else None
+    return deep_review.get_current_review(item_key)
 
 
 def _usable_cache(item_key: str) -> dict[str, Any] | None:

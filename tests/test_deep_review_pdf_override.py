@@ -47,9 +47,12 @@ def _wire(monkeypatch, *, detail, quality_basis="full_text"):
     monkeypatch.setattr(deep_review._deep_review_layers, "extra_layers",
                         lambda ctx: (QualityEval(grade="A", basis=quality_basis, quality_band="highlight").model_dump(),
                                      goals, {"type": "x"}, None, None))
-    # The note write is a local import inside _review_one — patch the source symbol.
-    from zotero_summarizer.services.zotero import zotero as zsvc
-    monkeypatch.setattr(zsvc, "zotero_upsert_digest_note", lambda *_a, **_k: None)
+    from zotero_summarizer.services.zotero import generated_notes
+
+    def forbidden_stage(*_args, **_kwargs):
+        pytest.fail("One-paper computation must not reach worker-owned proposal staging")
+
+    monkeypatch.setattr(generated_notes, "stage_current_digest", forbidden_stage)
     return reader, extractor, seen
 
 

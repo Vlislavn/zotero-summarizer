@@ -25,8 +25,8 @@ export default function NotConfiguredCard() {
         <div className="flex-1 leading-snug">
           <p className="font-semibold">Finish setting up Zotero Summarizer</p>
           <p className="text-xs text-teal-800 mt-0.5">
-            Add an LLM key and describe your research so the feed can be scored
-            against your goals. Zotero can be connected later for sync.
+            Choose AI or ML-only operation and describe your research so the feed
+            can be scored against your goals. Zotero can be connected later for sync.
           </p>
         </div>
         <button

@@ -222,3 +222,59 @@ def test_probe_worker_owns_exclusion_past_executor_shutdown(monkeypatch):
         assert returned.wait(2)
         assert _WORKER.acquire(timeout=2)
         _WORKER.release()
+
+
+def test_operational_callback_return_without_native_inventory_is_not_success():
+    attempt = SetupAttempt()
+    result = attempt.run(lambda: {"status": "operational"}, timeout=operational_check._PROBE_TIMEOUT_SECS)
+    assert result["status"] == "fail"
+    assert result["reason_code"] == "request_inventory_missing"
+
+
+def test_nonempty_unobserved_probe_output_is_not_native_completion(monkeypatch):
+    provider = ProviderConfig(name="fixture", base_url="https://synthetic.invalid/v1", api_key_env="FIXTURE_KEY")
+    closed = []
+
+    def construct(actual_provider, model, *, verification):
+        assert actual_provider == provider and model == "synthetic" and verification is True
+        return SimpleNamespace(prompt=lambda _: "ok", close=lambda: closed.append(True))
+
+    monkeypatch.setattr(operational_check, "build_client_for_provider", construct)
+    result = operational_check.probe_provider(provider, "synthetic")
+    assert result["status"] == "fail"
+    assert result.get("observed_operational") is not True
+    assert result["request_completion"]["expected"] == 0
+    assert result["ownership"] == "not_submitted" and closed == [True]
+
+
+def test_later_callback_does_not_borrow_predecessor_native_inventory():
+    from uuid import uuid4
+    import httpx
+
+    attempt = SetupAttempt()
+    request = attempt.requests.expect("synthetic", "synthetic", "https://synthetic.invalid/v1/chat/completions", local=False)
+    native_id = uuid4()
+    request.native_started(native_id)
+    request.transport_started(httpx.Request("POST", "https://synthetic.invalid/v1/chat/completions", json={"model": "synthetic"}))
+    request.terminal("synthetic", "stop", native_id=native_id, native_required=True)
+    result = attempt.run(lambda: {"status": "fail", "ownership": "not_submitted", "attempted": False},
+                         timeout=operational_check._PROBE_TIMEOUT_SECS)
+    assert result["attempted"] is False and result["ownership"] == "not_submitted"
+    assert result["request_completion"]["expected"] == 0
+    assert attempt.receipt()["request_completion"]["expected"] == 1
+
+
+def test_owned_tcp_fixture_closes_listener_before_any_setup_failure(tmp_path, monkeypatch):
+    import sys
+    from tests import _setup_owned_loopback as fixture
+
+    closed = []
+    permit = SimpleNamespace(open=lambda: SimpleNamespace(settimeout=lambda _: None), address=("127.0.0.1", 1),
+                             resolve=lambda *_a, **_k: pytest.fail("No DNS allowed"),
+                             connect=lambda *_a, **_k: pytest.fail("No TCP allowed"), close=lambda: closed.append(True))
+    monkeypatch.setattr(sys, "_zs_setup_owned_loopback", permit, raising=False)
+    monkeypatch.setattr(fixture, "write_policy", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("owned setup failure")))
+    with pytest.raises(RuntimeError, match="owned setup failure"):
+        with fixture.owned_sdk_wire(tmp_path, monkeypatch, "complete"):
+            pytest.fail("Failed setup yielded a native client")
+    assert closed == [True]

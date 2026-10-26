@@ -75,7 +75,7 @@ export async function fetchReviewDetail(itemKey) {
     console.warn('offline detail cache unavailable', { stage, name: error.name, message: diagnostic.message });
     return diagnostic;
   }
-  if (!navigator.onLine) {
+  if (!navigator.onLine || transportUnavailable()) {
     try {
       const cached = await cachedReviewDetail(itemKey);
       if (cached) return cached;

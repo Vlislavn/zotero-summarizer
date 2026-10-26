@@ -97,7 +97,7 @@ def test_rss_write_uncertainty_does_not_reuse_verified_health(question_browser, 
     lab.context.route(lab.server.origin + "/api/**", _doctor_route(lab, before, observations))
     page.goto(lab.server.origin + "/settings#rss-feeds")
     expect(page.get_by_text("✓ Setup verified", exact=True)).to_be_visible()
-    region = page.get_by_role("region", name="RSS sources")
+    region = page.locator('#rss-feeds')
     expect(region.get_by_role("button", name="Save", exact=True)).to_be_visible()
     target = lab.server.origin + "/api/rss/feeds/" + str(before[0]["id"])
     lab.context.route(target, _write_route(lab, outcome, before, fault))

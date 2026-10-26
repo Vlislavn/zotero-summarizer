@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
 import {
   fetchJobs,
   fetchJob,
@@ -8,7 +7,6 @@ import {
   fetchLatestResultFeedback,
   submitResultFeedback,
 } from '../api/triageApi.js';
-import { triggerTriageBacklog } from '../api/dailyApi.js';
 import { humanizeError } from '../utils/humanizeError.js';
 import Async from '../components/ui/Async.jsx';
 import { ActionBadge } from '../components/ui/Badge.jsx';
@@ -115,11 +113,6 @@ export default function Triage() {
   // Last seen status of the active job, so we can auto-refresh calibration the
   // moment a job transitions out of `running` (EDGE 4).
   const prevStatusRef = useRef(null);
-  const runMutation = useMutation({
-    mutationFn: triggerTriageBacklog,
-    onSuccess: () => { setMessage('Triage started — check job list.'); setIsError(false); loadJobs(); },
-    onError: (err) => { setMessage(humanizeError(err)); setIsError(true); },
-  });
   const jobListRef = useRef(null);
 
   // Completed results, optionally narrowed to the ones still awaiting your
@@ -313,19 +306,12 @@ export default function Triage() {
         <div>
           <h2 className="font-display text-xl font-light text-slate-900">Triage Monitor</h2>
           <p className="text-sm text-slate-600">
-            Watch active triage jobs and review feedback metrics. Start new jobs from the
-            Library tab.
+            Watch selected-item triage jobs and review feedback metrics. Start new jobs from the
+            Library tab. Feed backlog triage runs in{' '}
+            <a href="/today" className="text-teal-700 underline">Today</a>, separate from these jobs.
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => runMutation.mutate()}
-            disabled={runMutation.isPending}
-            className="px-3 py-1.5 rounded-lg border border-teal-600 bg-teal-600 text-white text-xs font-medium hover:bg-teal-700 disabled:opacity-50"
-          >
-            {runMutation.isPending ? 'Starting…' : 'Run triage now'}
-          </button>
           <button
             type="button"
             onClick={() => { loadJobs(); if (activeJobId) loadJob(activeJobId); }}

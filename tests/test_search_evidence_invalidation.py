@@ -11,6 +11,7 @@ from test_search_question_evidence import journey, run, stored_session
 from zotero_summarizer.api.routes import search
 from zotero_summarizer.models.providers import resolve_stage
 from zotero_summarizer.services import _common
+from zotero_summarizer.services.llm import factory
 from zotero_summarizer.services.search import _question_evidence as evidence
 from zotero_summarizer.services.search import pipeline, session
 
@@ -62,7 +63,7 @@ def test_changed_current_evaluator_suppresses_active_answer_without_client_or_wr
         monkeypatch.setattr(evidence, "_VERIFY", evidence._VERIFY + "\nProtocol revision two.")
     no_clients = Mock(side_effect=AssertionError("saved reads must not construct clients"))
     monkeypatch.setattr(search, "default_deps", no_clients)
-    monkeypatch.setattr(_common.state(), "resolve_stage_client", no_clients)
+    monkeypatch.setattr(factory, "resolve_stage_client", no_clients)
     app = FastAPI()
     app.include_router(search.router)
 

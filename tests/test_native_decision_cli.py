@@ -1,11 +1,13 @@
 """Real parser -> adapter -> report -> immutable artifact wiring; no live endpoint."""
+from pathlib import Path
+
 import httpx
 import pytest
 
 from tools.method_validation.__main__ import main
 from tools.method_validation import support_run
 from tools.method_validation.decision_adapter import NativeDecisionAdapter, payload, prompt
-from tools.method_validation.support import SupportCase, encoded, loads
+from tools.method_validation.support import SupportCase, encoded, loads, sha
 from test_support_fixtures import (
     ENDPOINT, MODEL, SENTINEL, fixture, native_wire, rows_at, validated,
 )
@@ -299,6 +301,85 @@ def test_default_native_http_controls_and_direct_adapter_call_cap(tmp_path, monk
     with pytest.raises(ValueError, match='budget'):
         adapter(request, retained.append)
     assert len(calls) == 1 and len(retained) == 1
+
+
+def deadline_case(tmp_path, task):
+    from tools.method_validation import collections, collections_run, priority, priority_run
+    from test_priority_boundaries import wire as priority_wire
+    from test_priority_fixtures import fixture as priority_fixture, write_ref
+    from test_collection_native import native as collection_fixture
+    from test_collection_fixtures import response, save
+
+    if task == 'support':
+        values, _, _, _ = fixture(tmp_path, kind='native')
+        return validated(values), support_run, encoded(native_wire()), 'pair', encoded(values)
+    if task == 'priority':
+        values, _, _ = priority_fixture(tmp_path, native=True)
+        inputs = loads(Path(values['inputs']['path']).read_bytes())
+        truth = loads(Path(values['gold']['path']).read_bytes())
+        inputs['papers'] = inputs['papers'][:1]
+        selected = priority.identity(priority.Paper.model_validate(inputs['papers'][0]))
+        truth['labels'] = [row for row in truth['labels'] if row['identity'] == selected]
+        values['inputs'] = write_ref(tmp_path / 'inputs.json', inputs)
+        values['gold'] = write_ref(tmp_path / 'gold.json', truth)
+        return priority.Config.model_validate(values), priority_run, encoded(priority_wire()), 'case', encoded(values)
+    cfg, _ = collection_fixture(tmp_path)
+    values = cfg.model_dump(mode='json')
+    inputs, truth = loads(cfg.inputs.path.read_bytes()), loads(cfg.gold.path.read_bytes())
+    inputs['papers'] = inputs['papers'][:1]
+    inputs['tree']['nodes'] = [node for node in inputs['tree']['nodes'] if node['key'] == 'A']
+    selected = collections.identity(collections.Paper.model_validate(inputs['papers'][0]))
+    truth['labels'] = [dict(row, memberships=[key for key in row['memberships'] if key == 'A'])
+                       for row in truth['labels'] if row['identity'] == selected]
+    values = save(tmp_path, values, inputs, truth)
+    return collections.Config.model_validate(values), collections_run, response(), 'case', encoded(values)
+
+
+@pytest.mark.parametrize('task', ['support', 'priority', 'collection'])
+@pytest.mark.parametrize('late', [False, True])
+def test_full_run_uses_remaining_deadline_not_idle_timeout(tmp_path, monkeypatch, task, late):
+    from tools.method_validation import decision_adapter
+
+    cfg, runtime, raw, prefix, raw_config = deadline_case(tmp_path, task)
+    remaining = min(cfg.idle_timeout_seconds / 2, cfg.max_run_seconds / 4)
+    clock, caller_ticks, consumed, requests = [0.0], [0], [], []
+    steps = 4
+    interval = remaining * (2 if late else 0.5) / steps
+
+    def caller_clock():
+        caller_ticks[0] += 1
+        if caller_ticks[0] == 2:
+            clock[0] = cfg.max_run_seconds - remaining
+        return clock[0]
+
+    class Trickle(httpx.SyncByteStream):
+        def __iter__(self):
+            for index in range(steps):
+                clock[0] += interval
+                consumed.append(index)
+                yield raw[len(raw) * index // steps:len(raw) * (index + 1) // steps]
+
+    def server(request):
+        requests.append(request)
+        assert 0 < interval < request.extensions['timeout']['read']
+        return httpx.Response(200, stream=Trickle())
+
+    monkeypatch.setattr(runtime, 'monotonic', caller_clock)
+    monkeypatch.setattr(decision_adapter, 'monotonic', lambda: clock[0])
+    owner, report = runtime.run(cfg, raw_config, transport=httpx.MockTransport(server))
+    row = loads((owner / f'{prefix}-0.json').read_bytes())
+    terminal = (owner / row['terminal']).read_bytes()
+    assert row['arm_id'] == cfg.arms[0].arm_id and len(requests) == 1
+    assert row['telemetry']['dispatched'] is True and row['telemetry']['attempt'] == 1
+    assert row['request_sha256'] == sha(requests[0].content)
+    assert row['status'] == ('timeout' if late else 'decision')
+    if late:
+        assert row['readout'] is None and row['telemetry']['raw_complete'] is False
+        assert raw.startswith(terminal) and 0 < len(terminal) < len(raw)
+        assert len(consumed) < steps
+    else:
+        assert row['readout'] is not None and terminal == raw and len(consumed) == steps
+    assert runtime.reopen(owner) == report and len(requests) == 1
 
 
 def test_programmer_error_propagates_and_marks_failed_owner(tmp_path):

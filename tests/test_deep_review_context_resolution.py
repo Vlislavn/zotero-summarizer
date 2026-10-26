@@ -25,7 +25,8 @@ def context_io(monkeypatch):
     provider = SimpleNamespace(name="owned-provider", thinking_on=True, lean_deep_review=True, structured_output=True)
     app = _fake_state(config, extractor=extractor, reader=reader)
     app.resolve_stage_provider = Mock(return_value=provider)
-    app.resolve_stage_client = Mock(side_effect=clients)
+    client = Mock(side_effect=clients)
+    monkeypatch.setattr(deep_review.factory, "resolve_stage_client", client)
     prestige = {"OWNED001": {"prestige": 1}}
     state, library = Mock(return_value=app), Mock(return_value=reader)
     loader, concurrency = Mock(return_value=(prestige, 2.0)), Mock(return_value=7)
@@ -34,7 +35,7 @@ def context_io(monkeypatch):
     trace = Mock()
     for name, callback in (("state", state), ("reader", library), ("resolve", routing),
                            ("provider", app.resolve_stage_provider), ("prestige", loader),
-                           ("client", app.resolve_stage_client), ("concurrency", concurrency), ("schema", schema)):
+                           ("client", client), ("concurrency", concurrency), ("schema", schema)):
         trace.attach_mock(callback, name)
     monkeypatch.setattr(deep_review, "get_state", state)
     monkeypatch.setattr(zotero_svc, "get_library_reader", library)
@@ -43,7 +44,7 @@ def context_io(monkeypatch):
     monkeypatch.setattr(deep_review, "deep_review_sub_concurrency", concurrency)
     monkeypatch.setattr(deep_review.quality_review, "build_response_format", schema)
     return SimpleNamespace(config=config, app=app, reader=reader, extractor=extractor, clients=clients,
-                           provider=provider, prestige=prestige, state=state, library=library, loader=loader,
+                           provider=provider, prestige=prestige, state=state, library=library, loader=loader, client=client,
                            concurrency=concurrency, routing=routing, schema=schema, trace=trace,
                            real_resolve=real_resolve, real_schema=real_schema)
 
@@ -74,11 +75,11 @@ def test_factory_preserves_exact_objects_keys_routing_and_callback_order(context
     io.app.resolve_stage_provider.assert_called_once_with("deep_review")
     io.loader.assert_called_once_with()
     io.concurrency.assert_called_once_with(io.provider)
-    calls = io.app.resolve_stage_client.call_args_list
-    assert calls[0].args == ("deep_review",) and calls[0].kwargs == {}
-    assert calls[1].args == ("deep_review",) and calls[1].kwargs == {"enable_thinking": thinking}
+    calls = io.client.call_args_list
+    assert calls[0].args == (io.app, "deep_review") and calls[0].kwargs == {"enable_thinking": False}
+    assert calls[1].args == (io.app, "deep_review") and calls[1].kwargs == {"enable_thinking": thinking}
     if strategy == "map_reduce":
-        assert len(calls) == 3 and calls[2].args == ("feed",) and calls[2].kwargs == {}
+        assert len(calls) == 3 and calls[2].args == (io.app, "feed") and calls[2].kwargs == {"enable_thinking": False}
     else:
         assert len(calls) == 2
     if reader_mode == "override":
@@ -107,7 +108,7 @@ def test_quality_admission_does_not_change_default_client_resolution(context_io,
     ctx = deep_review._build_ctx()
     assert ctx["quality_enabled"] is (enabled and has_extractor)
     assert ctx["extractor"] is io.app.pdf_extractor
-    assert io.app.resolve_stage_client.call_count == 2
+    assert io.client.call_count == 2
     assert ctx["llm"] is io.clients[0] and ctx["llm_digest"] is io.clients[1]
 
 
@@ -142,7 +143,7 @@ def test_provider_optional_flags_and_name_keep_existing_defaults(context_io):
     ctx = deep_review._build_ctx()
     assert ctx["_provider"] is provider and ctx["lean_tier"] is False and ctx["response_format"] is None
     assert ctx["provenance"]["provider"] == expected_route.provider.name
-    assert io.app.resolve_stage_client.call_args_list[1].kwargs == {"enable_thinking": False}
+    assert io.client.call_args_list[1].kwargs == {"enable_thinking": False}
     io.concurrency.assert_called_once_with(provider)
     io.schema.assert_not_called()
 
@@ -165,7 +166,7 @@ def test_factory_failure_propagates_at_original_callback_position(context_io, fa
     if failure.endswith("client"):
         replies = list(io.clients)
         replies[{"generic_client": 0, "digest_client": 1, "map_client": 2}[failure]] = error
-        io.app.resolve_stage_client.side_effect = replies
+        io.client.side_effect = replies
     else:
         callback = io.app.resolve_stage_provider if failure == "provider" else getattr(io, {"reader": "library", "prestige": "loader"}.get(failure, failure))
         callback.side_effect = error

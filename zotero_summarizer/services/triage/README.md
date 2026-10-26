@@ -10,7 +10,9 @@ SQLite-locked current verdict remains positive; a newer Trash produces a
 
 Turns raw RSS feed items into scored, ranked `processed_feed_items` rows that
 the Today tab consumes. The cheap `model/` gate fast-rejects; survivors get an
-LLM summary + composite score.
+LLM summary + composite score. Summarization and the legacy LLM backlog drain
+resolve clients through `services.llm.factory` with the existing runtime cache;
+the default ML-only drain never resolves a client.
 
 ```
 Zotero feedItems ─feeds.run_daemon_tick→ gate(model) ─reject──> dropped
@@ -163,6 +165,13 @@ Python cannot interrupt a native call or withdraw an already-submitted provider
 request: timeouts/cancellation may take longer than the configured deadline,
 and the current call may still incur cost. For a forcibly bounded local stop,
 process isolation is required. No detached thread is declared terminal here.
+
+Successful model-refined abstract summaries expose `should_deep_read="No"` in
+legacy response JSON. The shared live/Doctor abstract boundary owns this projection,
+not the model's wording. Received refinement and triage input remain unchanged;
+PDF advice, other fields, scoring and failure propagation retain their contracts.
+This is not a scientific-quality verdict or the full-text reading policy, and it
+does not rewrite saved summaries or add model calls.
 
 Refinement validates JSON against `RefinedSummary`. Its single existing repair
 attempt receives that model's canonical JSON schema and the actual parse/validation

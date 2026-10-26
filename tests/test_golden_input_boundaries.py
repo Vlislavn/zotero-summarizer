@@ -1,6 +1,7 @@
 """HTTP key normalization and ownership of explicit app verdicts."""
 
 import asyncio
+import sqlite3
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -14,7 +15,6 @@ from zotero_summarizer.api.routes import golden
 from zotero_summarizer.api.routes import _golden_helpers
 from zotero_summarizer.integrations.zotero_write import ZoteroWriteError
 from zotero_summarizer.services.golden import label_verdicts, user_labels, verdict_effects
-from zotero_summarizer.services.zotero import zotero
 from zotero_summarizer.storage import repositories as db
 from zotero_summarizer.runtime import AppContext, set_context
 from zotero_summarizer.services.setup.bootstrap import bootstrap_phase0
@@ -125,7 +125,9 @@ def test_online_confirmation_without_csv_provenance_takes_app_ownership(tmp_path
     db.insert_or_update_label_verdict(path, item_key="PARENT", original_derived_priority=original,
                                      user_priority="must_read", comment="")
     revision = db.sync_current_fields(path)[("PARENT", "verdict")]["revision"]
-    zotero.zotero_set_label_tag("PARENT", None)
+    with sqlite3.connect(zdb) as conn:
+        conn.execute("DELETE FROM itemTags WHERE itemID=? AND tagID IN "
+                     "(SELECT tagID FROM tags WHERE name='label:must_read')", (item,))
     monkeypatch.setattr(writer, "is_connector_running", lambda: True)
     monkeypatch.setattr(golden, "_load_all", lambda: [])
     monkeypatch.setattr(verdict_effects, "append_training_row", lambda *args: None)

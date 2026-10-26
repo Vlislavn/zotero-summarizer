@@ -40,8 +40,8 @@ def _stamp(cands: list[Candidate], *, source: str, variant: str, at: str) -> lis
     return cands
 
 
-def _arxiv_channel(query: str, quota: int, at: str) -> list[Candidate]:
-    hits = search_arxiv(query, max_results=quota)
+def _arxiv_channel(query: str, quota: int, at: str, *, outcome: dict | None = None) -> list[Candidate]:
+    hits = search_arxiv(query, max_results=quota, **({"outcome": outcome} if outcome is not None else {}))
     cands = [
         Candidate(
             title=h.title, abstract=h.abstract, arxiv_id=h.arxiv_id, doi=h.doi,
@@ -52,8 +52,8 @@ def _arxiv_channel(query: str, quota: int, at: str) -> list[Candidate]:
     return _stamp(cands, source="arxiv", variant=query, at=at)
 
 
-def _europepmc_channel(query: str, quota: int, at: str) -> list[Candidate]:
-    hits = search_europepmc(query, page_size=quota)
+def _europepmc_channel(query: str, quota: int, at: str, *, outcome: dict | None = None) -> list[Candidate]:
+    hits = search_europepmc(query, page_size=quota, **({"outcome": outcome} if outcome is not None else {}))
     cands = [
         Candidate(
             title=h.title, abstract=h.abstract, doi=h.doi, pmid=h.pmid, pmcid=h.pmcid,
@@ -86,8 +86,8 @@ def _openalex_channel(client: Any, query: str, quota: int, at: str, *, semantic:
     return _stamp(cands, source="openalex", variant=variant, at=at)
 
 
-def _crossref_channel(query: str, quota: int, at: str, mailto: str | None) -> list[Candidate]:
-    hits = search_crossref(query, rows=quota, mailto=mailto)
+def _crossref_channel(query: str, quota: int, at: str, mailto: str | None, *, outcome: dict | None = None) -> list[Candidate]:
+    hits = search_crossref(query, rows=quota, mailto=mailto, **({"outcome": outcome} if outcome is not None else {}))
     cands = [
         Candidate(
             title=h.title, abstract=h.abstract, doi=h.doi,
@@ -98,8 +98,8 @@ def _crossref_channel(query: str, quota: int, at: str, mailto: str | None) -> li
     return _stamp(cands, source="crossref", variant=query, at=at)
 
 
-def _semantic_scholar_channel(query: str, quota: int, at: str) -> list[Candidate]:
-    hits = search_semantic_scholar(query, limit=quota)
+def _semantic_scholar_channel(query: str, quota: int, at: str, *, outcome: dict | None = None) -> list[Candidate]:
+    hits = search_semantic_scholar(query, limit=quota, **({"outcome": outcome} if outcome is not None else {}))
     cands = [
         Candidate(
             title=h.title, abstract=h.abstract, doi=h.doi, arxiv_id=h.arxiv_id, pmid=h.pmid,
@@ -204,11 +204,11 @@ def federate(
 
     add_variant_tasks(
         "arxiv", _variant_queries(plan.arxiv_variants, plan.arxiv),
-        lambda q, n: _arxiv_channel(q, n, at),
+        lambda q, n, **kw: _arxiv_channel(q, n, at, **kw), channel="arxiv",
     )
     add_variant_tasks(
         "europepmc", _variant_queries(plan.europepmc_variants, plan.europepmc),
-        lambda q, n: _europepmc_channel(q, n, at),
+        lambda q, n, **kw: _europepmc_channel(q, n, at, **kw), channel="europepmc",
     )
     add_variant_tasks(
         "openalex", _variant_queries(plan.openalex_lexical_variants, plan.openalex_lexical, cap=2),
@@ -218,10 +218,11 @@ def federate(
                       lambda q, n, **kw: _openalex_channel(openalex_client, q, n, at, semantic=True, **kw),
                       channel="openalex_semantic")
     if plan.crossref:
-        add_variant_tasks("crossref", [plan.crossref], lambda q, n: _crossref_channel(q, n, at, crossref_mailto))
+        add_variant_tasks("crossref", [plan.crossref],
+                          lambda q, n, **kw: _crossref_channel(q, n, at, crossref_mailto, **kw), channel="crossref")
     if plan.semantic_scholar:
         add_variant_tasks("semantic_scholar", [plan.semantic_scholar],
-                          lambda q, n: _semantic_scholar_channel(q, n, at))
+                          lambda q, n, **kw: _semantic_scholar_channel(q, n, at, **kw), channel="semantic_scholar")
     if plan.openreview and openreview_client is not None:
         add_variant_tasks("openreview", [plan.openreview], lambda q, n: _openreview_channel(
             q, or_client=openreview_client, openalex_client=openalex_client, quota=n, at=at))

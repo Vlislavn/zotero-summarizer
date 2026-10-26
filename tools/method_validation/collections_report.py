@@ -16,7 +16,8 @@ def paper_outcomes(rows, questions, eligible):
     for key, group in groups.items():
         first = group[0]
         native = first['capability'] == 'native_membership'
-        complete = (len(group) == len(questions) and all(r['status'] == 'decision'
+        complete = (len(group) == len(questions) and {r['node_key'] for r in group} == set(questions)
+            and all(r['status'] == 'decision'
             and r['label'] != 'insufficient_evidence' for r in group)) if native else first['status'] == 'decision'
         selected = ([r['node_key'] for r in group if r['label'] == 'belongs']
                     if native else first['selected_keys']) if complete else None
@@ -143,6 +144,7 @@ def report(rows, cfg, inputs, truth, *, timings=()):
                  for k in keys if gold[k].memberships]
     return {'conclusion': 'no-go' if any(v is False for g in gates.values() for v in g.values()) else 'inconclusive',
             'action': 'retain_baseline', 'winner': None, 'reference': cfg.reference, 'synthetic': truth.synthetic,
+            'lineage_qualification': 'unknown' if inputs.lineage is None else 'declared_only_not_authenticated',
             'holdout_labelled_papers': len(keys), 'shortlist_recall': distribution(shortlist),
             'selected_question_keys': list(questions), 'eligible_keys': sorted(eligible),
             'arms': arms, 'gates': gates,
@@ -158,6 +160,7 @@ def report(rows, cfg, inputs, truth, *, timings=()):
                 'Approximately100human-confirmed papers/20families and rare/nested/duplicate/no-match controls remain required.',
                 'Cold/warm/resource/cost/pass/manual-correction evidence is unavailable, never zero.',
                 'Similarity ranks at most3 original names, not scores/vectors or confident no-match.',
+                'Declared ancestry/exclusions are unsigned consistency evidence, not exhaustive authenticated purge proof.',
                 'Threshold coverage and successful common cohorts are selected; model confidences not interchangeable.']}
 
 

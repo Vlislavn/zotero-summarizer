@@ -26,7 +26,6 @@ def markdown(payload: dict[str, Any]) -> str:
             card["problem"], "",
             f"**Core idea:** {card['core_idea'] or 'not established'}", "",
             f"**Project use:** {'; '.join(card['project_use_notes'])}", "",
-            f"**Reproduction:** {card['reproducibility_tier']} — {card['reproducibility_rationale']}", "",
             f"**Artifacts:** {', '.join(card['code_urls'] + card['dataset_urls'] + card['model_urls']) or 'none verified'}", "",
         ]
         for label, value in (
@@ -63,6 +62,8 @@ def persist(
     render_markdown: Callable[[dict[str, Any]], str] | None = None,
     inputs: list[dict[str, Any]] | None = None,
 ) -> tuple[Path, Path]:
+    if output_dir.is_symlink():
+        raise ValueError("report output directory cannot be a symlink")
     output_dir.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{slug}-", dir=output_dir))
     published = output_dir / slug

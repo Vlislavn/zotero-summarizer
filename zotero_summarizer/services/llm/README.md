@@ -1,17 +1,30 @@
 # services/llm — provider-aware client construction
 
-`goals.yaml:llm_routing` resolves each stage to a provider/model; the runtime
-builds and caches an `LLMClient` lazily.
+`goals.yaml:llm_routing` resolves each stage to a provider/model;
+`factory.resolve_stage_client(runtime_state, stage, ...)` lazily builds clients
+using the cache, lock and invalidation generation held by `RuntimeState`.
 
 ```text
 llm_routing → resolve_stage → ResolvedStage → factory → LLMClient
                               feed · backlog · deep_review
 ```
 
+Verification binds an explicit attempt/provider/model owner before credentials.
+Each prompt requires joined expected/native/pre-send/terminal evidence; probe
+receipts use their own request slice, not a completed sibling. Native success is
+not hardware admission. Local UNKNOWN still refuses before construction, ordinary
+hosted diagnostics keep independent-model continuation, and client close is cleanup
+rather than finality. Safety receipts stay in the existing selected Doctor file.
+
 ## Files
 
-- `factory.py` dispatches OpenAI-compatible/native Anthropic clients and resolves
-  secrets from the keyring with env fallback. OpenAI-compatible transports receive
+- `factory.py` owns stage-client resolution: under the runtime lock it copies the
+  effective routing snapshot, checks `expected_identity` before cache/credentials,
+  and keys clients by stage, thinking variant and snapshot fingerprint. Construction
+  runs outside the lock; only the same invalidation generation may publish a
+  successful build. Failed builds are not cached. It also dispatches
+  OpenAI-compatible/native Anthropic clients and resolves secrets from the keyring
+  with env fallback. OpenAI-compatible transports receive
   the process `SUMMARY_TIMEOUT_SECONDS` request deadline; its optional
   `enable_thinking` overrides only clients already advertising that capability.
   A verification/light-call override lowers an active plain low/medium/high
@@ -28,11 +41,14 @@ llm_routing → resolve_stage → ResolvedStage → factory → LLMClient
   checks, setup validation, and Doctor. Identical routes share one serial probe;
   standalone local checks get 60 seconds and hosted checks 30 seconds. Doctor uses
   its outer bounded waiter and keeps real requests inside callback exclusion. Failures become
-  bounded results, not startup errors. Cheap `/models` reachability remains the
-  proactive companion.
+  bounded results, not startup errors. Local and explicitly cancellation-owned
+  batches stop after a timeout. Ordinary hosted diagnostics may continue to a
+  different model; a shared timed-out identity is reused, never automatically retried.
+  Cheap `/models` reachability remains the proactive companion.
 - `model_list.py` lists sorted unique model IDs. Remote discovery accepts a
-  built-in preset or an identity already present in the live saved config; a
-  custom remote draft must be saved first. Loopback listing receives only a
+  built-in preset or an identity already present in the live saved config. With
+  no live config holder (CLI Doctor), it reads only the selected persisted config,
+  never a default template or a draft. A custom remote draft must be saved first. Loopback listing receives only a
   non-secret local token, so a request cannot pair an arbitrary destination
   with a server-held credential.
 - `presets.py` / `credentials.py` compile eight service cards to
