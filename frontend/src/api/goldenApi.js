@@ -128,7 +128,7 @@ export async function submitVerdict({ item_key, user_priority, comment }) {
  * POST /api/golden/review-note
  * Body: { item_key, note }
  * Returns: { saved: true, note_written: boolean, note_error: string|null }.
- * Local save always succeeds; note_written reflects the best-effort Zotero mirror
+ * A local app save requires saved === true; note_written reflects the best-effort Zotero mirror
  * (false + note_error when Zotero is open), exactly like the verdict-note path.
  */
 export async function saveReviewNote({ item_key, note }) {
@@ -139,6 +139,7 @@ export async function saveReviewNote({ item_key, note }) {
     const result = await request('/review-note', {
       method: 'POST', body: JSON.stringify({ item_key, note: note ?? '' }),
     }, true);
+    if (result?.saved !== true) throw new Error('Note save is unconfirmed; keep this draft and check the saved note before retrying.');
     requestSync();
     return result;
   } catch (err) {

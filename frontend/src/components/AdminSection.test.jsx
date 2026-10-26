@@ -42,6 +42,37 @@ async function start() {
   await tick();
 }
 
+it.each(['pending', 'failed', 'missing'])('does not refresh labels or train with %s configuration', async state => {
+  if (state === 'pending') fetchConfig.mockReturnValue(new Promise(() => {}));
+  if (state === 'failed') fetchConfig.mockRejectedValue(new Error('Config unavailable'));
+  if (state === 'missing') fetchConfig.mockResolvedValue({});
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><AdminSection /></QueryClientProvider>);
+  await tick();
+  const button = screen.getByRole('button', { name: 'Retrain model' });
+  expect(button.disabled).toBe(true);
+  fireEvent.click(button);
+  await tick();
+  expect(refreshLabels).not.toHaveBeenCalled();
+  expect(retrain).not.toHaveBeenCalled();
+  expect(screen.queryByText('logreg')).toBeNull();
+});
+
+it('captures the acknowledged classifier before label refresh, not a later configuration', async () => {
+  let release;
+  fetchConfig.mockResolvedValue({ classifier_gate: { model_name: 'configured-gate' } });
+  refreshLabels.mockReturnValue(new Promise(resolve => { release = resolve; }));
+  getJob.mockResolvedValue(terminal('succeeded'));
+  await start();
+  expect(refreshLabels).toHaveBeenCalledOnce();
+  await act(async () => {
+    client.setQueryData(['runtime-config'], { classifier_gate: { model_name: 'later-gate' } });
+    release({ ok: true });
+  });
+  await tick();
+  expect(retrain).toHaveBeenCalledWith({ classifier_name: 'configured-gate', n_folds: 5 });
+});
+
 it.each(['succeeded', 'failed'])('stops stale-running reads, then explicitly recovers the same job to %s', async (status) => {
   getJob.mockResolvedValueOnce(running).mockRejectedValueOnce(new Error('HTTP 503: status unavailable'))
     .mockResolvedValue(terminal(status));

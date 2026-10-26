@@ -703,7 +703,6 @@ function DigestRows({ digest, exclude = [] }) {
       {(d.key_findings || []).filter(Boolean).length > 0 && (
         <KeyVal label="Key findings"><Bullets items={d.key_findings} /></KeyVal>
       )}
-      <KeyVal label="Relevance">{d.relevance}</KeyVal>
       <KeyVal label="Methods">{d.methods}</KeyVal>
       <KeyVal label="Dataset / sample">{[p.dataset, p.sample_size].filter(Boolean).join(' · ')}</KeyVal>
       <KeyVal label="Architecture">{p.architecture}</KeyVal>

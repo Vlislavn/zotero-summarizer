@@ -11,6 +11,15 @@ or feature instructions.
 
 ## [Unreleased]
 
+- Publish the checklist-driven eight-agent PR208 audit and separate issue-linked human checklist; replace the generic smoke and distinguish unimplemented/conditional acceptance from machine PASS.
+- Keep three main docs plus explicitly declared validation artifacts; check their Markdown links too. Reproduce and resolve the prior publication's stale three-files-only assertion.
+
+- Require literal app acknowledgement before manual-note drafts become clean; invalid/empty replies preserve navigation protection without duplicate offline capture.
+- Block label refresh/retraining until classifier configuration is known; remove the guessed logreg fallback and retain same-job status recovery.
+- Resolve transitive Related identifier/app-alias families with the existing Search union-find before selection and after retrieved details; exclude seed/rejected families without title merging.
+- Explain withheld reading targets/original value, reuse the supported-goal predicate for legacy rows, and remove duplicated applicability rationale across review modes.
+- Show Homebrew Ollama recovery only on macOS; other platforms receive the official download page without automatic installation or inventory calls.
+
 - Publish the UI fleet audit, source/evidence manifests and first-UAT checklist. Distinguish automated protocol coverage from unperformed human acceptance, private/account/model checks and production readiness.
 
 - Give Search's two textareas persistent native labels and Ops System its missing section heading. No new controls, routing, requests or state; regressions check actual label/control association and heading level.

@@ -38,6 +38,16 @@ with build output in a disposable directory so existing `dist/` stays intact.
 The dependency ignore also permits a shared `node_modules` symlink in worktrees.
 See the [checked PR workflow](../CONTRIBUTING.md#check-and-publish).
 
+## Checklist-audit corrections
+
+Manual-note HTTP saves require literal `saved: true` before advancing the dirty
+baseline or requesting sync. Invalid/empty receipts preserve the draft and route
+protection; device-queue saves remain separate. Ops cannot refresh labels or train
+until the configured classifier is known; it never guesses `logreg` on a failed read.
+The existing reading disclosure explains missing original value/targets, uses the
+shared supported-goal predicate for legacy rows, and owns applicability rationale
+without a duplicate full-digest row. No ranking or scientific judgment changes.
+
 ## Product surfaces
 
 - **Library** — Read next, labels, reviews, figures, paper Q&A, and acquisition.

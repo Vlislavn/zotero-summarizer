@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def maintained_documents():
     documents = [ROOT / name for name in ("README.md", "CONTRIBUTING.md", "tests/README.md",
                                          "frontend/README.md", "frontend/DESIGN.md")]
-    documents.extend((ROOT / "docs").glob("*.md"))
+    documents.extend((ROOT / "docs").rglob("*.md"))
     for directory in ("zotero_summarizer", "tools"):
         documents.extend((ROOT / directory).rglob("README.md"))
         documents.extend((ROOT / directory).rglob("*INTERFACES.md"))
@@ -28,10 +28,16 @@ def heading_anchors(text):
     return anchors
 
 
-def test_docs_directory_contains_only_the_three_main_documents():
+def test_docs_directory_contains_three_main_documents_and_declared_validation_artifacts():
     files = {path.relative_to(ROOT / "docs").as_posix()
              for path in (ROOT / "docs").rglob("*") if path.is_file() and path.name != ".DS_Store"}
-    assert files == {"architecture.md", "features.md", "overrides.md"}
+    validation = {
+        "ui-fleet50": {"README.md", "results.json", "findings.json", "coverage.json", "source-manifest.json"},
+        "pr208": {"README.md", "manual-checklist.md", "issue-scope.md", "results.json", "swarm.json", "source-manifest.json"},
+    }
+    assert files == {"architecture.md", "features.md", "overrides.md"} | {
+        f"validation/{directory}/{name}" for directory, names in validation.items() for name in names
+    }
 
 
 def test_features_group_single_paragraph_entries_under_task_headings():

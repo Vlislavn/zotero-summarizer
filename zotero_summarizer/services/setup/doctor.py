@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import closing
 from datetime import datetime, timezone
+import platform
 import shutil
 import sqlite3
 from threading import Lock
@@ -102,8 +103,9 @@ def _runtime_model(settings: Settings) -> dict[str, Any]:
         ollama = _ollama_endpoint(item.provider)
         identity = f"{item.provider.name}/{item.model} at {item.provider.base_url}"
         if ollama and shutil.which("ollama") is None:
-            return _row("runtime_model", "needs_action", "Ollama is not installed", identity,
-                        action="Install Ollama", command="brew install ollama")
+            return _row("runtime_model", "needs_action", "Ollama is not installed",
+                        f"{identity}. Install the runtime for your platform: https://ollama.com/download",
+                        action="Install Ollama", command="brew install ollama" if platform.system() == "Darwin" else None)
         try:
             served[item.provider.name] = list_models_for_provider(item.provider)
         except Exception as exc:  # noqa: BLE001 — inventory failures retain the failing route

@@ -17,6 +17,44 @@ const quality = {
 };
 
 describe('orthogonal reviewed signals', () => {
+  it.each([{ compact: true }, {}, { flat: true }])('accepts an omitted legacy abstention flag consistently in %j', props => {
+    const deep = { digest, quality, goal_summaries: [
+      { goal_id: 'legacy', goal_label: 'Legacy goal', retrieval_state: 'hit', relevant: true,
+        summary: 'Retained supported summary.', key_sections: [] },
+    ] };
+    const html = renderToStaticMarkup(<PaperReview deep={deep} {...props} />);
+    expect(html).toContain('Supported goal match recorded.');
+    expect(html).not.toContain('Goal match unknown.');
+  });
+
+  it.each([{ compact: true }, {}, { flat: true }])('keeps applicability in one home and uses the shared legacy goal predicate in %j', props => {
+    const relevance = 'Unique literal applicability for this saved review.';
+    const deep = { digest: { ...digest, relevance }, quality, goal_summaries: [
+      { goal_id: 'g', goal_label: 'Bounded retrieval', retrieval_state: 'hit', relevant: true,
+        summary: 'A supported saved finding.', key_sections: [] },
+    ] };
+    const before = JSON.stringify(deep);
+    const html = renderToStaticMarkup(<PaperReview deep={deep} {...props} />);
+    expect(html.split(relevance)).toHaveLength(2);
+    expect(html).toContain('Supported goal match recorded.');
+    expect(html).not.toContain('Goal match unknown.');
+    expect(JSON.stringify(deep)).toBe(before);
+  });
+
+  it.each([
+    ['original_value_not_assessed', 'Original-only value was not assessed; the reading decision is withheld.'],
+    ['reading_targets_not_assessed', 'Specific reading targets were not recorded; the reading decision is withheld.'],
+  ].flatMap(([flag, text]) => [{ compact: true }, {}, { flat: true }].map(props => ({ flag, text, props }))))(
+    'explains the recorded policy reason $flag in $props', ({ flag, text, props }) => {
+      const deep = { digest: { ...digest, read_decision: '', read_parts: [], original_value: '' }, quality,
+        reading_policy_flags: [flag], model_read_decision: 'read' };
+      const before = JSON.stringify(deep);
+      const html = renderToStaticMarkup(<PaperReview deep={deep} {...props} />);
+      expect(html).toContain(text);
+      expect(html).not.toContain('>READ<');
+      expect(JSON.stringify(deep)).toBe(before);
+    },
+  );
   it.each([{ compact: true }, {}, { flat: true }])('shares policy output across review modes %j', props => {
     const deep = { digest: { ...digest, grade: 'C' }, quality,
       model_digest: { ...digest, read_decision: 'read' } };

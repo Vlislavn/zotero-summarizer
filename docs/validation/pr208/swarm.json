@@ -1,0 +1,86 @@
+{
+  "workflow_id": "d90f6c13-6425-4295-a46e-db0f908958ed",
+  "state": "complete",
+  "draft_scenarios": 33,
+  "draft_sha256": "2c09def0fabcd8e7d3154b50484ae9d268764fefe73c93c8fc6de387f62db4fe",
+  "launch_shape": "6 area auditors, then2 independent cross-reviewers; parent executes and fixes",
+  "reports": [
+    {
+      "key": "setup",
+      "run_id": "17ab600a-e8ef-42e3-b2b7-1a9f9759d782",
+      "context": "fresh",
+      "role": "readonly issue/source auditor; no test execution",
+      "report_sha256": "68aa490cb03c362199db3b4fd040fa7681a4fed2860831a7157be8781a1b3051",
+      "snapshot": "6e909596593b1ab0a89f3d54e0ee22ad9a5639c7"
+    },
+    {
+      "key": "feed",
+      "run_id": "4ddbc87c-9b2d-4903-a5fe-5d55e781eb6a",
+      "context": "fresh",
+      "role": "readonly issue/source auditor; no test execution",
+      "report_sha256": "eaf8a227c6efbd31c2038aec474e3a15a946b69bcae4ee4c863dc274487beeb9",
+      "snapshot": "6e909596593b1ab0a89f3d54e0ee22ad9a5639c7"
+    },
+    {
+      "key": "reading",
+      "run_id": "c2805f94-eb62-4612-9ff1-017a1fa4acb4",
+      "context": "fresh",
+      "role": "readonly issue/source auditor; no test execution",
+      "report_sha256": "889cd840426c05f32b4fb0b3a2ed7c16a32badffada5c6ad06cae937fead1e60",
+      "snapshot": "6e909596593b1ab0a89f3d54e0ee22ad9a5639c7"
+    },
+    {
+      "key": "notes",
+      "run_id": "9202fa19-8108-4fbc-9f52-34dbce943612",
+      "context": "fresh",
+      "role": "readonly issue/source auditor; no test execution",
+      "report_sha256": "8112af92fcc90f9c644d1a454e8d25b233f11c3cb2042aff57b9afaa48adb0dc",
+      "snapshot": "6e909596593b1ab0a89f3d54e0ee22ad9a5639c7"
+    },
+    {
+      "key": "search",
+      "run_id": "45528652-1c88-4dfe-b1e8-d0fdb5af365d",
+      "context": "fresh",
+      "role": "readonly issue/source auditor; no test execution",
+      "report_sha256": "d890dae8da32c7c865c4948cd335f85c4f109b89be72facc94ebb917f0405888",
+      "snapshot": "6e909596593b1ab0a89f3d54e0ee22ad9a5639c7"
+    },
+    {
+      "key": "operations",
+      "run_id": "900078fc-b6d8-4373-966c-29d09a7a1f74",
+      "context": "fresh",
+      "role": "readonly issue/source auditor; no test execution",
+      "report_sha256": "2ea9639a6b1a2f3a76423e9a6878710f8b40f9fc93e6053da1773218784eb9ed",
+      "snapshot": "6e909596593b1ab0a89f3d54e0ee22ad9a5639c7"
+    },
+    {
+      "key": "issue-completeness",
+      "run_id": "a4924047-f04d-4a63-8f8b-deda84e8c17c",
+      "context": "fresh",
+      "role": "readonly issue/source auditor; no test execution",
+      "report_sha256": "71ea0061d3a892897ad9eefdfdaefa059191185f93de7453b61ea07d3329f81d",
+      "snapshot": "6e909596593b1ab0a89f3d54e0ee22ad9a5639c7"
+    },
+    {
+      "key": "human-safety",
+      "run_id": "b05ff7e7-6866-4bda-97d9-57d24a2490a1",
+      "context": "fresh",
+      "role": "readonly issue/source auditor; no test execution",
+      "report_sha256": "5c686ab07ec100e0254b624ca9544e0bc988ac1d7b7d1d067f6a77e2a5f840ab",
+      "snapshot": "6e909596593b1ab0a89f3d54e0ee22ad9a5639c7"
+    }
+  ],
+  "limitations": [
+    "readonly source review, not real human execution",
+    "operations reviewer did not inspect test bodies/primary receipts",
+    "completeness reviewer read33/39 primary issues; remaining6 parent-read",
+    "scope findings and product bugs adjudicated separately by parent"
+  ],
+  "followup": {
+    "run_id": "aca90e03-6fe8-4e1c-b0e3-82be176bf89f",
+    "role": "resumed same human-safety reviewer; bounded7-fix + checklist challenge",
+    "verdict": "PASS-with-bounds; SOURCE review, not independently verified execution",
+    "report_sha256": "c1eef33ddb615315a64c41aba8ed903b6dbac07428cbb69461aa1a017807a0a3",
+    "reviewed_source_manifest_sha256": "c47d95f886041c8b53debdd7f7cf1b9c8ca07d21fb360b7a1c06d0522d395258"
+  }
+}

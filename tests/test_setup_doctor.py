@@ -1,4 +1,5 @@
 import json
+import platform
 import sqlite3
 import pytest
 from zotero_summarizer.api.errors import APIError
@@ -11,6 +12,24 @@ def _settings(tmp_path):
     settings = Settings.load(project_root=tmp_path)
     bootstrap_phase0(settings)
     return settings
+
+
+@pytest.mark.parametrize('system', ['Darwin', 'Linux', 'Windows', 'Unknown'])
+def test_missing_ollama_recovery_matches_platform_without_inventory(tmp_path, monkeypatch, system):
+    from zotero_summarizer.services.llm import model_list
+
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(platform, 'system', lambda: system)
+    monkeypatch.setattr(doctor.shutil, 'which', lambda _: None)
+    monkeypatch.setattr(model_list, 'list_models_for_provider', lambda _: pytest.fail('Unexpected runtime inventory'))
+    row = doctor._runtime_model(settings)
+    assert row['status'] == 'needs_action'
+    assert row['message'] == 'Ollama is not installed'
+    if system == 'Darwin':
+        assert row['recovery']['command'] == 'brew install ollama'
+    else:
+        assert 'command' not in row['recovery']
+        assert 'https://ollama.com/download' in row['detail']
 
 
 def test_doctor_persists_shared_contract_and_redacts_secrets(tmp_path, monkeypatch):

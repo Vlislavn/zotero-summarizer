@@ -11,7 +11,7 @@ from zotero_summarizer.services.library._related_context import (
 )
 from zotero_summarizer.services.library._search import hybrid_search
 from zotero_summarizer.services.library.app_library_reader import AppLibraryReader
-from zotero_summarizer.services.search import session as sessions
+from zotero_summarizer.services.search import dedup, session as sessions
 from zotero_summarizer.services.search._models import Candidate, QueryPlan, SearchIntent
 from zotero_summarizer.services.zotero.zotero import get_library_reader, resolve_reader_for_key
 from zotero_summarizer.storage.corpus_read import _corpus_fingerprint
@@ -56,6 +56,17 @@ def _comments(key, detail, native, context, app, reader):
     return {**comments, "native_sources": sources}
 
 
+def _families(rows, contexts):
+    families = dedup._Union()
+    for key, row in rows:
+        node = f"paper:{key}"
+        for alias in contexts.get(key, {}).get("aliases", [key]):
+            families.union(node, f"paper:{alias}")
+        for identifier in _identifiers(row):
+            families.union(node, identifier)
+    return families
+
+
 def _snapshot(item_key, collection, tag):
     _validate_key(item_key)
     reader = get_library_reader()
@@ -71,34 +82,34 @@ def _snapshot(item_key, collection, tag):
     contexts, app = app_context(settings().triage_db_path, list(dict.fromkeys([item_key, *items])))
     if app != "observed":
         raise APIError("source_identity_unavailable", "Cannot determine seed aliases or human exclusions while app context is unavailable", status_code=503)
-    aliases = set(contexts.get(item_key, {}).get("aliases", [item_key]))
-    seen_ids, seen_aliases = _identifiers(seed), set(aliases)
-    candidates, excluded = {}, []
+    families = _families([*items.items(), (item_key, seed)], contexts)
+    excluded = [key for key in items if (verdict := contexts.get(key, {}).get("verdict"))
+                and verdict.get("source") == "user" and verdict.get("value") == "dont_read"]
+    seen = {families.find(f"paper:{key}") for key in [item_key, *excluded]}
+    candidates = {}
     for key, row in items.items():
-        family = set(contexts.get(key, {}).get("aliases", [key]))
-        ids = _identifiers(row)
-        if family & seen_aliases or ids & seen_ids:
-            continue
-        verdict = contexts.get(key, {}).get("verdict")
-        if verdict and verdict.get("source") == "user" and verdict.get("value") == "dont_read":
-            excluded.append(key)
-            continue
-        candidates[key] = row
-        seen_aliases.update(family)
-        seen_ids.update(ids)
+        family = families.find(f"paper:{key}")
+        if family not in seen:
+            candidates[key] = row
+            seen.add(family)
     query = "\n".join(str(seed.get(field) or "") for field in ("title", "abstract"))
     if not query.strip():
         raise APIError("seed_metadata_unavailable", "Seed title/abstract are unavailable for retrieval", status_code=409)
     ordered, scores, search = hybrid_search(query, list(candidates), top_n=semantic.budgets()["candidates"])
-    pool, detail_ids = [], set(_identifiers(seed))
+    details = {}
     for key in ordered:
         detail, availability = native_detail(reader, key)
         row = {**candidates[key], **(detail or {})}
-        # Detail identifiers can reveal an alias absent from a list projection.
-        ids = _identifiers(row)
-        if ids & detail_ids:
+        for identifier in _identifiers(row):
+            families.union(f"paper:{key}", identifier)
+        details[key] = row, detail, availability
+    pool = []
+    seen = {families.find(f"paper:{key}") for key in [item_key, *excluded]}
+    for key, (row, detail, availability) in details.items():
+        family = families.find(f"paper:{key}")
+        if family in seen:
             continue
-        detail_ids.update(ids)
+        seen.add(family)
         comments = _comments(key, detail, availability, contexts.get(key), app, reader)
         pool.append(_paper(key, row, comments, contexts.get(key)))
     seed_paper = _paper(item_key, seed, _comments(item_key, seed, native, contexts.get(item_key), app, reader), contexts.get(item_key))
@@ -132,7 +143,7 @@ def _identity(snapshot, boundary):
         corpus = _corpus_fingerprint(str(settings().corpus_db_path))
     except FileNotFoundError:
         corpus = None
-    paths = [Path(__file__), Path(semantic.__file__), Path(__file__).with_name("_related_context.py"),
+    paths = [Path(__file__), Path(semantic.__file__), Path(dedup.__file__), Path(__file__).with_name("_related_context.py"),
              Path(__file__).with_name("_search.py"), Path(__file__).with_name("_prompt_security.py")]
     import zotero_summarizer.storage.library_context as context_owner
     paths.append(Path(context_owner.__file__))

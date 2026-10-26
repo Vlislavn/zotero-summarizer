@@ -98,6 +98,22 @@ it('does not treat a protocol or HTTP block as transport-outage authority', asyn
   expect(await offline.pendingMutations()).toEqual([]);
 });
 
+it.each([{}, { saved: false }, { saved: 'true' }, null, 'empty'])('refuses unconfirmed manual-note receipt %j without queuing another write', async receipt => {
+  const offline = await import('../offlineStore.js');
+  const sync = vi.fn();
+  window.addEventListener('zs-sync-request', sync);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(receipt === 'empty'
+    ? { ok: true, status: 204 }
+    : { ok: true, status: 200, json: async () => receipt }));
+  try {
+    const { saveReviewNote } = await import('./goldenApi.js');
+    await expect(saveReviewNote({ item_key: 'P1', note: 'Unacknowledged intent' })).rejects.toThrow();
+    expect(await offline.pendingMutations()).toEqual([]);
+    expect(sync).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  } finally { window.removeEventListener('zs-sync-request', sync); }
+});
+
 it('refuses a server detail when device storage cannot establish pending local field visibility', async () => {
   vi.spyOn(IDBFactory.prototype, 'open').mockImplementation(() => { throw new DOMException('Storage denied', 'SecurityError'); });
   const data = { item_key: 'P1', title: 'Server view', user_note: 'Server note' };

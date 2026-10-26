@@ -36,7 +36,8 @@ export default function AdminSection() {
   // The gate's configured classifier is the single source of truth — retrain
   // trains THAT model, not a locally-picked one (Settings → Advanced owns the choice).
   const configQuery = useQuery({ queryKey: ['runtime-config'], queryFn: fetchConfig });
-  const classifierName = configQuery.data?.classifier_gate?.model_name || 'logreg';
+  const classifierName = configQuery.data?.classifier_gate?.model_name;
+  const configReady = configQuery.isSuccess && typeof classifierName === 'string' && classifierName.trim().length > 0;
 
   const [jobId, setJobId] = useState(null);
   const [lastFinishedAt, setLastFinishedAt] = useState(null);
@@ -49,6 +50,7 @@ export default function AdminSection() {
     // label→train sequence) so a `label:must_read` tag typed in Zotero minutes
     // ago reaches the golden CSV + label_verdicts before training.
     mutationFn: async () => {
+      if (!configReady) throw new Error('Classifier configuration is unavailable. Reload before retraining.');
       setStartPhase('refreshing');
       await refreshLabels();
       setStartPhase('starting');
@@ -94,7 +96,7 @@ export default function AdminSection() {
   const running = Boolean(job && job.status === 'running');
   const succeeded = Boolean(job && job.status === 'succeeded');
   const failed = Boolean(job && job.status === 'failed');
-  const buttonDisabled = starting || running || Boolean(jobId && (!job || jobErr));
+  const buttonDisabled = !configReady || starting || running || Boolean(jobId && (!job || jobErr));
 
   const progress = job?.progress || { done: 0, total: 0 };
   const pct = progress.total > 0 ? Math.min(100, Math.round((progress.done / progress.total) * 100)) : null;
@@ -143,6 +145,9 @@ export default function AdminSection() {
     statusNode = <Banner kind="error">{startError}</Banner>;
   } else if (lastFinishedAt) {
     statusNode = <p className="text-xs text-slate-500 font-mono">Last run: {lastFinishedAt}</p>;
+  } else if (!configReady) {
+    statusNode = <Banner kind={configQuery.isPending ? 'info' : 'error'}>{configQuery.isPending
+      ? 'Loading classifier configuration…' : 'Classifier configuration is unavailable. Reload before retraining.'}</Banner>;
   }
 
   return (
@@ -152,7 +157,7 @@ export default function AdminSection() {
       </h3>
       <p className="text-xs text-slate-500 mt-1 mb-4">
         Pulls your latest labels from Zotero (label:* tags, emojis, notes) and re-trains
-        the feed gate (<span className="font-mono">{classifierName}</span>) on them — one
+        the feed gate (<span className="font-mono">{configReady ? classifierName : 'configuration unavailable'}</span>) on them — one
         click, nothing to refresh first. Takes 1-5 minutes.
       </p>
       <div className="space-y-2">

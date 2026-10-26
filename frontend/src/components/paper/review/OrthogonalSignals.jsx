@@ -12,6 +12,8 @@ const POLICY_REASONS = {
   strong_evidence_not_confirmed: 'Strong scientific support was not confirmed.',
   weak_evidence: 'Scientific support has material concerns.',
   goals_not_assessed: 'Goal assessment is unavailable; the reading decision is withheld.',
+  original_value_not_assessed: 'Original-only value was not assessed; the reading decision is withheld.',
+  reading_targets_not_assessed: 'Specific reading targets were not recorded; the reading decision is withheld.',
 };
 
 function ideaLabel(digest) {
@@ -21,7 +23,7 @@ function ideaLabel(digest) {
 }
 
 function goalLabel(goals) {
-  if (goals.some(goal => isSupportedGoal(goal) && goal.abstained === false)) return 'Supported goal match recorded.';
+  if (goals.some(isSupportedGoal)) return 'Supported goal match recorded.';
   if (goals.length && goals.every(goal => goal.retrieval_state === 'miss' && goal.relevant === false)) {
     return 'No goal match recorded.';
   }

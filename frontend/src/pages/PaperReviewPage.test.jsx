@@ -307,6 +307,7 @@ it.each([
   ['navigate', false, 'dirty'], ['navigate', true, 'dirty'],
   ['back', false, 'dirty'], ['back', true, 'dirty'],
   ['navigate', false, 'clean'], ['navigate', false, 'saved'], ['unload', false, 'dirty'],
+  ['link', false, 'unconfirmed'], ['back', false, 'refused'], ['navigate', false, 'empty'],
 ])('note navigation %s / accept=%s / %s uses one route-owned guard', async (exit, accept, mode) => {
   await publishStatus('', 'connected');
   vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
@@ -320,8 +321,9 @@ it.each([
     if (path === '/api/golden/review-detail?item_key=GUARD001') data = detail;
     else if (path === '/api/golden/review-note' && options.method === 'POST') {
       writes.push(JSON.parse(options.body));
-      detail.user_note = writes.at(-1).note;
-      data = { saved: true, note_written: false };
+      if (mode === 'empty') return new Response(null, { status: 204 });
+      data = mode === 'unconfirmed' ? {} : mode === 'refused' ? { saved: false } : { saved: true, note_written: false };
+      if (data.saved) detail.user_note = writes.at(-1).note;
     } else if (path === '/api/library/related/GUARD001/discover') data = {
       seed_key: 'GUARD001', admission: { state: 'unknown', basis: null }, context_fingerprint: null };
     else if (path === '/api/admin/llm-reachability') data = { stages: [{ stage: 'deep_review', enabled: false }] };
@@ -339,10 +341,13 @@ it.each([
   try {
     const notes = await screen.findByRole('textbox', { name: 'Manual notes' });
     if (mode !== 'clean') fireEvent.change(notes, { target: { value: 'Unsaved guard draft' } });
-    if (mode === 'saved') {
+    const attemptedSave = ['saved', 'unconfirmed', 'refused', 'empty'].includes(mode);
+    const dirty = !['clean', 'saved'].includes(mode);
+    if (attemptedSave) {
       fireEvent.click(screen.getByRole('button', { name: 'Save', exact: true }));
       await waitFor(() => expect(writes).toEqual([{ item_key: 'GUARD001', note: 'Unsaved guard draft' }]));
-      await waitFor(() => expect(screen.getByRole('button', { name: 'Save', exact: true }).disabled).toBe(true));
+      if (dirty) await screen.findByText(/Save failed:/);
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Save', exact: true }).disabled).toBe(!dirty));
     }
     if (exit === 'unload') {
       const event = new Event('beforeunload', { cancelable: true });
@@ -354,15 +359,15 @@ it.each([
         if (exit === 'link') fireEvent.click(screen.getByRole('link', { name: 'Leave paper' }));
         else await router.navigate(exit === 'back' ? -1 : '/library');
       });
-      if (mode === 'dirty') {
+      if (dirty) {
         await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
         expect(confirm).toHaveBeenCalledWith('You have unsaved notes on this paper. Leave without saving them?');
       } else expect(confirm).not.toHaveBeenCalled();
       await waitFor(() => expect(router.state.location.pathname).toBe(
-        mode === 'dirty' && !accept ? '/paper/GUARD001' : '/library'));
-      if (mode === 'dirty' && !accept) expect(notes.value).toBe('Unsaved guard draft');
+        dirty && !accept ? '/paper/GUARD001' : '/library'));
+      if (dirty && !accept) expect(notes.value).toBe('Unsaved guard draft');
     }
-    expect(writes).toHaveLength(mode === 'saved' ? 1 : 0);
+    expect(writes).toHaveLength(attemptedSave ? 1 : 0);
     expect(unexpected).toEqual([]);
   } finally { client.clear(); router.dispose(); }
 });

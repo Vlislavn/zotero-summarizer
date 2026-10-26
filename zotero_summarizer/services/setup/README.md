@@ -140,7 +140,9 @@ Add runtimes only with install and verification paths.
 Doctor state is `data/setup_doctor.json`; stale `running` rows become Needs
 action **and clear any earlier Ready flag**, even if the last full pass succeeded.
 It is current state, not an audit log. Recovery strings are displayed,
-never executed. `--fix` only runs idempotent bootstrap/migrations.
+never executed. Missing Ollama retains the Homebrew command only on macOS;
+Windows, Linux and unknown platforms receive the official platform download URL,
+without a guessed shell installer or runtime inventory call. `--fix` only runs idempotent bootstrap/migrations.
 Bootstrap owns migration; Doctor does not repeat it. Path validation snapshots
 read the resulting `.env`, including unchanged paths and empty update requests.
 Calibration accepts 1–10 papers, checks item paths (including symlinks) remain

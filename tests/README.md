@@ -1,5 +1,12 @@
 # Tests
 
+Checklist-driven regressions cover strict manual-note app acknowledgements and
+real route dirtiness, unresolved/failed classifier configuration before label
+refresh, transitive Related identifier families under every list permutation,
+platform-specific missing-runtime recovery, and one-home reading explanations.
+All use owned data or supplied DTOs; they do not certify scientific usefulness,
+positive Full-local runtime readiness or human/native-device acceptance.
+
 Calibration regressions exercise saved No-LLM on fresh/cached OpenAI and Anthropic
 routes: refuse before paper reads, credentials, progress or tier stamps; HTTP jobs
 must fail, not become Ready. Actual CLI Doctor dispatch reads an owned saved custom
@@ -603,8 +610,9 @@ scientific accuracy, recommendation usefulness or private-library persistence.
 
 ## Documentation checks
 
-[`test_documentation.py`](test_documentation.py) keeps `docs/` to architecture,
-features and generated overrides, verifies maintained local file/anchor links,
+[`test_documentation.py`](test_documentation.py) keeps three main docs plus the
+explicit closed inventory of published validation bundles, checks their Markdown
+alongside other maintained local file/anchor links,
 and checks task groups with one paragraph per feature. [`test_config_overrides.py`](test_config_overrides.py) separately compares
 the override reference with its code generator. These are structural contracts,
 not keyword-based judgments of whether feature prose is true. Review the linked

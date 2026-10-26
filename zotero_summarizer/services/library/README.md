@@ -706,7 +706,12 @@ See [Discovery](../../../docs/features.md#saved-paper-discovery).
 `related.py` reuses `_search.hybrid_search` for up to three saved-paper links on
 the shared Today/Library page. Default retrieval uses public seed metadata, not
 comments; read items remain eligible, self aliases/identifiers and current human
-`dont_read` candidates are excluded, and collection/tag scopes stay intact.
+`dont_read` families are excluded, and collection/tag scopes stay intact. Related
+reuses Search's union-find to close identifier/app-alias bridges before selection,
+then incorporates retrieved detail identifiers before choosing distinct families.
+List order cannot leak a seed version or consume multiple recommendation slots;
+identical titles without shared identifiers remain distinct. The dedup owner is
+included in assessment currentness; no new identity store or title heuristic exists.
 `_related_context` reads current manual/verdict notes through the existing SQLite
 alias/revision owners, plus structurally unowned native notes and annotation
 comments, retaining full text and original source identity. Generated reviews and

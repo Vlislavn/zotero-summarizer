@@ -1,4 +1,7 @@
 """Related review context uses current local intent, never generated-note interest."""
+from itertools import permutations
+
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -174,6 +177,50 @@ def test_duplicate_saved_versions_are_not_three_recommendations(tmp_path, monkey
     reader.items['PAPER002']['doi'] = '10.1/saved'
     reader.items['PAPER003'] = {**reader.items['PAPER002'], 'item_key': 'PAPER003', 'doi': 'https://doi.org/10.1/SAVED'}
     assert len(related.related_papers('PAPER001')['items']) == 1
+
+
+@pytest.mark.parametrize('order', list(permutations(['PAPER002', 'PAPER003', 'PAPER004'])))
+@pytest.mark.parametrize('seed_family', [True, False])
+def test_transitive_identifier_families_are_closed_before_selection(tmp_path, monkeypatch, journey, order, seed_family):
+    _, reader, _ = setup_related(tmp_path, monkeypatch, journey)
+    seed = reader.items['PAPER001']
+    seed['doi'] = '10.1/seed' if seed_family else '10.1/different'
+    first = {**reader.items['PAPER002'], 'doi': '10.1/seed'}
+    second = {**first, 'item_key': 'PAPER003', 'doi': '', 'url': 'https://arxiv.org/abs/2401.01234v2'}
+    bridge = {**first, 'item_key': 'PAPER004', 'url': second['url']}
+    unrelated = {**first, 'item_key': 'PAPER005', 'doi': '', 'url': ''}
+    rows = {row['item_key']: row for row in [first, second, bridge, unrelated]}
+    reader.items = {'PAPER001': seed, **{key: rows[key] for key in order}, 'PAPER005': unrelated}
+
+    result = related.related_papers('PAPER001')
+
+    keys = [row['item_key'] for row in result['items']]
+    assert len(keys) == (1 if seed_family else 2)
+    assert 'PAPER005' in keys  # Identical titles without identifiers are not aliases.
+    assert not seed_family or keys == ['PAPER005']
+    assert journey.model.payloads == []
+
+
+def test_detail_identifier_bridge_excludes_an_earlier_seed_version(tmp_path, monkeypatch, journey):
+    _, reader, _ = setup_related(tmp_path, monkeypatch, journey)
+    reader.items['PAPER001']['doi'] = '10.1/seed'
+    reader.items['PAPER002']['url'] = 'https://arxiv.org/abs/2401.01234'
+    reader.items['PAPER003'] = {**reader.items['PAPER002'], 'item_key': 'PAPER003', 'doi': '10.1/seed'}
+    monkeypatch.setattr(reader, 'get_all_items', lambda **_: {'items': [
+        {key: value for key, value in row.items() if key not in {'doi', 'url'}}
+        for row in reader.items.values()]})
+    assert related.related_papers('PAPER001')['items'] == []
+
+
+def test_human_rejected_identifier_family_cannot_reenter_through_another_version(tmp_path, monkeypatch, journey):
+    path, reader, _ = setup_related(tmp_path, monkeypatch, journey)
+    reader.items['PAPER002']['doi'] = '10.1/rejected'
+    reader.items['PAPER003'] = {**reader.items['PAPER002'], 'item_key': 'PAPER003'}
+    db.insert_or_update_label_verdict(path, item_key='PAPER003', original_derived_priority='could_read',
+                                     user_priority='dont_read', comment='Explicit current rejection')
+    result = related.related_papers('PAPER001')
+    assert result['items'] == []
+    assert result['excluded_human_dont_read'] == ['PAPER003']
 
 
 def test_content_fingerprint_changes_without_note_count_or_timestamp_change(tmp_path, monkeypatch, journey):
