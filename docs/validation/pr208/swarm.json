@@ -82,5 +82,14 @@
     "verdict": "PASS-with-bounds; SOURCE review, not independently verified execution",
     "report_sha256": "c1eef33ddb615315a64c41aba8ed903b6dbac07428cbb69461aa1a017807a0a3",
     "reviewed_source_manifest_sha256": "c47d95f886041c8b53debdd7f7cf1b9c8ca07d21fb360b7a1c06d0522d395258"
+  },
+  "checklist_scope": {
+    "reviewed_revision": 1,
+    "reviewed_draft_scenarios": 33,
+    "current_revision": 2,
+    "current_functions": 18,
+    "current_originating_issues": 15,
+    "current_revision_reviewed_by_this_swarm": false,
+    "note": "Historical8source auditors+bounded followup; not50 and not a new review of revision2"
   }
 }

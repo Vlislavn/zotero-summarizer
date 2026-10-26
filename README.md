@@ -118,7 +118,7 @@ docs/overrides.md     generated environment-variable reference
 
 - [Contributing](CONTRIBUTING.md) — development setup, checks and PR publication.
 - [Tests](tests/README.md) — isolation, opt-in integration checks and failure diagnosis.
-- [PR208 manual acceptance checklist](docs/validation/pr208/manual-checklist.md) — issue-linked human checks after the checklist-driven swarm and fixes; conditional integrations stay separate.
+- [PR208 added-function checklist](docs/validation/pr208/manual-checklist.md) — each added function, its originating GitHub issue, manual actions and expected result; no general regression/backlog checklist.
 - [PR208 swarm results and limits](docs/validation/pr208/README.md); [historical UI audit](docs/validation/ui-fleet50/README.md).
 - Package READMEs — local implementation contracts beside the code.
 - [Changelog](CHANGELOG.md) — change history, not current operating instructions.

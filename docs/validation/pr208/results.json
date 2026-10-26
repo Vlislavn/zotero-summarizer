@@ -1,7 +1,7 @@
 {
   "pr": 208,
   "baseline_head": "6e909596593b1ab0a89f3d54e0ee22ad9a5639c7",
-  "status": "CHECKLIST_FINALIZED_AFTER_FIXES_MACHINE_VERIFIED_HUMAN_NOT_RUN",
+  "status": "HISTORICAL_CODE_TEST_RESULTS_WITH_REVISED_FEATURE_CHECKLIST",
   "human_acceptance": "NOT_RUN",
   "confirmed_product_mechanisms_fixed": 7,
   "red": {
@@ -1078,5 +1078,61 @@
       "primary_sha256": "7b3dc4d1fae7fada84cbf3b11beaf3f2aad2b9e9ed93bed58bfa4f3b7406f546",
       "source_snapshot_sha256": "f1f1ff14ef453bc41e7496a6b86ea02f7d6ffb4abde0db62f57c796e833e0f47"
     }
-  ]
+  ],
+  "checklist": {
+    "revision": 2,
+    "scope": "only functions added in PR208; originating GitHub issues, not related regression/backlog issues",
+    "function_count": 18,
+    "originating_issue_count": 15,
+    "function_ids": [
+      "FEATURE-01",
+      "FEATURE-02",
+      "FEATURE-03",
+      "FEATURE-04",
+      "FEATURE-05",
+      "FEATURE-06",
+      "FEATURE-07",
+      "FEATURE-08",
+      "FEATURE-09",
+      "FEATURE-10",
+      "FEATURE-11",
+      "FEATURE-12",
+      "FEATURE-13",
+      "FEATURE-14",
+      "FEATURE-15",
+      "FEATURE-16",
+      "FEATURE-17",
+      "FEATURE-18"
+    ],
+    "originating_issues": [
+      9,
+      12,
+      15,
+      16,
+      19,
+      27,
+      30,
+      33,
+      37,
+      38,
+      42,
+      46,
+      47,
+      48,
+      49
+    ],
+    "application_code_changed": false,
+    "previous_swarm_scope": "revision1 mixed33scenario draft",
+    "new_swarm_run": false,
+    "human_execution": "NOT_RUN",
+    "scope_evidence": "Primary issue/subPR bodies + actual base diff; existing Setup/Pending, #8rich notes and #21proposal excluded; no bugfix/developer/backlog rows",
+    "documentation_verification": {
+      "cases": 3,
+      "passed": 3,
+      "failed": 0,
+      "guard_stop": null,
+      "primary_sha256": "f70a07b92beb55c4377f7584ec45004f12ac87b98ceaad1ee68e77aab8a9299a",
+      "scope": "documentation inventory and links, not human acceptance or a new swarm"
+    }
+  }
 }

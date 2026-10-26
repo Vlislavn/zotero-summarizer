@@ -89,9 +89,9 @@ Cancel/Delete CRUD для заметок не был добавлен как н�
 ## Ручной UAT — отдельный актуальный чеклист
 
 Прежний общий12-шаговый smoke заменён [issue-bound чеклистом PR208](../pr208/manual-checklist.md):
-он прошёл новый8-agent source review, parent reproduction/fixes и отделяет browser
-core от условных model/native/device/deployment и developer checks. Человеком он
-ещё не выполнен. Этот final295 report и его manifests — исторический snapshot;
+версия2 перечисляет только добавленные функции и исходные GitHub issues.
+Исторический8-agent review и code-исправления относятся к более широкой версии1;
+версия2 новым роем и человеком ещё не проверялась. Этот final295 report и его manifests — исторический snapshot;
 новые исправления и поправка AUD14-02 описаны в [новом отчёте](../pr208/README.md).
 
 ## Повторение автоматических проверок и provenance

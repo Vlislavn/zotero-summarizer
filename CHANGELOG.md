@@ -11,6 +11,8 @@ or feature instructions.
 
 ## [Unreleased]
 
+- Scope PR208 manual acceptance to18added functions and their15originating GitHub issues. Remove general regressions, internal checks and unimplemented backlog; distinguish revision2 from the historical swarm's broader checklist.
+
 - Publish the checklist-driven eight-agent PR208 audit and separate issue-linked human checklist; replace the generic smoke and distinguish unimplemented/conditional acceptance from machine PASS.
 - Keep three main docs plus explicitly declared validation artifacts; check their Markdown links too. Reproduce and resolve the prior publication's stale three-files-only assertion.
 

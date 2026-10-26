@@ -1,158 +1,80 @@
-# PR #208 — ручная приёмка человеком
+# PR208 — ручной чеклист добавленного функционала
 
 ```text
-Копия данных → основной UI → выбранные интеграции → решение человека
-                 A–D            E–G
-Разработчик: fault/race/replay проверки — отдельно, не ручной маршрут
+Добавленная функция → исходный GitHub issue → действие → результат
 ```
 
-**Чеклист финализирован после роя и исправлений, но человеком ещё не выполнен.**
-[PR #208](https://github.com/Vlislavn/zotero-summarizer/pull/208) ·
-[что проверил рой и что исправлено](README.md) ·
-[границы всех 39 ишьюсов и ссылки на исходные PR](issue-scope.md).
-Ишьюс в строке означает связь/регрессию, **не обещание закрытия всего ишьюса**.
-Идентификаторы S/F/R/N/Q/E/X сохранены из чеклиста, переданного агентам.
+**Версия 2: только функционал, добавленный в PR208 относительно `main@bd5e267`.**
+Не общий smoke приложения, не перечень исправленных багов и не весь backlog.
+[Происхождение функций: issue → реализация](issue-scope.md) ·
+[PR208](https://github.com/Vlislavn/zotero-summarizer/pull/208).
+Проверяется фактически добавленная часть функции, а не закрытие всего issue.
 
-## Перед началом
+**Человеком ещё не выполнен.** Предыдущие8агентов проверяли более широкий
+чеклист версии1; их результаты не считаются проверкой этой новой версии.
 
-- Записать: `git rev-parse HEAD`, ОС, браузер/версию, origin, режим AI и размер окна.
-- Использовать отдельный project root и **отдельно выбранную копию** Zotero/PDF.
-  Сам по себе другой project root не копирует библиотеку и не делает записи безопасными.
-- Для первого прохода отключить AI, фоновые задания и native writers. Для разделов
-  с записью включать только явно разрешённую интеграцию с копией; подготовить backup.
-- Сохранённые обзоры/отчёты/сессии и Pending не появляются в чистом проекте.
-  До сеанса записать доступные ключи в таблицу ниже. Отсутствующие данные → BLOCKED,
-  не SQL-редактирование или изготовление «успешных» receipts человеком.
-- Просмотр UI не всегда пассивен: обычный `/paper/KEY` может начать review;
-  для просмотра использовать `?autoRun=false`. Переход Related может открыть обычный
-  URL. Reader может перестроить stale artifact; Build/Ask/Search/Refresh/Save/Add/
-  Trash/Retrain имеют самостоятельные эффекты. Для чисто визуального сеанса их
-  отключает подготовивший окружение разработчик, а не только query-параметр.
-- Не очищать browser storage с несинхронизированными заметками. Не повторять
-  неопределённую native-запись ради получения зелёного результата.
+## Подготовка и запись результата
 
-### Данные сеанса — заполнить до действий
+- Записать commit, ОС, браузер и origin. Для записей использовать **отдельно
+  выбранную копию** Zotero/PDF и backup; новый project root сам библиотеку не копирует.
+- Для AI/сетевых функций нужны уже разрешённые routes, источники и assets;
+  для Telegram — разрешённая сессия, для remote — настроенный HTTPS gateway.
+  Без prerequisite ставить **BLOCKED**, а не PASS; новые keys/веса ради чеклиста не нужны.
+- Сохранённые обзоры/отчёты/предложения должны существовать в тестовой копии.
+  Если их нет, создать обычным workflow либо отметить соответствующий пункт BLOCKED.
+- У каждого пункта записать **PASS / FAIL / BLOCKED / N/A**, фактический результат
+  и ссылку на screenshot/вывод. Чекбоксы ниже пока не отмечены.
 
-| Нужный пример | Ключ/URL/ID в копии |
-|---|---|
-| Paper с полным review; READ / capped SKIM / SKIP | ___ / ___ / ___ |
-| Unknown/missing assessment; нет PDF; длинный/legacy review | ___ / ___ / ___ |
-| Saved seed, уже прочитанная related paper, версии DOI/arXiv | ___ / ___ / ___ |
-| Today: без review, usable review, rejected; Read Next | ___ / ___ / ___ |
-| Saved Search session; Weekly run, включая пустой/pending | ___ / ___ |
-| Approvable Pending proposals; backup копии | ___ / ___ |
-| Синхронизированный working set; второй клиент для конфликта | ___ / ___ |
+## A. Функции в приложении
 
-Для каждого подпункта: **PASS / FAIL / BLOCKED / N/A** + фактический результат.
-N/A — функция намеренно не входит в выбранный режим; нет prerequisite — BLOCKED.
-Чекбокс означает «проверено и записан результат», а не автоматически PASS.
+| Проверено / ID | Добавленная функция и исходный GitHub issue | Как проверить вручную | Ожидаемый результат |
+|---|---|---|---|
+| ☐ FEATURE-01 | **HackerNoon как RSS-источник** — [#16](https://github.com/Vlislavn/zotero-summarizer/issues/16) | Settings → Sources: добавить предложенные HackerNoon feeds, отдельно Refresh, открыть полученные записи в Today. Отключить один feed и reload. | Подписки/состояние сохраняются; статьи поступают в обычный RSS workflow; Save подписки не запускает скрытый refresh. Полезность practitioner-triage проверять на самих статьях, не по успешному fetch. |
+| ☐ FEATURE-02 | **Объяснение выбора статьи в Today** — [#33](https://github.com/Vlislavn/zotero-summarizer/issues/33) | В Today раскрыть **Why selected** у статьи с review и у статьи без подтверждённого review. | Видны причины и записанная политика выбора; relevance отделена от evidence, неизвестная оценка не названа плохим качеством. Порядок карточек раскрытием не меняется. |
+| ☐ FEATURE-03 | **План чтения рядом с вердиктом** — [#9](https://github.com/Vlislavn/zotero-summarizer/issues/9) | Открыть сохранённый обзор с read/skip targets и временем в карточке и на `/paper/KEY?autoRun=false`, не открывая Details. | Рядом с READ/SKIM видны упорядоченные части для чтения, что пропустить и что добавляет оригинал. Для отсутствующего решения нет старого плана; неизвестное время не превращено в0. |
+| ☐ FEATURE-04 | **Раздельные идея, доказательства и сложность изложения** — [#15](https://github.com/Vlislavn/zotero-summarizer/issues/15) | В обзоре раскрыть Idea/Evidence/Writing; сравнить полезную идею со сложным изложением и работу со слабыми доказательствами. | Scientific grade не подменяется красивым текстом или self-grade. При ограничении чтения до SKIM видны причина и конкретные targets; полезная идея остаётся доступной. |
+| ☐ FEATURE-05 | **Автоматическое сохранение отправленных вопросов** — [#48](https://github.com/Vlislavn/zotero-summarizer/issues/48) | Из Today и Library отправить typed и preset question, в том числе на paper без PDF/при недоступном ответе. Reload; затем изменить/очистить manual note. Если разрешена native-запись, проверить My notes в копии Zotero после доставки. | Каждый вопрос остаётся отдельной записью My notes независимо от ответа; manual note его не стирает. Retry answer не создаёт новый вопрос, осознанная повторная отправка создаёт. Device/app save и доставка в Zotero различимы. |
+| ☐ FEATURE-06 | **Related in my library** — [#46](https://github.com/Vlislavn/zotero-summarizer/issues/46) | На paper открыть **Show related saved papers**; затем отдельно **Try with comments**, сначала отменить, затем подтвердить разрешённую обработку. | До3других saved-paper families, включая уже прочитанные; собственная версия не рекомендована. Ссылки открываются; comments assessment требует явного согласия и показывает использованные excerpts. Metadata similarity не названа доказанным подтверждением/опровержением. |
+| ☐ FEATURE-07 | **Find new relevant из сохранённой статьи** — [#46](https://github.com/Vlislavn/zotero-summarizer/issues/46) | На saved paper нажать **Find new relevant**, открыть Search session, раскрыть pool, reload. При разрешении явно Review/Add один результат. | Есть bounded внешний набор и до3рекомендаций; уже сохранённые работы не названы новыми, unknown membership обозначен. Private seed comments — отдельное согласие; Add не происходит автоматически. |
+| ☐ FEATURE-08 | **Поиск ответа на вопрос в оригинале до выбора обзоров** — [#30](https://github.com/Vlislavn/zotero-summarizer/issues/30) | Targeted Search: тема + вопрос, включить **Experimental original-source question evidence**. Раскрыть результат/цитату и сопоставить с оригиналом, затем reload session. | Видны answer-evidence state, точный источник/locator и scope; checked sufficient evidence учитывается в Recommended. Partial/непроверенное не выдаётся за отсутствие ответа во всей статье; отрицательный научный результат тоже может отвечать. |
+| ☐ FEATURE-09 | **Просмотр и скачивание сохранённых Weekly digests** — [#12](https://github.com/Vlislavn/zotero-summarizer/issues/12) | Открыть `/weekly`, выбрать saved run, раскрыть engineering card, скачать JSON/Markdown, открыть bookmark этого run. | Показывается выбранный сохранённый отчёт, downloads относятся к нему; pending review/неизвестное evidence явно обозначены. Просмотр/скачивание не генерируют новый обзор. |
+| ☐ FEATURE-10 | **Чтение working set и редактирование offline** — [#19](https://github.com/Vlislavn/zotero-summarizer/issues/19) | При доступном backend завершить Sync now и подготовить offline shell. На том же origin/storage отключить собственный backend, открыть ещё не открывавшуюся synced paper, сохранить note/verdict, перезапустить браузер, reconnect. Отдельно создать конфликт тем же полем со второго клиента и выбрать версию. | Синхронизированный контекст доступен, изменения переживают restart и ждут ACK; после reconnect применяются, конфликт показывает обе версии. PDFs и новые AI-вызовы offline не обещаны. |
+| ☐ FEATURE-11 | **Удалённый доступ через owner-authenticated HTTPS** — [#19](https://github.com/Vlislavn/zotero-summarizer/issues/19) | Только на уже согласованном gateway открыть приложение с другого устройства как owner; отдельно проверить anonymous/non-owner/revoked access. | Owner использует приложение/sync, остальные не получают доступ. Это отдельный тест реального TLS/device; эмуляция390px не заменяет его. Не включать unauthenticated LAN и не обходить TLS. |
 
-## A. Setup и настройки
+## B. Добавленные CLI-функции
 
-| Проверено | ID / ишьюсы | Действие → наблюдаемый PASS |
-|---|---|---|
-| ☐ | S01 — #11, #17 | В свежем проекте пройти `/setup` в No LLM, сохранить и reload. Режим/цели сохранены; нет обязательного LLM key; «сохранено» не названо operational Ready. |
-| ☐ | S02 — #11 | Full local → Existing: ввести endpoint/model **до** списка моделей. Поля остаются редактируемыми; несовместимый preset имеет причину отказа; listing не выдаётся за загрузку/проверенную ёмкость. Без runtime evidence — UNKNOWN, не Ready. **Положительная готовность Full local сейчас не реализована.** |
-| ☐ | S03 — #11 | Явно Verify в допустимом окружении; раскрыть результаты. Видны реальные выполненные/непроверенные проверки. Stop — только на действительно запущенном собственном run; после Stop нет ложного Ready. Retry не означает прекращение удалённой работы. Реальная inference — раздел E. |
-| ☐ | S04 — #11, #17 | Открыть `/settings#ai-models`, `#rss-feeds`, `#university-access` с холодной страницы и внутри неё. Нужный блок открыт и поле в фокусе; переход не запускает Save/Verify/Refresh. Изменённый login URL недоступен до подтверждённого Save; посторонний черновик не блокирует прежний сохранённый URL. |
-| ☐ | X02a — #11 | Пройти wizard клавиатурой при 320/390/768px и desktop. Видны подписи и текущий шаг, фокус предсказуем, ошибки не только цветом; длинные endpoint/model не расширяют страницу. Browser emulation не считается iPhone-тестом. |
+Это пользовательские операторские функции, а не дополнительные обязательные UI-шаги.
+Пути/окно/config выбрать для тестового проекта; команды запуска могут вызвать AI
+или сбор данных. Без подготовленного окружения — BLOCKED.
 
-## B. Источники, Today, Read Next, Weekly
+| Проверено / ID | Добавленная функция и исходный GitHub issue | Как проверить вручную | Ожидаемый результат |
+|---|---|---|---|
+| ☐ FEATURE-12 | **Source-qualified engineering cards из RSS для проектов** — [#12](https://github.com/Vlislavn/zotero-summarizer/issues/12) | Выполнить `zotero-summarizer research-feed run --project-root ROOT --from START --to END --shortlist-budget N --card-budget M`; прочитать JSON/Markdown и открыть saved run в Weekly. Без новой генерации — `--cached-only` по уже qualified inputs. | Карточки связывают статью с проектом, artifacts и reproduction blockers; неизвестное не превращено в измеренные сроки. Лимиты соблюдены, исходники доступны для проверки. Без `--queue-zotero` нет queued Zotero write, но локальный отчёт всё равно публикуется. |
+| ☐ FEATURE-13 | **Telegram news: сбор и обработка сохранённых сообщений** — [#27](https://github.com/Vlislavn/zotero-summarizer/issues/27) | С разрешённой сессией использовать `research-feed telegram-auth`, затем `research-feed run --source telegram --collect-only --project-root ROOT`. Отдельно обработать разрешённый saved input через `--input-jsonl FILE`, открыть report. | Сохранены тексты/идентичности и ссылки на сообщения; collection и model processing разделены, повторный сбор не дублирует известные posts. Просмотр saved report не активирует Telegram. ML остаётся shadow, не принятым hard gate. |
+| ☐ FEATURE-14 | **Анализ накопленных решений: manual и еженедельно** — [#47](https://github.com/Vlislavn/zotero-summarizer/issues/47) | На подготовленных labels выполнить `goldenset analyze-feedback --project-root ROOT --cutoff AWARE_ISO`, прочитать JSON/Markdown. Если используется weekly operation, включить её существующей конфигурацией и проверить опубликованный scheduled report после наступления срока. | Есть описательный отчёт, coverage/ограничения и traceable examples; insufficient data обозначена. Отчёт не меняет labels/models; manual и weekly используют ту же логику. Отсутствие unbiased-quality evidence не скрыто. |
 
-| Проверено | ID / ишьюсы | Действие → наблюдаемый PASS |
-|---|---|---|
-| ☐ | F01 — #16 | Settings → Sources: набрать custom draft, добавить HackerNoon presets, отключить один, reload. Draft не теряется при preset-save; повторное добавление не включает отключённый feed. Refresh выполнять отдельно: пусто, ошибка и offline различимы. Live triage — раздел E. |
-| ☐ | F02 — #33, #34 | Today → Why selected у доступных контрастных примеров. Relevance отделена от evidence; unknown/legacy не названы плохой наукой; exploration обозначена; объяснение относится к выбранной статье. Это **не** доказательство качества отбора. |
-| ☐ | F07 — #21 | Library → Read Next: открыть предложение, не подтверждать. «Review suggests» не становится сохранённым вердиктом/новым ранжировщиком; явно сохранённый пользовательский приоритет остаётся отдельным. |
-| ☐ | F03a — #28, #20 | У Today-строки без usable full-text review Add недоступен с причиной; Trash доступен. Генерация review сама не добавляет статью. Проверка реального Add/attachment — раздел F. **Trash меняет feedback.** |
-| ☐ | F05 — #12 | `/weekly`: выбрать сохранённый run, bookmark/reload, раскрыть cards/pending, скачать JSON/Markdown. Остаётся тот же run; пустой отчёт не ошибка; pending review не назван отсутствующим PDF; unverified observations не названы доказанным применением. Просмотр/скачивание не генерируют новый отчёт. |
+## C. Добавленные экспериментальные инструменты — только при их использовании
 
-## C. Чтение, объяснения и вопросы
+Проверять на подготовленных frozen inputs, не на основной библиотеке.
+Получение tool output не доказывает научную пользу или победу модели.
 
-| Проверено | ID / ишьюсы | Действие → наблюдаемый PASS |
-|---|---|---|
-| ☐ | R01 — #9, #15 | Открыть доступные READ/capped SKIM/SKIP/unknown на полной странице, compact и HTML brief. Один упорядоченный план рядом с действием; targets/skip hints буквальны; missing time ≠ 0; capped time — сохранённая оценка. Unknown не оживляет старые инструкции. |
-| ☐ | R02 — #15, #29, #41 | Раскрыть Idea/Evidence/Writing и Full digest. Идея, scientific evidence и writing не смешаны; applicability и writing reasons не повторены; отсутствующие targets/original value объяснены; legacy supported goal не назван unknown. Все разные caveats/цитаты доступны. |
-| ☐ | R03a — #10, #32, #34, #36 | На сохранённом результате сравнить claim/число/URL/quote с **исходной** статьёй. Репозиторий «найден» не значит «принадлежность проверена»; generated/map notes не заменяют original evidence. Source/parser/verifier failure не научный отрицательный вывод. Production method/code — раздел E. |
-| ☐ | R04 — #18, #40 | На подготовленном artifact открыть Figures & full brief. Есть только текущие audited outputs; при показанной stale/error-проблеме понятен rebuild, старые ссылки не предлагаются как текущие. Build не обещает Markdown. Изменение файлов/удержание rebuild выполняет разработчик, не человек. |
-| ☐ | N01 — #48 | В Today и Library открыть paper **без PDF/успешного review**, отправить typed и preset question. При недоступном ответе вопрос остаётся в My notes после reload, отдельно от manual note. Повторная осознанная отправка — новый вопрос; Retry answer — та же отправка. Онлайн Ask может вызвать QA и mirror; нет отдельной «Save question only» кнопки. |
-| ☐ | Q05a / X02b — #30, #46, #41 | Раскрыть длинные evidence/IDs/locators: текст целиком читается и копируется, в том числе при 390/1440px. Для полного review дополнительно 320px, 200% text resize, spacing override, keyboard и light/dark: нет потери caveats/перекрытий. Проверить понимание, а не только геометрию. |
-
-## D. Заметки и решения
-
-| Проверено | ID / ишьюсы | Действие → наблюдаемый PASS |
-|---|---|---|
-| ☐ | N02 — #48, #19 | Сохранить manual note, изменить; уйти по ссылке, history и доступным Prev/Next. Cancel оставляет черновик; Leave уходит без скрытого Save; reload/close спрашивает нативно. После подтверждённого Save лишнего prompt нет. Очистить и Save — существующая операция, не отдельный Delete API. |
-| ☐ | N03 — #13, #14 | Save приоритет X с rationale → Update Y → retract → reload. Видно текущее решение; изменение приоритета не стирает комментарий, отмена черновика ничего не пишет. Наличие transition-history UI и crash-exactly-once JSONL **не обещается**. |
-| ☐ | X01a — #25, #26 | Ops → System: виден текущий loaded gate, не «новейший файл». Пока classifier config неизвестен/ошибочен, Retrain недоступен, `logreg` не угадан. Сам Retrain — отдельное согласие в разделе E. |
-
-## E. Условные AI / сеть / операторские действия
-
-Нужны разрешённые источники, выбранные routes и существующий corpus/assets.
-**Не запрашивать новые API keys ради чеклиста**; нет уже доступного окружения — BLOCKED.
-Не загружать локальные веса без отдельного ресурсного допуска. No LLM не может
-положительно принять Generate/Ask/Add нового feed item без прежнего usable review.
-
-| Проверено | ID / ишьюсы | Действие → наблюдаемый PASS |
-|---|---|---|
-| ☐ | S01/S03 live — #11, #17 | В уже разрешённом hosted окружении выбрать preset/model, Save/reload, явно Verify. Реальная inference и no-write pipeline наблюдаются отдельно от listing. Local UNKNOWN не засчитывать как положительную Full-local готовность. |
-| ☐ | F01 live — #16 | Разрешённые concrete practitioner и hype-примеры проходят реальный triage; вручную проверить смысл результата и web-article review. Scripted regression не доказывает полезность классификации. |
-| ☐ | R03b — #10 | На abstract/direct-PDF/long-map примерах проверить шесть `method_and_code` полей или честные null, источники, persistence/reload и итоговую note. CodeLink banner недостаточен; неподтверждённые команды/файлы — FAIL. |
-| ☐ | Q01 — #31 (регрессия) | Targeted Search: narrow comparison, Query plan, proposed против явно подтверждённых phrase/type constraints; сменить sort и reload session. Сохраняются candidate identity/полный retained pool; предложения модели не стали молчаливыми фильтрами. Retrieval не обещает полноту литературы. |
-| ☐ | Q02 — #46 | Show related saved papers: включены already-read, ≤3 distinct families, нет собственной DOI/arXiv-версии. Cancel «Try with comments» не вызывает assessment; Confirm явно называет обработчик/private context. Изменить/очистить manual note и refresh: старое assessment не остаётся текущим. Local display comments не равен отправке провайдеру. |
-| ☐ | Q03 — #46 | Saved seed → Find new relevant без private consent, затем отдельно с разрешённым consent. Новыми рекомендованы только confirmed misses; unknown membership явно обозначен. Review/Add отдельны; stale result не разрешает новый эффект. Повтор uncertain Add не ручной тест. |
-| ☐ | Q04 — #30 | Отдельно opt-in original-source question evidence. Проверить оригинальную цитату и реально отвечающий результат, в том числе отрицательный/null scientific finding. Partial/unknown не «нет ответа во всей статье». Это эксперимент; улучшение ranking/latency требует отдельного held-out исследования. |
-| ☐ | X01b — #26 | Только с разрешением на refresh labels/training/artifact replacement нажать Retrain. Выбрана подтверждённая конфигурация, статус привязан к одному job; при недоступном статусе Retry status читает его, не запускает новое обучение. История/restore — CLI, не Ops-кнопка. |
-
-## F. Условная native-приёмка — только копия Zotero
-
-| Проверено | ID / ишьюсы | Действие → наблюдаемый PASS |
-|---|---|---|
-| ☐ | F03b — #20, #28 | Explicit Add usable review (включая negative recommendation), затем mixed batch. Заблокированные rows не объявлены добавленными; проверить **реальные** parent item, PDF/attachment и partial errors. Item created ≠ PDF attached. |
-| ☐ | N04 — #7, #48 | Существующие tag/collection/priority/My notes editors: Save, отказ force, обновление черновика. Текст сохраняется при отказе/неопределённом исходе; manual clear не стирает questions. Закрыть Zotero для нормального положительного write; не форсировать ради PASS. |
-| ☐ | N05 — #7, #48 | Ops → Pending Changes: видимые filter/selection, Preview → отдельно Edit/Save → explicit Apply/Reject. Проверить backup, terminal row и реальную библиотеку. Direct/system-mirror history не разрешает Pending approval; нет обещания exposed Undo. Неопределённый outcome сначала сверить, не replay. |
-| ☐ | N07 — #8 | На заранее подготовленной scored row с полным triage artifact перезапустить **собственный** сервис, позднее materialize. Прочитать native note без app/PDF: summary/methods/findings/relevance/limitations/guidance сохранены. Legacy fallback явно помечен; triage/digest/manual/verdict notes не перезаписывают друг друга. Полезность на 10 статьях — отдельно. |
-
-## G. Условные device/offline/deployment
-
-| Проверено | ID / ишьюсы | Действие → наблюдаемый PASS |
-|---|---|---|
-| ☐ | N06 — #19 | Сначала active offline shell и завершённый Sync now; **тот же origin/storage**. Остановить собственный backend, открыть ещё не открывавшуюся synced paper, сохранить note/verdict, перезапустить браузер, reconnect. Device edits пережили restart и дождались ACK; PDFs/AI/native work не обещаны offline. |
-| ☐ | N06 conflict — #19 | На втором независимом клиенте изменить то же поле, затем reconnect. Видны обе версии, решение явное; разные поля не конфликтуют. Не очищать outbox; ошибки protocol/storage не названы «синхронизировано». |
-| ☐ | X02c — #19 | На физическом устройстве повторить disconnect/restart/storage-lifetime. Затем **отдельно** на уже развёрнутом owner-authenticated HTTPS gateway проверить owner / anonymous / non-owner / revoked. Не включать unauthenticated LAN и не обходить TLS. 390px localhost не является этим тестом. |
-
-## H. Не перекладывать на обычного пользователя
-
-Эти функции входят в техническую проверку/операторскую приёмку, но не требуют
-изобретать UI или давать человеку SQL/инъекцию сетевых гонок. Их фактический
-машинный статус — в [отчёте](README.md) и [results.json](results.json).
-
-| ID | Отдельная проверка / связь |
-|---|---|
-| F04 — #12 | CLI `research-feed run`: bounded dates, `--shortlist-budget`, `--card-budget`, `--cached-only`, optional `--queue-zotero`. **Нет** флагов `--dry-run`/`--budget`. Default без queue не пишет Zotero, но может вызвать models/acquisition и публикует локальный bundle; cached-only тоже пишет новый report/state. |
-| E01 — #27 | `telegram-auth`, collection, saved `--input-jsonl` processing и passive report reading — отдельные операции. Авторизация только владельцем, SDK/аккаунт условны; ML сейчас shadow, не принятый hard gate. |
-| E02 — #47 | `goldenset analyze-feedback --project-root ROOT --cutoff AWARE_ISO`; manual/weekly, два test-clock цикла/restart, aliases/retractions/gaps/future leakage и passive replay. Никакой новой dashboard; reports не меняют labels/models. |
-| E03 — #37/#38/#42 | `python -m tools.method_validation {support,priority,collections} --config FILE`; отдельно `--run`, затем `--inspect ATTEMPT`. Frozen/replay/native positive/refusal и held-out human/model/resource qualification — разные результаты. |
-| E04 — #49 | `zotero-summarizer faithbench interpretation --project-root ROOT --run-id ID`: opt-in A/B/C, ordinary-default isolation, valid base при card-only failure, все assigned questions в denominator. Научную пользу не доказывает synthetic zero-error. |
-| R05 — #40 | Retained-audit export — **внутренний** `_review_cache.export_review_audit` в initialized project; публичного UI/CLI/HTTP export нет. Exact byte/source binding ≠ scientific entailment. |
-| Q05b / D01 — #7/#30/#46 | Held GET/Add ownership, request UUID/replay, MCP actual semantic confirmation, quote checkpoints/capabilities и malformed ACK — проверки разработчика. Человек проверяет видимость/копирование, не удерживает transport вручную. |
-| D02 — PR-only native maintenance | Raw RSS read-state backup-before-effects и retention-after-success: owned native SQLite tests, не вмешательство в основную библиотеку. |
-| D03 / X03 — #7/#22/#23 | Selected-root CLI до model imports, архитектура/ADR provenance, исследовательские решения. RepoDoc не принят; нет новой пользовательской graph-функции. |
-| F06 — #160/#161 | Не implemented UI: #160 — research policy; #161 — унаследованные collection-tail/last-author/person-h-index/organisation gaps. Prefilter metadata PR не реализует эти требования. Их нельзя отметить PASS по этому чеклисту. |
+| Проверено / ID | Добавленная функция и исходный GitHub issue | Как проверить вручную | Ожидаемый результат |
+|---|---|---|---|
+| ☐ FEATURE-15 | **Сравнение criterion–evidence support** — [#37](https://github.com/Vlislavn/zotero-summarizer/issues/37) | `python -m tools.method_validation support --config FILE`; отдельно разрешить `--run`, затем `--inspect ATTEMPT`. | До запуска показаны admission/ограничения; после есть source-linked readouts, неизвестные/ошибки отдельно от negatives. Inspect не делает новый model run. |
+| ☐ FEATURE-16 | **Сравнение reading priority** — [#38](https://github.com/Vlislavn/zotero-summarizer/issues/38) | Аналогично выполнить `python -m tools.method_validation priority --config FILE`, явно `--run` и `--inspect ATTEMPT`. | В отчёте сравниваются admitted frozen priorities с provenance/coverage; отсутствующие решения не выдуманы. Production ranking не меняется. |
+| ☐ FEATURE-17 | **Сравнение распределения по существующим коллекциям** — [#42](https://github.com/Vlislavn/zotero-summarizer/issues/42) | Аналогично выполнить `python -m tools.method_validation collections --config FILE`, явно `--run` и `--inspect ATTEMPT`. | Результат относится к выбранной существующей taxonomy, допускает несколько memberships/unknown; новые имена и native membership не применяются автоматически. |
+| ☐ FEATURE-18 | **Эксперимент с Finding / Scope / Unproven карточками** — [#49](https://github.com/Vlislavn/zotero-summarizer/issues/49) | На prepared study inputs явно выполнить `zotero-summarizer faithbench interpretation --project-root ROOT --run-id ID`; прочитать A/B/C packets и доступные qualified card/QA outputs. | Условие C содержит Finding / Scope / Unproven с исходным evidence; обычный review по умолчанию не получает experiment card. Ошибки и все assigned questions сохранены; вывод adopt/reject не объявлен без независимых человеческих оценок. |
 
 ## Лист результата
 
 ```text
-Revision / OS / browser / origin / AI mode: __________________________
-Prepared data keys + backup: ________________________________________
-ID + subcheck: ______  PASS / FAIL / BLOCKED / N/A
-Expected: __________________________________________________________
-Observed + screenshot/log/reference: _______________________________
-Side effects/native readback checked: ______________________________
-Tester / date: _____________________________________________________
+Commit / окружение / выбранная копия: _______________________________
+FEATURE-__: PASS / FAIL / BLOCKED / N/A
+Действия и входные данные: _________________________________________
+Ожидаемый / фактический результат: _________________________________
+Screenshot / output / native readback: _____________________________
+Проверил / дата: ___________________________________________________
 ```
 
-**Решение человека:** разрешённые основные сценарии без FAIL → можно продолжить
-ограниченный UAT. BLOCKED не превращать в PASS; недоступные conditional workflows
-не считать принятыми. Полная production/local/hardware/scientific/device-ready
-готовность этим документом не заявляется.
+Общие регрессии приложения, низкоуровневые race/replay/backup тесты, внутренний
+export и нереализованные пожелания не являются пунктами этого чеклиста.

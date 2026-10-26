@@ -1,21 +1,21 @@
-# PR208 — чеклист → рой → исправления → ручная приёмка
+# PR208 — добавленные функции и ручная приёмка
 
 ```text
-33 исходных сценария + primary issues/diff
-        ↓
-6 area-аудиторов → 2 независимых cross-reviewer
-        ↓
-parent reproduction → исправления → regression/build/browser
-        ↓
-отдельный чеклист человеку (ещё НЕ выполнен)
+Функция, добавленная в PR → исходный GitHub issue → ручная проверка
 ```
 
-**Открыть [финальный ручной чеклист](manual-checklist.md).**
-[Все 39 ишьюсов и границы PR](issue-scope.md) · [машинные receipts](results.json) ·
+**[Актуальный чеклист версии2](manual-checklist.md):18функций из15исходных GitHub issues.**
+[Функция → issue → реализация](issue-scope.md) · [исторические машинные receipts](results.json) ·
 [8 run IDs / hashes](swarm.json) · [проверенные code bytes](source-manifest.json).
 
-Рой проверял один заранее составленный чеклист, а не придумывал восемь разных
-задач. Draft SHA256 `2c09def0fabcd8e7d3154b50484ae9d268764fefe73c93c8fc6de387f62db4fe`;
+По уточнению пользователя убраны существующие функции/общие регрессии, внутренние
+технические проверки и нереализованный backlog. Проверяется добавленная часть
+функционала, а не весь acceptance каждого issue. Человеком версия2 не выполнена;
+новый рой по ней не запускался.
+
+## Исторический аудит версии1
+
+Рой проверял прежний смешанный33-сценарный чеклист, а не текущую версию2. Draft SHA256 `2c09def0fabcd8e7d3154b50484ae9d268764fefe73c93c8fc6de387f62db4fe`;
 workflow `d90f6c13-6425-4295-a46e-db0f908958ed`. Все 8 завершены, fresh contexts,
 6 зон + issue-completeness/human-safety. Их работа — **readonly primary/source
 review**, не исполненная пользовательская приёмка. Воспроизведение и реальные
@@ -61,23 +61,27 @@ rejected-family controls и общие post-fix gates записаны в `resul
 использовать для текущего goal-label случая. На6e он воспроизведён и исправлен
 здесь. Исторический final295 остаётся историческим snapshot, не вечным сертификатом.
 
-## Закрытые дыры самого чеклиста
+## Исправление scope чеклиста по уточнению пользователя
 
-Добавлены delayed triage-note restart/materialization (#8), отдельный Read Next
-(#21), production method/code отдельно от repository banner (#10), Q&A checkpoint /
-capability и selected-root CLI, raw RSS maintenance. Setup accessibility, reading
-comprehension и physical-device/gateway разделены. Убраны придуманные публичный
-export, history UI, Delete-comment API и флаги CLI `--dry-run`/`--budget`.
+Версия1 была слишком широкой: смешивала добавленные функции, регрессии старого
+приложения, технические проверки и backlog. Даже source-supported regression
+не становится новой функцией только потому, что файл изменён.
 
-Вместо «весь issue готов» — slice/regression/conditional/out-of-scope. Пустая
-explicit-reference карта не исключает Telegram implementation; merged dependency
-reference не доказывает acceptance. Source/example flags и научные thresholds
-в issue appendix не выдаются за измеренные показатели.
+Например, richer delayed triage note (#8) и non-ranking Read Next proposal (#21)
+уже существовали в base; их прежние N07/F07 удалены из актуального чеклиста.
+Существующие Setup, Pending/editors, Search (#31), retrain/labels, внутренний
+audit export, race/ACK/MCP/backup checks также не создают отдельных новых
+пользовательских пунктов.
+
+В версии2 каждая строка называет добавленную функцию, **исходный GitHub issue,
+по которому её делали**, действия и ожидаемый результат. Компаньон содержит
+конкретную реализацию/subPR, а не общий каталог39связанных issues. Результаты
+прежнего роя и code tests сохранены как исторические факты, не как приёмка новой версии.
 
 ## Границы решения
 
-- Все **подтверждённые семь дефектов в проверяемом PR slice** исправлены;
-  checklist/provenance holes адресованы. Это не закрытие всего backlog.
+- Семь подтверждённых продуктовых дефектов исторического аудита исправлены.
+  Текущая правка меняет только documentation scope, не runtime-код и не backlog.
 - #11 positive Full-local **не реализован** без executing-runtime envelope
   producer; честный UNKNOWN/refusal не заменяет usable-local acceptance.
 - #160 — research policy; #161 collection-tail/last-author/personal h-index /
@@ -111,9 +115,11 @@ validation bundles; link checker теперь проверяет и их Markdow
 
 ## Простота и итоговая приёмка
 
-Source: Laws of UX vault — Hick’s Law, Tesler’s Law, Occam’s Razor. Сначала
-вычтены duplicate rationale, второй supported-goal predicate и guessed classifier;
-затем добавлены только недостающие admission/explanation/recovery. Это UX-эвристики,
+Source: Laws of UX vault — Hick’s Law, Tesler’s Law, Occam’s Razor. В версии2
+сначала убраны лишние regression/developer/backlog пункты, затем добавлена прямая
+привязка каждой функции к исходному GitHub issue. Исторические code-исправления
+вычли duplicate rationale, второй supported-goal predicate и guessed classifier,
+добавив только недостающие admission/explanation/recovery. Это UX-эвристики,
 не measured comprehension benefit. Reuse: прежние request/query/state owners,
 Search `_Union`, existing disclosures и guard; новых моделей/stores/frameworks нет.
 Дальнейшее деление этого небольшого исправления не упрощает touched code.
