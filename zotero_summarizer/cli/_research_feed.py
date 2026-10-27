@@ -9,6 +9,9 @@ import sys
 from pathlib import Path
 
 
+DEFAULT_REVIEW_TIMEOUT_SECONDS = 3600
+
+
 def _date(value: str) -> datetime:
     try:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -102,12 +105,16 @@ def _validate_research_feed_args(args: argparse.Namespace, parser: argparse.Argu
         if args.input_jsonl or args.collect_only:
             parser.error("--input-jsonl and --collect-only require --source telegram")
     else:
+        if args.start is not None or args.end is not None or args.review_timeout is not None:
+            parser.error("--from, --to, and --review-timeout require --source app_rss")
         if args.queue_zotero or args.venue:
             parser.error("Telegram news does not support --queue-zotero or --venue")
         if args.collect_only and args.cached_only:
             parser.error("--collect-only and --cached-only are mutually exclusive")
         if args.cached_only and args.input_jsonl:
             parser.error("--cached-only cannot import new input")
+    if args.review_timeout is None:
+        args.review_timeout = DEFAULT_REVIEW_TIMEOUT_SECONDS
     try:
         args.shortlist_budget, args.card_budget, _, args.review_timeout = parse_run_budgets(
             args.shortlist_budget, args.card_budget, 1000, args.review_timeout,
@@ -130,7 +137,7 @@ def register_research_feed(subparsers: argparse._SubParsersAction) -> None:
     run.add_argument("--venue", default="", help="Optional conference/feed-name filter")
     run.add_argument("--shortlist-budget", type=int, default=None)
     run.add_argument("--card-budget", type=int, default=None)
-    run.add_argument("--review-timeout", type=int, default=3600)
+    run.add_argument("--review-timeout", type=int, default=None)
     run.add_argument("--cached-only", action="store_true", help="Project current source-qualified reviews only; no model work")
     run.add_argument(
         "--queue-zotero", action="store_true",
@@ -146,7 +153,7 @@ def register_research_feed(subparsers: argparse._SubParsersAction) -> None:
     auth.add_argument("--project-root", default=None)
     auth.set_defaults(func=_telegram_auth)
     child = actions.add_parser("_telegram-child", help=argparse.SUPPRESS)
-    child.add_argument("--purpose", choices=("auth", "collect"), required=True)
+    child.add_argument("--purpose", choices=("auth", "collect", "conversations"), required=True)
     child.add_argument("--receipt", required=True)
     child.add_argument("--project-root", required=True)
     child.set_defaults(func=_telegram_child)

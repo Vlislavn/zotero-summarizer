@@ -12,6 +12,7 @@ import { humanizeError } from '../../utils/humanizeError.js';
 import { invalidateSetupDoctor } from '../../utils/setupDoctorState.js';
 import { Banner, CheckboxField, Field, SectionCard } from '../form/Fields.jsx';
 import Button from '../ui/Button.jsx';
+import TelegramSources from './TelegramSources.jsx';
 
 const HACKERNOON_FEEDS = [
   { name: 'HackerNoon AI Agents', url: 'https://hackernoon.com/tagged/ai-agents/feed' },
@@ -110,10 +111,11 @@ export default function RssFeedsSection() {
 
   return (
     <SectionCard
-      title="RSS feeds"
-      description="App-owned subscriptions used by the Today pipeline."
+      title="Sources"
+      description="RSS subscriptions for Today, and selected Telegram conversations for Weekly."
     >
       <div id="rss-feeds" className="space-y-4 scroll-mt-20">
+        <h3 className="font-display text-xl text-forest-800">RSS feeds</h3>
         <div className="flex flex-wrap gap-2">
           <Button
             variant="secondary"
@@ -265,6 +267,7 @@ export default function RssFeedsSection() {
           )}
         </div>
       </div>
+      <TelegramSources />
     </SectionCard>
   );
 }

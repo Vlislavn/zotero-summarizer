@@ -31,6 +31,8 @@ remain unknown. Accuracy bounds and fully observed primary shortfalls can refuse
 independently of unrelated missing review/resource judgments. Reports count actual
 whole-card QA exposures; zero exposure cannot recommend a card pilot (no minimum
 study exposure rate or scientific sufficiency is inferred from a nonzero count).
+A report with no non-null human score stays inconclusive; retained assigned errors
+alone do not produce a reject decision.
 
 `_corpus.chunk_spans` exposes the exact stripped coordinates used by `chunk_text`
 and `PaperChunkIndex`; repeated occurrences remain distinct. Digest audit retention

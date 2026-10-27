@@ -181,7 +181,15 @@ def _paired(losses, recipe):
     return comparisons
 
 
+def _has_human_judgment(labels):
+    return any(judgment.correct is not None or judgment.overclaim is not None or
+               judgment.add_regression is not None or bool(judgment.card)
+               for judgment in labels.judgments.values())
+
+
 def _decision(metrics, comparisons, recipe, labels):
+    if not _has_human_judgment(labels):
+        return 'INCONCLUSIVE'
     current, thresholds = metrics['C'], {key: Fraction(str(value)) for key, value in recipe['thresholds'].items()}
     known_failures = current['card_failures'] or any(value is True for value in current['add_regressions'])
     complete = all(value['human_complete'] for value in metrics.values())

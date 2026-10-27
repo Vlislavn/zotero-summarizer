@@ -62,6 +62,27 @@ def test_receipt_cannot_rebase_another_device_or_overwrite_intervening_edit(clie
     assert repositories.get_review_note(db, "P1") == ("remote" if intervening else "first")
 
 
+def test_replaying_older_receipt_does_not_lower_continuation_revision(client):
+    http, db = client
+    first = _mutation("P1", "review_note", "first", 0)
+    first_result = _push(http, [first]).json()["results"][0]
+    assert first_result["status"] == "applied"
+
+    second = _mutation("P1", "review_note", "second", 0)
+    second_result = _push(http, [second], [first["mutation_id"]]).json()["results"][0]
+    assert second_result["status"] == "applied"
+
+    third = _mutation("P1", "review_note", "third", 0)
+    response = _push(http, [first, third], [second["mutation_id"]])
+
+    assert response.status_code == 200
+    assert [result["status"] for result in response.json()["results"]] == [
+        "already_applied",
+        "applied",
+    ]
+    assert repositories.get_review_note(db, "P1") == "third"
+
+
 def test_unknown_receipt_is_not_a_successful_continuation(client):
     http, db = client
     response = _push(http, [_mutation("P1", "review_note", "draft", 0)], [str(uuid4())])

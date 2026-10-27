@@ -149,3 +149,22 @@ def test_whole_workload_firewalls_refuse_before_artifacts(tmp_path, change):
     with pytest.raises(ValueError):
         priority_run.run(Config.model_validate(cfg), encoded(cfg))
     assert not (tmp_path / 'selected').exists()
+
+
+@pytest.mark.parametrize(('observed_at', 'accepted'), [
+    ('2025-12-31T23:59:59Z', True),
+    ('2026-01-01T00:00:00Z', True),
+    ('2026-01-01T05:00:00+05:00', True),
+    ('2026-01-02T00:00:00Z', False),
+])
+def test_development_observations_respect_frozen_split(tmp_path, observed_at, accepted):
+    cfg, _, _ = fixture(tmp_path)
+    bundle = loads(Path(cfg['inputs']['path']).read_bytes())
+    bundle['papers'][0].update(split='development', observed_at=observed_at)
+    cfg['inputs'] = write_ref(tmp_path / 'inputs.json', bundle)
+    config = Config.model_validate(cfg)
+    if accepted:
+        priority_run.prepare(config)
+    else:
+        with pytest.raises(ValueError, match='development observations exceed frozen split'):
+            priority_run.prepare(config)

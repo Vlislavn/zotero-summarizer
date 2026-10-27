@@ -64,6 +64,31 @@ def test_weekly_http_lists_opens_and_downloads_existing_publication_without_writ
     assert not any(route.path == "/api/research-feed/run" for route in app.routes)
 
 
+@pytest.mark.parametrize("format", ["json", "md"])
+def test_weekly_download_returns_the_bytes_qualified_before_response_streaming(saved_report, format):
+    _, app, json_path = saved_report
+    artifact = json_path if format == "json" else json_path.with_suffix(".md")
+    qualified_bytes = artifact.read_bytes()
+    replacement = b"changed after report qualification"
+
+    async def replace_after_qualification(scope, receive, send):
+        async def send_with_replacement(message):
+            if message["type"] == "http.response.start":
+                artifact.write_bytes(replacement)
+            await send(message)
+
+        await app(scope, receive, send_with_replacement)
+
+    response = _request(
+        replace_after_qualification,
+        f"/api/research-feed/runs/{json_path.parent.name}/download?format={format}",
+    )
+
+    assert response.status_code == 200
+    assert response.content == qualified_bytes
+    assert artifact.read_bytes() == replacement
+
+
 def test_new_report_keeps_private_receipt_but_exports_only_its_reference(tmp_path, monkeypatch):
     from copy import deepcopy
     from tests.test_feed_assessment_producer import produce_review
@@ -89,7 +114,34 @@ def test_new_report_keeps_private_receipt_but_exports_only_its_reference(tmp_pat
         'status': entry['feed_assessment']['status'], 'origin': entry['feed_assessment']['origin'],
         'scientific_verification': 'unverified',
         'retained_payload_sha256': entry['feed_assessment']['payload_sha256']}
+    readback = reports.get_report(settings, Path(result['json_path']).parent.name)
+    assert readback['cards'][0]['provenance'] == public
     assert entry == original and generator.pydantic_prompt.call_count == verifier.calls == 1
+
+
+@pytest.mark.parametrize("generation", ["missing", None, "not-a-hash", False])
+def test_partial_source_binding_stays_available_in_saved_metadata(tmp_path, generation):
+    settings = _settings(tmp_path)
+    _seed(settings, "partial-paper", "Agent harness benchmark")
+    review = _review("partial-paper")
+    if generation == "missing":
+        review["review_identity"].pop("generation_sha256")
+    else:
+        review["review_identity"]["generation_sha256"] = generation
+    result = run_weekly(
+        settings, start=datetime(2026, 8, 20, tzinfo=timezone.utc),
+        end=datetime(2026, 8, 29, tzinfo=timezone.utc), review_loader=lambda _key: review,
+    )
+    run_id = Path(result["json_path"]).parent.name
+    payload = json.loads(Path(result["json_path"]).read_text())
+    evidence = payload["metadata"]["full_text_evidence"]["partial-paper"]
+
+    assert payload["cards"] == []
+    assert evidence["availability"] == "available" and evidence["qualified"] is False
+    assert evidence["reason"] == "review_generation_unbound"
+    expected = {"source_kind", "source_sha256"}
+    assert set(evidence["source_binding"]) == (expected if generation == "missing" else expected | {"generation_sha256"})
+    assert reports.get_report(settings, run_id) == payload
 
 
 def test_weekly_http_empty_library_is_not_an_unreadable_report(tmp_path, monkeypatch):
@@ -205,6 +257,34 @@ def test_malformed_nested_reports_are_unavailable_not_crashing_or_empty(saved_re
     assert _request(app, base + "/download?format=json").status_code == 422
     assert _request(app, base + "/download?format=md").status_code == 422
     assert path.read_bytes() == saved_bytes
+
+
+@pytest.mark.parametrize(("location", "bad_value"), [
+    (("cards", 0, "provenance", "source_binding"), []),
+    (("cards", 0, "provenance", "source_binding", "source_sha256"), "not-a-hash"),
+    (("cards", 0, "provenance", "source_binding", "generation_sha256"), "not-a-hash"),
+    (("cards", 0, "provenance", "source_binding", "generation_sha256"), None),
+    (("cards", 0, "provenance", "feed_generation"), []),
+    (("metadata", "full_text_evidence", "feed:weekly-paper", "source_binding"), []),
+])
+def test_malformed_saved_provenance_is_unavailable_everywhere(saved_report, location, bad_value):
+    _, app, path = saved_report
+    payload = json.loads(path.read_text())
+    parent = payload
+    for key in location[:-1]:
+        parent = parent[key]
+    parent[location[-1]] = bad_value
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    original = path.read_bytes()
+    base = f"/api/research-feed/runs/{path.parent.name}"
+
+    detail = _request(app, base)
+    assert detail.status_code == 422
+    assert detail.json()["error"] == "report_unavailable"
+    assert _request(app, base + "/download?format=json").status_code == 422
+    assert _request(app, base + "/download?format=md").status_code == 422
+    assert _request(app, "/api/research-feed/runs").json()["items"][0]["available"] is False
+    assert path.read_bytes() == original
 
 
 @pytest.mark.parametrize("raw", ["not JSON", "[]", "null", '{"metadata":', b"\xff", '{"extra": 1e999}'])

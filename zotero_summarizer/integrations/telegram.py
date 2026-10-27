@@ -217,7 +217,8 @@ class TelethonPageClient:
         except rpcerrorlist.FloodWaitError as error:
             raise TelegramTransportError("flood_wait", retry_seconds=error.seconds) from None
         except (rpcerrorlist.UsernameInvalidError, rpcerrorlist.UsernameNotOccupiedError,
-                rpcerrorlist.ChannelPrivateError, rpcerrorlist.ChannelPublicGroupNaError):
+                rpcerrorlist.ChannelPrivateError, rpcerrorlist.ChannelPublicGroupNaError,
+                rpcerrorlist.MsgIdInvalidError, rpcerrorlist.TopicDeletedError):
             raise TelegramTransportError("channel_unavailable") from None
         except (ConnectionError, TimeoutError, AsyncTimeoutError):
             raise TelegramTransportError("network_error") from None

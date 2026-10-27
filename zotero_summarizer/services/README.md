@@ -1,5 +1,12 @@
 # services — business logic, grouped by domain
 
+`_adapters.build_llm(..., local_only=True)` admits literal loopback before loading
+OnPrem, rechecks every sent HTTP URL, and reuses the existing owned no-proxy/
+no-redirect transport with retries/cache disabled. This ordinary privacy option is
+separate from Setup verification/load admission and rejects their combination;
+existing callers are unchanged. Caller close owns the transport. It neither loads
+weights directly nor certifies an inference runtime/hardware envelope.
+
 Verification adapters pass explicit per-invocation request ownership to the native
 client boundary. Setup owns safety-state persistence; integration callbacks do not
 import services. Ordinary LLM construction, cache and user-facing consent owners

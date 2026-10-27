@@ -26,12 +26,18 @@ def collect_once_cli(settings: Settings, *, session_factory=None, client_factory
     The native fuse and lease remain live AFTER return. Exit this process; never run
     later ML/LLM work or embed this function in a server.
     """
-    if purpose not in {"collect", "auth"}:
+    if purpose not in {"collect", "auth", "conversations"}:
         raise ValueError("invalid Telegram process purpose")
     profile = None if purpose == "auth" else load_profile(settings.data_dir, persist_default=False)
     usernames = [] if profile is None else profile.telegram_channels
     channels = telegram_collect._channel_receipts(usernames)
     account = {"status": "not_checked", "retry_at": None}
+    if purpose == "conversations":
+        from zotero_summarizer.services.research_feed.telegram_conversations import targets
+
+        if not targets(profile):
+            return {"status": "no_sources", "cleanup": "not_started", "collection": None,
+                    "account": account}
     if not channels and purpose == "collect":
         return {"status": "no_channels", "cleanup": "not_started", "collection": None,
                 "account": account}
@@ -49,6 +55,10 @@ def collect_once_cli(settings: Settings, *, session_factory=None, client_factory
             from zotero_summarizer.integrations.telegram_auth import authenticate
 
             return await authenticate(sdk)
+        if purpose == "conversations":
+            from zotero_summarizer.services.research_feed.telegram_conversations import collect
+
+            return await collect(settings, sdk, profile, now=clock)
         collected = await telegram_collect.collect_pages(settings, usernames, _page_client(sdk), now=clock)
         with closing(repositories._connect_to(settings.triage_db_path)) as conn:
             for channel in collected["channels"]:
@@ -62,10 +72,13 @@ def collect_once_cli(settings: Settings, *, session_factory=None, client_factory
 
     result = telegram_session.collect_once_cli(
         settings, collect, session_factory=session_factory, client_factory=client_factory,
-        admit=admit, on_error=on_error, purpose=purpose,
+        admit=admit, on_error=on_error, purpose="auth" if purpose == "auth" else "collect",
     )
+    if (purpose == "conversations" and result["collection"] is not None
+            and not result["collection"].get("authorized")):
+        result["status"] = result["collection"]["account"]["status"]
     result["account"] = (result["collection"]["account"]
-                         if result["collection"] is not None and purpose == "collect" else account)
+                         if result["collection"] is not None and purpose in {"collect", "conversations"} else account)
     return result
 
 

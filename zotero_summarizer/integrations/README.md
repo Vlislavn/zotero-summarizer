@@ -1,5 +1,19 @@
 # integrations — external-system adapters
 
+`telegram_threads.py` reuses the explicit Telethon request/error leaf for selected
+public broadcasts, megagroups and forum roots. `GetDiscussionMessage` routes linked
+replies via the returned group/root, with complete direct-origin or saved-from
+origin consistency; `GetReplies` retains nested parent/top IDs. One bounded newest
+window is re-fetched per run (no whole-history promise). Validate peer/order/route
+before retaining originals; nontext/skipped and cap counts remain explicit.
+Broadcast lookahead/scanned/retained/truncated counts are separate from reply
+coverage. A later post stop carries completed observations plus origin-bound
+unavailable/not-attempted rows; it cannot discard earlier threads or continue RPCs.
+Reply-peer scope is retained as a boolean, never a sender/user identity; cross-peer
+or historically unknown scope must not become an invented same-peer parent. No
+join/send/delete, personal peer, convenience iterator, SDK lifecycle or model work
+is added here; the existing dedicated session owner still owns connect/disconnect.
+
 Opt-in OpenAlex search receipts reject nonfinite decoded JSON as parse failure
 before publishing hits. Ordinary/no-receipt payload policy remains unchanged;
 malformed variants do not invalidate independently usable neighboring requests.

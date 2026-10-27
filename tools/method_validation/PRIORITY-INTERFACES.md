@@ -55,7 +55,10 @@ silently retried or converted into semantic classes.
   No made-up native probability vector; invalid baseline rows remain unscored,
   original artifact retained.
 - Whole-family/canonical/time and development-only threshold firewalls apply
-  before inference or writes. Whole workload reserves outcomes/calls/forward-pass
+  before inference or writes. Development observations must be no later than
+  `split_frozen_at`; an equal instant is accepted with timezone-aware comparison.
+  The split freeze must still precede holdout opening, and later papers remain
+  held out before tuning. Whole workload reserves outcomes/calls/forward-pass
   work; snapshots have a cumulative byte cap. No clipping to fit.
 - Raw terminal bytes are written and acknowledged before parser projection.
   Rows identify exact request/input/model/readout/telemetry and the native raw

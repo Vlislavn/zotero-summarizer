@@ -1,11 +1,25 @@
 # cli — the `zotero-summarizer` command-line interface
 
+The existing `_telegram-child` adds `purpose=conversations` for the consented
+Settings source action. It retains the dedicated session/fuse/lease, no model work
+before clean exit, and hash-verified immutable export receipt. Authorization remains
+interactive terminal-only. Conversation failures expose bounded status codes, not
+raw SDK messages/account paths; the existing v1 collect/saved-news CLI stays intact.
+A cleanly disconnected conversation failure with retained observations can publish
+a raw partial bundle. Its receipt/files are hash-verified before exposing only the
+safe report ID; the action still fails/needs authorization and never enters model
+processing. Failure/partial evidence is not a successful collection receipt.
+The child kickoff imports its runtime owner; saved-news publication retains its
+separate import owner rather than an unused child-local binding.
+
 `faithbench interpretation` inspects a frozen recipe by default, without provider
 construction or output effects. Explicit `--run --capture-local` records a private
 A/B/C attempt; its stage clients resolve through `services.llm.factory` using
 invocation-local `RuntimeState` cache state. `--run-id` exports blinded human
-packets, and `--labels` scores an existing run. Inconsistent/unconsented flags refuse at the existing pre-Settings
-validator, including the real dispatcher. See [experiment overview](../../docs/features.md#interpretation-experiment).
+packets, and `--labels` scores an existing run. If no non-null human score is supplied,
+assigned execution errors alone leave the result inconclusive. Inconsistent/unconsented flags
+refuse at the existing pre-Settings validator, including the real dispatcher. See
+[experiment overview](../../docs/features.md#interpretation-experiment).
 
 Each command group lives in its own module and owns both its handlers and its
 argparse registration. `__init__.build_parser()` just wires the groups together,
@@ -210,5 +224,9 @@ see [feedback analysis](../services/golden/feedback_analysis/README.md).
 Retain original explicit default-no inference consent; use the existing canonical provider verification boundary.
 
 Telegram account/session activation and collection are explicit operations; retained
-report viewing does not activate them. See [Telegram news](../../docs/features.md#telegram-news).
-Source and synthetic lifecycle tests are not live-account acceptance.
+report viewing does not activate them. Saved JSONL replay uses `--input-jsonl`, and
+`--collect-only` publishes originals without ML/LLM work. Telegram mode rejects the
+RSS-only `--from`, `--to`, and `--review-timeout` options instead of silently ignoring
+them; it also rejects unsupported `--venue` and `--queue-zotero`. See
+[Telegram news](../../docs/features.md#telegram-news). Source and synthetic lifecycle
+tests are not live-account acceptance.

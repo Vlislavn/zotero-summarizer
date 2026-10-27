@@ -91,12 +91,18 @@ def _override_thinking(extra_body: dict | None, enable: bool) -> dict | None:
 
 def build_client_for_provider(
     provider: ProviderConfig, model: str, *, enable_thinking: bool | None = None,
-    verification: bool = False,
+    verification: bool = False, local_only: bool = False,
 ) -> LLMClient:
     """Construct the live client for one provider/model pair."""
     if LLMCapability.text not in provider.available_capabilities:
         raise APIError("unsupported_capabilities", "Selected provider does not declare text support", status_code=422)
-    verification_options = {}
+    if local_only:
+        from zotero_summarizer.services._adapters import require_loopback_endpoint
+
+        if verification or provider.type != ProviderType.openai:
+            raise ValueError("local-only inference requires an ordinary OpenAI-compatible API")
+        require_loopback_endpoint(provider.base_url or "")
+    verification_options = {"local_only": True} if local_only else {}
     if verification:
         from zotero_summarizer.services.setup.load_admission import refused_local_load
         from zotero_summarizer.services.setup.load_attempt import SetupAttempt, current_attempt

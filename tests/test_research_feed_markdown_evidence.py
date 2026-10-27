@@ -221,6 +221,25 @@ def test_optional_legacy_field_states_are_honest(typed_payload, field, label, st
     assert typed_payload == before
 
 
+def test_empty_reproduction_inputs_from_assessment_are_not_reported_as_unassessed(typed_payload):
+    card = typed_payload["cards"][0]["card"]
+    card["reproducibility_tier"] = "one_week"
+    card["reproducibility_rationale"] = "AI estimate, unverified: setup is documented."
+    card["reproduction_assessment"] = {
+        "tier": "one_week",
+        "rationale": "Setup is documented.",
+        "evidence_quote": "We provide a runnable setup guide.",
+        "missing_inputs": [],
+    }
+    card["missing_reproduction_inputs"] = []
+
+    text = render.markdown(typed_payload).split("## 2. ", 1)[0]
+
+    assert (
+        "**Missing reproduction inputs:** none reported (AI assessment, unverified)"
+    ) in text.splitlines()
+
+
 def test_minimal_legacy_card_keeps_existing_content_and_sections(typed_payload):
     for record in typed_payload["cards"]:
         record["candidate"] = {"title": record["candidate"]["title"]}

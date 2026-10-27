@@ -1,5 +1,21 @@
 # models — Pydantic contract (config + API shapes)
 
+Telegram adds `TelegramTarget`, `TelegramSourceSettings`, explicit Telegram-only
+provider/model selection and bounded limits to `ResearchProfile`. Existing
+`TelegramPost` v1 stays unchanged. `telegram_discussion.py` owns strict immutable
+conversation originals, peer/message/thread identities, coverage, and source-cited
+semantic topic/assertion response shapes. Context membership is separate from
+canonical message evidence, so selected group/thread overlaps are not independent
+corroboration. Optional `post_window` records broadcast selection independently of
+replies; `attempted` distinguishes refused work from later unattempted posts.
+Absent additive coverage/reply-scope fields preserve historical v2 hashes.
+`reply_peer_is_current` records scope without retaining an external private peer;
+unknown scope stays unresolved. No account identity, SDK access hash or credential
+field is admitted. `telegram_generation.py` separately bounds new model output:
+short assertions, one point per category and budget-allocated topics; generated
+evidence IDs are constrained to actual news/discussion role sets. Exact original
+span quotes and canonical source membership are supplied by the service. Broader retained topic schemas stay unchanged.
+
 `interpretation.py` defines the opt-in experiment's strict scientific item and
 typed response schema. Pydantic `SkipValidation` delays only optional transport
 validation until independent base acceptance; malformed sidecars are retained,

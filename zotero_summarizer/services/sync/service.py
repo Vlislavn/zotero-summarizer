@@ -185,7 +185,9 @@ def push(db_path: Path, mutations: list[dict[str, Any]], predecessors: list[str]
                 _log_applied_verdict(effective, result)
             _run_post_commit_effects(db_path, effective, result)
             if result["status"] in {"applied", "already_applied"}:
-                last_applied[key] = result["applied_revision"]
+                last_applied[key] = max(
+                    last_applied.get(key, 0), result["applied_revision"]
+                )
         results.append(result)
     return {"protocol": 1, "results": results, **repositories.sync_status(db_path)}
 

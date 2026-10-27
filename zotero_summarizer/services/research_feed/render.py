@@ -19,6 +19,9 @@ def markdown(payload: dict[str, Any]) -> str:
     ]
     for index, record in enumerate(cards, 1):
         candidate, card = record["candidate"], record["card"]
+        missing_inputs = "; ".join(card.get("missing_reproduction_inputs") or [])
+        if not missing_inputs and card.get("reproduction_assessment") is not None:
+            missing_inputs = "none reported (AI assessment, unverified)"
         lines += [
             f"## {index}. {candidate['title']}", "",
             f"**Action:** {card['worth_reading']} · **Projects:** "
@@ -31,8 +34,7 @@ def markdown(payload: dict[str, Any]) -> str:
         for label, value in (
             ("Reproducibility tier", card.get("reproducibility_tier")),
             ("Reproducibility rationale", card.get("reproducibility_rationale")),
-            ("Missing reproduction inputs",
-             "; ".join(card.get("missing_reproduction_inputs") or [])),
+            ("Missing reproduction inputs", missing_inputs),
             ("Evidence gaps", "; ".join(card.get("evidence_gaps") or [])),
         ):
             lines += [f"**{label}:** {value or 'not recorded (not assessed)'}", ""]

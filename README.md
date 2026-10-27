@@ -32,6 +32,23 @@ set your research goals. Add RSS subscriptions in Settings → Sources, refresh
 them, then run **Today → Triage backlog**. For headless setup use
 `uv run zotero-summarizer setup`.
 
+Telegram is also available in **Settings → Sources**: explicitly save public
+channel/group links or forum-topic links, choose an already prepared local provider
+and model, then consent to **Collect & review selected sources**. One-time
+`research-feed telegram-auth` stays in the terminal (optional `telegram` extra).
+Linked replies and group windows are bounded snapshots, not complete history;
+coverage/errors and source-cited topic mini-reviews are saved in **Weekly**.
+Later collection stops retain earlier threads and unattempted-post coverage;
+post-window truncation is separate from reply coverage. Weekly merges saved sources
+chronologically. The chosen local provider must declare compatible output/thinking
+wire controls and have independently verified server context; model names and
+client-side limits alone do not prove those runtime properties. New reviews use
+short, source-cited points within an output-work budget; older broader saved reviews
+remain readable unchanged. Reviews prioritize distinct raised issues and selected
+source evidence; they are concise syntheses, not exhaustive transcripts.
+Saving/viewing never collects or generates. The Telegram-only model selection
+never falls back to global/feed routes; local processing is not hardware approval.
+
 Saving settings is not verification. Local-model Doctor/calibration checks can
 refuse with **unknown** when effective runtime resources are not established;
 model inventory or free RAM is not a safety certificate. Local mode also requires
@@ -69,7 +86,8 @@ the display; presentation changes do not rewrite or regenerate the saved review.
 Explicit Interpretation experiments remain separate: their stored optional payloads
 cannot enter ordinary cache views or exports, even through a digest subtype.
 Saved experiment records use verified byte snapshots; optional contract drift
-withholds the card without discarding valid base evidence.
+withholds the card without discarding valid base evidence. Without a non-null human
+score, assigned execution errors alone cannot produce an adopt/reject decision.
 Missing verification evidence cannot make a generated review current; older saved
 context remains displayable without gaining that authority. Feed cards require base
 proof even without optional project assessments; no-digest placeholders cannot

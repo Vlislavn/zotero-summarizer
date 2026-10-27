@@ -117,6 +117,6 @@ def test_v2_upgrade_and_replay_preserve_data_and_all_trigger_effects(tmp_path):
 
 
 def test_migration_versions_remain_ordered_and_aligned():
-    assert migrations.SCHEMA_VERSION == 13
+    assert migrations.SCHEMA_VERSION == 14
     for steps in (migrations.TRIAGE_MIGRATIONS, migrations.CORPUS_MIGRATIONS):
-        assert [step.version for step in steps] == list(range(1, 14))
+        assert [step.version for step in steps] == list(range(1, migrations.SCHEMA_VERSION + 1))

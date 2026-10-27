@@ -9,7 +9,7 @@ from tests.test_offline_sync import _db, _mutation
 from tests.test_review_note_identity import STABLE, _feed, _materialize
 from tests.test_related_saved_papers import journey  # noqa: F401 — shared owned model/session fixture
 from zotero_summarizer.api.routes import library
-from zotero_summarizer.services.library import related
+from zotero_summarizer.services.library import _search, related
 from zotero_summarizer.services.library._related_context import collect_comments
 from zotero_summarizer.services.zotero._notes import build_user_note_html
 from zotero_summarizer.storage import repositories as db
@@ -177,6 +177,120 @@ def test_duplicate_saved_versions_are_not_three_recommendations(tmp_path, monkey
     reader.items['PAPER002']['doi'] = '10.1/saved'
     reader.items['PAPER003'] = {**reader.items['PAPER002'], 'item_key': 'PAPER003', 'doi': 'https://doi.org/10.1/SAVED'}
     assert len(related.related_papers('PAPER001')['items']) == 1
+
+
+def test_related_overfetch_keeps_real_hybrid_ceiling_and_assessment_budget(journey, monkeypatch):
+    app = related.state()
+
+    class ResidentRetrieval:
+        def query_affinity_for_items(self, query, keys):
+            self.keys = list(keys)
+            return {key: float(len(keys) - index) for index, key in enumerate(keys)}
+
+    class LocalBM25:
+        def search(self, query, keys, *, top_k):
+            self.keys, self.top_k = list(keys), top_k
+            return {key: float(len(keys) - index) for index, key in enumerate(keys)}
+
+        def texts_for(self, keys):
+            self.text_keys = list(keys)
+            return {key: f"synthetic indexed text {key}" for key in keys}
+
+    class LocalReranker:
+        def is_ready(self):
+            return True
+
+        def rerank(self, query, pairs, top_n):
+            self.pair_count, self.requested_top_n = len(pairs), top_n
+            return [(key, 1.0 / (index + 1)) for index, (key, _) in enumerate(pairs)][:top_n]
+
+    retrieval, bm25, reranker = ResidentRetrieval(), LocalBM25(), LocalReranker()
+    app.embedding_cache = retrieval
+    journey.config.corpus.reranker_enabled = True
+    journey.config.corpus.reranker_model = "synthetic-reranker"
+    monkeypatch.setattr(_search, "get_corpus_bm25", lambda path: bm25)
+    monkeypatch.setattr(_search, "get_reranker", lambda model: reranker)
+    assert related.hybrid_search is _search.hybrid_search
+
+    for index in range(110):
+        key = f"EXTRA{index:03d}"
+        journey.reader.rows[key] = {"item_key": key, "title": f"Candidate {index}",
+                                    "abstract": f"Synthetic metadata {index}", "doi": f"10.1/extra-{index}",
+                                    "notes": [], "annotations": []}
+    original_detail = journey.reader.get_item_detail
+    detail_reads = []
+
+    def track_detail(key):
+        detail_reads.append(key)
+        return original_detail(key)
+
+    monkeypatch.setattr(journey.reader, "get_item_detail", track_detail)
+    snapshot = related._snapshot("SEED0001", "", "")
+
+    candidate_reads = [key for key in detail_reads if key != "SEED0001"]
+    assert len(retrieval.keys) == 113
+    assert bm25.top_k == 100
+    assert len(bm25.text_keys) == 100
+    assert reranker.pair_count == 100 and reranker.requested_top_n == 113
+    assert len(candidate_reads) == 100 and len(set(candidate_reads)) == 100
+    assert len(snapshot["pool"]) == len(snapshot["scores"]) == 10
+
+
+def test_list_identifiers_choose_high_ranked_family_version_and_keep_exclusions(tmp_path, monkeypatch, journey):
+    path, reader, _ = setup_related(tmp_path, monkeypatch, journey)
+    seed = {**reader.items['PAPER001'], 'doi': '10.1/seed'}
+    low = {**reader.items['PAPER002'], 'doi': '10.1/shared', 'abstract': 'Low-ranked version.'}
+    high = {**low, 'item_key': 'PAPER003', 'abstract': 'High-ranked version.'}
+    distinct = {**low, 'item_key': 'PAPER004', 'doi': '10.1/distinct'}
+    seed_alias = {**seed, 'item_key': 'PAPER005'}
+    rejected = {**low, 'item_key': 'PAPER006', 'doi': '10.1/rejected'}
+    rejected_alias = {**rejected, 'item_key': 'PAPER007'}
+    reader.items = {row['item_key']: row for row in
+                    [seed, low, high, distinct, seed_alias, rejected, rejected_alias]}
+    db.insert_or_update_label_verdict(path, item_key='PAPER007', original_derived_priority='could_read',
+                                     user_priority='dont_read', comment='Current human rejection', source='user')
+    searched, ranked = [], []
+
+    def rank(query, keys, *, top_n):
+        searched.extend(keys)
+        ordered = [key for key in ('PAPER003', 'PAPER002', 'PAPER004') if key in keys]
+        ranked.extend(ordered)
+        return ordered[:top_n], {key: float(key == 'PAPER003') for key in ordered}, {'mode': 'hybrid_reranked'}
+
+    monkeypatch.setattr(related, 'hybrid_search', rank)
+    result = related.related_papers('PAPER001')
+
+    assert set(searched) == {'PAPER002', 'PAPER003', 'PAPER004'}
+    assert ranked[:2] == ['PAPER003', 'PAPER002']
+    assert [row['item_key'] for row in result['items']] == ['PAPER003', 'PAPER004']
+    assert result['excluded_human_dont_read'] == ['PAPER007']
+
+
+def test_retrieval_window_keeps_distinct_family_after_detail_identity_closure(tmp_path, monkeypatch, journey):
+    _, reader, _ = setup_related(tmp_path, monkeypatch, journey)
+    versions = [f'PAPER{index:03d}' for index in range(2, 12)]
+    template, seed = reader.items['PAPER002'], reader.items['PAPER001']
+    reader.items = {'PAPER001': seed}
+    for key in versions:
+        reader.items[key] = {**template, 'item_key': key, 'doi': '10.1/shared'}
+    reader.items['PAPER003']['abstract'] = 'Highest-ranked version of the saved family.'
+    reader.items['PAPER012'] = {**reader.items['PAPER002'], 'item_key': 'PAPER012', 'doi': '10.1/other'}
+    monkeypatch.setattr(reader, 'get_all_items', lambda **_: {'items': [
+        {key: value for key, value in row.items() if key not in {'doi', 'url'}}
+        for row in reader.items.values()]})
+    searched = []
+
+    def rank(query, keys, *, top_n):
+        searched.extend(keys)
+        ordered = ['PAPER003', *[key for key in keys if key not in {'PAPER003', 'PAPER012'}], 'PAPER012']
+        ordered = ordered[:top_n]
+        return ordered, {key: float(key == 'PAPER003') for key in ordered}, {'mode': 'hybrid_reranked'}
+
+    monkeypatch.setattr(related, 'hybrid_search', rank)
+    result = related.related_papers('PAPER001')
+
+    assert set(searched) == {*versions, 'PAPER012'}
+    assert [row['item_key'] for row in result['items']] == ['PAPER003', 'PAPER012']
 
 
 @pytest.mark.parametrize('order', list(permutations(['PAPER002', 'PAPER003', 'PAPER004'])))

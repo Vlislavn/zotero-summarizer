@@ -1,5 +1,64 @@
 # services/research_feed — weekly Research Intelligence
 
+Telegram’s additive conversation path stays in this feature: `telegram_workflow`
+owns narrow Sources save/status and an explicit synchronous action under one
+cross-process lock; it reuses the CLI collection child, never interactive web auth
+or a background runner. `telegram_conversations` collects selected newest post/reply,
+group or forum windows and publishes immutable v2 bundles using `render.persist`.
+`telegram_review` makes one structured semantic grouping/mini-review call through
+an explicitly selected Telegram-only local provider/model; no global/feed fallback,
+reranker/classifier or lexical topic assignment. Per-send local-only transport,
+no repair/retry/cache, compact ID/role/text/context model inputs (raw metadata and
+hashes retained outside the prompt), prompt/schema/provider/source identity, literal citation
+membership and quote checks fail closed. Empty/nontext contexts skip generation;
+failed generation preserves raw inputs and a visible error. Conservative UTF-8
+prompt+schema/output context allowance can refuse before model construction.
+Bounds are configurable operational caps, not measured tokenizer/hardware capacity.
+Default/max: 3 sources, 3 newest posts/channel, 30 newest replies/thread, 120 model
+messages, 24,000 prompt characters; context 8,192 (max 32,768), output 2,048
+(max 4,096). No silent clipping. Reduce selected work before raising context.
+The operation keeps only provider-declared chat-template/reasoning/output wire
+controls, forces off through the existing factory dialect mapping, and rewrites
+every declared `max_tokens`/`max_completion_tokens` to its actual output budget.
+It does not invent vLLM chat-template flags or infer API dialect from model/provider
+names. Server context must be independently established: sending a `num_ctx` option
+does not prove the compatible backend honors it. Failed generation retains only a
+safe underlying exception type, not its text/path/prompt, alongside its identity.
+Generation uses a separate compact schema: up to one short point per category,
+short literal quotes and a topic work limit allocated from the output budget
+(one topic per 1,024-token allowance, capped at six). This allowance is operational,
+not a guarantee every possible response fits; decoder-length failures remain errors.
+The model selects role-scoped evidence IDs instead of copying quotes or membership.
+Exact original spans reuse `faithbench._corpus.chunk_spans` (320 characters, no
+overlap); ordered excerpts preserve all non-whitespace content, with immutable full
+originals outside the prompt. The service expands references into source/quote pairs
+and membership; canonical role/literal-quote validation still runs independently.
+The evidence-map fingerprint joins the prompt/schema/source identity. Prompt v2.6
+inventories distinct substantive news/discussion issues before grouping; interests
+are a lens, not a filter. Assertions must follow their selected excerpts. This is
+concise principal-issue synthesis, not a guarantee of exhaustive detail coverage.
+Input JSON is compact and omits only empty URL metadata; every nonempty URL,
+excerpt and context edge remains. Formatting overhead is subtracted before the
+unchanged prompt/context admission, never by clipping source content. Retained broader v2 topics remain readable without rewritten saved bytes.
+
+Peer+message evidence is canonical across overlapping group/thread scopes;
+memberships/root/parent IDs remain separate. Raw snapshot hashes observe edits
+within the re-fetched newest window; no cache claims old messages are current.
+Coverage distinguishes observed empty, unavailable, fetched and truncated, with
+scanned/skipped counts and reported reply totals when available. Broadcast
+post-window lookahead/scanned/retained/truncated observations are separate from
+reply coverage; post-window truncation makes the report partial even with empty
+replies. Later per-post flood/auth/admission/validation stops retain prior threads,
+current origin/root observations and unattempted selected posts before stopping
+RPCs, persisting the account deadline/state and immutable evidence. Group prompt
+projection includes peer-qualified parent/top relationships; missing/out-of-window,
+non-reviewable, mirrored-news and unknown/cross-peer contexts are explicit rather
+than inferred joins. All contexts are
+partial history; participant claims are not paper-verified science. Reports/read
+GETs never activate Telegram/models; Sources GET/save also remain effect-free
+except the explicit save. Successful child authorization plus clean receipt permits
+historical verified status, not a session-file guess or continuing validity claim.
+
 One bounded command projects the existing app RSS and current deep-review
 artifacts into a project-specific engineering digest. Missing abstract triage
 reuses the existing abstract pipeline; project proposals share the existing review
@@ -22,7 +81,7 @@ rss_items → source/dedupe → prior triage → budget → existing deep_review
 | `runner.py` | Budgeted triage, optional missing deep reviews through `library.deep_review`, per-paper failure isolation, metrics/watermark, and dry-run/idempotent writeback. Tag idempotency looks up pending changes by target Zotero item, so unrelated older queue rows cannot push a matching writeback beyond a global scan cap. |
 | `card.py` | Base-qualified engineering-card assembly; only exact validated artifact URLs survive. No extraction or model calls. |
 | `render.py` | Canonical JSON and compact Markdown persistence. |
-| `reports.py` | Read-only list/detail/download lookup of published v1 RSS bundles, validated with existing candidate/triage/card models. Reject malformed reports and symlink/path escapes; never generate or migrate artifacts. |
+| `reports.py` | Read-only list/detail/download lookup of published v1 RSS, retained v1 Telegram news and additive v2 Telegram conversation bundles, validated with existing candidate/triage/card models and present source/generation provenance references. Missing legacy provenance stays optional; malformed present references refuse. Source observations can retain an unqualified generation field; card provenance requires a valid generation hash. Reject symlink/path escapes; never generate or migrate artifacts. |
 
 Run weekly: `uv run zotero-summarizer research-feed run --from 2026-08-22
 --to 2026-08-29`. Add `--venue NeurIPS` for conference mode, `--cached-only`
@@ -56,7 +115,9 @@ null impact means unassessed (legacy numeric zero fields are placeholders).
 Code availability alone never implies effort. Existing blockers and artifact URLs
 remain; an effort estimate cannot override missing verified code or critical inputs.
 Markdown gives tier, rationale, missing inputs and evidence gaps one labelled home
-each. Direct legacy presentation uses explicit unrecorded values for missing fields;
+each. An empty missing-input list says “none reported (AI assessment, unverified)”
+only when a reproduction assessment exists; otherwise it remains “not recorded (not
+assessed).” Direct legacy presentation uses explicit unrecorded values for missing fields;
 this does not relax the typed saved-report reader or rewrite retained JSON/bundles.
 `tests/test_reproduction_uncertainty.py` preserves all six prior oracles.
 `tests/test_feed_engineering.py` covers producer, binding, cache, rank, error and
@@ -169,6 +230,11 @@ raw rows in the date window. Cursor consumption stops at the cap; sorting/scanni
 the underlying window can still require database work. Malformed nonempty source
 timestamps raise instead of silently becoming absent dates.
 
+Report listing merges RSS/Telegram by saved timezone-aware `generated_at` before
+the shared limit; unavailable/undated bundles use non-following bundle mtime, with
+names only breaking equal-time ties. Reads scan/validate retained bundles one at a
+time and retain only small list entries; no new index or report-byte rewrite.
+
 The **Weekly** page opens existing bundles from the CLI, including older v1
 snapshots without optional provenance or grouped ideas. Missing values stay
 unrecorded; reads return saved fields unchanged. The list retains unavailable
@@ -182,7 +248,8 @@ valid saved text/order/duplicates are unchanged. The UI lists these rows with
 review-status reasons beside existing source needs, not as unavailable PDFs, and
 its existing paper links never auto-start review.
 Markdown is served verbatim only when canonical JSON validates. A missing Markdown file does not prevent
-reading valid JSON. There is no browser run/build endpoint or cached-card replay.
+reading valid JSON. Downloads return the qualified JSON or selected Markdown bytes captured before the response,
+so later file changes cannot replace bytes during streaming. There is no browser RSS run/build endpoint or cached-card replay; Telegram’s separate explicit bounded source action is described above.
 
 **Boundary:** may compose library services and storage reads. Zotero writes are
 optional pending actions only; default runs are dry-run.

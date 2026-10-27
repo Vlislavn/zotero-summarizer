@@ -65,6 +65,7 @@ export default function RelatedPapers({ itemKey }) {
     assessment.mutate({ token: boundary.token, retry: ['failed', 'interrupted', 'stale'].includes(data?.assessment_status) });
   };
   const used = (data?.items || []).flatMap(row => row.used_context_ids || []);
+  const submitted = data?.submitted_context_ids || [];
   return <section aria-label="Related in my library" className="py-6 text-sm text-slate-700 break-words">
     <h2 className="font-display text-xl text-forest">Related in my library</h2>
     {metadata.isFetching && <p role="status">Checking saved discovery eligibility…</p>}
@@ -115,7 +116,7 @@ export default function RelatedPapers({ itemKey }) {
         Complete private comments are sent only after confirmation. Up to 10 candidates / 30,000 input characters; over-budget contexts are not clipped.</p>}
       {data.status === 'unavailable' && <p role="status">Saved-library search unavailable; check corpus/model availability.</p>}
       {data.status === 'empty' && <p role="status">No related saved papers found in this scope{data.assessment_status === 'assessed' ? ' with a supported, preference-compatible assessment' : ''}.</p>}
-      <Comments comments={data.seed_comments} used={used} />
+      <Comments comments={data.seed_comments} used={used} submitted={submitted} />
       <ol className="mt-3 space-y-4">
         {(data.items || []).map(row => <li key={row.item_key}>
           <Link className="text-forest underline" to={`/paper/${encodeURIComponent(row.item_key)}`}>{row.title}</Link>
@@ -127,7 +128,7 @@ export default function RelatedPapers({ itemKey }) {
               {side} · {evidence.item_key} · {evidence.field}: “{evidence.excerpt}”
             </blockquote>)}
           </details>}
-          <Comments comments={row.comments} used={row.used_context_ids} />
+          <Comments comments={row.comments} used={row.used_context_ids} submitted={submitted} />
         </li>)}
       </ol>
       <button type="button" className="mt-3 text-forest underline" disabled={query.isFetching || assessment.isPending}

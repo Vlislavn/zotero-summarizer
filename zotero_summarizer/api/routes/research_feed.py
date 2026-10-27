@@ -1,15 +1,43 @@
-"""Browse and download saved weekly digests; never start generation."""
+"""Saved Weekly reads and explicit bounded Telegram Sources actions."""
 from __future__ import annotations
 
 from typing import Literal
 
 from fastapi import APIRouter, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
+from pydantic import BaseModel, ConfigDict
+
+from zotero_summarizer.models.research_feed import TelegramSourceSettings
 
 from zotero_summarizer.services._common import settings
-from zotero_summarizer.services.research_feed import reports
+from zotero_summarizer.services.research_feed import reports, telegram_workflow
 
 router = APIRouter(prefix="/api/research-feed")
+
+
+class TelegramRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    consent: bool
+
+
+@router.get("/telegram/sources")
+def telegram_sources():
+    return telegram_workflow.sources(settings())
+
+
+@router.put("/telegram/sources")
+def save_telegram_sources(selection: TelegramSourceSettings):
+    return telegram_workflow.save_sources(settings(), selection)
+
+
+@router.get("/telegram/status")
+def telegram_status():
+    return telegram_workflow.status(settings())
+
+
+@router.post("/telegram/runs")
+def run_telegram(request: TelegramRunRequest):
+    return telegram_workflow.run(settings(), consent=request.consent)
 
 
 @router.get("/runs")
@@ -24,8 +52,7 @@ def get_run(run_id: str):
 
 @router.get("/runs/{run_id}/download")
 def download_run(run_id: str, format: Literal["json", "md"] = "json"):
-    current = settings()
-    reports.get_report(current, run_id)
-    path = reports.report_path(current, run_id, format)
-    return FileResponse(path, filename=path.name,
-                        media_type="application/json" if format == "json" else "text/markdown")
+    content = reports.download_bytes(settings(), run_id, format)
+    filename = f"{run_id}.{format}"
+    return Response(content=content, media_type="application/json" if format == "json" else "text/markdown",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})

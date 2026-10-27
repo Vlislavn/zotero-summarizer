@@ -83,6 +83,37 @@ it('retains three saved links, attributed comments and exact two-sided evidence 
   client.clear();
 });
 
+it('distinguishes submitted related comments from model-cited comments only after assessment', async () => {
+  const seedComments = { ...comments, availability: 'available', records: [
+    { id: 'seed-note', text: 'Seed context', source: 'app_note', authorship: 'user' },
+  ] };
+  const candidateComments = { ...comments, availability: 'available', records: [
+    { id: 'candidate-note', text: 'Candidate context', source: 'native_note', authorship: 'uncertain' },
+  ] };
+  let current = { ...baseline, seed_comments: seedComments,
+    items: [{ ...baseline.items[0], comments: candidateComments }] };
+  fetchRelatedPapers.mockImplementation(async () => current);
+  assessRelatedPapers.mockImplementation(async () => {
+    current = { ...current, assessment_status: 'assessed', comments_in_ranking: false,
+      submitted_context_ids: ['seed-note', 'candidate-note'],
+      items: current.items.map(row => ({ ...row, used_context_ids: [] })) };
+    return current;
+  });
+  vi.stubGlobal('confirm', () => true);
+  const { client } = mount();
+  fireEvent.click(screen.getByRole('button', { name: 'Show related saved papers' }));
+  await screen.findByText('Seed context');
+  expect(screen.getByText(/Metadata hybrid search; no successful comment-use assessment/)).toBeTruthy();
+  expect(screen.queryByText(/submitted, not model-cited/)).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Try with comments — experimental' }));
+
+  await screen.findByText(/Metadata-retrieved pool; model reported no comment use/);
+  expect(screen.getByText(/seed-note · submitted, not model-cited/)).toBeTruthy();
+  expect(screen.getByText(/candidate-note · submitted, not model-cited/)).toBeTruthy();
+  client.clear();
+});
+
 it('keeps observed empty and unavailable saved-library reads distinct from pending loading', async () => {
   let complete;
   fetchRelatedPapers.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));

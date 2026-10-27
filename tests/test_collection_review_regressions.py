@@ -57,6 +57,21 @@ def test_nested_workflow_exclusion_and_duplicate_alias_refusal(tmp_path, names, 
     assert reopen(owner) == result
 
 
+@pytest.mark.parametrize(('names', 'nested', 'empty_count'), [
+    ([], False, 3), (['Inbox'], False, 0), (['Topic > Inbox'], True, 0)])
+def test_empty_retrieval_counts_original_empty_list_not_filtered_workflow(tmp_path, names, nested, empty_count):
+    config, inputs, truth, path = bundle(tmp_path)
+    if nested:
+        inputs['tree']['nodes'][2]['parent'] = 'A'
+    artifact(tmp_path, config, inputs, names=names)
+    cfg = Config.model_validate(save(tmp_path, config, inputs, truth))
+    owner, result = run(cfg, path.read_bytes())
+    baseline = result['arms']['similarity']
+    assert baseline['empty_similarity_retrieval'] == empty_count
+    assert baseline['workflow_suggestions_excluded'] == (3 if names else 0)
+    assert reopen(owner) == result
+
+
 @pytest.mark.parametrize('owner', ['taxonomy', 'baseline'])
 def test_reference_must_strictly_precede_its_frozen_owner(tmp_path, owner):
     config, inputs, truth, path = bundle(tmp_path)

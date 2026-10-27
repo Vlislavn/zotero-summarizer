@@ -103,6 +103,29 @@ def test_no_card_exposure_cannot_establish_a_card_pilot_recommendation():
     assert _decision(metrics, comparisons, recipe, labels) == 'INCONCLUSIVE'
 
 
+@pytest.mark.parametrize('failure', ['question', 'review'])
+def test_assigned_execution_errors_without_human_scores_stay_inconclusive(frozen_run, failure):
+    from zotero_summarizer.services.faithbench._interpretation_report import Labels, _decision, _metrics, _paired
+
+    _, _, (inputs, records) = frozen_run
+    records = deepcopy(records)
+    candidate = next(row for row in records if row['assignment']['condition'] == 'C')
+    if failure == 'question':
+        candidate['questions'][0]['status'] = 'failed'
+        candidate['questions'][0].pop('output')
+    else:
+        candidate['review_status'] = 'failed'
+        candidate['review'] = None
+        for question in candidate['questions']:
+            question['status'] = 'failed'
+            question.pop('output')
+    labels = Labels.model_validate({'reviewer': 'empty synthetic fixture', 'manifest_sha256': '0' * 64, 'judgments': {}})
+    metrics, losses = _metrics(inputs, records, labels)
+    assert all(not metric['human_complete'] for metric in metrics.values())
+    result = _decision(metrics, _paired(losses, inputs['recipe']), inputs['recipe'], labels)
+    assert result == 'INCONCLUSIVE'
+
+
 @pytest.mark.parametrize('directory', ['interpretation', 'interpretation-reports'])
 def test_symlinked_output_parent_refuses_before_publication(tmp_path, frozen_run, directory):
     from tests._interpretation_cohort import cohort

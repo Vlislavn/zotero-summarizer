@@ -198,6 +198,9 @@ slots; candidates outside that set keep their constrained baseline positions.
 The corrected distinct-question/eligible-slot policy revises the evaluator protocol:
 older bindings become unchecked without losing historical receipts.
 Legacy receipts without recorded order/binding cannot certify current evidence or invent lost ties. No automatic rerun repairs them.
+Malformed retained source hashes, scope bounds, passages or evidence spans invalidate
+the receipt before locator comparison, restoring baseline order without breaking a
+session read; they never become checked-negative answers.
 Invalidation changes only the in-memory snapshot, not files on read. Raw serialization
 keeps exact historical receipts/answers through ordinary saves; only HTTP projection
 suppresses stale answers. Stored extraction identity is historical, not a freshness

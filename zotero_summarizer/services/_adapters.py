@@ -26,6 +26,24 @@ def _load_onprem() -> tuple[Any, Any]:
         return LLM, load_single_document
 
 
+def require_loopback_endpoint(value: str) -> None:
+    """Strict literal loopback API admission; not a runtime/hardware approval."""
+    from ipaddress import ip_address
+    from urllib.parse import urlsplit
+
+    endpoint = urlsplit(value)
+    if (endpoint.scheme not in {"http", "https"} or not endpoint.hostname
+            or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment):
+        raise ValueError("local-only generation requires a literal loopback HTTP API")
+    host = endpoint.hostname.lower()
+    try:
+        local = host == "localhost" or ip_address(host).is_loopback
+    except ValueError:
+        local = host == "localhost"
+    if not local or endpoint.path.lower().endswith((".gguf", ".bin")):
+        raise ValueError("local-only generation requires a literal loopback HTTP API")
+
+
 def build_llm(
     model_url: str,
     model_name: str,
@@ -44,9 +62,14 @@ def build_llm(
     verification: bool = False,
     before_request: Any = None,
     request_owner: Any = None,
+    local_only: bool = False,
 ) -> InstrumentedLLMClient:
     from zotero_summarizer.integrations.llm_callbacks import CompletionGuard
 
+    if local_only:
+        if verification:
+            raise ValueError("local-only inference and Setup verification are separate operations")
+        require_loopback_endpoint(model_url)
     if verification:
         from urllib.parse import urlsplit
 
@@ -83,6 +106,14 @@ def build_llm(
         from zotero_summarizer.integrations.llm_requests import verification_http_client
 
         transport = verification_http_client(guard.transport_started)
+        kwargs.update(max_retries=0, cache=False, http_client=transport)
+    if local_only:
+        from zotero_summarizer.integrations.llm_requests import verification_http_client
+
+        def require_local_request(request):
+            require_loopback_endpoint(str(request.url))
+
+        transport = verification_http_client(require_local_request)
         kwargs.update(max_retries=0, cache=False, http_client=transport)
     try:
         inner = llm_cls(**kwargs)

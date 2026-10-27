@@ -34,6 +34,92 @@ def parse_run_budgets(shortlist, cards, source_limit, timeout) -> tuple[int | No
     ]).validate_python((shortlist, cards, source_limit, timeout))
 
 
+class TelegramTarget(BaseModel):
+    """Explicit public peer selection; never an invite, user, or personal inbox."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kind: Literal["broadcast", "group", "topic"]
+    username: str
+    message_id: int | None = Field(default=None, ge=1, le=2**31 - 1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _link(cls, value):
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        name = data.get("username")
+        if isinstance(name, str) and name.strip().startswith(("https://", "http://")):
+            link = urlsplit(name.strip())
+            parts = link.path.strip("/").split("/")
+            if (link.scheme != "https" or link.netloc != "t.me" or link.query or link.fragment
+                    or len(parts) not in {1, 2}):
+                raise ValueError("use a public Telegram username or t.me link")
+            name = parts[0]
+            if len(parts) == 2:
+                if not parts[1].isascii() or not parts[1].isdigit():
+                    raise ValueError("invalid Telegram message link")
+                number = int(parts[1])
+                if data.get("message_id") not in (None, number):
+                    raise ValueError("Telegram message link differs from selection")
+                data["message_id"] = number
+        data["username"] = normalize_telegram_username(name)
+        if data["username"] in {"me", "self", "c", "joinchat", "s"}:
+            raise ValueError("select a public channel or discussion group")
+        return data
+
+    @model_validator(mode="after")
+    def _scope(self):
+        if self.kind == "topic" and self.message_id is None:
+            raise ValueError("forum topic requires its root message ID")
+        if self.kind == "group" and self.message_id is not None:
+            raise ValueError("choose topic for a scoped discussion link")
+        return self
+
+    @property
+    def key(self) -> str:
+        return f"{self.kind}:{self.username}:{self.message_id or 0}"
+
+
+class TelegramModelSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    provider: str = Field(min_length=1, max_length=100)
+    model: str = Field(min_length=1, max_length=200)
+
+    @field_validator("provider", "model")
+    @classmethod
+    def _nonblank(cls, value):
+        if not value.strip():
+            raise ValueError("explicit Telegram provider/model required")
+        return value.strip()
+
+
+class TelegramLimits(BaseModel):
+    """Operational work caps, not hardware or model capacity certification."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    sources: int = Field(default=3, ge=1, le=3)
+    posts_per_channel: int = Field(default=3, ge=1, le=3)
+    replies_per_thread: int = Field(default=30, ge=1, le=30)
+    messages: int = Field(default=120, ge=1, le=120)
+    prompt_characters: int = Field(default=24000, ge=1000, le=24000)
+    context_tokens: int = Field(default=8192, ge=2048, le=32768)
+    output_tokens: int = Field(default=2048, ge=512, le=4096)
+
+
+class TelegramSourceSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    sources: list[TelegramTarget] = Field(max_length=3)
+    model: TelegramModelSelection | None = None
+    limits: TelegramLimits = Field(default_factory=TelegramLimits)
+
+    @model_validator(mode="after")
+    def _unique(self):
+        if len({target.key for target in self.sources}) != len(self.sources) or len(self.sources) > self.limits.sources:
+            raise ValueError("duplicate sources or Telegram source budget exceeded")
+        return self
+
+
 class ResearchProfile(BaseModel):
     schema_version: Literal[1] = 1
     themes: list[str]
@@ -41,6 +127,9 @@ class ResearchProfile(BaseModel):
     shortlist_budget: _ShortlistBudget = 20
     card_budget: _CardBudget = 10
     telegram_channels: list[str] = Field(default_factory=list)
+    telegram_targets: list[TelegramTarget] = Field(default_factory=list, max_length=3)
+    telegram_model: TelegramModelSelection | None = None
+    telegram_limits: TelegramLimits = Field(default_factory=TelegramLimits)
     topic_taxonomy: list[str] = Field(default_factory=lambda: sorted(TOPIC_TAXONOMY))
 
     @field_validator("topic_taxonomy")

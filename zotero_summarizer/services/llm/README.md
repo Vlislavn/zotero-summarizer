@@ -1,5 +1,13 @@
 # services/llm — provider-aware client construction
 
+`build_client_for_provider(..., local_only=True)` is an opt-in ordinary inference
+privacy boundary, not Setup verification or load approval. It refuses nonliteral
+loopback, unspecified addresses, credentials-in-URL, model-file URLs and non-OpenAI
+adapters before credentials/client construction. Every HTTP send is rechecked;
+the shared no-proxy/no-redirect HTTPX helper is reused with cache/retries disabled
+and caller-owned close. Combining `verification=True` is rejected. Existing
+callers keep their defaults. No locality flag certifies model or hardware safety.
+
 `goals.yaml:llm_routing` resolves each stage to a provider/model;
 `factory.resolve_stage_client(runtime_state, stage, ...)` lazily builds clients
 using the cache, lock and invalidation generation held by `RuntimeState`.

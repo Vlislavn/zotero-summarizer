@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -13,6 +14,14 @@ import tempfile
 
 class OptionalTelegramMissing(RuntimeError):
     pass
+
+
+class TelegramChildFailed(RuntimeError):
+    def __init__(self, code="telegram_incomplete", *, collection_report_id=None):
+        self.code = code if code in {"missing_session", "session_unauthorized", "revoked_session", "busy", "deferred"} else "telegram_incomplete"
+        self.collection_report_id = (collection_report_id if isinstance(collection_report_id, str)
+            and re.fullmatch(r"telegram-review-[0-9a-f]{32}", collection_report_id) else None)
+        super().__init__(self.code)
 
 
 def require_terminal() -> None:
@@ -46,12 +55,15 @@ def _receipt(settings, purpose: str, result: dict, exported: dict | None) -> dic
             "result": result, "export": exported, "files": files}
 
 
-def _verify(settings, purpose: str, receipt: dict) -> dict:
+def _verify(settings, purpose: str, receipt: dict, *, partial=False) -> dict:
     if (receipt.get("schema_version") != 1 or receipt.get("purpose") != purpose
             or receipt.get("data_dir") != str(settings.data_dir)):
         raise RuntimeError("invalid Telegram child receipt")
     result = receipt["result"]
-    if result["status"] != "collected" or result["cleanup"] != "completed":
+    partial_source = (partial and purpose == "conversations"
+                      and result["status"] in {"missing_session", "session_unauthorized", "revoked_session"}
+                      and isinstance(result.get("collection"), dict) and result["collection"].get("conversations"))
+    if (result["status"] != "collected" and not partial_source) or result["cleanup"] != "completed":
         raise RuntimeError("Telegram did not complete: " + result["status"])
     if purpose == "auth":
         if result["collection"] != {"authorized": True} or receipt["files"] or receipt["export"] is not None:
@@ -79,7 +91,7 @@ def _verify(settings, purpose: str, receipt: dict) -> dict:
 def run_child(settings, purpose: str) -> dict:
     from zotero_summarizer.integrations.telegram_session import _budgets
 
-    if purpose not in {"auth", "collect"}:
+    if purpose not in {"auth", "collect", "conversations"}:
         raise ValueError("invalid Telegram process purpose")
     if purpose == "auth":
         require_terminal()
@@ -103,6 +115,13 @@ def run_child(settings, purpose: str) -> dict:
             failure = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
             if failure is not None and failure.get("error") == "optional_dependency_missing":
                 raise OptionalTelegramMissing("Telegram requires the optional telegram extra")
+            if purpose == "conversations":
+                report_id = None
+                if failure is not None and failure.get("export") is not None:
+                    _verify(settings, purpose, failure, partial=True)
+                    report_id = Path(failure["export"]["json_path"]).parent.name
+                raise TelegramChildFailed(failure.get("result", {}).get("status") if failure else None,
+                                          collection_report_id=report_id)
             if failure is not None and "result" in failure:
                 print(json.dumps({"status": "telegram_incomplete", "result": failure["result"],
                                   "export": failure["export"]}, indent=2))
@@ -119,6 +138,22 @@ def _write_receipt(path: Path, value: dict) -> None:
         write_json_atomic(path, value)
     except Exception:
         raise RuntimeError("Telegram receipt publication failed") from None
+
+
+def _export(settings, purpose, result):
+    if purpose == "auth":
+        return None
+    if purpose == "collect":
+        from zotero_summarizer.services.research_feed.telegram import run_saved
+
+        return run_saved(settings, collect_only=True, live_collection=result)
+    from zotero_summarizer.models.telegram_discussion import TelegramConversation
+    from zotero_summarizer.services.research_feed import telegram_conversations
+    from zotero_summarizer.services.research_feed.profile import load_profile
+
+    batches = [TelegramConversation.model_validate(value) for value in result["collection"]["conversations"]]
+    return telegram_conversations.publish(settings, batches, collection=result,
+        profile=load_profile(settings.data_dir, persist_default=False))
 
 
 def child(args) -> int:
@@ -141,7 +176,7 @@ def child(args) -> int:
         session_type = _sdk_session_type()
         from zotero_summarizer.cli._telegram_identity import resolve
         from zotero_summarizer.integrations.telegram_auth import client
-        from zotero_summarizer.services.research_feed import telegram, telegram_runtime
+        from zotero_summarizer.services.research_feed import telegram_runtime
 
         def client_factory(session):
             api_id, api_hash = resolve(settings.data_dir, authenticate=args.purpose == "auth")
@@ -152,10 +187,16 @@ def child(args) -> int:
             client_factory=client_factory, purpose=args.purpose,
         )
         if result["status"] != "collected" or result["cleanup"] != "completed":
-            _write_receipt(path, _receipt(settings, args.purpose, result, None))
+            exported = None
+            if (args.purpose == "conversations" and result["cleanup"] == "completed"
+                    and isinstance(result.get("collection"), dict) and result["collection"].get("conversations")):
+                exported = _export(settings, args.purpose, result)  # Raw partial snapshot only, never generation.
+            receipt = _receipt(settings, args.purpose, result, exported)
+            if exported is not None:
+                _verify(settings, args.purpose, receipt, partial=True)
+            _write_receipt(path, receipt)
             return 1
-        exported = (telegram.run_saved(settings, collect_only=True, live_collection=result)
-                    if args.purpose == "collect" else None)
+        exported = _export(settings, args.purpose, result)
         receipt = _receipt(settings, args.purpose, result, exported)
         _verify(settings, args.purpose, receipt)
         _write_receipt(path, receipt)

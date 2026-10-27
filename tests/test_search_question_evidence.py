@@ -108,7 +108,7 @@ def test_delete_between_generation_and_verification_does_not_recreate_session(jo
         session.load("cancelled-evidence")
 
 
-@pytest.mark.parametrize("mutation", ["question", "query", "source", "evidence", "retracted", "below_floor"])
+@pytest.mark.parametrize("mutation", ["question", "query", "source", "evidence", "malformed_scope", "retracted", "below_floor"])
 def test_stale_or_ineligible_evidence_cannot_promote_or_escape_projection(journey, mutation):
     result = run(journey)
     candidate = result.candidates[0]
@@ -120,6 +120,8 @@ def test_stale_or_ineligible_evidence_cannot_promote_or_escape_projection(journe
         candidate.url = "https://example.org/another.pdf"
     elif mutation == "evidence":
         candidate.question_evidence[0]["evidence"][0]["start"] = -1
+    elif mutation == "malformed_scope":
+        candidate.question_evidence[0]["checked_scope"]["end"] = "corrupt"
     elif mutation == "retracted":
         candidate.is_retracted = True
     else:
@@ -128,12 +130,30 @@ def test_stale_or_ineligible_evidence_cannot_promote_or_escape_projection(journe
     apply_question_policy(result)
     assert result.candidates[0].candidate_id == "P01"
     assert result.evidence_status["promoted_candidate_ids"] == []
-    if mutation in {"question", "query", "source", "evidence"}:
+    if mutation in {"question", "query", "source", "evidence", "malformed_scope"}:
         projected = result.to_dict(for_display=True)
         target = next(c for c in projected["candidates"] if c["candidate_id"] == "P11")
         assert target["question_evidence"][0]["state"] == "unknown"
         assert "answer" not in target["question_evidence"][0]
         assert projected["evidence_status"]["state"] == "unavailable"
+
+
+def test_malformed_persisted_locator_invalidates_without_breaking_session_load(journey, tmp_path):
+    result = run(journey)
+    path = tmp_path / "sessions" / f"{result.id}.json"
+    stored = json.loads(path.read_text())
+    candidate = next(c for c in stored["candidates"] if c["candidate_id"] == "P11")
+    candidate["question_evidence"][0]["checked_scope"]["end"] = "corrupt"
+    path.write_text(json.dumps(stored))
+
+    loaded = session.load(result.id)
+    assert loaded.evidence_status["state"] == "unavailable"
+    assert loaded.evidence_status["promoted_candidate_ids"] == []
+    assert loaded.candidates[0].candidate_id == "P01"
+    projected = loaded.to_dict(for_display=True)
+    target = next(c for c in projected["candidates"] if c["candidate_id"] == "P11")
+    assert target["question_evidence"][0]["state"] == "unknown"
+    assert "answer" not in target["question_evidence"][0]
 
 
 def test_merge_keeps_concurrent_explicit_add_and_family_enrichment_invalidates_evidence(journey):

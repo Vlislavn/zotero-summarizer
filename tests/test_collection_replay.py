@@ -4,7 +4,7 @@ import json
 import pytest
 
 from test_collection_fixtures import bundle, encoded, save, sha
-from tools.method_validation.collections import Config
+from tools.method_validation.collections import Config, Result
 from tools.method_validation.collections_report import readable, report
 from tools.method_validation.collections_run import prepare, reopen, run
 
@@ -49,8 +49,10 @@ def test_self_consistent_derived_hashes_cannot_bypass_frozen_branches(tmp_path, 
     if mutation == 'gold': row['gold_memberships'] = []
     if mutation == 'request': row['request_sha256'] = '0' * 64
     if mutation == 'capability':
-        row.update(capability='top3_suggestions', selected_keys=['A', 'B'], label=None,
-                   readout=None, baseline_native={'synthetic_capability': True})
+        row.update(capability='top3_suggestions', node_key=None, selected_keys=['A', 'B'], label=None,
+                   readout=None, baseline_native={'readout': {'has_corpus': True,
+                                                            'suggested_collections': ['A', 'B']}})
+        Result.model_validate_json(encoded(row))
     if mutation == 'recorded_transport': row['telemetry']['terminal_status'] = 'blocked'
     if mutation == 'orphan': (owner / 'terminal-999.bin').write_bytes(b'{}')
     (owner / 'case-0.json').write_bytes(encoded(row))

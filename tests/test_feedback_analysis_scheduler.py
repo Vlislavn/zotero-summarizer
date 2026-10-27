@@ -55,6 +55,56 @@ def test_two_actual_weekly_executions_late_observation_and_frozen_replay(tmp_pat
     assert due(settings, MONDAY + timedelta(days=7))["status"] == "no_due"
 
 
+def test_prelaunch_failure_after_intent_is_retryable(tmp_path, monkeypatch):
+    settings = enabled(tmp_path)
+    original = schedule_state.begin_attempt
+
+    def fail_after_intent(*args):
+        original(*args)
+        raise OSError("synthetic failure before child launch")
+
+    monkeypatch.setattr(schedule_state, "begin_attempt", fail_after_intent)
+    with pytest.raises(OSError, match="before child launch"):
+        due(settings)
+
+    failure = json.loads(next(settings.feedback_analysis_dir.glob("attempts/*/failure.json")).read_bytes())
+    assert failure["phase"] == "admission" and failure["child"] == {}
+    assert failure["published"] is False
+    assert (settings.feedback_schedule_dir / "intents" / "weekly_20261012T000000Z" / "active.json").is_file()
+
+    monkeypatch.setattr(schedule_state, "begin_attempt", original)
+    retry = due(settings)
+
+    assert retry["completed_windows"] == 1
+    assert len(list((settings.feedback_analysis_dir / "attempts").iterdir())) == 2
+    assert len(list((settings.feedback_analysis_dir / "runs").iterdir())) == 1
+
+
+def test_prelaunch_retry_rejects_nonempty_child_evidence(tmp_path, monkeypatch):
+    settings = enabled(tmp_path)
+    original = schedule_state.begin_attempt
+
+    def fail_after_intent(*args):
+        original(*args)
+        raise OSError("synthetic failure before child launch")
+
+    monkeypatch.setattr(schedule_state, "begin_attempt", fail_after_intent)
+    with pytest.raises(OSError, match="before child launch"):
+        due(settings)
+
+    path = next(settings.feedback_analysis_dir.glob("attempts/*/failure.json"))
+    failure = json.loads(path.read_bytes())
+    failure["child"] = {"pid": 123}
+    path.write_text(json.dumps(failure))
+    monkeypatch.setattr(operation, "_launch", lambda *a: pytest.fail("unconfirmed child must not relaunch"))
+
+    with pytest.raises(schedule_state.UnconfirmedPublication):
+        due(settings)
+
+    assert len(list((settings.feedback_analysis_dir / "attempts").iterdir())) == 1
+    assert not (settings.feedback_schedule_dir / "cursor.json").exists()
+
+
 def test_cursor_failure_recovers_without_another_child(tmp_path, monkeypatch):
     settings = enabled(tmp_path)
     log(settings, [event("A")])

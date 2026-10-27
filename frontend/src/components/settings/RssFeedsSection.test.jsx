@@ -28,6 +28,8 @@ beforeEach(() => {
   feeds = [];
   refresh = () => response({ feeds: 2, inserted: 0, updated: 0, errors: [] });
   vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {
+    if (path === '/api/research-feed/telegram/status') return response({ state: 'idle', connection: 'unknown' });
+    if (path === '/api/research-feed/telegram/sources') return response({ sources: [], model: null, limits: {}, local_providers: [], llm_enabled: true });
     if (path === '/api/rss/feeds' && !options.method) return response({ feeds: [...feeds] });
     if (path === '/api/rss/feeds' && options.method === 'POST') {
       const saved = { id: feeds.length + 1, source: 'app', ...JSON.parse(options.body) };
@@ -96,7 +98,15 @@ it('blocks additional subscriptions while an add is pending', async () => {
 });
 
 it('distinguishes unavailable subscriptions from an empty list and offers a read retry', async () => {
-  fetch.mockResolvedValueOnce(response({ message: 'Synthetic source-list unavailable' }, 503));
+  const original = fetch.getMockImplementation();
+  let failed = false;
+  fetch.mockImplementation((path, options = {}) => {
+    if (path === '/api/rss/feeds' && !options.method && !failed) {
+      failed = true;
+      return response({ message: 'Synthetic source-list unavailable' }, 503);
+    }
+    return original(path, options);
+  });
   mount();
 
   await screen.findByText(/Synthetic source-list unavailable/);

@@ -352,10 +352,14 @@ def _failed_before_candidate(settings, attempt, intent, guard):
                 "cutoff": intent["cutoff"]}
     if (type(failure) is not dict or any(type(failure.get(key)) is not type(value) or failure[key] != value
             for key, value in expected.items()) or failure.get("phase") not in
-            {"child", "request", "provenance", "freeze", "analysis", "report", "validation"}):
+            {"admission", "child", "request", "provenance", "freeze", "analysis", "report", "validation"}):
         return False
     child = failure.get("child")
-    if type(child) is not dict or child.get("reaped") is not True or child.get("group_absent") is not True:
+    # The dispatcher advances to "child" before calling _launch; an empty admission child proves no launch.
+    if failure["phase"] == "admission":
+        if child != {}:
+            return False
+    elif type(child) is not dict or child.get("reaped") is not True or child.get("group_absent") is not True:
         return False
     run = settings.feedback_analysis_dir / "runs" / _name(failure.get("run_id"))
     return failure.get("run_path") == str(run) and not _no_symlinks(run).exists()

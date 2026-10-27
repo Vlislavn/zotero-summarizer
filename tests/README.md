@@ -1,5 +1,54 @@
 # Tests
 
+Telegram conversation regressions use synthetic actual Telethon TL values (no
+account), source snapshots and scripted local-model responses. They cover direct/
+forwarded linked roots, peer/thread decoys, nested parents, overlapping group
+identity, edits/immutable storage, cap/nontext/empty/unavailable coverage, strict
+citation binding, narrow source save, historical verified status and read-only
+Weekly v1/v2 access. `test_llm_local_only.py` permits only its owned loopback HTTP
+origin to check redirect/proxy refusal without a model or remote network. These
+are machine contract checks, not semantic topic/review-quality or hardware proof.
+`test_telegram_review_corrections.py` discriminates later-post stops at linked/reply
+RPC phases, separate post-window lookahead, chronological mixed-source >limit
+history, immutable/verified partial exports and prompt reply-edge resolution.
+`test_telegram_wire_controls.py` loads the installed OnPrem/LangChain client in
+forked tests but sends only nonprivate synthetic prompts to HTTPX MockTransport:
+assert actual declared wire caps/off dialect, no provider mutation and safe
+underlying failure type. No endpoint, model execution or source text is involved.
+`test_telegram_generation_budget.py` separates compact generation work from retained
+history, constrains evidence choices by actual source role, expands exact original
+spans without non-whitespace content loss, and checks one call/no repair. Schema
+and payload checks do not establish semantic usefulness. Combined-v12 lineage
+upgrades now verify migration14's empty conversation store, retained v13 contracts,
+unchanged RSS data and byte-identical idempotent database dumps. The sync migration
+inventory pins version14 and checks continuous alignment through that version.
+Private Telegram semantic checks remain diagnostic, not an automatic approval
+gate: local critics produced contradictory control judgments. Their flags,
+unknowns, rejected proposals and source-bound attempts are retained privately,
+not presented as independent human/scientific approval or hidden by a perfect
+coverage metric. Shipped tests independently enforce canonical roles, literal
+quotes, immutable evidence and bounded explicit actions; they do not grade meaning
+with keywords. Positive generation fixtures explicitly use prepared context;
+a computed one-byte-under-envelope
+countercontrol still refuses before constructing another client, without clipping.
+Compact-JSON projection checks retain nonempty hidden URLs/excerpts/context and
+remove only structural padding and empty URL fields.
+
+PR208 feature-swarm regressions reject coercible verifier fields and malformed
+retained question locators, preserve sync continuation revisions and exact field
+comparison, and distinguish submitted comments and assessed-empty reproduction
+inputs. Weekly download controls replace files at the same ASGI response boundary
+for both implementations, proving returned bytes were captured before streaming.
+The real hybrid-search ceiling test lives with Library retrieval contracts in
+`test_related_library.py`, reusing the existing saved-paper `journey` fixture.
+Collection capability-forgery fixtures validate their intrinsic row shape before
+resealing; the asserted refusal must still come from the actual frozen replay.
+Positive saved-Telegram CLI journeys use admitted Telegram options; separate
+pre-Settings regressions exercise rejection of the formerly ignored RSS flags.
+Collapsed signal contrast checks include the now-visible SKIM policy label and
+measure every visible label; keyboard, expanded-label and overflow controls stay.
+These are owned synthetic machine contracts, not human or live-model acceptance.
+
 Checklist-driven regressions cover strict manual-note app acknowledgements and
 real route dirtiness, unresolved/failed classifier configuration before label
 refresh, transitive Related identifier families under every list permutation,

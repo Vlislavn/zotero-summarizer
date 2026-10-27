@@ -125,9 +125,10 @@ through `feeds serve`. Its recovery rules are:
 - With no committed cursor, bounded lookup recovers the oldest retained active
   intent across a weekly rollover before processing newer closed windows.
 - Missing/failed success receipts HOLD a candidate. Before any candidate exists,
-  an identity-bound failure proving no publication, a reaped/absent child group
-  and no destination permits one fresh bounded attempt; missing/ambiguous
-  evidence still HOLDs. Old attempts and failure evidence remain intact.
+  an identity-bound failure proving no publication and no destination permits one
+  fresh bounded attempt if the child was reaped with its group absent, or if the
+  phase is `admission` with an empty child record (launch was not entered).
+  Missing/ambiguous evidence still HOLDs. Old attempts and failure evidence remain intact.
 - Only explicitly tagged owned SIGINT/SIGTERM interruptions stop the daemon
   cleanly after drain, without a feed tick or cursor advancement. Other faults
   propagate. Cursor links are refused before child launch.

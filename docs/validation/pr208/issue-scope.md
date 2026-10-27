@@ -4,15 +4,15 @@
 Diff от main@bd5e267 + scope реализации → новая функция → её GitHub issue
 ```
 
-[Ручной чеклист версии2](manual-checklist.md) · [PR208](https://github.com/Vlislavn/zotero-summarizer/pull/208).
+[Ручной чеклист версии3](manual-checklist.md) · [PR208](https://github.com/Vlislavn/zotero-summarizer/pull/208).
 Здесь **не все связанные/упомянутые issues**: только исходные GitHub issues
-для18добавленных функциональных возможностей. Номер bugfix, зависимость или
+для18исходных функциональных пунктов с отдельно указанной добавленной частью. Номер bugfix, зависимость или
 исторический audit ledger сами по себе не делают существующую функцию новой.
 Указанный issue может иметь больший scope, чем добавленная в PR часть.
 
 | ID | Добавленный функционал | Исходный GitHub issue | Реализация в PR208 |
 |---|---|---|---|
-| FEATURE-01 | HackerNoon presets в обычных RSS-подписках | [#16](https://github.com/Vlislavn/zotero-summarizer/issues/16) | [PR137](https://github.com/Vlislavn/zotero-summarizer/pull/137); RssFeedsSection и practitioner feed routing. |
+| FEATURE-01 | HackerNoon presets в обычных RSS-подписках | [#16](https://github.com/Vlislavn/zotero-summarizer/issues/16) | [PR137](https://github.com/Vlislavn/zotero-summarizer/pull/137); RssFeedsSection presets — добавленная часть; practitioner feed routing уже существовал в base и служит контролем. |
 | FEATURE-02 | Why selected: причины выбора Today и отдельный evidence signal | [#33](https://github.com/Vlislavn/zotero-summarizer/issues/33) | [PR138](https://github.com/Vlislavn/zotero-summarizer/pull/138); SelectionEvidence и daily-selection projection. Не measured ranking improvement. |
 | FEATURE-03 | Сохранённый план чтения рядом с действием, без Details | [#9](https://github.com/Vlislavn/zotero-summarizer/issues/9) | [PR134](https://github.com/Vlislavn/zotero-summarizer/pull/134); ReadingPlan/PaperReview. Не новая генерация всего review. |
 | FEATURE-04 | Раздельные idea/evidence/writing и объяснимое ограничение глубины чтения | [#15](https://github.com/Vlislavn/zotero-summarizer/issues/15) | [PR144](https://github.com/Vlislavn/zotero-summarizer/pull/144), [PR181](https://github.com/Vlislavn/zotero-summarizer/pull/181); reading-policy projection/OrthogonalSignals. |
@@ -21,9 +21,9 @@ Diff от main@bd5e267 + scope реализации → новая функци�
 | FEATURE-07 | Find new relevant из saved seed с retained Search session | [#46](https://github.com/Vlislavn/zotero-summarizer/issues/46) | [PR153](https://github.com/Vlislavn/zotero-summarizer/pull/153); `search/discovery.py` и Search discovery view. |
 | FEATURE-08 | Opt-in original-source question evidence перед review selection | [#30](https://github.com/Vlislavn/zotero-summarizer/issues/30) | [PR147](https://github.com/Vlislavn/zotero-summarizer/pull/147); `_question_evidence`, `_question_policy`, QuestionEvidence. |
 | FEATURE-09 | Weekly UI: сохранённые отчёты, bookmark и original downloads | [#12](https://github.com/Vlislavn/zotero-summarizer/issues/12) | [PR139](https://github.com/Vlislavn/zotero-summarizer/pull/139); Weekly/WeeklyDigest и saved-report API. |
-| FEATURE-10 | Disconnected working-set review, durable edits и conflict resolution | [#19](https://github.com/Vlislavn/zotero-summarizer/issues/19) | [PR157](https://github.com/Vlislavn/zotero-summarizer/pull/157); offlineStore/syncClient и `services/sync/`. |
+| FEATURE-10 | Cold offline-контекст ещё не открывавшейся synced paper; прежняя очередь/конфликты — контроли | [#19](https://github.com/Vlislavn/zotero-summarizer/issues/19) | [PR157](https://github.com/Vlislavn/zotero-summarizer/pull/157) — исходный offline workflow, уже в base. В дельте `offlineStore.applyPull` впервые создаёт `response:review:*` без прежнего cached detail; изменения Library/cached-review navigation делают cold-контекст доступным. Базовые queue/conflict helpers не объявляются новыми. |
 | FEATURE-11 | Explicit owner-authenticated remote HTTPS/private-Unix mode | [#19](https://github.com/Vlislavn/zotero-summarizer/issues/19) | [PR150](https://github.com/Vlislavn/zotero-summarizer/pull/150); `serve-mobile` и gateway admission. Не #11 inference readiness. |
-| FEATURE-12 | Source-qualified project engineering cards из RSS | [#12](https://github.com/Vlislavn/zotero-summarizer/issues/12) | [PR136](https://github.com/Vlislavn/zotero-summarizer/pull/136); research-feed producer/card/proposal qualification. |
+| FEATURE-12 | Source-qualified project engineering cards из RSS | [#12](https://github.com/Vlislavn/zotero-summarizer/issues/12) | [PR136](https://github.com/Vlislavn/zotero-summarizer/pull/136); research-feed producer/card/proposal qualification; сам RSS engine не является новой функцией. |
 | FEATURE-13 | Telegram auth/collection/saved-input news processing | [#27](https://github.com/Vlislavn/zotero-summarizer/issues/27) | [PR170](https://github.com/Vlislavn/zotero-summarizer/pull/170), [PR171](https://github.com/Vlislavn/zotero-summarizer/pull/171), [PR177](https://github.com/Vlislavn/zotero-summarizer/pull/177); Telegram transport/runtime/public CLI. |
 | FEATURE-14 | Retained feedback analysis, manual report и weekly scheduling | [#47](https://github.com/Vlislavn/zotero-summarizer/issues/47) | [PR162](https://github.com/Vlislavn/zotero-summarizer/pull/162), [PR163](https://github.com/Vlislavn/zotero-summarizer/pull/163), [PR164](https://github.com/Vlislavn/zotero-summarizer/pull/164), [PR166](https://github.com/Vlislavn/zotero-summarizer/pull/166), [PR168](https://github.com/Vlislavn/zotero-summarizer/pull/168); feedback_analysis/report/scheduler. |
 | FEATURE-15 | Frozen criterion–evidence support comparator | [#37](https://github.com/Vlislavn/zotero-summarizer/issues/37) | [PR152](https://github.com/Vlislavn/zotero-summarizer/pull/152); `tools.method_validation support`. |
@@ -51,7 +51,8 @@ Diff от main@bd5e267 + scope реализации → новая функци�
 ## Статус проверки
 
 Исторический рой8агентов и его33scenario IDs относятся к **версии1 со смешанным
-scope**. Текущая версия2 составлена заново по уточнению пользователя; прежний рой
-не считается её проверкой, новый рой здесь не запускался. Машинные результаты
-приложения в [results.json](results.json) сохранены как отдельные свидетельства,
+scope** и не засчитываются в новый рой. Новый50-агентный аудит сохранил все18исходных
+пунктов/15issues и уточнил их actual delta: в частности cold offline-контекст нельзя
+смешивать с уже существовавшими очередью и conflict resolution. Его source/synthetic
+проверки и восстановления отражаются отдельно в [results.json](results.json),
 не как отметки PASS у18ручных функций.

@@ -160,8 +160,10 @@ overlapping 1,200-character chunks. Evidence is selected from the original paper
 not copied/repaired by the model (which mangled PDF line-break hyphens and added
 ellipses). Exact-span/length checks remain unchanged; semantic support still requires
 the verifier's judgment, and citation membership alone is not proof of entailment.
-Missing/duplicate claim indices and missing/invalid evidence IDs get one verifier
-repair attempt, then `DigestVerifierUnavailable`, not a rewrite of the digest.
+Verifier claim indices and support flags require actual integer/boolean values;
+coercible booleans or numbers cannot authorize a claim. Missing/duplicate indices
+and missing/invalid evidence IDs get one verifier repair attempt, then
+`DigestVerifierUnavailable`, not a rewrite of the digest.
 The numeric guard treats the hyphen in `85.2%-85.8%` as a range separator,
 not a negative sign; standalone negative values still require source support.
 Providers declaring `structured_output` constrain all Pydantic calls in the shared
@@ -709,7 +711,10 @@ comments; read items remain eligible, self aliases/identifiers and current human
 `dont_read` families are excluded, and collection/tag scopes stay intact. Related
 reuses Search's union-find to close identifier/app-alias bridges before selection,
 then incorporates retrieved detail identifiers before choosing distinct families.
-List order cannot leak a seed version or consume multiple recommendation slots;
+Retrieval uses the existing hybrid-search ceiling of100 before selecting at most10
+unique assessment candidates; first-list representatives no longer suppress a
+higher-ranked version, and detail-only duplicate versions cannot exhaust a top10
+raw-result window. List order cannot leak a seed version or consume multiple recommendation slots;
 identical titles without shared identifiers remain distinct. The dedup owner is
 included in assessment currentness; no new identity store or title heuristic exists.
 `_related_context` reads current manual/verdict notes through the existing SQLite

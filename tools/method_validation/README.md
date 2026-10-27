@@ -8,7 +8,7 @@ Optional declared version/derivation DAGs bind every reference channel, exclude 
 same optional admission/run/inspect grammar, transport/raw ACK and fresh-owner
 publication primitives. It asks independent existing-key membership questions,
 retains full native choices/vectors, and imports original top3 NAME suggestions
-without inventing keys/scores or confident no-match. Taxonomy, canonical/time
+without inventing keys/scores or confident no-match. Empty-retrieval counts use the original suggestion list; workflow-only suggestions remain nonempty and count separately as exclusions. Taxonomy, canonical/time
 lineage, separate human gold, complete request/work budgets and all replay branches
 are validated before scoring. Corpus-backed artifacts require nonempty declared
 reference lineage strictly earlier than its owner; replay filenames and native HTTP
@@ -44,8 +44,9 @@ outcomes stay unscored; synthetic controls and unknown resources cannot establis
 a winner, promotion or full #38 completion. Reports keep per-gold-class failure
 coverage separate from decision-only quality and identify synthetic labels plus
 declared/missing provenance counts without claiming independent verification.
-Admission rejects repeated canonical papers even within one family, and ML imports
-require nonempty training-family provenance before any artifacts or requests.
+Admission rejects repeated canonical papers even within one family, refuses
+development observations after the frozen split (while accepting the exact instant),
+and requires nonempty ML training-family provenance before artifacts or requests.
 Priority uses the same public native admission/TLS guard, retaining its four-way
 projector and outcome-work reservation. Its separate aggregate `max_snapshot_bytes`
 cap also bounds each input read before allocation. Priority rows without declared

@@ -1,129 +1,113 @@
-# PR208 — добавленные функции и ручная приёмка
+# PR208 — аудит 50 агентов и добавленные функции
 
 ```text
-Функция, добавленная в PR → исходный GitHub issue → ручная проверка
+18 функций / 15 issues
+        ↓
+50 новых logical agents: 49 isolated writers + 1 readonly scout
+        ↓
+14 групп исправлений → parent RED/GREEN → main working tree
+        ↓
+10 764 Python PASS · 1 000 frontend PASS · 98 unique browser PASS
+        └─ не человеческая, live-provider или scientific приёмка
 ```
 
-**[Актуальный чеклист версии2](manual-checklist.md):18функций из15исходных GitHub issues.**
-[Функция → issue → реализация](issue-scope.md) · [исторические машинные receipts](results.json) ·
-[8 run IDs / hashes](swarm.json) · [проверенные code bytes](source-manifest.json).
+**[Чеклист версии 3](manual-checklist.md)** сохраняет все18пунктов/15исходных issues.
+[Функция → issue → добавленная часть](issue-scope.md) ·
+[проверки и ограничения](results.json) · [50 run/session/report bindings](swarm.json) ·
+[1360 runtime/test/config fingerprints](source-manifest.json) ·
+[CHANGELOG](../../../CHANGELOG.md).
 
-По уточнению пользователя убраны существующие функции/общие регрессии, внутренние
-технические проверки и нереализованный backlog. Проверяется добавленная часть
-функционала, а не весь acceptance каждого issue. Человеком версия2 не выполнена;
-новый рой по ней не запускался.
+Изменения перенесены в основной checkout **без stage/commit/push**. Проверялся
+изолированный build; существующий root `frontend/dist` не заменялся, deployment
+не выполнялся. **Все18ручных чекбоксов остаются неотмеченными.**
 
-## Исторический аудит версии1
+## Что именно обследовано
 
-Рой проверял прежний смешанный33-сценарный чеклист, а не текущую версию2. Draft SHA256 `2c09def0fabcd8e7d3154b50484ae9d268764fefe73c93c8fc6de387f62db4fe`;
-workflow `d90f6c13-6425-4295-a46e-db0f908958ed`. Все 8 завершены, fresh contexts,
-6 зон + issue-completeness/human-safety. Их работа — **readonly primary/source
-review**, не исполненная пользовательская приёмка. Воспроизведение и реальные
-локальные проверки выполнял parent в изолированных fixtures без личных
-данных/аккаунтов/моделей. Ограничения каждого вида свидетельств сохранены.
+Первичный workflow `27ab1399-c0d6-4f41-bc22-fd3d936b900b`:50/50spawns,
+fresh contexts,49раздельных writer-worktrees. Первичная очередь ограничена6агентами;
+тяжёлые проверки выполнялись по одной под общим kernel lock. Retained recovery
+имеют собственный lifecycle, поэтому6не выдаётся за измеренный общий peak.
 
-## Найденные продуктовые дыры
+Из первоначальных запусков **40завершились,10failed**:9native timeouts и1acceptance
+mismatch. Все10затем завершили retained recovery. Отдельные продолжения агента13
+(один rejected, затем completed) и readonly агента50 **не являются новыми агентами**.
+Исходные failures остаются NOT_PASS; наличие50отчётов не превращает их в50успешных
+первичных запусков. Native/managed outputs сверены штатным acceptance-stripper:
+6byte-identical,28различаются terminal newline,16—machine acceptance block.
 
-| Дефект | Причина / минимальное исправление | Исполненный discriminator |
-|---|---|---|
-| Manual-note Save очищал dirty draft без app ACK | В HTTP boundary требуется literal `saved === true`, до sync/clean baseline | `{}`, false, string, null,204; реальные route guards; legitimate device/app saves сохранены |
-| Retrain мог выбрать `logreg` до загрузки/после ошибки config | Убрано угадывание; нет label refresh/training без известного classifier | Pending/error/missing config; nondefault acknowledged model pinned across label refresh; same-job recovery controls |
-| Related показывал seed-version/дубликаты через identifier bridge | Переиспользован Search union-find, closure до выбора и после detail; seed/rejected families исключены | Все6перестановок × seed/candidate family, no-ID same-title control, detail-only bridge, rejected-family control |
-| Missing Ollama советовал brew на любой ОС | Homebrew только Darwin; официальный platform download URL иначе | Darwin/Linux/Windows/unknown; inventory запрещён sentinel |
-| Policy withholding терял конкретную причину | Добавлены missing-target/original-value explanations в существующий disclosure | Обе server flags × compact/standard/full; входные DTO не изменяются |
-| Applicability повторялась в двух раскрытиях | Удалена duplicate full-digest row | Одна supplied literal relevance sentence во всех3режимах |
-| Legacy supported goal был одновременно unknown | Удалён второй abstention predicate; используется общий `isSupportedGoal` | Оmitted abstention ×3 surfaces; существующие false/abstained controls сохранены |
+Readonly follow-up того же агента50 проверил15изменённых production owners и
+происхождение18функций по base `bd5e267`; дополнительных конкретных нарушений не
+нашёл. Он **не запускал тесты**, не является новым независимым аудитором и не
+сертифицировал receipts. Исправления принимал parent после реального воспроизведения.
 
-Первый qualified RED: frontend **85:62 PASS /23 FAIL**, Python **48:35 PASS /13 FAIL**.
-Те же сценарии после исправлений: **85/85 и48/48 PASS**. Дополнительные detail /
-rejected-family controls и общие post-fix gates записаны в `results.json`.
+## Исправленные контракты
 
-| Текущая проверка | Фактический результат |
+| Функция / lanes | Подтверждённая проблема и минимальная коррекция |
 |---|---|
-| Frontend, полный набор | **997/997 PASS** |
-| Python, все577test files в8последовательных процессах | **10 727 PASS /166 SKIP /0 FAIL**,10 893уникальных записей |
-| Свежий build + owned built-browser | **98/98 PASS**; это98точных skipped identities основного Python-набора, не дополнительная независимая выборка |
-| Pre-commit +6новых artifacts | **PASS** |
-| Frontend lint | **0 errors /13 existing warnings** |
-| Независимый bounded follow-up | **PASS-with-bounds**; source-review, не повторная сертификация receipts |
+| Reading policy,07/08 | Verifier больше не принимает `False` как index0 и `1` как supported; SKIM-причины видны до раскрытия, weak-evidence берётся из server flags |
+| Related,13/15 | Версии ранжируются до identity closure, retrieval-window не исчерпывается дубликатами; submitted comments отделены от cited records |
+| Question evidence,20 | Повреждённые persisted scope/span данные становятся stale/unknown, а не crash или основанием для promotion |
+| Weekly,23 | JSON validation и ответ используют те же captured bytes; выбранный Markdown также захватывается до streaming |
+| Offline controls,26 | Старый receipt не понижает continuation revision; любое несовпадение current/base, включая future base, даёт conflict |
+| RSS cards,29/31 | Assessed-empty inputs не названы unassessed; malformed present provenance недоступна, но unqualified source observation не отвергается как card authority |
+| Telegram CLI,34 | Игнорировавшиеся RSS-only flags явно запрещены до Settings; положительный saved-input workflow сохранён |
+| Weekly feedback,36 | Доказанный prelaunch failure допускает retry; неопределённые child/publication evidence остаются held |
+| Priority,41 | Development observations после объявленного frozen split не допускаются; равные и timezone-equivalent instants сохранены |
+| Collections,46 | Empty retrieval считается по исходным suggestions, не по результату удаления workflow collections |
+| Interpretation,49 | Без независимых human scores результат INCONCLUSIVE, даже если assigned executions завершились ошибками |
 
-Однопроцессный повтор Python-suite остановлен guard по20%free-RAM floor через527.5s:
-**не PASS**. Весь тот же набор577files затем выполнен8последовательными группами
-≤80files с неизменными лимитами; уникальность cases и точные166skip IDs сверены.
-Защита не ослаблялась, чужие процессы не останавливались. Из166основных skips98
-исполнены отдельно браузером; оставшиеся68в этом goal не объявляются проверенными.
-Из147созданных PNG parent открыл4полных reading-снимка390/1440; остальные не
-объявляются просмотренными человеком.
-Ни один skipped case не превращён в PASS; реальные scientific/hardware/native-GUI
-или physical-device результаты из этих чисел не выводятся.
+Не вводились новые scorer/store/runner/model или произвольная более строгая политика.
+Например, равенство taxonomy/split timestamps и различие raw/effective config не
+объявлены багами без соответствующего контракта. Дублирование manifest provenance
+во всех Markdown/stdout полях отклонено. Candidate-схема31дала **2PASS/2FAIL** на
+собственном producer/readback control; принята меньшая граница observation/card.
 
-**Поправка старому аудиту:** прежний вывод об отсутствии original AUD14-02 нельзя
-использовать для текущего goal-label случая. На6e он воспроизведён и исправлен
-здесь. Исторический final295 остаётся историческим snapshot, не вечным сертификатом.
+## Исполненные проверки
 
-## Исправление scope чеклиста по уточнению пользователя
+| Проверка | Receipt |
+|---|---|
+| Полный Python:577files,8последовательных partitions | **10 764PASS /166SKIP /0FAIL /0ERROR**,10 930уникальных записей |
+| Полный frontend | **1000/1000PASS**,144suites |
+| Свежий isolated build | **PASS**, bundle/source pins сверены |
+| Built-browser | **98уникальных PASS**:94initial passes +12перепроверок,8overlap; это98точных skipped identities Python-набора, не дополнительная независимая выборка |
+| Frontend lint | **0errors /13existing warnings** |
+| Static gates | Все9pre-commit hooks passed; новый untracked frontend test проверен явно; final documentation closure отражена в `results.json` |
 
-Версия1 была слишком широкой: смешивала добавленные функции, регрессии старого
-приложения, технические проверки и backlog. Даже source-supported regression
-не становится новой функцией только потому, что файл изменён.
+Первый whole cohort выявил некорректный Collection reseal fixture; следующий —
+Telegram positive fixture с теперь запрещёнными RSS date flags. Начальный browser
+run: **94PASS/4FAIL**, потому что старый DOM assert запрещал новый видимый SKIM label.
+Исправлены только fixtures/assertions: valid DTO до reseal, реальные replay refusals,
+admitted CLI options и WCAG≥4.5для **каждого** visible collapsed label. Все keyboard,
+expanded-label, overflow и immutable-replay controls сохранены. Исходные failed
+attempts не скрыты и не суммируются с итоговыми cohorts.
 
-Например, richer delayed triage note (#8) и non-ranking Read Next proposal (#21)
-уже существовали в base; их прежние N07/F07 удалены из актуального чеклиста.
-Существующие Setup, Pending/editors, Search (#31), retrain/labels, внутренний
-audit export, race/ACK/MCP/backup checks также не создают отдельных новых
-пользовательских пунктов.
+Лимиты не ослаблялись:20%available RAM,4096MiBowned-tree RSS,2048MiBswap growth,
+900sguard safety cap,1spoll,2stermination grace. Чужие процессы не останавливались.
+Parent открыл6новых PNG:4SKIM surfaces390/1440 и2isolated Related captures;
+последние не являются full-styled-application acceptance. Остальные PNG не
+объявляются просмотренными. Сырые receipts локальны; пути/hashes не притворяются
+публичными вложениями.
 
-В версии2 каждая строка называет добавленную функцию, **исходный GitHub issue,
-по которому её делали**, действия и ожидаемый результат. Компаньон содержит
-конкретную реализацию/subPR, а не общий каталог39связанных issues. Результаты
-прежнего роя и code tests сохранены как исторические факты, не как приёмка новой версии.
+## Scope и границы
 
-## Границы решения
+- В base уже были offline queue/conflicts и practitioner routing. Добавленная
+  часть FEATURE-10 — cold context ранее не открывавшейся synced paper; старые
+  workflows остаются контролями. FEATURE-01 отделяет presets, Refresh и triage.
+- Human UAT, live-model usefulness, Telegram account/SDK pagination, native desktop,
+  deployed owner-authenticated HTTPS, physical device и scientific studies здесь
+  **не выполнены**. Отсутствующий prerequisite означает BLOCKED, не PASS.
+- Из166основных skips98исполнены отдельно браузером;68остаются unexecuted.
+  Optional Telethon adapter не устанавливался ради зелёной строки.
+- Source/scripted fixtures доказывают bounded machine contracts, не научную
+  истинность, полезность рекомендаций, победу модели или полноту issues.
 
-- Семь подтверждённых продуктовых дефектов исторического аудита исправлены.
-  Текущая правка меняет только documentation scope, не runtime-код и не backlog.
-- #11 positive Full-local **не реализован** без executing-runtime envelope
-  producer; честный UNKNOWN/refusal не заменяет usable-local acceptance.
-- #160 — research policy; #161 collection-tail/last-author/personal h-index /
-  organisation gaps унаследованы из base и не реализованы этим PR. Рой их не
-  «закрыл» проверкой prefilter metadata.
-- Live-provider usefulness, private frozen inputs, Telegram credentials, native
-  desktop interoperability, физический iOS/HTTPS deployment и human scientific
-  studies остаются отдельными prerequisites/результатами. Они включены в checklist
-  как conditional/BLOCKED, не скрыты в общем GREEN.
+Исторические8агентов проверяли смешанный33-сценарный чеклист версии1; они не
+засчитываются в этот рой. Их receipts сохранены в `historical_v1` обоих JSON;
+исторический source manifest имеет pinned Git URL. Текущий manifest пересобран
+из fresh snapshot, включая CSS/HTML/config и без старого absent-file tombstone.
 
-## Проверка и повторение
-
-Использованы существующие source tests и bounded guard:20% available-RAM floor,
-4096MiB tree RSS,2048MiB swap growth, именованный wall safety cap900s; checks
-сериализованы, source/index/bundle pins проверяются, owned descendants убираются.
-Ни флаги environment, ни mocked success не считаются доказательством acceptance.
-
-Базовые команды: `pre-commit run --all-files`, `pytest -q --forked`,
-`npm test --prefix frontend -- --no-file-parallelism --maxWorkers=1 --minWorkers=1`,
-`npm run lint --prefix frontend`, `npm run build --prefix frontend`.
-Browser opt-ins и installed dependencies описаны в [tests README](../../../tests/README.md);
-нужен новый isolated build, не чужой/stale root `dist`.
-Фактические команды, counts, JUnit/Vitest SHA и guard scope — в `results.json`;
-сырые локальные receipts сохранены, но не притворяются публичными вложениями.
-
-Во время текущего whole run обнаружен ранее опубликованный documentation-contract
-конфликт: test разрешал только3main docs и отвергал5уже опубликованных validation
-artifacts. Исправление сохраняет ровно3main docs и **явный закрытый список** двух
-validation bundles; link checker теперь проверяет и их Markdown. Никакого
-безусловного исключения каталога или удаления substantive assertions нет.
-
-## Простота и итоговая приёмка
-
-Source: Laws of UX vault — Hick’s Law, Tesler’s Law, Occam’s Razor. В версии2
-сначала убраны лишние regression/developer/backlog пункты, затем добавлена прямая
-привязка каждой функции к исходному GitHub issue. Исторические code-исправления
-вычли duplicate rationale, второй supported-goal predicate и guessed classifier,
-добавив только недостающие admission/explanation/recovery. Это UX-эвристики,
-не measured comprehension benefit. Reuse: прежние request/query/state owners,
-Search `_Union`, existing disclosures и guard; новых моделей/stores/frameworks нет.
-Дальнейшее деление этого небольшого исправления не упрощает touched code.
-
-**Разрешён следующий шаг: ограниченный ручной UAT на копии.** Решение человека о
-приёмке ещё отсутствует. Не merge/close issues автоматически и не называть этот
-отчёт full production/local/hardware/scientific/device certification.
+Source: **Laws of UX vault — Hick’s Law, Tesler’s Law, Occam’s Razor**. Сначала убраны
+устаревшие scope/«новый рой не запускался» assertions и duplicate authority predicates;
+затем уточнены источник, видимая причина и recovery в существующих owners.
+Дальнейшее дробление этих небольших границ не упрощает touched code. Это эвристики,
+не measured comprehension benefit. Автоматически merge/close issues нельзя.

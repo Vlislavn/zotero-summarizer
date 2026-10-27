@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, StrictInt
 
 from zotero_summarizer.models import PaperDigest
 from zotero_summarizer.services._common import extract_json_blob, to_text
@@ -13,8 +13,8 @@ from zotero_summarizer.services.library._grounding import quote_is_grounded
 
 
 class _Check(BaseModel):
-    index: int
-    supported: bool
+    index: StrictInt
+    supported: StrictBool
     evidence: list[StrictInt] = Field(default_factory=list, max_length=3)
 
 

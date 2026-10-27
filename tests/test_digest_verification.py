@@ -76,6 +76,27 @@ def test_digest_verification_rejects_duplicate_checks():
         verify_digest(_digest(), PAPER, _Verifier(duplicate=True))
 
 
+@pytest.mark.parametrize("malformed_check", [
+    {"index": False, "supported": True, "evidence": [0]},
+    {"index": 0, "supported": 1, "evidence": [0]},
+])
+def test_digest_verification_rejects_coercible_check_fields(malformed_check):
+    from zotero_summarizer.services.library._digest_verification import DigestVerifierUnavailable
+
+    class Verifier:
+        calls = 0
+
+        def pydantic_prompt(self, **_kwargs):
+            self.calls += 1
+            return {"checks": [malformed_check]}
+
+    verifier = Verifier()
+    digest = _digest().model_copy(update={"read_why": ""})
+    with pytest.raises(DigestVerifierUnavailable, match="invalid response twice"):
+        verify_digest(digest, PAPER, verifier)
+    assert verifier.calls == 2
+
+
 def test_literal_guard_handles_ranges_without_inventing_negative_numbers():
     assert not _unsupported_literals(["tldr: discovery took 30-45 minutes"], "It took 30-45 minutes.")
     assert not _unsupported_literals(["finding: 43.5-54.6%"], "The range was 43.5%–54.6%.")

@@ -128,7 +128,7 @@ def test_resealed_record_cannot_detach_from_retained_verifier_or_original(frozen
 
 
 def decision_fixture():
-    from zotero_summarizer.services.faithbench._interpretation_report import Labels
+    from zotero_summarizer.services.faithbench._interpretation_report import Judgment, Labels
     metrics = {arm: {'human_complete': True, 'card_exposed_questions': 80 if arm == 'C' else 0,
                       'card_failures': 0, 'add_regressions': [False],
                       'supported_accuracy': 0.9, 'supported_counts': [36, 40], 'review_overclaims': [False], 'failures': 0, 'review_failures': 0,
@@ -139,7 +139,8 @@ def decision_fixture():
     comparisons = {arm: {'paper_paired_95_interval': [0.1, 0.4], 'relative_95_interval': [0.4, 0.9]} for arm in ('A', 'B')}
     recipe = {'thresholds': {'relative_reduction': 0.3, 'absolute_reduction': 0.05,
                              'accuracy_loss': 0.05, 'resource_ratio': 1.25}}
-    labels = Labels.model_construct(controlled_runtime=True, complete_token_accounting=True, model_identity_verified=True)
+    labels = Labels.model_construct(judgments={'question': Judgment.model_construct(response_sha256='0' * 64, correct=True)},
+                                    controlled_runtime=True, complete_token_accounting=True, model_identity_verified=True)
     return metrics, comparisons, recipe, labels
 
 

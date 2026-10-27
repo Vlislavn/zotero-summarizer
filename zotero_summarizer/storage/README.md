@@ -1,5 +1,14 @@
 # storage — SQLite persistence
 
+Migration 14 adds `research_feed_conversations.py`: content-addressed append-only
+Telegram conversation snapshots, with update/delete refusal triggers. Peer/message
+and thread/root context plus coverage participate in content identity; refreshed
+edits retain the previous snapshot rather than overwriting it. Duplicate unchanged
+content keeps its first stored observation; each published report retains its own
+actual observation time. Existing v1 Telegram rows/evaluations/cursors stay intact;
+the corpus receives only a named v14 alignment marker. This is bounded-window
+refresh, not historical edit/deletion monitoring or a second report store.
+
 Owns the two local databases under `data/` and all SQL. Services call these
 functions; nothing here reaches up into `services/` or `api/`.
 `sync_mutation_exists(db_path, uuid)` lets the feed-review gate skip a previously
@@ -259,8 +268,9 @@ transaction or a guard against direct edits in an independently opened Zotero.
 
 `sync_applied_revisions` reads immutable applied receipts from `sync_mutations`
 for bounded push continuation. Revisions are keyed by device, item and field;
-unknown/conflict UUIDs cannot supply a base. Existing compare-and-write still
-checks the latest canonical revision inside its writer transaction. Receipt
+unknown/conflict UUIDs cannot supply a base. Existing compare-and-write requires
+exact equality with the latest canonical field revision inside its writer
+transaction; an unobserved future base conflicts rather than overwriting state. Receipt
 lookup never repeats Zotero/CSV effects and requires no new table.
 
 `get_pending_changes(..., item_key=...)` filters by item key in SQLite before

@@ -155,6 +155,25 @@ def test_auth_requires_tty_before_settings_or_child(monkeypatch):
     assert caught.value.code == 2
 
 
+@pytest.mark.parametrize(("flag", "value"), [
+    ("--from", "2026-10-01"), ("--to", "2026-10-08"),
+    ("--review-timeout", "17"), ("--review-timeout", "3600"),
+])
+def test_telegram_rejects_rss_only_options_before_settings(tmp_path, monkeypatch, flag, value):
+    from zotero_summarizer.settings import Settings
+
+    def forbidden_settings(**kwargs):
+        raise AssertionError("unsupported Telegram options must fail before Settings")
+
+    monkeypatch.setattr(Settings, "load", forbidden_settings)
+    with pytest.raises(SystemExit) as caught:
+        cli.main([
+            "research-feed", "run", "--source", "telegram", "--input-jsonl",
+            str(tmp_path / "saved-input.jsonl"), "--project-root", str(tmp_path), flag, value,
+        ])
+    assert caught.value.code == 2
+
+
 def test_missing_optional_sdk_is_explicit(monkeypatch):
     import builtins
     from zotero_summarizer.cli import _telegram
@@ -181,10 +200,17 @@ def test_rss_cached_dispatch_never_imports_telegram_or_opens_its_state(tmp_path,
             raise AssertionError("RSS imported Telegram")
         return real_import(name, *args, **kwargs)
     monkeypatch.setattr(builtins, "__import__", guarded)
-    monkeypatch.setattr(research_feed, "run_weekly", lambda settings, **kwargs: {"source": "app_rss"})
+    calls = []
+
+    def run_weekly(settings, **kwargs):
+        calls.append(kwargs)
+        return {"source": "app_rss"}
+
+    monkeypatch.setattr(research_feed, "run_weekly", run_weekly)
     assert cli.main(["research-feed", "run", "--from", "2026-10-01", "--to", "2026-10-08",
                      "--cached-only", "--project-root", str(tmp_path)]) == 0
     assert json.loads(capsys.readouterr().out) == {"source": "app_rss"}
+    assert calls[0]["review_timeout_seconds"] == 3600
     assert not (tmp_path / "data").exists()
 
 

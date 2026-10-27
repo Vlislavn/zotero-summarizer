@@ -11,6 +11,57 @@ or feature instructions.
 
 ## [Unreleased]
 
+- Do not ship an unqualified automatic Telegram semantic-approval gate. Preserve its contradictory critic controls and rejected proposals privately; retain canonical evidence/role, bounded-action and immutable-report regressions. AI output remains unverified.
+
+- Compact Telegram v2.6 input JSON and omit only empty URL metadata before unchanged admission limits. Preserve nonempty links, excerpts, relationships and originals; add machine serialization regressions without reducing selected work or raising budgets.
+
+- Prioritize news/discussion issue inventory and selected-excerpt support in Telegram prompt v2.5. Add locally judged artifact identity, strict receipt/citation controls and near-boundary pre-client refusal; retain bounded-coverage/same-family caveats.
+
+- Remove the unused legacy saved-news import from Telegram child kickoff; retain the runtime/export owners. Align ordered triage/corpus sync migration controls with version14.
+
+- Keep the Telegram feature entry within the documented single-paragraph catalogue contract; preserve detailed behavior, legacy CLI guarantees and source/test links.
+
+- Align both isolated-v12 lineage upgrade controls with migration14; assert an empty conversation store alongside preserved v13 contracts/RSS data and unchanged idempotent database dumps.
+
+- Bound Telegram generation with compact points and budget-allocated topics. Role-scoped evidence IDs expand to exact original spans and membership via shared chunking, not model-copied quotes. Keep broader v2 history readable and decoder-length failures explicit.
+- Retain completed Telegram threads after later stops, durable account state, separate post-window coverage and unresolved reply edges; merge RSS/Telegram history chronologically before listing limits.
+- Preserve declared local wire controls, bind token fields to the operation cap and retain safe failure types. Installed-client mock-wire controls and verified partial-auth exports do not imply semantic acceptance.
+- Add Telegram save and explicit bounded local-review action in Settings → Sources, with source-cited v2 topic snapshots and retained v1 news in Weekly. Preserve RSS, CLI auth and immutable history; refuse remote/default fallback and silent clipping.
+- Add opt-in ordinary local-only LLM transport: literal loopback, no proxies/redirects/cache/retries, per-send checks and owned close. Existing callers/Setup retain their contracts; synthetic checks are not live quality or hardware proof.
+
+- Record the PR208 fifty-agent audit, fourteen parent-verified repair groups, current source fingerprints and bounded checks; preserve failed lifecycle/fixture attempts and unchecked human acceptance.
+
+- Update built-browser contrast checks for the intentionally visible SKIM policy label, requiring WCAG contrast for both collapsed labels while retaining keyboard, expansion and overflow checks.
+
+- Update the saved-Telegram positive CLI fixture to omit formerly ignored RSS date flags; preserve its gate-order, immutable-replay and edit-invalidation assertions.
+
+- Keep Collection capability-forgery fixtures structurally valid before resealing; actual replay must still reject their frozen-plan mismatch.
+
+- Keep the real Related retrieval-budget regression in the existing Library retrieval-test module, sharing its fixture and preserving the500-line file gate without changing assertions.
+
+- Refine the same18 PR208 checklist items: explicit RSS triage and weekly-daemon prerequisites, blinded Today expectations, record-level comment attribution, and cold offline delta versus baseline queue/conflict behavior.
+
+- Refuse development observations later than the declared frozen Priority/Collection split; preserve equal instants and development-before-holdout checks.
+
+- Validate present saved Weekly provenance; distinguish unqualified source observations from card-generation authority and preserve legacy absence.
+- Retry weekly feedback after identity-bound admission failures with no child/publication; ambiguous evidence still holds.
+- Count empty Collection retrieval from original suggestions, not the set left after workflow exclusions.
+- Keep Interpretation A/B/C inconclusive with no non-null human score; assigned errors alone cannot support rejection.
+
+- Rank Related versions before family selection; close retrieved detail identities within the existing100-result ceiling before the10-family assessment cap.
+- Reject RSS-only date-window and explicit review-timeout flags in Telegram mode before Settings; preserve RSS defaults and timeout overrides.
+
+- Keep offline sync continuation bases monotonic when replaying older receipts; conflict on every canonical field/base mismatch, including unobserved future revisions.
+- Snapshot qualified Weekly JSON/Markdown download bytes before responding; JSON is validated on the exact attachment bytes.
+- Distinguish an empty unverified reproduction assessment from unassessed missing inputs in weekly feed Markdown.
+
+- Fail closed on malformed retained Search question-evidence spans: invalidate stale receipts and restore baseline order instead of crashing during review or display.
+
+- Show the server-recorded reason with visible targets when a review is capped to SKIM; use the shared weak-evidence flag for the concept-source warning without recomputing the decision.
+- Distinguish submitted-but-not-cited seed/candidate comments from model-cited comments after Related assessment; keep unassessed metadata-only wording explicit.
+
+- Reject coercible verifier indices/support flags before they can authorize digest claims.
+
 - Scope PR208 manual acceptance to18added functions and their15originating GitHub issues. Remove general regressions, internal checks and unimplemented backlog; distinguish revision2 from the historical swarm's broader checklist.
 
 - Publish the checklist-driven eight-agent PR208 audit and separate issue-linked human checklist; replace the generic smoke and distinguish unimplemented/conditional acceptance from machine PASS.

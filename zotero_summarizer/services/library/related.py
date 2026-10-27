@@ -85,17 +85,16 @@ def _snapshot(item_key, collection, tag):
     families = _families([*items.items(), (item_key, seed)], contexts)
     excluded = [key for key in items if (verdict := contexts.get(key, {}).get("verdict"))
                 and verdict.get("source") == "user" and verdict.get("value") == "dont_read"]
-    seen = {families.find(f"paper:{key}") for key in [item_key, *excluded]}
-    candidates = {}
-    for key, row in items.items():
-        family = families.find(f"paper:{key}")
-        if family not in seen:
-            candidates[key] = row
-            seen.add(family)
+    excluded_families = {families.find(f"paper:{key}") for key in [item_key, *excluded]}
+    candidates = {key: row for key, row in items.items()
+                  if families.find(f"paper:{key}") not in excluded_families}
     query = "\n".join(str(seed.get(field) or "") for field in ("title", "abstract"))
     if not query.strip():
         raise APIError("seed_metadata_unavailable", "Seed title/abstract are unavailable for retrieval", status_code=409)
-    ordered, scores, search = hybrid_search(query, list(candidates), top_n=semantic.budgets()["candidates"])
+    candidate_limit = semantic.budgets()["candidates"]
+    # Detail-only identifiers can reveal duplicate families after retrieval; overfetch
+    # within hybrid_search's cap so those duplicates do not exhaust the unique budget.
+    ordered, scores, search = hybrid_search(query, list(candidates), top_n=len(candidates))
     details = {}
     for key in ordered:
         detail, availability = native_detail(reader, key)
@@ -103,8 +102,8 @@ def _snapshot(item_key, collection, tag):
         for identifier in _identifiers(row):
             families.union(f"paper:{key}", identifier)
         details[key] = row, detail, availability
-    pool = []
-    seen = {families.find(f"paper:{key}") for key in [item_key, *excluded]}
+    excluded_families = {families.find(f"paper:{key}") for key in [item_key, *excluded]}
+    pool, selected_scores, seen = [], {}, set(excluded_families)
     for key, (row, detail, availability) in details.items():
         family = families.find(f"paper:{key}")
         if family in seen:
@@ -112,9 +111,12 @@ def _snapshot(item_key, collection, tag):
         seen.add(family)
         comments = _comments(key, detail, availability, contexts.get(key), app, reader)
         pool.append(_paper(key, row, comments, contexts.get(key)))
+        selected_scores[key] = scores.get(key)
+        if len(pool) == candidate_limit:
+            break
     seed_paper = _paper(item_key, seed, _comments(item_key, seed, native, contexts.get(item_key), app, reader), contexts.get(item_key))
     return {"seed": seed_paper, "pool": pool, "library_identity": fingerprint({"items": items, "contexts": contexts}),
-            "search": search, "scores": scores, "excluded": excluded,
+            "search": search, "scores": selected_scores, "excluded": excluded,
             "scope": {"collection": collection, "tag": tag}}
 
 

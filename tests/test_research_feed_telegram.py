@@ -314,8 +314,7 @@ def test_bundle_snapshots_allow_identical_reuse_and_fresh_paths(tmp_path):
 
 
 def _first_run(settings, input_path, gates, capsys):
-    receipt = _run(settings.project_root, capsys, "--input-jsonl", input_path,
-                   "--from", "2026-10-01", "--to", "2026-10-08")
+    receipt = _run(settings.project_root, capsys, "--input-jsonl", input_path)
     payload, markdown = _report(receipt)
     stored = _stored(settings)
     assert set(stored) == set(gates.posts) and len(stored) == 6

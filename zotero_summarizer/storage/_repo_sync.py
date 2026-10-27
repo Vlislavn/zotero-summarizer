@@ -187,7 +187,7 @@ def apply_sync_mutation(db_path: Path, request: dict[str, Any]) -> dict[str, Any
             latest = _latest_revision(conn, item_key, field)
             previous = _canonical(conn, item_key, field)
             base = request["base_revision"] if keep_server else request.get("_effective_base_revision", request["base_revision"])
-            conflicted = latest != base if keep_server else latest > base
+            conflicted = latest != base
             if conflicted:
                 result = {"mutation_id": request["mutation_id"], "status": "conflict",
                           "conflict_revision": latest, "canonical": previous}

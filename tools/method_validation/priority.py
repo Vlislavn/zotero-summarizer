@@ -194,8 +194,12 @@ def admit(cfg, inputs, truth):
         raise ValueError('nonempty bounded papers required')
     dev = [p for p in papers.values() if p.split == 'development']
     held = [p for p in papers.values() if p.split == 'holdout']
-    if dev and held and max(p.observed_at for p in dev) >= min(p.observed_at for p in held):
-        raise ValueError('later papers must be held out before tuning')
+    if dev:
+        latest_development = max(p.observed_at for p in dev)
+        if latest_development > truth.split_frozen_at:
+            raise ValueError('development observations exceed frozen split')
+        if held and latest_development >= min(p.observed_at for p in held):
+            raise ValueError('later papers must be held out before tuning')
     gold = {g.identity: g for g in truth.labels}
     if len(gold) != len(truth.labels) or not gold.keys() <= papers.keys():
         raise ValueError('duplicate or unmatched normalized-text gold identity')

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { researchFeedApi } from './researchFeedApi.js';
+import { researchFeedApi, telegramFeedApi } from './researchFeedApi.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -13,6 +13,18 @@ it('reads saved reports with encoded identities and no generation command', asyn
   ]);
   expect(fetch.mock.calls.every(([, options]) => !options.method || options.method === 'GET')).toBe(true);
   expect(researchFeedApi.download('weekly-a/b?', 'md')).toBe('/api/research-feed/runs/weekly-a%2Fb%3F/download?format=md');
+});
+
+it('keeps source saves, status reads and explicit consented runs separate', async () => {
+  const fetch = vi.fn().mockResolvedValue({ ok: true, text: async () => '{}' });
+  vi.stubGlobal('fetch', fetch);
+  await telegramFeedApi.sources(); await telegramFeedApi.status();
+  await telegramFeedApi.save({ sources: [] }); await telegramFeedApi.run({ consent: true });
+  expect(fetch.mock.calls.map(([path, options]) => [path, options.method || 'GET'])).toEqual([
+    ['/api/research-feed/telegram/sources', 'GET'], ['/api/research-feed/telegram/status', 'GET'],
+    ['/api/research-feed/telegram/sources', 'PUT'], ['/api/research-feed/telegram/runs', 'POST'],
+  ]);
+  expect(JSON.parse(fetch.mock.calls[3][1].body)).toEqual({ consent: true });
 });
 
 it('keeps report failures as errors instead of an empty report', async () => {

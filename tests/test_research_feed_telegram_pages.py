@@ -129,14 +129,14 @@ def test_v11_upgrade_preserves_original_evaluation_and_legacy_cursor(tmp_path):
         assert conn.execute("SELECT count(*) FROM research_feed_telegram_bindings").fetchone()[0] == 0
     corpus = tmp_path / "corpus.db"
     # Only the new no-op alignment step: no EmbeddingCache/weights or invented corpus schema.
-    assert migrations.CORPUS_MIGRATIONS[-1].name == "combined_live_telegram_review_alignment"
-    assert migrations.TRIAGE_MIGRATIONS[-1].name == "combined_live_telegram_review"
+    assert [m.name for m in migrations.CORPUS_MIGRATIONS[-2:]] == ["combined_live_telegram_review_alignment", "telegram_conversation_snapshots_alignment"]
+    assert [m.name for m in migrations.TRIAGE_MIGRATIONS[-2:]] == ["combined_live_telegram_review", "telegram_conversation_snapshots"]
     assert migrations.run_migrations(corpus, "corpus", migrations.CORPUS_MIGRATIONS[-1:]) == migrations.SCHEMA_VERSION
     assert migrations.run_migrations(corpus, "corpus", migrations.CORPUS_MIGRATIONS[-1:]) == migrations.SCHEMA_VERSION
     with closing(repositories._connect_to(corpus)) as conn:
         assert [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")] == [
             "schema_migrations"]
-    assert migrations.SCHEMA_VERSION == 13
+    assert migrations.SCHEMA_VERSION == 14
 
 
 def test_saved_upsert_stays_uninitialized_unbound_and_nonpaper(store):

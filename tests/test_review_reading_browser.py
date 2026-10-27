@@ -349,8 +349,8 @@ def test_three_signal_contrast_outside_full_reader(application_browser, surface,
     assert not signals.evaluate("e => !!e.closest('.review-reading, .paper-reading-page')")
     page.mouse.move(0, 0)
     closed = signals.evaluate(SIGNAL_CONTRAST)
-    assert len(closed) == 1 and closed[0]['tag'] == 'SPAN', closed
-    assert closed[0]['ratio'] >= 4.5, closed
+    assert [row['tag'] for row in closed] == (['DT', 'SPAN'] if decision == 'skim' else ['SPAN']), closed
+    assert all(row['ratio'] >= 4.5 for row in closed), closed
     _keyboard_disclosure(page, 'Idea: high')
     for label in ['Idea value', 'Scientific quality', 'Writing friction · low']:
         expect(signals.locator('dt').filter(has_text=label)).to_be_visible()

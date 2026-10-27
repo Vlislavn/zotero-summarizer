@@ -1,5 +1,20 @@
 # Zotero Summarizer frontend
 
+Settings → Sources keeps RSS and adds `TelegramSources`: explicit public channel,
+group/forum-topic selection/save, a Telegram-only saved local provider/model,
+bounded limits, historical connection state and one consented Collect & review
+action. Saving/viewing does no collection/generation; one-time auth remains in the
+terminal. Errors, unknown status and partial scope stay visible. No new navigation,
+mandatory JSON editor or background workflow. `TelegramDigest` renders retained
+v1 news and v2 source-cited topic mini-reviews inside the existing Weekly selector/
+download owner; links derive from originals, not generated URLs. Semantic quality
+and real account validity are separate acceptance, not DOM-test assertions.
+Weekly orders mixed sources chronologically before its limit, retaining unavailable
+entries. Telegram coverage separately displays broadcast post-window lookahead and
+per-post reply states, including not-attempted work after a stop. Cleanly saved
+partial collection remains linkable even when later authorization fails; this is
+not a successful review or connected status.
+
 React 18 + Vite 5 + Tailwind 3, served by FastAPI at the app root.
 The shared Today/Library setup nudge retains one Finish setup action and describes
 AI or ML-only operation, not an API key as a universal prerequisite.
@@ -399,8 +414,10 @@ The shared `/paper/:key` page includes `RelatedPapers`: explicitly load up to
 three saved links, then optionally confirm **Try with comments — experimental**.
 The confirmation names the configured review provider/model/endpoint and complete
 private seed/candidate context. Metadata hybrid remains default. The panel retains
-comment-source identity and failed/unknown/empty distinctions; failures and
-budget/interruption/staleness do not masquerade as successful contextual ranking.
+comment-source identity and failed/unknown/empty distinctions; after successful
+assessment, submitted seed/candidate comments distinguish model-cited from
+submitted-but-not-cited. Failures and budget/interruption/staleness do not
+masquerade as successful contextual ranking.
 Acknowledged note/verdict saves immediately fence the panel, before the detail
 refetch returns. Verdict fencing consumes the primary acknowledgement through
 `usePaperReview.onVerdictAcknowledged`, not completion of the secondary reject-tag
@@ -619,7 +636,7 @@ scoring change is introduced; compact presentation remains unchanged.
 
 Full reading views fold goal findings into one native disclosure; states and citations remain visible. Saved quality/digest source basis is shown literally, with reviewed extent explicitly unrecorded. Rubric-literal warning frames preserve each modifier, complete suffix, and original wording.
 
-The original OrthogonalSignals disclosure replaces the abbreviated signal line. It presents stored idea/evidence/writing assessments and reading-policy reasons without changing the current server decision or projected grade. No second scoring rule or new inference is added.
+The original OrthogonalSignals disclosure replaces the abbreviated signal line. It presents stored idea/evidence/writing assessments without changing the current server decision or projected grade; policy-capped SKIM reasons are visible with the saved reading plan. No second scoring rule or new inference is added.
 
 Retain original setup source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
 

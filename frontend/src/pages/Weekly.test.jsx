@@ -187,6 +187,32 @@ it('attempts local reads even when network is offline and exposes server failure
   expect(screen.queryByText(/No engineering cards/)).toBeNull();
 });
 
+it('renders Telegram topics, source-bound citations, partial coverage and originals in the same Weekly reader', async () => {
+  const citation = { source_id: 'telegram:-1000000000002:51', quote: 'participant claim' };
+  const assertion = { text: 'This is a reported claim, not verified science.', citations: [citation] };
+  researchFeedApi.list.mockResolvedValue({ items: [{ run_id: 'telegram-review-fixture', source: 'telegram', available: true, counts: { cards_generated: 1 } }] });
+  researchFeedApi.get.mockResolvedValue({ metadata: { schema_version: 2, source: 'telegram', status: 'partial', scope: 'Bounded partial context.', generated_at: '2026-10-24' },
+    topics: [{ title: 'Source-grounded topic', source_ids: [citation.source_id], context: assertion, news: [], discussion: [assertion], contrasts: [], evidence: [], caveats: [assertion], implications: [] }],
+    conversations: [{ target: { kind: 'topic', username: 'group' }, peer_id: -1000000000002, root_id: 50, status: 'truncated', reason: 'reply_cap',
+      messages: [{ peer_id: -1000000000002, message_id: 51, text: 'A participant claim', permalink: 'https://t.me/group/51', urls: ['https://example.test/evidence'] }] }], errors: [] });
+  mount('/weekly?run=telegram-review-fixture');
+  await screen.findByRole('heading', { name: 'Source-grounded topic' });
+  expect(screen.getAllByRole('link', { name: citation.source_id })[0].getAttribute('href')).toBe('https://t.me/group/51');
+  expect(screen.getByText(/truncated; 1 replies\/messages/)).toBeTruthy();
+  expect(screen.getByText(/Linked papers have not been independently checked/)).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Discussion opinions' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Download canonical JSON' }).getAttribute('href')).toContain('telegram-review-fixture');
+  expect(researchFeedApi.get).toHaveBeenCalledTimes(1);
+});
+
+it('retains readable v1 Telegram news without inventing discussion coverage', async () => {
+  researchFeedApi.list.mockResolvedValue({ items: [] });
+  researchFeedApi.get.mockResolvedValue({ metadata: { schema_version: 1, source: 'telegram' }, cards: [{ source_id: 'telegram:1:7', permalink: 'https://t.me/alpha/7', summary: 'Saved news summary', reason: 'Kept', evidence_quote: 'original' }], posts: [] });
+  mount('/weekly?run=saved-news-fixture');
+  await screen.findByText('Saved news summary');
+  expect(screen.getByText(/No discussion coverage or topic mini-reviews were recorded/)).toBeTruthy();
+});
+
 it('never turns an unsafe source or artifact URL into an active link', async () => {
   const unsafe = report();
   unsafe.cards[0].candidate.url = 'javascript:alert(1)';

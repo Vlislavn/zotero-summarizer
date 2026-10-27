@@ -38,8 +38,9 @@ export default function OrthogonalSignals({ deep }) {
   const band = quality.quality_band;
   const evidence = nonPaper ? 'not applicable' : band === 'flag' ? 'weak (Flag)' : BAND_LABEL[band] || 'not assessed';
   const friction = ['low', 'moderate', 'high'].includes(digest.writing_friction) ? digest.writing_friction : null;
-  const weakEvidence = !nonPaper && (band === 'flag' || (quality.overstatements || []).some(value => String(value).trim()));
-  const policyReasons = (deep.reading_policy_flags || []).map(flag => POLICY_REASONS[flag]).filter(Boolean);
+  const policyFlags = deep.reading_policy_flags || [];
+  const weakEvidence = !nonPaper && policyFlags.includes('weak_evidence');
+  const policyReasons = policyFlags.map(flag => POLICY_REASONS[flag]).filter(Boolean);
   const capped = deep.model_read_decision === 'read' && digest.read_decision === 'skim';
   const writingReasons = (digest.writing_reasons || []).filter(Boolean);
   const scoreText = (value) => Number.isInteger(value) && value >= 1 && value <= 5 ? `${value}/5` : 'not assessed';
@@ -49,6 +50,15 @@ export default function OrthogonalSignals({ deep }) {
       {weakEvidence && <p>Concept/hypothesis source — claims are not established convincingly; inspect the evidence gap before relying on them.</p>}
       {friction === 'high' && ['read', 'skim'].includes(digest.read_decision) && (
         <p>Idea preserved — high writing friction limits automatic advice to a targeted skim, not a judgment of bad science.</p>
+      )}
+      {digest.read_decision === 'skim' && (capped || policyReasons.length > 0) && (
+        <dl>
+          <KeyVal label="Why SKIM">
+            {capped && <p>Automatic policy capped the model&apos;s read recommendation to skim.</p>}
+            {policyReasons.length ? <Bullets items={policyReasons} />
+              : <p>Specific policy reasons are unavailable in this saved review.</p>}
+          </KeyVal>
+        </dl>
       )}
       <Disclosure summary={`Idea: ${ideaLabel(digest)} · Evidence: ${evidence} · Writing: ${friction ? `${friction} friction` : 'not assessed'}`}>
         <dl className="space-y-2">
@@ -69,8 +79,7 @@ export default function OrthogonalSignals({ deep }) {
               : friction ? 'Concrete writing reasons not recorded in this saved review.'
                 : 'Missing writing signal is unknown, not clear writing.'}</p>}
           </KeyVal>
-          {(capped || policyReasons.length > 0) && <KeyVal label="Reading policy">
-            {capped && <p>Automatic policy capped the model&apos;s read recommendation to skim.</p>}
+          {digest.read_decision !== 'skim' && policyReasons.length > 0 && <KeyVal label="Reading policy">
             <Bullets items={policyReasons} />
           </KeyVal>}
         </dl>

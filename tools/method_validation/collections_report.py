@@ -27,7 +27,8 @@ def paper_outcomes(rows, questions, eligible):
             'gold': first['gold_memberships'], 'selected': selected, 'ranked': ranked_keys,
             'complete': complete, 'blocked': all(r['status'] == 'blocked' for r in group),
             'confirmed_no_match': bool(native and complete and not selected and set(questions) == eligible),
-            'retrieval_empty': bool(not native and complete and not selected)}
+            'retrieval_empty': bool(not native and complete
+                and not first['baseline_native']['readout']['suggested_collections'])}
     return result
 
 

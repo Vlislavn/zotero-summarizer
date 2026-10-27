@@ -70,20 +70,34 @@ def current_receipt(row: dict, candidate: Any, session: Any, binding: dict | Non
 
 
 def verified_evidence(row: dict) -> bool:
-    sha = row.get("source_sha256", "")
-    scope = row.get("checked_scope") or {}
-    if (row.get("source_kind") != "acquired_original" or row.get("source_version_id") != sha
-            or len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha)
+    sha = row.get("source_sha256")
+    scope = row.get("checked_scope")
+    evidence = row.get("evidence")
+    passages = row.get("checked_passages")
+    if (not isinstance(sha, str) or row.get("source_kind") != "acquired_original"
+            or row.get("source_version_id") != sha or len(sha) != 64
+            or any(c not in "0123456789abcdef" for c in sha)
             or row.get("reason") != "verified" or not row.get("verification_attempted")
-            or not row.get("evidence")):
+            or not isinstance(scope, dict) or type(scope.get("start")) is not int
+            or type(scope.get("end")) is not int or scope["start"] != 0 or scope["end"] <= 0
+            or not isinstance(evidence, list) or not evidence
+            or not isinstance(passages, list)):
         return False
-    for span in row["evidence"]:
+    for passage in passages:
+        if (not isinstance(passage, dict) or type(passage.get("start")) is not int
+                or type(passage.get("end")) is not int
+                or not scope["start"] <= passage["start"] < passage["end"] <= scope["end"]):
+            return False
+    for span in evidence:
+        if not isinstance(span, dict):
+            return False
         start, end = span.get("start"), span.get("end")
-        if (type(start) is not int or type(end) is not int or not 0 <= start < end <= scope.get("end", 0)
+        if (type(start) is not int or type(end) is not int
+                or not scope["start"] <= start < end <= scope["end"]
                 or not isinstance(span.get("quote"), str) or len(span["quote"]) != end - start
                 or span.get("passage_id") != f"chars:{start}:{end}"
                 or span.get("source_id") != row.get("source_id") or span.get("source_version_id") != sha
-                or not any(p["start"] <= start < end <= p["end"] for p in row.get("checked_passages", []))):
+                or not any(p["start"] <= start < end <= p["end"] for p in passages)):
             return False
     return True
 
