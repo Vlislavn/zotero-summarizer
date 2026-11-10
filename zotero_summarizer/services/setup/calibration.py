@@ -14,6 +14,7 @@ is provenance.
 """
 from __future__ import annotations
 
+from contextlib import ExitStack
 import json
 import os
 import subprocess
@@ -131,9 +132,10 @@ def run_full_calibration(
     the user's resolved deep-review endpoint, writing both to calibration.json. Label-free.
     Lazy imports keep the setup package's load light + avoid a library-layer cycle.
     ``progress`` (optional) receives ``{phase, completed, total}`` dicts for a live UI."""
+    from zotero_summarizer.models import PaperDigest
     from zotero_summarizer.models.providers import resolve_stage
-    from zotero_summarizer.services._common import read_config
-    from zotero_summarizer.services.library import quality_review
+    from zotero_summarizer.services._common import deep_review_sub_concurrency, read_config
+    from zotero_summarizer.services.library import _map_reduce, quality_review
     from zotero_summarizer.services.llm.factory import build_client_for_provider
 
     config = read_config(settings.config_path, settings.calibration_path)
@@ -159,19 +161,31 @@ def run_full_calibration(
             probe_llm.close()
     if provider.is_local:
         memory_preflight()  # remote endpoints skip this — they load no local model
-    digest_llm = build_client_for_provider(provider, model, enable_thinking=provider.thinking_on,
-                                           verification=provider.is_local)
+    with ExitStack() as clients:
+        digest_llm = build_client_for_provider(provider, model, enable_thinking=provider.thinking_on,
+                                               verification=provider.is_local)
+        clients.callback(digest_llm.close)
+        light_llm = build_client_for_provider(provider, model, enable_thinking=False, verification=provider.is_local)
+        clients.callback(light_llm.close)
+        map_llm = light_llm
+        qr = config.quality_review
+        if qr.chunk_strategy == 'map_reduce':
+            mapping = resolve_stage(config.llm_routing, 'feed')
+            map_llm = build_client_for_provider(mapping.provider, mapping.model, enable_thinking=False,
+                                                verification=mapping.provider.is_local)
+            clients.callback(map_llm.close)
 
-    def run_digest(title: str, text: str, budget: int) -> tuple[Any, float]:
-        start = perf_counter()
-        digest = quality_review.assess_digest(title=title, full_text=text, config=config, llm=digest_llm, max_chars=budget)
-        return digest, perf_counter() - start
+        def run_digest(title: str, text: str, budget: int) -> tuple[Any, float]:
+            start = perf_counter()
+            digest = _map_reduce.digest_for_strategy(
+                title, text, config, map_llm=map_llm, reduce_llm=digest_llm,
+                budget=_map_reduce.ChunkBudget(budget, qr.map_chunk_chars, deep_review_sub_concurrency(provider)),
+                response_format=quality_review.build_response_format(PaperDigest) if provider.structured_output else None,
+                verification_audit={},
+            )
+            return digest, perf_counter() - start
 
-    try:
         tier2 = tier2_calibrate(config, settings.calibration_path, papers, run_digest=run_digest, progress=progress)
-    finally:
-        if provider.is_local:
-            digest_llm.close()
     return {"tier1": tier1, "tier2": tier2, "provider": provider.name, "model": model, "papers": len(papers)}
 
 
@@ -229,6 +243,8 @@ def load_review_papers(
     needs real paper text, not user verdicts."""
     if not 1 <= limit <= 10:
         raise APIError("validation_error", "Calibration requires 1 to 10 papers", 422)
+    from zotero_summarizer.services.library._paper_read_meta import qa_body_text
+
     render_dir = settings.paper_render_dir.resolve()
     keys = item_keys
     if keys is None:
@@ -246,7 +262,7 @@ def load_review_papers(
         if not state_path.exists():
             continue
         state = json.loads(state_path.read_text(encoding="utf-8"))
-        text = (state.get("qa_text") or "").strip()
+        text = qa_body_text(state).strip()
         if text:
             papers.append((str(state.get("title") or key), text))
         if len(papers) >= limit:

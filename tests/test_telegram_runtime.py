@@ -333,7 +333,7 @@ def test_optional_actual_m2a_leaf_through_m3_and_sqlite(tmp_path):
         assert store.read_channel_state(conn, username="alpha")["confirmed_message_id"] == 7
 
 
-@pytest.mark.parametrize("wall,reserve", [("nan", "1"), ("301", "1"), ("0", "1"),
+@pytest.mark.parametrize("wall,reserve", [("nan", "1"), ("601", "1"), ("0", "1"),
                                          ("True", "1"), ("2", "2"), ("2", "0")])
 def test_invalid_budgets_before_sdk_and_account_side_effects(tmp_path, monkeypatch, wall, reserve):
     from zotero_summarizer.integrations import telegram_session as owner

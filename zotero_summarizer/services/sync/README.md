@@ -10,7 +10,7 @@ The server SQLite database remains canonical. `pull` returns compact paper
 snapshots plus a monotonic field-change cursor; protocol-v1 `changes` is always
 empty because clients reconcile from the snapshot and never consume the event
 history. This keeps stale-device pulls independent of accumulated note/verdict
-transitions. `push` applies ordered verdict or
+transitions. One `pull` computes review currentness once (`runtime.request_memo`). `push` applies ordered verdict or
 review-note mutations. Each mutation has a UUID and per-field base revision, so
 replay is idempotent, edits to different fields merge, and any mismatch with the
 current field revision, including a future base, returns an explicit conflict. A resolution is another mutation naming the

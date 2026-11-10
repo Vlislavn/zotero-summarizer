@@ -84,7 +84,9 @@ def markdown(result, status):
                  for g in result["gaps"])
     for window, channels in result["periods"].items():
         lines.extend(["", f"## {window}", ""])
-        for name in ("journal", "interaction_log", "current_feedback"):
+        for name in ("journal", "interaction_log", "current_feedback", "verdict_snapshots"):
+            if name not in channels:  # results published before #224 lack verdict_snapshots
+                continue
             channel = channels[name]
             lines.extend([f"### {name} · {channel['status']}", "",
                           f"Unique observed papers: {channel['unique_papers']}. Selection-biased cohort; no sufficiency threshold."])

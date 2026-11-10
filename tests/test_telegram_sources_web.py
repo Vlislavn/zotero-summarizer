@@ -11,10 +11,9 @@ import httpx
 import pytest
 
 from tests.test_research_feed_telegram import _project
-from tests.test_telegram_conversations import snapshot, generated_response
 from zotero_summarizer.api.app import create_app
 from zotero_summarizer.api.routes import research_feed as routes
-from zotero_summarizer.services.research_feed import telegram_conversations, profile
+from zotero_summarizer.services.research_feed import profile, telegram_job, telegram_live, telegram_today
 from zotero_summarizer.services.llm import factory
 from zotero_summarizer.cli import _telegram
 
@@ -75,93 +74,64 @@ def test_remote_explicit_selection_refuses_before_collection_or_client(project, 
     assert request(app, "PUT", "/api/research-feed/telegram/sources", value).status_code == 200
     child = Mock(side_effect=AssertionError("must not collect"))
     monkeypatch.setattr(_telegram, "run_child", child)
-    result = request(app, "POST", "/api/research-feed/telegram/runs", {"consent": True})
+    request(app, "POST", "/api/research-feed/telegram/collect-consent", {"allow": True})
+    result = request(app, "POST", "/api/research-feed/telegram/runs")
     assert result.status_code == 409 and result.json()["error"] == "telegram_local_required"
     child.assert_not_called()
 
 
-def test_action_verifies_then_publishes_readable_source_bound_weekly_without_mutating_history(project, monkeypatch):
+def _run(app):
+    """Grant the one-time consent, tap once, wait for the background job; return (start response, final status)."""
+    request(app, "POST", "/api/research-feed/telegram/collect-consent", {"allow": True})
+    first = request(app, "POST", "/api/research-feed/telegram/runs")
+    telegram_job._thread.join(10)
+    return first, request(app, "GET", "/api/research-feed/telegram/status").json()
+
+
+def _today(summary="commenters agree [c1]"):
+    return {"schema_version": 1, "generated_at": "2026-11-07T12:00:00Z", "goals": ["agent checkpoints"],
+            "posts": [{"source_id": "telegram:-100:10", "channel": "chan", "permalink": "https://t.me/chan/10",
+                       "published_at": "2026-11-07T11:00:00+00:00", "text": "line one", "why_goal": "agent checkpoints",
+                       "discussion": {"comment_count": 3, "label": "summary", "summary": summary, "top_comment_ids": ["c1"]}}],
+            "counts": {"gated": 1}, "account": {},
+            "trends": {"terms": [{"term": "agent eval", "comments": 6, "channels": 2}], "clusters": []}}
+
+
+def test_action_collects_and_serves_today_digest_without_a_review_bundle(project, monkeypatch):
     settings, app = project
     assert request(app, "PUT", "/api/research-feed/telegram/sources", selection()).status_code == 200
-    current = [snapshot()]
-    def child(selected, purpose):
-        assert selected == settings and purpose == "conversations"
-        result = {"status": "collected", "cleanup": "completed", "account": {"status": "not_deferred", "retry_at": None},
-                  "collection": {"authorized": True, "conversations": [current[0].model_dump()], "counts": {"messages": 1}}}
-        exported = telegram_conversations.publish(settings, current, collection=result,
-                                                   profile=profile.load_profile(settings.data_dir))
-        return {"result": result, "export": exported}
-    monkeypatch.setattr(_telegram, "run_child", child)
-    client = Mock(); client.pydantic_prompt.return_value = generated_response()
-    build = Mock(return_value=client); monkeypatch.setattr(factory, "build_client_for_provider", build)
-    action = request(app, "POST", "/api/research-feed/telegram/runs", {"consent": True})
-    assert action.status_code == 200
-    state = action.json()
-    assert state["connection"] == "verified" and state["verified_at"]
-    assert state["state"] == "reviewed" and state["report_id"].startswith("telegram-review-")
-    run = state["report_id"]
-    detail = request(app, "GET", "/api/research-feed/runs/" + run)
-    assert detail.status_code == 200
-    assert detail.json()["topics"][0]["title"] == "Claim evaluation"
-    assert detail.json()["metadata"]["evaluation_identity"]["local_only"] is True
-    assert build.call_args.kwargs["local_only"] is True
-    assert "https://t.me/group/51" in detail.text
-    original = request(app, "GET", f"/api/research-feed/runs/{run}/download?format=json").content
-    markdown = request(app, "GET", f"/api/research-feed/runs/{run}/download?format=md")
-    assert markdown.status_code == 200 and "participant claim" in markdown.text
-    assert str(settings.data_dir) not in detail.text + action.text + markdown.text
-    listing = request(app, "GET", "/api/research-feed/runs").json()
-    assert any(item["run_id"] == run and item["source"] == "telegram" and item["available"] for item in listing["items"])
-    files = {file: file.read_bytes() for file in settings.data_dir.rglob('*') if file.is_file()}
-    request(app, "GET", "/api/research-feed/telegram/status")
-    request(app, "GET", "/api/research-feed/runs/" + run)
-    assert {file: file.read_bytes() for file in settings.data_dir.rglob('*') if file.is_file()} == files
-    assert client.pydantic_prompt.call_count == 1
-    current[0] = snapshot("Edited participant claim")
-    repeat = request(app, "POST", "/api/research-feed/telegram/runs", {"consent": True})
-    assert repeat.json()["report_id"] != run
-    assert client.pydantic_prompt.call_count == 2
-    assert request(app, "GET", f"/api/research-feed/runs/{run}/download?format=json").content == original
+    monkeypatch.setattr(telegram_live, "collect",
+                        lambda s, profile, config: telegram_today.persist_today(s, _today()))
+    action, state = _run(app)
+    assert action.status_code == 202 and action.json()["state"] == "collecting"
+    assert state["connection"] == "verified" and state["verified_at"] and state["state"] == "reviewed"
+    today = request(app, "GET", "/api/research-feed/telegram/today")
+    assert today.status_code == 200
+    data = today.json()
+    assert data["posts"][0]["discussion"]["summary"] == "commenters agree [c1]"
+    assert data["posts"][0]["why_goal"] == "agent checkpoints"
+    assert data["trends"]["terms"][0]["term"] == "agent eval"
+    assert str(settings.data_dir) not in action.text + today.text
 
 
-def test_model_failure_preserves_collected_originals_and_reports_error_not_empty_success(project, monkeypatch):
-    settings, app = project
+def test_action_failure_reports_error_without_leaking_secrets(project, monkeypatch):
+    _settings, app = project
     request(app, "PUT", "/api/research-feed/telegram/sources", selection())
-    result = {"status": "collected", "cleanup": "completed", "account": {},
-              "collection": {"authorized": True, "conversations": [snapshot().model_dump()]}}
-    monkeypatch.setattr(_telegram, "run_child", lambda *_: {"result": result, "export": {"run_id": "telegram-review-collection"}})
-    monkeypatch.setattr(factory, "build_client_for_provider", Mock(side_effect=RuntimeError("secret path /private/source")))
-    value = request(app, "POST", "/api/research-feed/telegram/runs", {"consent": True}).json()
-    assert value["state"] == "error" and value["connection"] == "verified"
-    detail = request(app, "GET", "/api/research-feed/runs/" + value["report_id"])
-    assert detail.status_code == 200
-    assert detail.json()["topics"] == [] and detail.json()["errors"][0]["code"] == "review_failed"
-    assert "participant claim" in detail.text and "/private/source" not in detail.text
-
-
-def test_existing_v1_saved_news_is_readable_and_downloaded_verbatim_through_weekly(project, tmp_path):
-    from tests.test_research_feed_telegram import _posts, _write_inputs
-    from zotero_summarizer.services.research_feed.telegram import run_saved
-    settings, app = project
-    inputs = tmp_path / "originals.jsonl"
-    _write_inputs(inputs, _posts())
-    result = run_saved(settings, input_jsonl=inputs, collect_only=True)
-    path = Path(result["json_path"])
-    before = path.read_bytes()
-    run = path.parent.name
-    detail = request(app, "GET", "/api/research-feed/runs/" + run)
-    download = request(app, "GET", f"/api/research-feed/runs/{run}/download?format=json")
-    assert detail.status_code == download.status_code == 200
-    assert detail.json()["metadata"]["schema_version"] == 1
-    assert download.content == before == path.read_bytes()
+    monkeypatch.setattr(telegram_live, "collect", Mock(side_effect=RuntimeError("secret path /private/source")))
+    _, value = _run(app)
+    assert value["state"] == "error" and value["connection"] == "unknown"
+    assert value["error"] == "telegram_action_failed"
+    status = request(app, "GET", "/api/research-feed/telegram/status")
+    assert "/private/source" not in status.text + request(app, "POST", "/api/research-feed/telegram/runs").text
 
 
 @pytest.mark.parametrize("code", ["missing_session", "session_unauthorized", "revoked_session"])
 def test_readiness_requires_actual_verification_and_auth_remains_outside_http(project, monkeypatch, code):
     _settings, app = project
     request(app, "PUT", "/api/research-feed/telegram/sources", selection())
+    monkeypatch.setattr(telegram_live, "_require_model", lambda *args: None)
     monkeypatch.setattr(_telegram, "run_child", Mock(side_effect=_telegram.TelegramChildFailed(code)))
-    value = request(app, "POST", "/api/research-feed/telegram/runs", {"consent": True}).json()
+    _, value = _run(app)
     assert value["connection"] == "needs_auth" and value["verified_at"] is None
     assert value["error"] == code
     assert not any("auth" in route.path for route in app.routes if route.path.startswith('/api/research-feed'))

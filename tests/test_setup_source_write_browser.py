@@ -4,16 +4,22 @@ Reuse the normal conftest isolation and existing owned-browser fixture. A buffer
 real response followed by route.abort is a lost-ack discriminator, not packet loss.
 """
 import hashlib
+import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
 
 from tests import _review_question_browser as support
-from tests import test_review_question_browser as journeys
+from tests.test_connection_browser import connection_build  # noqa: F401 — explicit disposable build
 
-question_browser = journeys.question_browser
-pytestmark = journeys.pytestmark
+pytestmark = pytest.mark.skipif(os.environ.get('ZS_APPLICATION_BROWSER_SMOKE') != '1',
+                               reason='opt-in guarded synthetic application browser')
+
+
+@pytest.fixture
+def source_browser(monkeypatch, connection_build):
+    yield from support.synthetic_lab(monkeypatch)
 READY = {"ready": True, "status": "ready", "config_signature": "synthetic-before",
          "checks": [], "modes": {}}
 
@@ -86,26 +92,42 @@ def _retain(lab, page, outcome, before, fault, observations):
 
 
 @pytest.mark.parametrize("outcome", ["rejected", "committed_reply_lost"])
-def test_rss_write_uncertainty_does_not_reuse_verified_health(question_browser, outcome, record_property):
+def test_rss_write_uncertainty_does_not_reuse_verified_health(source_browser, outcome, record_property):
     from patchright.sync_api import expect
 
-    lab = question_browser
+    lab = source_browser
     before = _rows(lab)
     assert len(before) == 1
     observations, fault = [], {}
     page = lab.open_browser()
     lab.context.route(lab.server.origin + "/api/**", _doctor_route(lab, before, observations))
-    page.goto(lab.server.origin + "/settings#rss-feeds")
-    expect(page.get_by_text("✓ Setup verified", exact=True)).to_be_visible()
+    page.goto(lab.server.origin + '/ops?tab=system&task=readiness')
+    expect(page.get_by_text('✓ Setup verified', exact=True)).to_be_visible()
+    page.get_by_role('link', name='Settings', exact=True).click()
+    page.get_by_role('link', name='RSS sources → Today', exact=True).click()
     region = page.locator('#rss-feeds')
-    expect(region.get_by_role("button", name="Save", exact=True)).to_be_visible()
+    edit = region.get_by_role('button', name='Edit ' + before[0]['name'], exact=True)
+    expect(edit).to_be_visible()
+    edit.click()
+    expect(region.get_by_role('textbox', name='Name', exact=True)).to_have_value(before[0]['name'])
+    region.get_by_role('button', name='Discard subscription draft', exact=True).click()
+    expect(edit).to_be_focused()
     target = lab.server.origin + "/api/rss/feeds/" + str(before[0]["id"])
     lab.context.route(target, _write_route(lab, outcome, before, fault))
     terminal = (page.expect_response(lambda r: r.url == target) if outcome == "rejected" else
                 page.expect_event("requestfailed", predicate=lambda r: r.url == target))
+    page.once('dialog', lambda dialog: dialog.accept())
     with terminal:
-        region.get_by_role("button", name="Delete", exact=True).click()
-    expect(region.get_by_role("status")).to_be_visible()  # original error stays visible
+        region.get_by_role('button', name='Delete ' + before[0]['name'], exact=True).click()
+    expect(region.get_by_role('status')).to_be_visible()
+    if outcome == 'rejected':
+        expect(edit).to_be_visible()
+    else:
+        expect(region.get_by_text('No RSS feeds saved.', exact=True)).to_be_visible()
+        expect(edit).to_have_count(0)
+    page.go_back()
+    page.go_back()
+    expect(page.get_by_role('heading', name='Check readiness', exact=True, level=1)).to_be_visible()
     writes = [r for r in lab.server.receipts if r["method"] == "DELETE" and r["path"] == urlsplit(target).path]
     record_property("rss_uncertainty_artifact", str(lab.artifact))
     try:
@@ -114,14 +136,11 @@ def test_rss_write_uncertainty_does_not_reuse_verified_health(question_browser, 
         if outcome == "rejected":
             assert _rows(lab) == before
             expect(page.get_by_text("✓ Setup verified", exact=True)).to_be_visible()
-            expect(region.get_by_role("button", name="Save", exact=True)).to_be_visible()
             assert len([r for r in observations if r.get("path") == "/api/setup/doctor"]) == 1
         else:
             assert fault["browser_reply_aborted"] and _rows(lab) != before
             expect(page.get_by_text("✓ Setup verified", exact=True)).not_to_be_visible()
             expect(page.get_by_text("Source changed; verify again", exact=True)).to_be_visible()
-            expect(region.get_by_text("No RSS feeds saved.", exact=True)).to_be_visible()
-            expect(region.get_by_role("button", name="Save", exact=True)).to_have_count(0)
             reads = [r for r in observations if r.get("path") == "/api/setup/doctor"]
             assert len(reads) == 2 and reads[-1]["rows"] == []
         feed_reads = [r for r in lab.server.receipts if r["method"] == "GET" and r["path"] == "/api/rss/feeds"]

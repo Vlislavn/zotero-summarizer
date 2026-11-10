@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from zotero_summarizer.runtime import memoized
+
 CONTRACT = 'digest-verification-audit-v1'
 
 
@@ -24,21 +26,37 @@ def digest_contract_payload(digest: Any) -> dict:
 
 
 def contract_hashes() -> dict[str, str]:
+    return memoized('contract_hashes', _contract_hashes)  # source bytes: hashed once per request/pass
+
+
+def _contract_hashes() -> dict[str, str]:
+    """Receipt binding: extraction keeps WHOLE-FILE hashes (it fixes evidence
+    coordinates), verification binds CONTRACT text/constants — a logic refactor
+    there must not stale an accepted review (#142)."""
+    from zotero_summarizer.models import PaperDigest
+    from zotero_summarizer.services.faithbench import _build_claims
+    from zotero_summarizer.services.library import _digest_verification, _grounding, _prompt_security
+    from zotero_summarizer.services.library._review_identity import (
+        _prompt_contract_text, contract_text_digests,
+    )
+
     root = Path(__file__).parents[2]
     sources = {
         'extraction': ('integrations/pdf.py', 'services/library/_review_text.py',
                        'services/faithbench/_corpus.py', 'services/faithbench/_constants.py',
                        'storage/corpus_bm25.py'),
-        'verifier': ('services/library/_digest_verification.py', 'services/library/_grounding.py',
-                     'services/library/_prompt_security.py', 'services/faithbench/_build_claims.py',
-                     'models/triage.py', 'services/library/quality_review.py', 'services/library/_map_reduce.py',
-                     'services/library/_review_identity.py', 'services/library/_review_cache.py',
-                     'services/library/deep_review.py', 'services/library/_digest_audit.py',
-                     'services/library/_digest_audit_export.py'),
     }
-    return {kind + '_contract_sha256': canonical_hash({
+    hashes = {kind + '_contract_sha256': canonical_hash({
         name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in names
     }) for kind, names in sources.items()}
+    hashes['verifier_contract_sha256'] = canonical_hash({
+        'prompt_contract': _prompt_contract_text(),
+        'verifier': contract_text_digests(
+            (_digest_verification, _grounding, _prompt_security, _build_claims), scalars=True),
+        'response_schema': _digest_verification._ScientificChecks.model_json_schema(),
+        'digest_schema': PaperDigest.model_json_schema(),
+    })
+    return hashes
 
 
 def source_context(full_text: str, cap: int, *, prefix: bool, verification_text: str | None) -> tuple[str, dict]:

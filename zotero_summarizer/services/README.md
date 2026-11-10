@@ -4,13 +4,27 @@
 OnPrem, rechecks every sent HTTP URL, and reuses the existing owned no-proxy/
 no-redirect transport with retries/cache disabled. This ordinary privacy option is
 separate from Setup verification/load admission and rejects their combination;
-existing callers are unchanged. Caller close owns the transport. It neither loads
+existing callers are unchanged. Declared no-auth requires the factory's explicit
+request timeout, not a new fallback literal. Sync OpenAI response-wrapper control
+is reconstructed from the OnPrem owner after header scrubbing, never inherited
+from ambient headers. Caller close owns the transport. It neither loads
 weights directly nor certifies an inference runtime/hardware envelope.
 
 Verification adapters pass explicit per-invocation request ownership to the native
 client boundary. Setup owns safety-state persistence; integration callbacks do not
 import services. Ordinary LLM construction, cache and user-facing consent owners
-remain separate from verification and its cleanup.
+remain separate from verification and its cleanup. An inline admission/header
+refusal in the owned HTTPX pre-send hook records positive no-dispatch for its exact
+expected request. It cannot erase a previous transport start, fabricate a terminal,
+clear an unrelated HOLD or infer remote termination.
+
+Config reads expose an opaque `_revision`; full-config HTTP replacements require
+that saved revision and refuse stale/missing values. Connection-task scoped writes
+reuse the canonical registry/config writer with a shared nonwaiting publication
+lock and no model/embedding work. Lifecycle stamps loaded config bytes on RuntimeState;
+another process's disk change refuses edits until server reload instead of merging
+against stale runtime state. App auth/source owners share admission; external
+uninstrumented edits remain outside the guarantee. See the LLM package contract.
 
 Domain workflows live here alongside shared infrastructure at the top level.
 The canonical package map is [docs/architecture.md](../../docs/architecture.md#code-map);
@@ -30,6 +44,11 @@ while a measured zero remains `0.000`.
 When Zotero corpus import is available, startup completes that reconciliation
 before comparing classifier inputs or retraining, so dependency/model encoder
 changes cannot expose the trainer to a half-migrated embedding table.
+`ZS_AUTOMATIC_GATE_UPDATES=0` disables automatic classifier retraining and startup
+rescoring, including the deferred post-corpus path, without disabling the cached
+gate or explicit training/rescore commands. Missing/incompatible required cached
+artifacts refuse startup in this mode. The default preserves ordinary launches;
+corpus import, RSS, job recovery and review prewarm keep their separate controls.
 
 `lifecycle.startup(background=False)` initializes dry-run clients/caches but
 does not resume persisted jobs, refresh RSS, train/rescore the gate, import the
@@ -49,7 +68,14 @@ or incompatible required cached gate fails explicitly instead of training.
       └────────────────────────────> zotero/ (queue + apply writes)
    mobile PWA ←typed mutations/cursor→ sync/ ──> golden label history
    research_feed/ ──projects existing RSS + deep reviews──> weekly digest
+   card/ ──reuses library full-text + code cascade + OpenAlex──> Today card facts
 ```
+
+`card/` computes the owner's per-paper decision facts on demand (Today top-K and
+paper open) by REUSING existing machinery — the library full-text chain, the
+`_code_link` cascade + `integrations.github` liveness, OpenAlex and the PDF header.
+Results are cached as JSON under `Settings.card_facts_dir` keyed by stable
+arXiv/DOI identity (alias-robust), with per-fact TTLs; no new DB table, no LLM.
 
 Setup-only `_adapters.build_llm(verification=True)` owns an HTTP transport with
 retries, cache, environment proxies and redirects disabled. It installs the
@@ -72,9 +98,10 @@ strict-offline override after env config, disabling prestige, OpenReview, and
 full-text refinement. `settings.offline_requested` is the one toggle used by
 RSS, uncached PDF, library acquisition, and Search network boundaries; the LLM-concurrency gates
 `effective_llm_concurrency` (triage per-item fan-out, remote→`TRIAGE_JOB_CONCURRENCY`),
-`deep_review_fleet_concurrency` (the N-paper deep-review batch, remote→`max_sub_concurrency`
-else all N — NOT the triage knob, so a remote batch isn't throttled by the local-RAM cap)
-and `deep_review_sub_concurrency` (within-review rubric/goal sub-calls) — all local→serial,
+`deep_review_fleet_concurrency` (papers reviewed at once: `quality_review.fleet_papers`, else
+remote→`max_sub_concurrency`, else all N — NOT the triage knob, so a remote batch isn't throttled
+by the local-RAM cap) and `deep_review_sub_concurrency` (LLM calls in flight inside one paper:
+`quality_review.calls_per_paper`, else `max_sub_concurrency`) — both set separately; all local→serial,
 shared so the daemon, deep-review job, and `verify-deep-review` CLI never drift),
 `_adapters` uses the installed dependency, or an explicitly configured `ONPREM_PATH`
 source checkout; it never guesses a developer checkout location.

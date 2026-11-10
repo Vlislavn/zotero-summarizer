@@ -75,9 +75,9 @@ def test_fallback_cap_counts_eligible_unique_papers(tmp_path, monkeypatch, obstr
                 timestamp = "2026-01-02 12:30:00"
             rid = _row(conn, item_id, timestamp, **changes)
             if item_id == 1 and obstruction in {"doi", "guid"}:
-                expected[rid] = changes.get("guid", "g1")
+                expected[rid] = str(item_id)
         older = _row(conn, 99, "2025-12-31 12:00:00")
-        expected[older] = "g99"
+        expected[older] = "99"
     finally:
         conn.close()
     if obstruction.startswith("handled"):
@@ -95,9 +95,9 @@ def test_window_compares_instants_and_keeps_entire_pool(tmp_path, monkeypatch):
         _row(conn, 1, "2026-01-02T01:00:00+00:00")
         _row(conn, 2, "2026-01-02T13:00:00+02:00")
         expected = {
-            _row(conn, 3, "2026-01-02 12:00:00"): "g3",
-            _row(conn, 4, "2026-01-02T07:15:00-05:00"): "g4",
-            _row(conn, 5, "2026-01-02T12:30:00Z"): "g5",
+            _row(conn, 3, "2026-01-02 12:00:00"): "3",
+            _row(conn, 4, "2026-01-02T07:15:00-05:00"): "4",
+            _row(conn, 5, "2026-01-02T12:30:00Z"): "5",
         }
     finally:
         conn.close()
@@ -113,7 +113,7 @@ def test_fallback_and_dedup_order_by_instant(tmp_path, monkeypatch, identity):
         newest = _row(conn, 2, "2026-01-01 20:00:00", **changes)
     finally:
         conn.close()
-    _check_consumers(db, monkeypatch, {newest: changes.get("guid", "g2")}, fallback=True, cap=1)
+    _check_consumers(db, monkeypatch, {newest: "2"}, fallback=True, cap=1)
 
 
 def test_invalid_candidate_timestamp_is_not_an_empty_slate(tmp_path):

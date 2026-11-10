@@ -1,6 +1,7 @@
-"""Saved-seed discovery: public Search retrieval, optional consent-bound assessment."""
+"""Seed discovery (saved or feed-only): public Search retrieval, optional consent-bound assessment."""
 from copy import deepcopy
 from pathlib import Path
+import re
 import sqlite3
 
 from zotero_summarizer.api.errors import APIError
@@ -25,11 +26,17 @@ _PUBLIC_TITLE_CHARS = 500
 _PUBLIC_ABSTRACT_CHARS = 3000
 _PUBLIC_QUERY_CHARS = 4000  # Existing Search request/review ceiling.
 _DISCOVERY_QUOTA = 15
+_membership_cache = None  # (change marker, _read_membership result); a file write changes the marker.
 _active_session = None  # One live synchronous owner; persisted running without it means interrupted.
 
 
 def _unavailable():
     raise APIError("discovery_unverified", "Discovery inputs could not be verified", status_code=409)
+
+
+def _title_key(title):
+    """Letters/digits only, so '[Perspectives] X' and 'X.' compare equal."""
+    return re.sub(r"[^a-z0-9]+", "", re.sub(r"^\s*\[[^\]]*\]", "", (title or "").lower()))
 
 
 def _app_identifiers(row):
@@ -38,7 +45,29 @@ def _app_identifiers(row):
                                     "url": row["canonical_url"]}))
 
 
+def _stamp(path):
+    """Cheap change marker of a SQLite file: main + WAL (size, mtime_ns); a write moves one of them."""
+    marker = []
+    for suffix in ("", "-wal"):
+        try:
+            info = Path(f"{path}{suffix}").stat()
+            marker.append((info.st_size, info.st_mtime_ns))
+        except OSError:
+            marker.append(None)
+    return tuple(marker)
+
+
 def _membership(reader):
+    """Whole-library membership, reused until the app DB or the Zotero DB file changes."""
+    global _membership_cache
+    marker = (_stamp(settings().triage_db_path), reader and (str(reader.db_path), _stamp(reader.db_path)))
+    cached = _membership_cache
+    if cached is None or cached[0] != marker:
+        cached = _membership_cache = (marker, _read_membership(reader))
+    return cached[1]
+
+
+def _read_membership(reader):
     rows = read_discovery_membership(settings().triage_db_path)
     kept = [row for row in rows if row["decision"] in KEPT_DECISIONS]
     keys, identifiers = set(), set()
@@ -53,29 +82,34 @@ def _membership(reader):
             {"doi": dois.get(key), "url": urls.get(key)}))} for key in sorted(live)]
         keys.update(live)
         identifiers.update(ident for row in native for ident in row["identifiers"])
-    return rows, keys, identifiers, native, fingerprint({"kept": kept, "native": native})
+    families = _Union()  # seed-independent identity families; requests copy `parent` and add their seed
+    for row in native:
+        for ident in row["identifiers"]:
+            families.union(f"paper:{row['item_key']}", ident)
+    for row in rows:
+        node = f"paper:{row['stable_feed_key']}"
+        if row["materialized_zotero_key"]:
+            families.union(node, f"paper:{row['materialized_zotero_key']}")
+        for ident in _app_identifiers(row):
+            families.union(node, ident)
+    native_keys = {row["item_key"] for row in native}
+    return {"rows": rows, "keys": keys, "identifiers": identifiers, "native_keys": native_keys,
+            "known_keys": native_keys | {row["stable_feed_key"] for row in rows},
+            "parent": families.parent, "digest": fingerprint({"kept": kept, "native": native})}
 
 
 def _inputs(item_key):
     related._validate_key(item_key)
     try:
         reader = state().zotero_reader
-        rows, keys, identifiers, native, digest = _membership(reader)
+        library = _membership(reader)
+        rows, keys, digest = library["rows"], library["keys"], library["digest"]
         detail, native_state = native_detail(resolve_reader_for_key(item_key), item_key)
         if detail is None or native_state == "failed":
             _unavailable()
         families, root = _Union(), f"seed:{item_key}"
-        native_keys = {row["item_key"] for row in native}
-        known_keys = native_keys | {row["stable_feed_key"] for row in rows}
-        for row in native:
-            for ident in row["identifiers"]:
-                families.union(f"paper:{row['item_key']}", ident)
-        for row in rows:
-            node = f"paper:{row['stable_feed_key']}"
-            if row["materialized_zotero_key"]:
-                families.union(node, f"paper:{row['materialized_zotero_key']}")
-            for ident in _app_identifiers(row):
-                families.union(node, ident)
+        families.parent = dict(library["parent"])
+        native_keys, known_keys = library["native_keys"], library["known_keys"]
         families.union(root, f"paper:{item_key}")
         for ident in related._identifiers(detail):
             families.union(root, ident)
@@ -123,7 +157,7 @@ def _inputs(item_key):
                     "timeout": settings().summary_timeout_seconds,
                     "sources": {str(path): fingerprint(path.read_text()) for path in paths}}
         return {"seed": seed, "basis": basis, "boundary": boundary, "membership_digest": digest,
-                "saved_keys": keys, "saved_identifiers": identifiers, "fingerprint": fingerprint(identity)}
+                "saved_keys": keys, "saved_identifiers": library["identifiers"], "fingerprint": fingerprint(identity)}
     except (OSError, sqlite3.Error, ZoteroReadError) as exc:
         raise APIError("discovery_unverified", "Discovery inputs could not be read", status_code=409) from exc
 
@@ -145,7 +179,7 @@ def discovery_metadata(item_key: str) -> dict:
             "admission": {"state": "saved" if inputs["basis"] else "not_saved", "basis": inputs["basis"]},
             "context_fingerprint": inputs["fingerprint"], "boundary": inputs["boundary"],
             "private_context": {"status": status[comments["availability"]], "record_count": len(comments["records"])},
-            "reason": None if inputs["basis"] else "saved_seed_required"}
+            "reason": None}
 
 
 def _candidate_fingerprint(sess):
@@ -173,7 +207,7 @@ def _freshness(sess):
     candidate_identity = sess.discovery["candidate_fingerprint"]
     candidates_current = (_candidate_fingerprint(sess) == candidate_identity
                           if candidate_identity is not None else not sess.candidates)
-    current = inputs["basis"] and inputs["fingerprint"] == sess.discovery["context_fingerprint"] and candidates_current
+    current = inputs["fingerprint"] == sess.discovery["context_fingerprint"] and candidates_current
     return "current" if current else "stale"
 
 
@@ -237,8 +271,10 @@ def _retrieve(sess, inputs):
         if (set(cand.identifier_keys()) & inputs["saved_identifiers"]
                 or cand.existing_zotero_key in inputs["saved_keys"]):
             cand.in_library = True
+    seed_title = _title_key(seed["title"])  # the seed itself often returns without a shared identifier
     retained = [cand for cand in candidates if cand.in_library is not True
-                and not set(cand.identifier_keys()) & set(seed["identifiers"])]
+                and not set(cand.identifier_keys()) & set(seed["identifiers"])
+                and not (seed_title and _title_key(cand.title) == seed_title)]
     score_query_relevance(public, retained, reranker_model=config.corpus.reranker_model,
                           reranker_enabled=config.corpus.reranker_enabled)
     rank_candidates(retained)
@@ -308,8 +344,8 @@ def find_new(item_key: str, *, context_fingerprint: str, consent_token: str | No
     global _active_session
     with sessions._lock_for("discovery"):
         inputs = _inputs(item_key)
-        if not inputs["basis"] or inputs["fingerprint"] != context_fingerprint:
-            raise APIError("discovery_stale", "A current saved seed is required", status_code=409)
+        if inputs["fingerprint"] != context_fingerprint:
+            raise APIError("discovery_stale", "Seed context changed; reload discovery", status_code=409)
         if consent_token is not None and consent_token != inputs["boundary"]["token"]:
             raise APIError("consent_required", "Consent to the current model is required", status_code=409)
         previous = sessions.find_discovery(context_fingerprint)

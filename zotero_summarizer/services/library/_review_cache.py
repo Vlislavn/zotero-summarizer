@@ -16,6 +16,7 @@ from typing import Any
 from uuid import uuid4
 
 from zotero_summarizer.api.errors import APIError
+from zotero_summarizer.runtime import memoized, request_memo
 from zotero_summarizer.services._common import LOGGER, now_iso_z, settings, write_json_atomic
 
 _CACHE_FILENAME = "deep_reviews.json"
@@ -82,6 +83,20 @@ def _write_one(item_key: str, entry: dict[str, Any]) -> None:
         _write_all(reviews, publication_key=item_key)
 
 
+def _depth(entry: dict[str, Any] | None) -> str:
+    return str(((entry or {}).get("provenance") or {}).get("review_depth") or "thorough")
+
+
+def keep_previous_if_downgraded(entry: dict[str, Any], prior: dict[str, Any] | None) -> None:
+    """A fast re-run must not silently destroy a deeper review: keep the prior usable
+    entry as ``entry["previous_review"]`` (restore: copy it back over the key in
+    ``deep_reviews.json``). Only the latest prior is kept; projections never expose it."""
+    from zotero_summarizer.services.library.review_eligibility import usable_review  # lazy: it imports this module
+
+    if usable_review(prior) and _depth(entry) == "fast" and _depth(prior) != "fast":
+        entry["previous_review"] = {key: value for key, value in prior.items() if key != "previous_review"}
+
+
 def get_cached_review(item_key: str) -> dict[str, Any] | None:
     """Project stored review through current reading policy; never rewrite the cache."""
     if not item_key:
@@ -123,42 +138,114 @@ def export_review_audit(item_key: str) -> dict[str, Any]:
             status, reason = 'unavailable', 'current_item_binding_unavailable'
     return {'item_key': item_key, 'digest': entry.get('digest'), 'audit_status': status, 'reason': reason,
             'verification_audit': entry.get('verification_audit') if status == 'available' else None,
-            'retained_evidence': retained}
+            'retained_evidence': retained,
+            'older_rules_evidence': _older_rules_evidence(entry) if reason == 'audit_contract_changed' else None}
 
 
-def review_is_current(entry: dict[str, Any] | None, item_key: str = "") -> bool:
+def _older_rules_evidence(entry: dict[str, Any]) -> dict[str, Any] | None:
+    """Quotes of an audit whose only drift is the check rules (paper bytes unchanged)."""
+    from zotero_summarizer.services.library._digest_audit_export import retained_audit_status
+    try:
+        status, _ = retained_audit_status(entry, older_rules_ok=True)
+    except (APIError, ValueError):
+        return None
+    return {'scope': 'retained_source_only', 'verification_audit': entry['verification_audit']} if status == 'available' else None
+
+
+def _structural_reason(entry: dict[str, Any] | None, item_key: str) -> str | None:
+    """``None`` when the entry is a complete, usable review; else why it is unusable
+    (incomplete or corrupt — hidden, as distinct from merely outdated)."""
     if not entry or not _entry_condition(entry, None):
-        return False
+        return "no_review"
     if entry.get("review_contract_version") != REVIEW_CONTRACT_VERSION:
-        return False
+        return "contract_version"
     if entry.get("digest") is None and not entry.get("needs_pdf"):
-        return False
-    if (entry.get("digest") is not None or entry.get("model_digest")) and entry.get("verification_audit") is None:
-        return False
-    stored = entry.get("review_identity")
-    if not item_key or not isinstance(stored, dict):
-        return False
+        return "no_digest"
+    if not item_key or not isinstance(entry.get("review_identity"), dict):
+        return "no_identity"
+    return None
+
+
+def _identity_drift(stored: dict[str, Any], current: dict[str, Any]) -> str:
+    """Human-readable reason a valid review is outdated (its first changed input)."""
+    if stored.get("source_sha256") != current.get("source_sha256"):
+        return "pdf_changed"
+    if stored.get("source_kind") != current.get("source_kind"):
+        return "source_changed"
+    if stored.get("focus_prompt") != current.get("focus_prompt"):
+        return "focus_changed"
+    if stored.get("generation_sha256") != current.get("generation_sha256"):
+        return "generation_updated"
+    return "metadata_changed"
+
+
+def review_status(entry: dict[str, Any] | None, item_key: str = "") -> tuple[str, str]:
+    """``('current'|'outdated'|'invalid', reason)``. An ``outdated`` review is still
+    valid and is SHOWN with a badge + refresh; only ``invalid`` (incomplete/corrupt)
+    is hidden. ``current`` preserves the exact prior ``review_is_current`` semantics."""
+    reason = _structural_reason(entry, item_key)
+    if reason is not None:
+        return "invalid", reason
+    stored = entry["review_identity"]
     try:
         from zotero_summarizer.services.library._review_identity import current_review_identity
         from zotero_summarizer.services.library._digest_audit_export import retained_audit_status
         current = current_review_identity(item_key, stored)
         if current != stored:
-            return False
-        if entry.get('verification_audit') is not None:
-            return retained_audit_status(entry, current_identity=current)[0] == 'available'
-        return True
+            return "outdated", _identity_drift(stored, current)
+        audit = entry.get("verification_audit")
+        has_digest = entry.get("digest") is not None or entry.get("model_digest")
+        if has_digest and audit is None:
+            # Legacy review written before the verification audit existed: show it
+            # badged (never silently hidden), but it is not 'current' for sync/prewarm.
+            return "outdated", "unverified"
+        if audit is not None and retained_audit_status(entry, current_identity=current)[0] != "available":
+            return "outdated", "verification_outdated"
+        return "current", ""
     except (APIError, AttributeError, OSError, RuntimeError, ValueError):
-        return False
+        return "outdated", "source_unresolved"
+
+
+def review_is_current(entry: dict[str, Any] | None, item_key: str = "") -> bool:
+    return review_status(entry, item_key)[0] == "current"
+
+
+def _project_usable(entry: dict[str, Any] | None, item_key: str) -> dict[str, Any] | None:
+    """Project a current OR outdated (valid) review, tagged with its freshness so the
+    UI/Today can badge an outdated one; ``invalid``/missing returns ``None`` (hidden)."""
+    status, reason = review_status(entry, item_key)
+    if status == "invalid":
+        return None
+    from zotero_summarizer.services.library.review_fleet.propose import project_review
+    return {**project_review(entry), "review_freshness": {"status": status, "reason": reason}}
+
+
+def get_usable_review(item_key: str) -> dict[str, Any] | None:
+    if not item_key:
+        return None
+    return _project_usable(_read_all().get(item_key), item_key)
+
+
+def usable_reviews() -> dict[str, Any]:
+    """Current + outdated (valid) reviews, each tagged with ``review_freshness``.
+    Display/Today seam: the strict ``current_reviews`` stays for correctness-critical
+    consumers (Zotero note sync, regeneration prewarm)."""
+    from zotero_summarizer.services.library._review_identity import prime_pdf_paths
+
+    def compute() -> dict[str, Any]:
+        entries = _read_all()
+        prime_pdf_paths(entries)
+        return {key: projected for key, entry in entries.items()
+                if (projected := _project_usable(entry, key)) is not None}
+
+    with request_memo():
+        return memoized("usable_reviews", compute)
 
 
 def get_current_review(item_key: str) -> dict[str, Any] | None:
     if not item_key:
         return None
-    entry = _read_all().get(item_key)
-    if not review_is_current(entry, item_key):
-        return None
-    from zotero_summarizer.services.library.review_fleet.propose import project_review
-    return project_review(entry)
+    return _project_current(_read_all().get(item_key), item_key)
 
 
 def cached_review_keys() -> set[str]:
@@ -170,9 +257,47 @@ def current_review_keys() -> set[str]:
     return {key for key, entry in _read_all().items() if review_is_current(entry, key)}
 
 
-def current_reviews() -> dict[str, Any]:
+def _project_current(entry: dict[str, Any] | None, key: str) -> dict[str, Any] | None:
+    if not review_is_current(entry, key):
+        return None
     from zotero_summarizer.services.library.review_fleet.propose import project_review
-    return {key: project_review(entry) for key, entry in _read_all().items() if review_is_current(entry, key)}
+    return project_review(entry)
+
+
+def current_reviews() -> dict[str, Any]:
+    """Current projected reviews. Within a ``request_memo`` scope computed once (read-only result)."""
+    from zotero_summarizer.services.library._review_identity import prime_pdf_paths
+
+    def compute() -> dict[str, Any]:
+        entries = _read_all()
+        prime_pdf_paths(entries)
+        return {key: projected for key, entry in entries.items()
+                if (projected := _project_current(entry, key)) is not None}
+
+    with request_memo():  # one pass hashes each PDF / resolves each library item at most once
+        return memoized("current_reviews", compute)
+
+
+def current_reviews_for_keys(item_keys: list[str]) -> dict[str, Any]:
+    """Check only requested identities; invalid cache bytes fail without repair."""
+    keys = {key for key in item_keys if key}
+    if not keys:
+        return {}
+    stored = _read_all(readonly=True)
+    return {key: projected for key in keys
+            if (projected := _project_current(stored.get(key), key)) is not None}
+
+
+def usable_reviews_for_keys(item_keys: list[str]) -> dict[str, Any]:
+    """Display/Today seam for a bounded key set: current OR outdated-but-valid
+    reviews, each tagged with ``review_freshness`` (mirrors ``usable_reviews`` the
+    way ``current_reviews_for_keys`` mirrors ``current_reviews``)."""
+    keys = {key for key in item_keys if key}
+    if not keys:
+        return {}
+    stored = _read_all(readonly=True)
+    return {key: projected for key in keys
+            if (projected := _project_usable(stored.get(key), key)) is not None}
 
 
 def copy_review(src_key: str, dst_key: str) -> bool:
@@ -192,7 +317,9 @@ def copy_review(src_key: str, dst_key: str) -> bool:
 __all__ = [
     "_cache_path", "_read_all", "_write_all", "_write_one",
     "REVIEW_CONTRACT_VERSION", "get_cached_review", "get_current_review",
-    "review_is_current", "cached_review_keys", "current_review_keys", "current_reviews", "copy_review",
+    "review_is_current", "review_status", "get_usable_review", "usable_reviews",
+    "usable_reviews_for_keys",
+    "cached_review_keys", "current_review_keys", "current_reviews", "copy_review",
 ]
 
 

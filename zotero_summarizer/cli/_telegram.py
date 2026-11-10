@@ -1,11 +1,9 @@
-"""One-shot Telegram child; no model work until clean exit and verified export."""
+"""One-shot Telegram child (auth or digest); the receipt is verified before the parent proceeds."""
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
-import re
 from pathlib import Path
 import subprocess
 import sys
@@ -17,10 +15,8 @@ class OptionalTelegramMissing(RuntimeError):
 
 
 class TelegramChildFailed(RuntimeError):
-    def __init__(self, code="telegram_incomplete", *, collection_report_id=None):
+    def __init__(self, code="telegram_incomplete"):
         self.code = code if code in {"missing_session", "session_unauthorized", "revoked_session", "busy", "deferred"} else "telegram_incomplete"
-        self.collection_report_id = (collection_report_id if isinstance(collection_report_id, str)
-            and re.fullmatch(r"telegram-review-[0-9a-f]{32}", collection_report_id) else None)
         super().__init__(self.code)
 
 
@@ -39,59 +35,26 @@ def _sdk_session_type():
     return SQLiteSession
 
 
-def _digest(path: Path) -> str:
-    value = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(65536), b""):
-            value.update(block)
-    return value.hexdigest()
+def _receipt(settings, purpose: str, result: dict) -> dict:
+    return {"schema_version": 1, "purpose": purpose, "data_dir": str(settings.data_dir), "result": result}
 
 
-def _receipt(settings, purpose: str, result: dict, exported: dict | None) -> dict:
-    files = {} if exported is None else {
-        name: {"path": exported[name], "sha256": _digest(Path(exported[name]))}
-        for name in ("json_path", "markdown_path", "inputs_path")}
-    return {"schema_version": 1, "purpose": purpose, "data_dir": str(settings.data_dir),
-            "result": result, "export": exported, "files": files}
-
-
-def _verify(settings, purpose: str, receipt: dict, *, partial=False) -> dict:
+def _verify(settings, purpose: str, receipt: dict) -> dict:
     if (receipt.get("schema_version") != 1 or receipt.get("purpose") != purpose
             or receipt.get("data_dir") != str(settings.data_dir)):
         raise RuntimeError("invalid Telegram child receipt")
     result = receipt["result"]
-    partial_source = (partial and purpose == "conversations"
-                      and result["status"] in {"missing_session", "session_unauthorized", "revoked_session"}
-                      and isinstance(result.get("collection"), dict) and result["collection"].get("conversations"))
-    if (result["status"] != "collected" and not partial_source) or result["cleanup"] != "completed":
+    if result["status"] != "collected" or result["cleanup"] != "completed":
         raise RuntimeError("Telegram did not complete: " + result["status"])
-    if purpose == "auth":
-        if result["collection"] != {"authorized": True} or receipt["files"] or receipt["export"] is not None:
-            raise RuntimeError("invalid Telegram authorization receipt")
-        return receipt
-    files = receipt["files"]
-    if set(files) != {"json_path", "markdown_path", "inputs_path"}:
-        raise RuntimeError("incomplete Telegram child export")
-    output = (settings.data_dir / "research_feed" / "telegram").resolve()
-    parents = set()
-    for name, artifact in files.items():
-        path = Path(artifact["path"])
-        if (not path.resolve().is_relative_to(output) or path.is_symlink()
-                or str(path) != receipt["export"][name] or _digest(path) != artifact["sha256"]):
-            raise RuntimeError("Telegram child export verification failed")
-        parents.add(path.parent)
-    if len(parents) != 1:
-        raise RuntimeError("Telegram child export is not one bundle")
-    payload = json.loads(Path(receipt["export"]["json_path"]).read_text(encoding="utf-8"))
-    if payload["metadata"]["collection"] != result:
-        raise RuntimeError("Telegram child export receipt mismatch")
-    return receipt
+    if purpose == "auth" and result["collection"] != {"authorized": True}:
+        raise RuntimeError("invalid Telegram authorization receipt")
+    return receipt  # digest persists telegram-today.json in-child; there is no export bundle
 
 
 def run_child(settings, purpose: str) -> dict:
     from zotero_summarizer.integrations.telegram_session import _budgets
 
-    if purpose not in {"auth", "collect", "conversations"}:
+    if purpose not in {"auth", "digest"}:
         raise ValueError("invalid Telegram process purpose")
     if purpose == "auth":
         require_terminal()
@@ -115,16 +78,10 @@ def run_child(settings, purpose: str) -> dict:
             failure = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
             if failure is not None and failure.get("error") == "optional_dependency_missing":
                 raise OptionalTelegramMissing("Telegram requires the optional telegram extra")
-            if purpose == "conversations":
-                report_id = None
-                if failure is not None and failure.get("export") is not None:
-                    _verify(settings, purpose, failure, partial=True)
-                    report_id = Path(failure["export"]["json_path"]).parent.name
-                raise TelegramChildFailed(failure.get("result", {}).get("status") if failure else None,
-                                          collection_report_id=report_id)
+            if purpose == "digest":
+                raise TelegramChildFailed(failure.get("result", {}).get("status") if failure else None)
             if failure is not None and "result" in failure:
-                print(json.dumps({"status": "telegram_incomplete", "result": failure["result"],
-                                  "export": failure["export"]}, indent=2))
+                print(json.dumps({"status": "telegram_incomplete", "result": failure["result"]}, indent=2))
             raise RuntimeError("Telegram child failed; saved pages remain durable; no model work started")
         if not path.is_file():
             raise RuntimeError("Telegram child exited without a receipt")
@@ -138,22 +95,6 @@ def _write_receipt(path: Path, value: dict) -> None:
         write_json_atomic(path, value)
     except Exception:
         raise RuntimeError("Telegram receipt publication failed") from None
-
-
-def _export(settings, purpose, result):
-    if purpose == "auth":
-        return None
-    if purpose == "collect":
-        from zotero_summarizer.services.research_feed.telegram import run_saved
-
-        return run_saved(settings, collect_only=True, live_collection=result)
-    from zotero_summarizer.models.telegram_discussion import TelegramConversation
-    from zotero_summarizer.services.research_feed import telegram_conversations
-    from zotero_summarizer.services.research_feed.profile import load_profile
-
-    batches = [TelegramConversation.model_validate(value) for value in result["collection"]["conversations"]]
-    return telegram_conversations.publish(settings, batches, collection=result,
-        profile=load_profile(settings.data_dir, persist_default=False))
 
 
 def child(args) -> int:
@@ -186,25 +127,12 @@ def child(args) -> int:
             settings, session_factory=lambda path: session_type(str(path)),
             client_factory=client_factory, purpose=args.purpose,
         )
+        receipt = _receipt(settings, args.purpose, result)
         if result["status"] != "collected" or result["cleanup"] != "completed":
-            exported = None
-            if (args.purpose == "conversations" and result["cleanup"] == "completed"
-                    and isinstance(result.get("collection"), dict) and result["collection"].get("conversations")):
-                exported = _export(settings, args.purpose, result)  # Raw partial snapshot only, never generation.
-            receipt = _receipt(settings, args.purpose, result, exported)
-            if exported is not None:
-                _verify(settings, args.purpose, receipt, partial=True)
             _write_receipt(path, receipt)
             return 1
-        exported = _export(settings, args.purpose, result)
-        receipt = _receipt(settings, args.purpose, result, exported)
         _verify(settings, args.purpose, receipt)
         _write_receipt(path, receipt)
-        if args.purpose == "collect" and any(
-            channel["status"] not in {"committed", "same_channel_already_seen"}
-            for channel in result["collection"]["channels"]
-        ):
-            return 1  # Preserve partial pages/export; never silently process a rebound source.
         return 0
     except Exception as error:
         _write_receipt(path, {"schema_version": 1, "purpose": args.purpose,

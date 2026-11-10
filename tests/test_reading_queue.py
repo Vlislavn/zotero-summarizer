@@ -133,34 +133,28 @@ def test_proposed_dont_read_does_not_hide_paper(monkeypatch):
     assert proposed["proposed"] == "dont_read"
 
 
-def test_positive_verdict_stays_visible_and_pins_to_top(monkeypatch):
-    """REGRESSION: a positive verdict (must/should/could_read) is a reading
-    INTENT, not 'done' — the paper must stay in Read next AND pin to the top,
-    even with a lower relevance score than the rest. Previously ANY verdict
-    marked a paper 'handled', so labelling a paper made it vanish from the queue
-    (unfindable). Only ``dont_read`` hides; positive labels surface."""
+def test_positive_verdict_stays_visible_and_sorts_after_undecided(monkeypatch):
+    """A positive verdict (must/should/could_read) is a reading INTENT, not 'done':
+    the paper stays in Read next, flagged ``decided`` and sorted AFTER the papers
+    still awaiting a decision (even with the highest relevance). Only ``dont_read``
+    hides."""
     from zotero_summarizer.storage import repositories
 
-    # L has the LOWEST relevance (2.0) but a must_read label → must lead the list.
     _patch_state(monkeypatch, _FakeReader([_item("A"), _item("B"), _item("L")]), _FakeGate("sha1"))
-    _seed("sha1", A=3.0, B=4.5, L=2.0)
-    monkeypatch.setattr(
-        repositories, "list_label_verdict_priorities",
-        lambda db_path: {"L": "must_read"},
-    )
+    _seed("sha1", A=3.0, B=4.5, L=5.0)
+    monkeypatch.setattr(repositories, "list_label_verdict_priorities", lambda db_path: {"L": "must_read"})
+    monkeypatch.setattr(repositories, "list_user_verdict_keys", lambda db_path: {"L"})
     res = reading_queue.build_reading_queue()
     keys = [i["item_key"] for i in res["items"]]
-    assert keys[0] == "L"                       # labelled paper pinned to the top
+    assert keys[-1] == "L"                      # decided paper sorted last
     assert set(keys) == {"A", "B", "L"}         # nothing hidden
-    assert res["read_hidden"] == 0
-    pinned = next(i for i in res["items"] if i["item_key"] == "L")
-    assert pinned["user_priority"] == "must_read"  # surfaced for the UI badge
+    assert res["read_hidden"] == 0 and res["decided_count"] == 1
+    decided = next(i for i in res["items"] if i["item_key"] == "L")
+    assert decided["user_priority"] == "must_read" and decided["decided"] is True
 
 
-def test_positive_verdicts_pin_in_priority_order(monkeypatch):
-    """Multiple labelled papers pin to the top in priority order (must > should >
-    could), preserving the relevance order WITHIN each tier; unlabelled papers
-    follow. So the user's explicit ranking wins over the model's."""
+def test_decided_papers_follow_undecided_keeping_relevance_order(monkeypatch):
+    """Decided papers trail the undecided ones; relevance order holds within each."""
     from zotero_summarizer.storage import repositories
 
     _patch_state(
@@ -168,14 +162,13 @@ def test_positive_verdicts_pin_in_priority_order(monkeypatch):
         _FakeReader([_item("could"), _item("plain"), _item("must"), _item("should")]),
         _FakeGate("sha1"),
     )
-    _seed("sha1", could=4.9, plain=4.8, must=1.0, should=1.0)
-    monkeypatch.setattr(
-        repositories, "list_label_verdict_priorities",
-        lambda db_path: {"must": "must_read", "should": "should_read", "could": "could_read"},
-    )
+    _seed("sha1", could=4.9, plain=4.8, must=1.0, should=1.5)
+    labels = {"must": "must_read", "should": "should_read", "could": "could_read"}
+    monkeypatch.setattr(repositories, "list_label_verdict_priorities", lambda db_path: labels)
+    monkeypatch.setattr(repositories, "list_user_verdict_keys", lambda db_path: set(labels))
     res = reading_queue.build_reading_queue()
     keys = [i["item_key"] for i in res["items"]]
-    assert keys == ["must", "should", "could", "plain"]
+    assert keys == ["plain", "could", "should", "must"]
 
 
 def test_read_items_hidden_live_and_shown_with_toggle(monkeypatch):

@@ -13,7 +13,7 @@ from zotero_summarizer.services.library._map_reduce import ChunkBudget
 from zotero_summarizer.services.library.interpretation import qualify, review
 
 
-def _case(inputs, config, clients, assignment):
+def _case(inputs, config, clients, assignment, *, client_failure=None):
     key, arm = assignment['paper'], assignment['condition']
     recipe = inputs['recipe']
     paper = next(p for p in inputs['meta']['papers'] if p['item_key'] == key)
@@ -25,6 +25,8 @@ def _case(inputs, config, clients, assignment):
         raise ValueError('Execution source changed')
     start = perf_counter()
     try:
+        if client_failure is not None:
+            raise client_failure
         record['review'] = review({'title': paper['title'], 'text': text, 'content': content}, config,
                                   (clients['map'], clients['reduce']),
                                   ChunkBudget(recipe['context_chars'], recipe['chunk_chars'], recipe['sub_concurrency']),
@@ -35,6 +37,8 @@ def _case(inputs, config, clients, assignment):
     for item in (i for i in inputs['items'] if i['paper_item_key'] == key):
         row = {'item_id': item['item_id'], 'question': item['question'], 'status': 'failed'}
         try:
+            if client_failure is not None:
+                raise client_failure
             if record['review'] is None:
                 raise ValueError('Base review unavailable')
             row['output'] = answer(record['review'], item['question'], clients['qa'],
@@ -74,11 +78,15 @@ def execute(settings, snapshot, config, profiles, build_client):
                                            if item['paper_item_key'] == key}}
                    for key in inputs['evaluation'] for arm in inputs['recipe']['labels']]
     publish_json(root / 'plan.json', assignments)
-    clients = {role: build_client(role, profile) for role, profile in profiles.items()}
+    clients, client_failure = {}, None
+    try:
+        clients = {role: build_client(role, profile) for role, profile in profiles.items()}
+    except Exception as exc:
+        client_failure = exc
     for assignment in assignments:
         directory = root / assignment['directory']
         directory.mkdir(mode=0o700)
-        record = _case(inputs, config, clients, assignment)
+        record = _case(inputs, config, clients, assignment, client_failure=client_failure)
         publish_json(directory / 'record.json', record)
         reopened = json.loads((directory / 'record.json').read_text())
         _render(directory, reopened)

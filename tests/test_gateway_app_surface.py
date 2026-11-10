@@ -5,14 +5,20 @@ import pytest
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
+from tests.test_offline_sync import _db, _mutation
 from zotero_summarizer.api import app as app_module
 from zotero_summarizer.api.mobile_access import MobileAccessPolicy
+from zotero_summarizer.api.routes import sync
+from zotero_summarizer.services.sync import service
 from zotero_summarizer.settings import Settings
 from test_mobile_access_boundary import _client, _headers, LOGIN, ORIGIN
 
 
+LOOPBACK_PORT = 18765
+
+
 @pytest.fixture
-def surface(tmp_path, monkeypatch):
+def surface(tmp_path, monkeypatch, request):
     dist = tmp_path / "fixture-build"
     (dist / "assets").mkdir(parents=True)
     for name, body in {
@@ -24,7 +30,9 @@ def surface(tmp_path, monkeypatch):
     }.items():
         (dist / name).write_bytes(body)
     monkeypatch.setattr(app_module, "_FRONTEND_DIST", dist)
-    policy = MobileAccessPolicy(ORIGIN, LOGIN, tmp_path / "api.sock")
+    policy = (MobileAccessPolicy(ORIGIN, LOGIN, trusted_loopback_port=LOOPBACK_PORT)
+              if getattr(request, "param", "unix") == "trusted-loopback"
+              else MobileAccessPolicy(ORIGIN, LOGIN, tmp_path / "api.sock"))
     app = app_module.create_app(Settings.load(project_root=tmp_path), mobile_access=policy)
     calls = []
 
@@ -63,6 +71,47 @@ def test_non_owner_cannot_read_any_surface(surface, path):
     assert response.status_code == 403
     assert response.json()["error"] == "mobile_access_denied"
     assert b"fixture application" not in response.content
+
+
+@pytest.mark.parametrize("surface", ["unix", "trusted-loopback"], indirect=True)
+def test_owner_sync_status_push_pull_and_denial_controls(surface, tmp_path, monkeypatch):
+    db = _db(tmp_path)
+    monkeypatch.setattr(sync, "_db_path", lambda: db)
+    monkeypatch.setattr(service.reading_queue, "build_reading_queue", lambda **_: {"items": []})
+    monkeypatch.setattr(service.deep_review, "current_reviews", lambda: {})
+    monkeypatch.setattr(service.verdict_effects, "mirror_review_note", lambda *_: {})
+    mutation = _mutation("PAPER001", "review_note", "Synthetic owner note", 0)
+
+    headers = _headers()
+    transport = {}
+    if surface[1].socket_path is None:
+        headers = [(key, ORIGIN.removeprefix("https://") if key == "Host" else value) for key, value in headers]
+        transport = {"peer": ("127.0.0.1", 45000), "server": ("127.0.0.1", LOOPBACK_PORT)}
+    with _client(surface, **transport) as client:
+        anonymous = [(key, value) for key, value in headers if key != "Tailscale-User-Login"]
+        assert client.get("/api/sync/status", headers=anonymous).status_code == 403
+        before = client.get("/api/sync/status", headers=headers)
+        assert before.status_code == 200
+        assert before.json()["server"] == "canonical"
+        pushed = client.post("/api/sync/push", headers=headers, json={"protocol": 1, "mutations": [mutation]})
+        assert pushed.status_code == 200
+        assert pushed.json()["results"][0]["status"] == "applied"
+        pulled = client.get("/api/sync/pull?protocol=1", headers=headers)
+        assert pulled.status_code == 200
+        assert pulled.json()["papers"][0]["review_note"] == "Synthetic owner note"
+        assert pulled.json()["cursor"] == pushed.json()["cursor"] > before.json()["cursor"]
+
+        for identity in (None, "other@example.net"):
+            denied_headers = [(key, identity if key == "Tailscale-User-Login" else value)
+                              for key, value in headers if key != "Tailscale-User-Login" or identity is not None]
+            for method, path, body in [("GET", "/api/sync/status", None),
+                                       ("POST", "/api/sync/push", {"protocol": 1, "mutations": [mutation]}),
+                                       ("GET", "/api/sync/pull?protocol=1", None)]:
+                response = client.request(method, path, headers=denied_headers, json=body)
+                assert response.status_code == 403
+                assert response.json()["error"] == "mobile_access_denied"
+                assert "Synthetic owner note" not in response.text
+        assert client.get("/api/sync/status", headers=headers).json()["cursor"] == pushed.json()["cursor"]
 
 
 def test_owner_websocket_gets_only_configured_https_authority(surface):

@@ -98,25 +98,25 @@ class TelegramLimits(BaseModel):
     """Operational work caps, not hardware or model capacity certification."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
-    sources: int = Field(default=3, ge=1, le=3)
+    sources: int = Field(default=30, ge=1, le=30)
     posts_per_channel: int = Field(default=3, ge=1, le=3)
-    replies_per_thread: int = Field(default=30, ge=1, le=30)
-    messages: int = Field(default=120, ge=1, le=120)
+    replies_per_thread: int = Field(default=300, ge=1, le=300)
+    messages: int = Field(default=300, ge=1, le=300)
     prompt_characters: int = Field(default=24000, ge=1000, le=24000)
-    context_tokens: int = Field(default=8192, ge=2048, le=32768)
+    context_tokens: int = Field(default=32768, ge=2048, le=32768)
     output_tokens: int = Field(default=2048, ge=512, le=4096)
 
 
 class TelegramSourceSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    sources: list[TelegramTarget] = Field(max_length=3)
+    sources: list[TelegramTarget] = Field(max_length=30)
     model: TelegramModelSelection | None = None
     limits: TelegramLimits = Field(default_factory=TelegramLimits)
 
     @model_validator(mode="after")
     def _unique(self):
-        if len({target.key for target in self.sources}) != len(self.sources) or len(self.sources) > self.limits.sources:
-            raise ValueError("duplicate sources or Telegram source budget exceeded")
+        if len({target.key for target in self.sources}) != len(self.sources):
+            raise ValueError("duplicate Telegram sources")  # the 30-source cap is the field's max_length
         return self
 
 
@@ -127,7 +127,7 @@ class ResearchProfile(BaseModel):
     shortlist_budget: _ShortlistBudget = 20
     card_budget: _CardBudget = 10
     telegram_channels: list[str] = Field(default_factory=list)
-    telegram_targets: list[TelegramTarget] = Field(default_factory=list, max_length=3)
+    telegram_targets: list[TelegramTarget] = Field(default_factory=list, max_length=30)
     telegram_model: TelegramModelSelection | None = None
     telegram_limits: TelegramLimits = Field(default_factory=TelegramLimits)
     topic_taxonomy: list[str] = Field(default_factory=lambda: sorted(TOPIC_TAXONOMY))
@@ -167,7 +167,7 @@ class TelegramPost(BaseModel):
     """Canonical saved input only: no embedded assessments or private session fields."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
-    schema_version: Literal[1]
+    schema_version: Literal[1, 2]
     channel_id: int = Field(ge=-(2**63), le=2**63 - 1)
     message_id: int = Field(ge=1, le=2**63 - 1)
     username: str | None = None
@@ -177,12 +177,16 @@ class TelegramPost(BaseModel):
     updated_at: str | None = None
     urls: list[str] = Field(default_factory=list)
     skip_reason: str | None = None
+    # schema_version 2 additions (stored in post_json; no SQL migration):
+    fwd_from: list[int] | None = None
+    reply_to_id: int | None = Field(default=None, ge=1, le=2**31 - 1)  # a channel post replying to another post
+    replies_count: int = Field(default=0, ge=0, le=2**31 - 1)
 
     @field_validator("schema_version", mode="before")
     @classmethod
     def _version(cls, value):
-        if type(value) is not int or value != 1:
-            raise ValueError("saved Telegram input requires schema_version=1")
+        if type(value) is not int or value not in (1, 2):
+            raise ValueError("saved Telegram input requires schema_version 1 or 2")
         return value
 
     @field_validator("published_at", "updated_at")
@@ -202,6 +206,15 @@ class TelegramPost(BaseModel):
             raise ValueError("skip_reason must be nonempty when supplied")
         if not self.text.strip() and self.skip_reason is None:
             raise ValueError("empty posts require an explicit skip_reason")
+        if self.fwd_from is not None:
+            if self.schema_version < 2:
+                raise ValueError("fwd_from requires schema_version 2")
+            origin_channel, origin_message = (self.fwd_from + [None, None])[:2]
+            if (len(self.fwd_from) != 2 or type(origin_channel) is not int or origin_channel == 0
+                    or type(origin_message) is not int or origin_message < 1):
+                raise ValueError("fwd_from must be [nonzero channel_id, message_id>=1]")
+        if self.replies_count and self.schema_version < 2:
+            raise ValueError("replies_count requires schema_version 2")
         for value in [self.permalink, *self.urls]:
             parsed = urlsplit(value)
             if parsed.scheme not in {"http", "https"} or not parsed.hostname:
@@ -243,23 +256,6 @@ class TelegramTransportError(Exception):
         self.code = code
         self.retry_seconds = retry_seconds
         super().__init__(code)
-
-
-class TelegramNewsVerdict(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    decision: Literal["keep", "drop", "uncertain"]
-    matched_interests: list[str]
-    reason: str = Field(min_length=1)
-    evidence_quote: str = Field(min_length=1)
-    summary: str = ""
-
-    @model_validator(mode="after")
-    def _required_text(self) -> TelegramNewsVerdict:
-        if not self.reason.strip() or not self.evidence_quote.strip():
-            raise ValueError("verdict requires a reason and original evidence quote")
-        if self.decision == "keep" and not self.summary.strip():
-            raise ValueError("keep requires a summary")
-        return self
 
 
 class ResearchCandidate(BaseModel):
@@ -437,5 +433,4 @@ __all__ = [
     "ResearchFeedTriage", "ResearchIdea", "ResearchProfile",
     "FeedReviewContext", "FeedProjectAssessment", "FeedReproduction", "FeedImpact",
     "FeedAssessment", "FeedDigestResponse", "parse_run_budgets", "TelegramPost",
-    "TelegramNewsVerdict",
 ]

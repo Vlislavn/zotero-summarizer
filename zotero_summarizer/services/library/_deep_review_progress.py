@@ -12,8 +12,8 @@ they stay usable headlessly (e.g. the ``verify-deep-review`` CLI) and in tests.
 
 Thread-safety: ``sub()`` is called from concurrent worker threads (parallel rubric
 samples / goal calls). A ``threading.Lock`` guards the shared mutable state
-(``_sub``, ``_calls``); ``phase()`` and ``summary()`` are called from the
-orchestrator thread only.
+(``_sub``, ``_calls``); ``phase()`` is serialised by its own lock because the
+independent review branches enter phases concurrently.
 """
 from __future__ import annotations
 
@@ -30,7 +30,9 @@ LOGGER = logging.getLogger("zotero_summarizer")
 PHASE_LABELS: dict[str, str] = {
     "extract": "Reading the PDF",
     "digest": "Reading the full paper & writing the digest",
+    "paper_type": "Detecting the paper type",
     "quality_rubric": "Scoring quality (rigor checks)",
+    "quality_verify": "Checking the critical checks again",
     "quality_overstate": "Checking for overstated claims",
     "goals": "Matching to your research goals",
     "note": "Saving the note to Zotero",
@@ -42,7 +44,9 @@ PHASE_LABELS: dict[str, str] = {
 _PHASE_MEDIANS: dict[str, float] = {
     "extract": 5.0,
     "digest": 29.0,            # the one phase that reasons (the quality digest)
+    "paper_type": 3.0,
     "quality_rubric": 11.0,    # 3 self-consistency checks, run in parallel
+    "quality_verify": 12.0,
     "quality_overstate": 5.0,  # thinking-off → fast
     "goals": 20.0,             # per-goal summaries, parallel
     "note": 1.0,
@@ -71,8 +75,10 @@ class ReviewReporter:
     phase with a ``[dr item=KEY]`` prefix (mirrors the feeds ``[tick_id]`` idiom).
 
     ``sub()`` is safe to call from multiple concurrent threads (parallel rubric
-    samples or goal calls).  All other methods (``phase``, ``summary``) are
-    called from the single orchestrator thread."""
+    samples or goal calls). The digest, the quality layers and the goals run as
+    overlapping chains: each chain times its own phases (``_open``), so a phase is
+    never ended by an unrelated chain entering its phase, and the median only learns
+    real durations."""
 
     def __init__(
         self, item_key: str, item_title: str, on_update: Callable[[dict[str, Any]], None]
@@ -84,8 +90,10 @@ class ReviewReporter:
         self._sub: dict[str, int] = {"done": 0, "total": 0}
         self._t0 = time.perf_counter()
         self._phase_t0 = self._t0
+        self._open: dict[str, tuple[str, float]] = {}  # chain -> (phase, start)
         self._calls = 0
         self._lock = threading.Lock()
+        self._phase_lock = threading.Lock()  # concurrent branches enter phases from different threads
 
     def _emit(self) -> None:
         now = time.perf_counter()
@@ -132,24 +140,52 @@ class ReviewReporter:
         return round(current_remaining + future, 0)
 
     def phase(self, name: str, *, total: int = 0, is_call: bool = False) -> None:
-        """Enter a new phase (called from orchestrator thread only).
+        """Enter a new phase .
 
         ``total`` sets the sub-step count (rubric runs / goals); ``is_call``
-        marks a phase that is itself a single LLM call."""
-        if self._phase:
-            phase_elapsed = time.perf_counter() - self._phase_t0
-            LOGGER.info(
-                "[dr item=%s] %s done in %.1fs",
-                self._item_key, self._phase, phase_elapsed,
-            )
-            # EWMA (0.7 prior / 0.3 latest) so one slow paper doesn't skew the ETA
-            _PHASE_MEDIANS[self._phase] = round(
-                0.7 * _PHASE_MEDIANS.get(self._phase, phase_elapsed) + 0.3 * phase_elapsed, 1
-            )
+        marks a phase that is itself a single LLM call. With concurrent chains the
+        reported phase is the most recently entered one."""
+        with self._phase_lock:
+            self._enter_phase(name, total, is_call)
+
+    @staticmethod
+    def _chain(name: str) -> str:
+        if name in ("digest", "goals"):
+            return name
+        return "quality" if name == "paper_type" or name.startswith("quality_") else "serial"
+
+    def _close(self, chain: str) -> None:
+        """End the chain's open phase: log it and fold its OWN duration into the median."""
+        opened = self._open.pop(chain, None)
+        if opened is None:
+            return
+        name, started = opened
+        elapsed = time.perf_counter() - started
+        LOGGER.info("[dr item=%s] %s done in %.1fs", self._item_key, name, elapsed)
+        # EWMA (0.7 prior / 0.3 latest) so one slow paper doesn't skew the ETA
+        _PHASE_MEDIANS[name] = round(0.7 * _PHASE_MEDIANS.get(name, elapsed) + 0.3 * elapsed, 1)
+
+    def finish(self, name: str) -> None:
+        """End the open phase of ``name``'s chain now, when its end is not the next
+        phase's start (the digest returning, goals done, the quality chain about to wait
+        for the digest) — otherwise the wait would be timed as phase work."""
+        with self._phase_lock:
+            self._close(self._chain(name))
+
+    def _enter_phase(self, name: str, total: int, is_call: bool) -> None:
+        chain = self._chain(name)
+        if name == "note":
+            for open_chain in list(self._open):
+                self._close(open_chain)
+        else:
+            if name == "digest":
+                self._close("serial")  # extraction ended where the digest began
+            self._close(chain)
         self._phase = name
         with self._lock:
             self._sub = {"done": 0, "total": int(total)}
         self._phase_t0 = time.perf_counter()
+        self._open[chain] = (name, self._phase_t0)
         if is_call:
             with self._lock:
                 self._calls += 1
@@ -167,15 +203,17 @@ class ReviewReporter:
         self._emit()
 
     def summary(self) -> None:
-        """Final one-line summary with the total wall-clock + LLM-call count."""
-        if self._phase:
-            LOGGER.info(
-                "[dr item=%s] %s done in %.1fs",
-                self._item_key, self._phase, time.perf_counter() - self._phase_t0,
-            )
+        """Final one-line summary with the total wall-clock + the REAL LLM-call count."""
+        with self._phase_lock:
+            for chain in list(self._open):
+                self._close(chain)
+        from zotero_summarizer.services.library._review_attempt import current_timings
+
+        timings = current_timings() or {}
         with self._lock:
             calls = self._calls
         LOGGER.info(
-            "[dr item=%s] review done in %.1fs (~%d LLM calls)",
-            self._item_key, time.perf_counter() - self._t0, calls,
+            "[dr item=%s] review done in %.1fs (%d LLM calls, %.0f by phase reporter%s)",
+            self._item_key, time.perf_counter() - self._t0, int(timings.get("calls") or calls),
+            calls, "" if timings else " - measured by the progress reporter only",
         )

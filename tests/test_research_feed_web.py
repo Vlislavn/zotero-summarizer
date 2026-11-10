@@ -383,7 +383,7 @@ def test_listing_bounds_isolates_damage_and_ignores_unpublished_or_unrelated_fil
     (root / "profile.json").write_text("{}")
     (root / "weekly-zz-damaged").mkdir()
     listing = _request(app, "/api/research-feed/runs?limit=1")
-    assert listing.json() == {"items": [{"run_id": "weekly-zz-damaged", "available": False}]}
+    assert listing.json() == {"items": [{"run_id": "weekly-zz-damaged", "available": False, "reason": "Unreadable or invalid"}]}
     assert len(_request(app, "/api/research-feed/runs").json()["items"]) == 2
     for limit in (0, 101):
         assert _request(app, f"/api/research-feed/runs?limit={limit}").status_code == 422

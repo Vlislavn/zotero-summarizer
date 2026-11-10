@@ -9,9 +9,11 @@ from tests._generated_write_fixtures import config, paper_io, published_review
 from tests._interpretation_experiment import CARD, PAYLOAD, ScriptedClient, run_review
 from tests.test_review_cache import _isolate_cache
 from zotero_summarizer.models import PaperDigest
+from zotero_summarizer.models.digest_generation import PaperDigestGeneration
 from zotero_summarizer.services.library import _digest_audit, _map_reduce, _review_cache, _review_identity, deep_review
 from zotero_summarizer.services.library._digest_verification import DigestSourceRejected, DigestVerifierUnavailable
 from zotero_summarizer.services.zotero import zotero
+from tests._interpretation_experiment import generates
 
 
 def _compute(config, io, client, **kwargs):
@@ -58,13 +60,13 @@ def test_default_exact_keyword_key_shape_no_c_import_and_original_native_mirror(
     assert relay.call_count == binder.call_count == 1 and binder.call_args.kwargs == {}
     assert set(entry) == {'review_contract_version', 'review_identity', 'provenance', 'digest', 'verification_audit',
         'quality', 'goal_summaries', 'paper_type', 'section_overlay', 'code_link', 'model_digest', 'model_read_decision',
-        'reading_policy_flags', 'needs_pdf', 'needs_login', 'login_url', 'gate_relevance', 'reviewed_at',
-        'zotero_note_written', 'zotero_note_error'}
+        'reading_policy_flags', 'not_established_fields', 'needs_pdf', 'needs_login', 'login_url', 'gate_relevance', 'reviewed_at',
+        'zotero_note_written', 'zotero_note_error', 'timings', 'text_window'}
     assert 'interpretation_schema' not in entry['review_identity']
     assert entry['review_identity']['source_kind'] == 'override'
     assert entry['verification_audit']['identity']['review_source_sha256'] == entry['review_identity']['source_sha256']
     assert entry['zotero_note_written'] is False and entry['zotero_note_error'] is None
-    assert all(model is PaperDigest for _, model, _ in client.calls if model is not None and issubclass(model, PaperDigest))
+    assert all(model is PaperDigestGeneration for _, model, _ in client.calls if model is not None and generates(model))
     paper_io.note_stage.assert_not_called()
     forbidden.assert_not_called()
     assert not _review_cache._cache_path().exists()
@@ -120,7 +122,7 @@ def test_native_optional_unavailable_is_bound_truthfully_and_only_valid_base_sur
     assert result['interpretation']['status'] == {'missing': 'unavailable', 'malformed': 'invalid',
         'numeric': 'support_not_established', 'semantic': 'support_not_established'}[optional]
     assert result['verification_audit']['lineage'][-1]['outcome'] == 'accepted'
-    assert sum(model is not None and issubclass(model, PaperDigest) for _, model, _ in client.calls) == 1
+    assert sum(model is not None and generates(model) for _, model, _ in client.calls) == 1
     _review_cache._write_one('LIBR0038', result)
     assert _review_cache.get_current_review('LIBR0038') is None  # not an ordinary cache artifact
 
@@ -146,7 +148,7 @@ def test_known_source_mutation_refuses_before_native_mirror_or_final_binding(con
         original = client.pydantic_prompt
         def generation(**kwargs):
             value = original(**kwargs)
-            if issubclass(kwargs['pydantic_model'], PaperDigest):
+            if generates(kwargs['pydantic_model']):
                 change()
             return value
         client.pydantic_prompt = generation
@@ -170,7 +172,7 @@ def test_native_failure_returns_no_forged_entry_and_does_not_bind_or_write(confi
         if failure == 'generator_exception':
             raise RuntimeError('scripted generator failure')
         result = original(**kwargs)
-        if not issubclass(kwargs['pydantic_model'], PaperDigest):
+        if not generates(kwargs['pydantic_model']):
             if failure == 'verifier_unavailable':
                 return {}
             result['checks'][0] = dict(result['checks'][0], supported=False, evidence=[])
@@ -192,7 +194,7 @@ def test_each_paper_gets_a_distinct_collector_and_missing_next_card_never_reuses
     saved = deepcopy(first)
     second = run_review(client)
     assert first['interpretation']['items'] == [CARD] and second['interpretation'] == {'status': 'unavailable'}
-    client.responses.append(PAYLOAD | {'tldr': '99999%'})
+    client.responses.extend([PAYLOAD | {'tldr': '99999%'}] * 2)  # first repair attempt + one reasoning escalation
     with pytest.raises(DigestSourceRejected):
         run_review(client)
     assert first == saved

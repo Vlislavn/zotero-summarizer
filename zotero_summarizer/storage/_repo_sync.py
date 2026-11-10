@@ -118,7 +118,9 @@ def _write_value(conn: sqlite3.Connection, request: dict[str, Any]) -> None:
            VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT(item_key) DO UPDATE SET
              original_derived_priority=excluded.original_derived_priority,
-             user_priority=excluded.user_priority, comment=excluded.comment,
+             user_priority=excluded.user_priority,
+             comment=CASE WHEN label_verdicts.source != excluded.source
+               AND label_verdicts.comment = excluded.comment THEN '' ELSE excluded.comment END,
              created_at=excluded.created_at, source=excluded.source""",
         (item_key, model_priority if model_priority in READING_PRIORITY_SORT_RANK else "unknown", request["value"],
          request.get("comment") or "", now, VERDICT_SOURCE_USER),
@@ -273,8 +275,9 @@ def sync_current_fields(db_path: Path) -> dict[tuple[str, str], dict[str, Any]]:
             """SELECT item_key, field, MAX(revision) AS revision
                FROM sync_changes WHERE field = 'verdict' GROUP BY item_key, field"""
         ).fetchall()
-        note_fields = review_notes.snapshots(conn)
-        question_fields = question_sync.snapshots(conn)
+        resolve = review_notes.alias_resolver(conn)
+        note_fields = review_notes.snapshots(conn, resolve)
+        question_fields = question_sync.snapshots(conn, resolve)
     finally:
         conn.close()
     fields = {(row["item_key"], row["field"]): dict(row) for row in rows}

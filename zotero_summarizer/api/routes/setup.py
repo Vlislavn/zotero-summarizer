@@ -56,6 +56,7 @@ async def validate_config(req: ValidateConfigRequest) -> ValidateConfigResponse:
 class CredentialRequest(BaseModel):
     name: str
     api_key: str
+    revision: str | None = None
 
 
 async def list_ai_presets() -> dict:
@@ -75,8 +76,10 @@ async def save_ai_credential(req: CredentialRequest) -> dict:
     from zotero_summarizer.services.setup.doctor import store_credential_and_invalidate
 
     credential = await asyncio.to_thread(store_credential_and_invalidate,
-                                         get_settings(), req.name, req.api_key)
-    return {"credential": credential}
+                                         get_settings(), req.name, req.api_key,
+                                         **({'expected_revision': req.revision} if req.revision else {}))
+    revision = credential.pop('_revision', None)
+    return {"credential": credential, **({'revision': revision} if revision else {})}
 
 
 class CalibrateRequest(BaseModel):

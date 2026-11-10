@@ -156,7 +156,7 @@ def _gauge_html(band: str, agreed: int, total: int) -> str:
     with a teal needle placed by band, the band label, and the N/M passes. It OWNS
     the band interpretation (a position on a scale) so the reader doesn't decode it."""
     pct = _GAUGE_POS.get(band, 50)
-    passes = f"{agreed}/{total} passes agree" if total else ""
+    passes = f"{agreed}/{total} passes agree" if total > 1 else "1 pass" if total == 1 else ""
     passes_html = f'<span class="gauge-passes">{_h(passes)}</span>' if passes else ""
     return (
         '<div class="gauge"><div class="gauge-h">Evidence grade</div>'

@@ -17,16 +17,17 @@ pytestmark = pytest.mark.skipif(
     os.environ.get("ZS_APPLICATION_BROWSER_SMOKE") != "1", reason="opt-in real built Chromium",
 )
 
+# Unknown/stale/failed/unscored evidence shows no review chip (#108); the «подробнее» disclosure stands in.
 EXPECTED = {
     "current-A": "Evidence: grade A (AI review)",
     "current-D": "Evidence: grade D (AI review)",
     "legacy": "Evidence: legacy grade A · current review unconfirmed",
-    "unknown": "Review evidence: unknown",
-    "stale": "Review evidence: unknown",
-    "failed": "Review evidence: unknown",
+    "unknown": "подробнее",
+    "stale": "подробнее",
+    "failed": "подробнее",
     "needs-pdf": "Review: full text unavailable",
     "not-ready": "Review: not ready",
-    "unscored": "Review evidence: unknown",
+    "unscored": "подробнее",
     "blinded": "Review evidence: unavailable (blinded selection)",
 }
 
@@ -91,7 +92,7 @@ def test_real_today_selection_evidence(application_browser, variant, width):
     expect(article.get_by_text(EXPECTED[variant], exact=True)).to_be_visible()
     relevance = "Relevance: unscored" if variant == "unscored" else "Relevance: moderate"
     expect(article.get_by_text(relevance, exact=True)).to_be_visible()
-    _keyboard_disclosure(page, "Why selected")
+    _keyboard_disclosure(page, "подробнее")
     response = client.get("/api/daily?K=5")
     assert response.status_code == 200, response.text
     payload = response.json()
@@ -107,7 +108,7 @@ def test_real_today_selection_evidence(application_browser, variant, width):
     after = _rows(settings)
     assert before == after
     contrast = page.evaluate(CONTRAST.replace(".paper-reading-page main", "article"))
-    relevant = [row for row in contrast if row["text"] in {EXPECTED[variant], relevance, "Why selected"}
+    relevant = [row for row in contrast if row["text"] in {EXPECTED[variant], relevance, "подробнее"}
                 or row["text"].startswith(("Active policy:", "Displayed composite:", "Stored priority (separate):",
                                           "Cohort ranking:", "Cohort key:", "Picker:", "Picker key:", "Quality adjustment:"))]
     assert len(relevant) >= 3

@@ -218,6 +218,9 @@ class QualityEval(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     passes_agreed: int = Field(default=0)  # self-consistency runs that voted the final band
     passes_total: int = Field(default=0)   # total self-consistency runs (renders "N/M agree")
+    type_uncertain: bool = Field(default=False)  # paper type undecided: graded on the generic checklist of the safe supertype
+    jev: Optional[Dict[str, Any]] = None  # #147: checklist engine audit {engine, model, status, items:{key:{p, band, decided_by, segment, support_p}}}; None = engine off
+    review_depth: str = Field(default="")  # thorough | fast: how many passes produced this verdict
     domain: str = Field(default="")  # clinical_bio | agentic | general
     basis: str = Field(default="full_text")
     # Type-aware coverage (the honest replacement for the unvalidated 1-5 self-scores):

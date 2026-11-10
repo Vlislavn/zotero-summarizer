@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, field_validator
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 
 from zotero_summarizer.services.library._paper_type_checklists import CHECKLISTS, Family, PaperType
@@ -53,6 +53,7 @@ _SIGNALS: dict[str, re.Pattern[str]] = {
     "policy": re.compile(r"\b(we recommend|recommendations|consensus|guideline|best practice|expert panel|Delphi|working group|should be reported)\b", re.I),
     "theory": re.compile(r"\b(theorem|lemma|\bproof\b|proposition|corollary|we prove)\b", re.I),
     "case_report": re.compile(r"\b(case report|case series|[0-9]+[- ]year[- ]old (man|woman|male|female|patient)|we present a case|patient presented)\b", re.I),
+    "experience_report": re.compile(r"\b(we share|lessons learned|our experience|in our (team|company|organi[sz]ation)|we deployed|retrospective)\b", re.I),
 }
 
 # Coarse Zotero itemType → hint passed to the classifier (itemType can't separate
@@ -69,8 +70,8 @@ _REVIEW_FAMILY = {Family.SYNTH, Family.ARG}
 class _TypeVerdict(BaseModel):
     """One LLM classification of the paper's type."""
 
-    paper_type: str = ""
-    confidence: float = Field(default=0.5)
+    paper_type: str
+    confidence: float
     reasoning: str = ""
     secondary: str = ""
 
@@ -100,7 +101,12 @@ _PROMPT = (
     "literature with a search protocol is systematic_review; without a protocol it is "
     "narrative_review or survey. A paper that argues a thesis with little/no new data is "
     "position; one that issues recommendations/consensus is policy. Theorems/proofs → "
-    "theory. Classify by what the paper DID, even if the metadata hint is generic.\n\n"
+    "theory. experience_report: one team's or organization's own project, deployment or "
+    "practice and the lessons learned (engineering, industry, operations, teaching) with no "
+    "controlled comparison or hypothesis test; not a clinical case, not a method with "
+    "benchmarks. case_report: one patient or a small series of PATIENTS only (presentation, "
+    "treatment, outcome); never software, company or organisational cases. "
+    "Classify by what the paper DID, even if the metadata hint is generic.\n\n"
     "Zotero item-type hint: {item_hint}\n"
     "Structural signals detected: {signals}\n\n"
     "Title: {title}\nAbstract: {abstract}\nSection headings: {headings}\n\n"
@@ -194,12 +200,12 @@ def detect_safe(ctx: Any, sections: list[dict[str, Any]], body: str, logger: Any
     """``detect`` with the deep-review boundary fallback (an independently-skippable
     layer): build the inputs from the review ctx, and on ANY failure log + return the
     unknown type instead of manufacturing an empirical assessment. ``ctx`` is
-    duck-typed (``.title``/``.digest_dump``/``.llm``, optional ``.item_type``/
+    duck-typed (``.title``/``.abstract``/``.llm``, optional ``.item_type``/
     ``.paper_type_override``) to avoid importing deep_review's dataclass."""
     try:
         headings = [str(s.get("title") or "") for s in (sections or [])]
-        abstract = " ".join(str((ctx.digest_dump or {}).get(k) or "")
-                            for k in ("tldr", "executive_summary")).strip()
+        # Feed/Zotero abstract; without one, the paper's opening text (carries the abstract).
+        abstract = str(getattr(ctx, "abstract", "") or "").strip() or " ".join(body.split())[:1500]
         return detect(title=ctx.title, abstract=abstract, headings=headings, full_text=body,
                       item_type=getattr(ctx, "item_type", None), llm=ctx.llm,
                       override=getattr(ctx, "paper_type_override", None),

@@ -17,7 +17,7 @@ from zotero_summarizer.domain import VERDICT_SOURCE_USER
 from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.golden.goldenset import _PRIORITY_TO_RELEVANCE
-from zotero_summarizer.services.golden import label_verdicts
+from zotero_summarizer.services.golden import label_verdicts, proposal_snapshot
 from zotero_summarizer.services.library.review_summary import prepare_training_sample
 from zotero_summarizer.services.triage.daily_select._candidate import parse_payload
 from zotero_summarizer.storage import feeds as feeds_storage
@@ -171,6 +171,7 @@ def _commit_review(
         else f"{new_state}_in_review_ui"
     )
     original = str(row.get("reading_priority") or "").strip() or "unknown"
+    proposal_json = proposal_snapshot.build_proposal(surface=surface, row=row)
     with _conn() as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
         current = _fetch_row(conn, int(row["id"]))
@@ -178,7 +179,7 @@ def _commit_review(
         _, previous = repositories.upsert_label_verdict(
             conn, item_key=item_key, original_derived_priority=original,
             user_priority=priority, comment=comment,
-            training_sample=sample,
+            training_sample=sample, proposal_json=proposal_json,
         )
         if payload is not None:
             conn.execute(

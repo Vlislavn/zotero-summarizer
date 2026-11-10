@@ -5,7 +5,8 @@ from pathlib import Path
 
 from zotero_summarizer.integrations.llm import build_response_format
 from zotero_summarizer.models import PaperDigest
-from zotero_summarizer.models.interpretation import InterpretationDigest, InterpretationItem
+from zotero_summarizer.models.interpretation import InterpretationItem
+from zotero_summarizer.models.digest_generation import PaperDigestGeneration, InterpretationDigestGeneration
 from zotero_summarizer.services._common import extract_json_blob, to_text
 from zotero_summarizer.services.faithbench._corpus import chunk_text, sha256_text
 from zotero_summarizer.services.library._digest_audit import canonical_hash, contract_hashes, digest_contract_payload
@@ -33,12 +34,12 @@ class _Client:
         return self.trace.invoke(self.client, 'prompt', prompt, {})
 
     def pydantic_prompt(self, *, prompt, pydantic_model, **kwargs):
-        generating = pydantic_model is PaperDigest
+        generating = pydantic_model in (PaperDigest, PaperDigestGeneration)
         if generating and self.condition != 'A':
             prompt += CAUTION
         if generating and self.condition == 'C':
             self.draft = None
-            pydantic_model = InterpretationDigest
+            pydantic_model = InterpretationDigestGeneration
             prompt += CARD_REQUEST
             if 'response_format' in kwargs:
                 kwargs['response_format'] = build_response_format(pydantic_model)

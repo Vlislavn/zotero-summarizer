@@ -95,7 +95,7 @@ def test_probe_stage_bounded_times_out(monkeypatch):
         ),
     )
 
-    def _slow(routing, stage):  # simulates a hung/loading provider
+    def _slow(routing, stage, memory_probe=False):  # simulates a hung/loading provider
         time.sleep(1.0)
         return {"stage": stage, "status": "operational", "detail": ""}
 
@@ -116,7 +116,7 @@ def test_probe_stage_bounded_passes_through_fast_result(monkeypatch):
     )
     monkeypatch.setattr(
         oc, "_probe_stage",
-        lambda routing, stage: {"stage": stage, "status": "operational", "detail": ""},
+        lambda routing, stage, memory_probe=False: {"stage": stage, "status": "operational", "detail": ""},
     )
     row = asyncio.run(oc._probe_stage_bounded(routing=None, stage="feed"))
     assert row["status"] == "operational"

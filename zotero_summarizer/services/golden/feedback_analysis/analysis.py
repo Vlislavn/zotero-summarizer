@@ -144,6 +144,15 @@ def _priority(value):
     return value if isinstance(value, str) and value in READING_PRIORITY_SORT_RANK else None
 
 
+def _stored_proposal_priority(data):
+    """The app's proposed priority stored with the verdict (#224); None for old rows."""
+    try:
+        proposal = json.loads(data.get("proposal_json") or "null")
+    except (TypeError, ValueError):
+        return None
+    return _priority(proposal.get("priority")) if type(proposal) is dict else None
+
+
 def _base(record, family, cutoff):
     data, channel = record["data"], record["channel"]
     key = data.get("item_key", data.get("item_id", ""))
@@ -225,6 +234,7 @@ def _snapshot(event, data, state):
     elif channel == "label_verdicts":
         event.update(value=data["user_priority"], kind="current_label")
         event["eligibility"] = "current_snapshot_only"
+        event["prediction"] = _stored_proposal_priority(data) if data.get("source") == "user" else None
     elif channel == "review_notes":
         event.update(kind="current_note", comment=data["note"], eligibility="current_snapshot_only")
     elif channel == "golden_csv":

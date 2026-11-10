@@ -1,6 +1,8 @@
 """Request ownership persistence in Doctor's existing selected-project state file."""
 from threading import RLock
 
+from zotero_summarizer.storage.configuration_lock import configuration_lock
+
 from zotero_summarizer.integrations.llm_requests import _summarize_requests
 from zotero_summarizer.models.providers import STAGES, resolve_stage
 from zotero_summarizer.services._common import read_config, read_json_or_empty, write_json_atomic
@@ -35,7 +37,8 @@ def _valid_attempts(attempts):
             return False
         seen = set()
         for row in rows:
-            if not isinstance(row, dict) or row.get("run_id") != run_id:
+            if (not isinstance(row, dict) or row.get("run_id") != run_id
+                    or row.get("operation", "inference") not in {"inference", "load", "unload"}):
                 return False
             request_id = row.get("request_id")
             identity, reason = row.get("identity"), row.get("reason_code")
@@ -59,13 +62,17 @@ def _valid_attempts(attempts):
 
 
 def local_request_fence(settings):
-    attempts = request_attempts(settings)
-    return not _valid_attempts(attempts) or any(_fenced(attempt) for attempt in attempts.values())
+    with _STATE:
+        payload = read_json_or_empty(_path(settings))
+        attempts = payload.get('request_attempts', {})
+        if not _valid_attempts(attempts):
+            return True
+        return any(_fenced(attempt) for attempt in attempts.values())
 
 
 def record_requests(settings, run_id, requests, completion):
     """Late evidence replaces only its original attempt, never a successor's record."""
-    with _STATE:
+    with configuration_lock(settings.data_dir), _STATE:
         payload = read_json_or_empty(_path(settings))
         previous = payload.get("request_attempts", {})
         if not _valid_attempts(previous):
@@ -77,7 +84,8 @@ def record_requests(settings, run_id, requests, completion):
             from zotero_summarizer.integrations.llm_requests import _RequestStartRefused
 
             raise _RequestStartRefused("An unresolved predecessor prevents local dispatch")
-        attempts = {key: value for key, value in previous.items() if key == run_id or _fenced(value, local_only=False)}
+        attempts = {key: value for key, value in previous.items()
+                    if key == run_id or _fenced(value, local_only=False)}
         attempts[run_id] = {"requests": requests, "completion": completion}
         payload["request_attempts"] = attempts
         if any(_fenced(value) for value in attempts.values()):
@@ -87,8 +95,9 @@ def record_requests(settings, run_id, requests, completion):
 
 def save_doctor(settings, payload):
     """Ordinary checklist/config/credential publication cannot erase request ownership."""
-    with _STATE:
-        attempts = read_json_or_empty(_path(settings)).get("request_attempts", {})
+    with configuration_lock(settings.data_dir), _STATE:
+        saved = read_json_or_empty(_path(settings))
+        attempts = saved.get("request_attempts", {})
         payload["request_attempts"] = attempts
         withhold_local_ready(settings, payload)
         write_json_atomic(_path(settings), payload)
@@ -116,18 +125,20 @@ def withhold_local_ready(settings, payload):
         return
     from zotero_summarizer.services.setup.doctor_environment import _row
 
+    reason = 'local_request_fence'
+    title = 'Local request ownership remains unproven'
+    detail = 'Exact original request evidence is unresolved; configuration changes and unrelated success cannot clear it.'
     modes = dict(payload.get("modes") or {})
     modes.update(local_inference="needs_action", offline_ready="needs_action")
     if modes.get("strict_offline") == "ready":
         modes["strict_offline"] = "needs_action"
     payload.update(ready=False, status="needs_action", modes=modes)
     payload["checks"] = [
-        _row(row["id"], "needs_action", "Local request ownership remains unproven",
-             "Exact original request evidence is unresolved; configuration changes and unrelated success cannot clear it.",
+        _row(row["id"], "needs_action", title, detail,
              action="Review AI settings") if row["id"] in {"llm_inference", "dry_run"} else row
         for row in payload.get("checks", [])
     ]
     for row in payload.get("checks", []):
         if row["id"] in {"llm_inference", "dry_run"}:
-            row.update(reason_code="local_request_fence")
+            row.update(reason_code=reason)
             row["recovery"]["action"] = "open_ai_settings"

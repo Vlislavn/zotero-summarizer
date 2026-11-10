@@ -45,8 +45,10 @@ class RequestInventory:
         self._changed = changed
         self._before_start = before_start
 
-    def expect(self, identity: str, model: str, endpoint: str, *, local: bool):
-        request = _RequestObservation(self, identity, model, endpoint, local=local)
+    def expect(self, identity: str, model: str, endpoint: str, *, local: bool, operation="inference"):
+        if operation not in {"inference", "load", "unload"}:
+            raise ValueError("Unsupported native request operation")
+        request = _RequestObservation(self, identity, model, endpoint, local=local, operation=operation)
         with self._lock:
             self._requests.append(request)
             self._notify(request)
@@ -65,7 +67,7 @@ class RequestInventory:
 
 
 class _RequestObservation:
-    def __init__(self, inventory, identity: str, model: str, endpoint: str, *, local: bool):
+    def __init__(self, inventory, identity: str, model: str, endpoint: str, *, local: bool, operation="inference"):
         self._inventory = inventory
         self._endpoint = endpoint.rstrip("/")
         self._model = model
@@ -75,6 +77,8 @@ class _RequestObservation:
                      "identity": identity, "local": local, "expected": True,
                      "started": False, "terminal": False, "successful": False, "not_submitted": False,
                      "invalid_events": False, "reason_code": "completion_unobserved"}
+        if operation != "inference":
+            self._row["operation"] = operation
 
     def receipt(self):
         return dict(self._row)
@@ -102,6 +106,19 @@ class _RequestObservation:
             self._native_id = run_id
             self._inventory._native_ids.add(run_id)
 
+    def _operation_matches(self, body):
+        operation = self._row.get("operation", "inference")
+        if operation == "inference":
+            return True
+        if (set(body) - {"model", "prompt", "stream", "keep_alive", "options"}
+                or body.get("prompt") != "" or body.get("stream") is not False):
+            return False
+        keep = body.get("keep_alive")
+        options = body.get("options", {})
+        return (type(keep) is int and (keep > 0 if operation == "load" else keep == 0)
+                and isinstance(options, dict) and not set(options) - {"num_ctx", "num_predict"}
+                and options.get("num_predict", 0) == 0)
+
     def transport_started(self, request):
         """Called by the owned HTTPX client, immediately before its transport send."""
         if self._inventory._before_start is not None:
@@ -116,9 +133,9 @@ class _RequestObservation:
             if self._transport is not None or self._row["terminal"]:
                 self._invalid()
             try:
-                actual_model = json.loads(request.content).get("model")
+                body = json.loads(request.content)
                 matches = (request.method == "POST" and str(request.url) == self._endpoint
-                           and actual_model == self._model)
+                           and body.get("model") == self._model and self._operation_matches(body))
             except (ValueError, TypeError, AttributeError):
                 matches = False
             if not matches:
@@ -138,12 +155,14 @@ class _RequestObservation:
     def terminal(self, model, reason, *, native_id=None, native_required=False):
         """Only a decoded native response for this exact invocation can reconcile it."""
         with self._inventory._lock:
+            operation = self._row.get("operation", "inference")
+            allowed = {"stop", "length", "end_turn", "stop_sequence", "max_tokens"} if operation == "inference" else {operation}
             if (not self._row["started"] or self._row["terminal"] or self._row["invalid_events"]
                     or model != self._model or not isinstance(reason, str)
-                    or reason not in {"stop", "length", "end_turn", "stop_sequence", "max_tokens"}
+                    or reason not in allowed
                     or (native_required and (native_id is None or native_id != self._native_id))):
                 self._invalid()
-            self._row.update(terminal=True, successful=reason in {"stop", "end_turn", "stop_sequence"},
+            self._row.update(terminal=True, successful=reason in {"stop", "end_turn", "stop_sequence", "load", "unload"},
                              reason_code="request_output_truncated" if reason in {"length", "max_tokens"} else "")
             self._inventory._notify(self)
 

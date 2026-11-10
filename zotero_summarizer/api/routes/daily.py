@@ -21,16 +21,20 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services import interaction_log
-from zotero_summarizer.services.golden import label_verdicts, verdict_effects
-from zotero_summarizer.services.triage import daily_actions, daily_select
+from zotero_summarizer.api.routes._daily_events import router as events_router
+from zotero_summarizer.api.routes._daily_members import router as members_router
+from zotero_summarizer.api.routes._daily_verdict import router as verdict_router
+from zotero_summarizer.runtime import request_memo
+from zotero_summarizer.services.triage import daily_actions, daily_select, today_exposure, today_preparation
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.storage import feeds as feeds_storage
-from zotero_summarizer.storage.feed_identity import row_feed_keys
 from zotero_summarizer.storage import repositories
 
 
 router = APIRouter()
+router.include_router(members_router)
+router.include_router(events_router)
+router.include_router(verdict_router)
 
 # ---------------------------------------------------------------------------
 # Request bodies
@@ -87,16 +91,20 @@ def _awaiting_review_total(lookback_hours: int = 168) -> int:
 
 
 def _slate_to_payload(slate: daily_select.DailySlate) -> dict[str, Any]:
-    return {
-        "papers": [asdict(paper) for paper in slate.papers],
-        "pool_size": slate.pool_size,
-        "lookback_hours": slate.lookback_hours,
-        "empty_role_events": list(slate.empty_role_events),
-        "fellback_to_recent": slate.fellback_to_recent,
-        "low_relevance_hidden": slate.low_relevance_hidden,
-        "weak_slate": slate.weak_slate,
-        "selection_policy": slate.selection_policy,
-    }
+    return asdict(slate)
+
+
+_SHELF_FIELDS = ("item_id", "stable_feed_key", "title", "feed_name", "why")
+
+
+def _shelf_payload(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Slim shelf rows (no abstract/scores) plus cached card TL;DR bullets (cache-only)."""
+    from zotero_summarizer.services.card import card
+
+    rows = [row for row in rows if row["stable_feed_key"]]
+    bullets = card.cached_bullets([row["stable_feed_key"] for row in rows])
+    return [{**{name: row[name] for name in _SHELF_FIELDS}, "bullets": bullets.get(row["stable_feed_key"], [])}
+            for row in rows]
 
 
 def _attach_saved_verdicts(papers: list[dict[str, Any]]) -> None:
@@ -136,17 +144,22 @@ async def get_daily(K: int = 5, lookback_hours: int = 168) -> dict[str, Any]:
             ),
             status_code=422,
         )
-    slate = await asyncio.to_thread(
-        daily_select.assemble_daily_slate,
-        db_path=_db_path(),
-        K=K,
-        lookback_hours=lookback_hours,
-    )
-    payload = _slate_to_payload(slate)
-    await asyncio.to_thread(_attach_saved_verdicts, payload["papers"])
-    payload["awaiting_review_total"] = await asyncio.to_thread(
-        _awaiting_review_total, lookback_hours
-    )
+    with request_memo():  # review currentness and the unhandled pool are computed once per request
+        slate = await asyncio.to_thread(
+            daily_select.assemble_daily_slate,
+            db_path=_db_path(),
+            K=K,
+            lookback_hours=lookback_hours,
+            policy="analyzed",
+        )
+        payload = _slate_to_payload(slate)
+        payload["slate_id"] = await asyncio.to_thread(today_exposure.record_slate, payload, k=K)
+        payload["unreviewed"] = await asyncio.to_thread(_shelf_payload, payload["unreviewed"])
+        payload["preparation"] = await asyncio.to_thread(today_preparation.status, _db_path())
+        await asyncio.to_thread(_attach_saved_verdicts, payload["papers"])
+        payload["awaiting_review_total"] = await asyncio.to_thread(
+            _awaiting_review_total, lookback_hours
+        )
     payload["showing"] = len(payload["papers"])
     return payload
 
@@ -357,80 +370,10 @@ async def rescore_slate() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Today-card priority verdict (feeds golden training)
-# ---------------------------------------------------------------------------
-
-
-class DailyVerdictRequest(BaseModel):
-    item_id: int = Field(..., ge=1, description="processed_feed_items PK (SlatePaper.item_id).")
-    user_priority: str = Field(
-        ..., min_length=1,
-        description="One of: must_read | should_read | could_read | dont_read.",
-    )
-    comment: str = Field(default="", description="Optional free-text rationale.")
-
-
-_VALID_DAILY_PRIORITIES = ("must_read", "should_read", "could_read", "dont_read")
-
-
-async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
-    """Write a reviewed positive or immediate negative Today label to the golden set."""
-    if body.user_priority not in _VALID_DAILY_PRIORITIES:
-        raise APIError(
-            error="validation_error",
-            message=f"user_priority must be one of {_VALID_DAILY_PRIORITIES}; got {body.user_priority!r}",
-            status_code=422,
-        )
-
-    row = await asyncio.to_thread(_load_processed_row, body.item_id)
-    if row is None:
-        raise APIError(
-            error="not_found",
-            message=f"no processed_feed_items row with id={body.item_id}",
-            status_code=404,
-        )
-
-    if body.user_priority != "dont_read" and not await asyncio.to_thread(daily_actions._materialized_key_for, row):
-        from zotero_summarizer.services.library.review_eligibility import require_review
-
-        await asyncio.to_thread(require_review, row)
-
-    golden_key = row_feed_keys(row)[0]
-
-    # Append to golden CSV (idempotent) so the row enters the training set.
-    from zotero_summarizer.services.library import review
-    await asyncio.to_thread(
-        review.append_to_golden, row,
-        label=body.user_priority, note=body.comment,
-    )
-
-    # UPSERT the manual verdict so it wins + stays visible/editable.
-    derived = (row.get("reading_priority") or "").strip() or "unknown"
-    row_id = await asyncio.to_thread(
-        label_verdicts.set_label_verdict,
-        _db_path(),
-        item_key=golden_key,
-        original_derived_priority=derived,
-        user_priority=body.user_priority,
-        surface="today_priority",
-        comment=body.comment,
-    )
-    if body.user_priority == "dont_read":
-        await asyncio.to_thread(verdict_effects.cancel_pending_feed_add, _db_path(), golden_key)
-    await asyncio.to_thread(
-        daily_actions.record_row_outcome, row, feeds_storage.OUTCOME_USER_LABELED,
-    )
-    interaction_log.log_feed_decision(
-        row=row, item_key=golden_key, surface="today_priority",
-        model_priority=derived, comment=body.comment,
-        human={"kind": "priority", "value": body.user_priority},
-    )
-    return {"id": row_id, "item_key": golden_key}
-
-
-# ---------------------------------------------------------------------------
 # Today batch keep/trash (Stage 1 of the two-stage reading flow)
 # ---------------------------------------------------------------------------
+# Per-card decision + reason chips live in ``_daily_verdict`` (POST
+# /api/daily/verdict, /api/daily/verdict/undo), mounted above.
 
 
 class BatchItemsRequest(BaseModel):
@@ -459,17 +402,6 @@ async def trash_papers(body: BatchItemsRequest) -> dict[str, Any]:
     return await asyncio.to_thread(daily_actions.trash, body.item_ids)
 
 
-def _load_processed_row(pk: int) -> dict[str, Any] | None:
-    import sqlite3
-    from zotero_summarizer.storage import feeds as feeds_storage
-    conn = sqlite3.connect(str(_db_path()))
-    conn.row_factory = sqlite3.Row
-    try:
-        return feeds_storage.get_processed_feed_item_by_pk(conn, pk)
-    finally:
-        conn.close()
-
-
 router.add_api_route("/api/daily", get_daily, methods=["GET"])
 router.add_api_route("/api/daily/pipeline", get_pipeline, methods=["GET"])
 router.add_api_route(
@@ -483,9 +415,6 @@ router.add_api_route(
 )
 router.add_api_route(
     "/api/daily/rescore-slate", rescore_slate, methods=["POST"],
-)
-router.add_api_route(
-    "/api/daily/verdict", submit_daily_verdict, methods=["POST"],
 )
 router.add_api_route(
     "/api/daily/add-to-library", add_to_library, methods=["POST"],

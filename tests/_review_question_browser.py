@@ -314,7 +314,7 @@ class BrowserLab:
                    "SELECT i.key,n.itemID,n.parentItemID,n.note,n.title FROM itemNotes n JOIN items i ON i.itemID=n.itemID"))
         if page is not None:
             write_json(self.artifact / f"indexeddb-{phase}.json", indexeddb(page))
-            page.screenshot(path=str(self.artifact / f"{phase}.png"), full_page=True)
+            page.screenshot(path=str(self.artifact / f"{phase}.png"), full_page=True, animations="disabled")
 
 
 def synthetic_lab(monkeypatch):

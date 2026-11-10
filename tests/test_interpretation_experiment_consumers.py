@@ -181,8 +181,8 @@ def test_native_renderer_absent_optional_preserves_original_html_bytes(condition
     before = deepcopy(record)
     kwargs = {} if optional == 'omitted' else {'interpretation': None if optional == 'none' else record}
     rendered = build_digest_note_html(PaperDigest.model_validate(record['digest']), **kwargs)
-    # Frozen ordinary A/B bytes captured before the optional-keyword correction.
-    assert sha256(rendered.encode()).hexdigest() == 'd7db809e6ba8208de77c7197a5e5335e951fb891ee277f9d2f613cbcc8cb61dc'
+    # Frozen A/B bytes of the whole-review digest note (digest-only path).
+    assert sha256(rendered.encode()).hexdigest() == '07809230ffabb2bb7b35ff68d8bfd8cc160aa093828948f35a48891729754237'
     assert record == before
 
 

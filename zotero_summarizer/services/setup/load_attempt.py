@@ -16,7 +16,8 @@ def current_attempt():
 
 
 class SetupAttempt:
-    def __init__(self):
+    def __init__(self, *, before_request=None):
+        self._before_request = before_request
         self.run_id = uuid4().hex
         self._state = Lock()
         self._aborted = Event()
@@ -27,6 +28,7 @@ class SetupAttempt:
         from zotero_summarizer.integrations.llm_requests import RequestInventory
 
         self._settings = None
+        self._runtime = None
         self.requests = RequestInventory(self.run_id, changed=self._requests_changed,
                                          before_start=self.require_active)
 
@@ -38,6 +40,23 @@ class SetupAttempt:
         finally:
             _CURRENT.reset(token)
 
+    @contextmanager
+    def own_runtime(self, runtime):
+        """Bind one explicit native runtime for this attempt, never a global registry."""
+        self.require_active()
+        if self._runtime is not None:
+            raise RuntimeError("An attempt already owns a local runtime")
+        self._runtime = runtime
+        try:
+            yield runtime
+        finally:
+            self._runtime = None
+
+    def observe_runtime(self, provider, model):
+        self.require_active()
+        return (self._runtime.observe(provider, model) if self._runtime is not None
+                else {"effective_envelope": None, "available_bytes": None})
+
     def _requests_changed(self, _request):
         if self._settings is not None:
             from zotero_summarizer.services.setup.doctor_requests import record_requests
@@ -46,6 +65,14 @@ class SetupAttempt:
 
     def bind_client(self, configuration, provider, model):
         """Freeze expected identity before construction; actual evidence comes from the client."""
+        return self._bind_request(configuration, provider, model, "inference")
+
+    def bind_preparation(self, configuration, provider, model, *, operation):
+        if operation not in {"load", "unload"} or not provider.is_local or provider.type != "openai":
+            raise ValueError("Preparation requires an explicit native local load/unload")
+        return self._bind_request(configuration, provider, model, operation)
+
+    def _bind_request(self, configuration, provider, model, operation):
         from zotero_summarizer.services.setup.doctor_requests import local_request_fence
 
         self.require_active()
@@ -59,14 +86,19 @@ class SetupAttempt:
         from zotero_summarizer.integrations.llm_requests import _generation_endpoint
 
         base = provider.base_url or "https://api.anthropic.com"
-        endpoint = _generation_endpoint(base, "/v1/messages" if provider.type == "anthropic" else "/chat/completions")
+        if operation == "inference":
+            endpoint = _generation_endpoint(base, "/v1/messages" if provider.type == "anthropic" else "/chat/completions")
+        else:
+            if not base.endswith("/v1"):
+                raise ValueError("Owned native preparation requires an explicit /v1 base")
+            endpoint = base[:-3] + "/api/generate"
 
         def expected():
             self.require_active()
             if provider.is_local and local_request_fence(configuration):
                 # A previous coherent invocation is allowed; an unresolved one is not.
                 raise RuntimeError("Unresolved local request ownership prevents another request")
-            return self.requests.expect(identity, model, endpoint, local=provider.is_local)
+            return self.requests.expect(identity, model, endpoint, local=provider.is_local, operation=operation)
 
         return expected
 
@@ -105,6 +137,8 @@ class SetupAttempt:
     def require_active(self) -> None:
         if self.is_abandoned():
             raise RuntimeError("Setup attempt was abandoned; no further request was submitted")
+        if self._before_request is not None:
+            self._before_request()
 
     def run(self, callback, *, timeout: float) -> dict:
         """Use the existing setup daemon-worker pattern, with a bounded waiter.
@@ -158,10 +192,12 @@ class SetupAttempt:
         if self.is_abandoned():
             return self._failure(start=previous_expected)
         completion = self.requests.summary(start=previous_expected)
-        if result.get("status") == "operational" and not completion["expected"]:
+        inference = any(row.get("operation", "inference") == "inference"
+                        for row in self.requests.receipts()[previous_expected:])
+        if result.get("status") == "operational" and not inference:
             result.update(status="fail", reason_code="request_inventory_missing",
                           detail="Callback return is not evidence of an owned native request.")
-        if completion["expected"] and not completion["successful"]:
+        if completion["expected"] and not completion["successful"] and result.get("status") == "operational":
             result.update(status="fail", reason_code="request_inventory_incomplete" if not completion["coherent"]
                           else "request_output_truncated",
                           detail="Verification requires coherent expected, transport-start and exact native terminal evidence.")

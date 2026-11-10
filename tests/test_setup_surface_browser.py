@@ -9,6 +9,7 @@ import os
 import pytest
 
 from tests.test_application_browser_live import application_browser  # noqa: F401
+from tests.test_connection_browser import connection_build  # noqa: F401 — explicit disposable build
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("ZS_APPLICATION_BROWSER_SMOKE") != "1",
@@ -24,17 +25,17 @@ _CHECKS = [
      "load_receipts": [{"admission": {"status": "unknown"}, "attempted": False}],
      "recovery": {"action": "open_ai_settings", "label": "Review endpoint settings"}},
     {"id": "rss_source", "status": "needs_action", "message": "No RSS source is enabled",
-     "recovery": {"action": "open_sources_settings", "label": "Add a source in Settings"}},
+     "recovery": {"action": "open_sources_settings", "label": "Add an RSS source"}},
     {"id": "optional_extras", "status": "unavailable", "message": "Browser extras are optional"},
 ]
 
 
-@pytest.mark.parametrize("recovery_id,label,control", [
-    ("rss-feeds", "Add a source in Settings", "#rss-feeds button"),
-    ("ai-models", "Review endpoint settings", "#ai-models input"),
+@pytest.mark.parametrize("destination,label,heading,control", [
+    ("/today?task=rss", "Add an RSS source", "RSS sources", "#rss-feeds button"),
+    ("/settings?task=connection", "Review endpoint settings", "AI models", "#ai-models button"),
 ], ids=["sources", "ai"])
 @pytest.mark.parametrize("width", [390, 1024, 1440])
-def test_setup_health_states_reflow_and_keyboard_recovery(application_browser, width, recovery_id, label, control):
+def test_setup_health_states_reflow_and_keyboard_recovery(application_browser, width, destination, label, heading, control):
     from patchright.sync_api import expect
 
     page, _client, settings, seen = application_browser
@@ -65,7 +66,7 @@ def test_setup_health_states_reflow_and_keyboard_recovery(application_browser, w
     expect(page.get_by_text("Strict offline", exact=True)).to_be_visible()
     expect(page.get_by_text("Local load safety is not established", exact=False)).to_be_visible()
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-    page.screenshot(path=str(settings.data_dir / f"setup-health-{width}.png"), full_page=True)
+    page.screenshot(path=str(settings.data_dir / f"setup-health-{width}.png"), full_page=True, animations="disabled")
     expect(page.get_by_role("button", name="Verifying…", exact=True)).to_be_disabled()
     state["status"] = "needs_action"
     state["checks"][1].update(status="ready", message="Runtime inventory finished")
@@ -74,15 +75,27 @@ def test_setup_health_states_reflow_and_keyboard_recovery(application_browser, w
     recovery = page.get_by_role("link", name=label, exact=True)
     recovery.focus()
     recovery.press("Enter")
-    expect(page).to_have_url(f"http://127.0.0.1/settings#{recovery_id}")
-    expect(page.locator(control).first).to_be_focused()
+    expect(page).to_have_url("http://127.0.0.1" + destination)
+    expect(page.get_by_role("heading", name=heading, exact=True, level=1)).to_be_focused()
+    expect(page.locator(control).first).to_be_visible()
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    page.go_back()
+    expect(page.get_by_role("heading", name="Setup saved", exact=True)).to_be_visible()
+    expect(page.get_by_role("link", name="Zotero paths", exact=True)).to_have_attribute("href", "/settings?task=zotero")
+    inputs = page.get_by_role("link", name="RSS sources", exact=True)
+    expect(inputs).to_have_attribute("href", "/today?task=rss")
+    inputs.focus()
+    inputs.press("Enter")
+    expect(page.get_by_role("heading", name="RSS sources", exact=True, level=1)).to_be_focused()
+    page.get_by_role("link", name="Back to Setup", exact=True).click()
+    expect(page).to_have_url("http://127.0.0.1/setup")
+    expect(page.get_by_role("heading", name="Setup saved", exact=True)).to_be_visible()
     assert doctor_reads
     assert not [row for row in seen if row[0] == "POST" and row[1] in {
         "/api/setup/doctor", "/api/admin/llm-models", "/api/rss/refresh",
     }]
     print("BROWSER_RECEIPT", json.dumps({"journey": "synthetic-setup-health-keyboard-recovery",
-                                        "width": width, "recovery": recovery_id,
+                                        "width": width, "recovery": destination,
                                         "states": 5, "model_loads": "not requested"}))
 
 
@@ -99,5 +112,5 @@ def test_setup_progress_reflows_with_accessible_states(application_browser, widt
     expect(current).to_have_count(1)
     expect(current).to_contain_text("Current step")
     assert "Not complete" in progress.locator(".sr-only").all_text_contents()
-    page.screenshot(path=str(settings.data_dir / f"setup-progress-{width}.png"), full_page=True)
+    page.screenshot(path=str(settings.data_dir / f"setup-progress-{width}.png"), full_page=True, animations="disabled")
     assert page.evaluate("document.documentElement.scrollWidth === document.documentElement.clientWidth")

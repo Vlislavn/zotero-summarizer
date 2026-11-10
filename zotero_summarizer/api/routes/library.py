@@ -21,8 +21,10 @@ from zotero_summarizer.services.library import (
     related,
     review_questions,
     score_tags,
+    section_summaries_job,
     university_access,
 )
+from zotero_summarizer.services.library._review_cache import export_review_audit
 from zotero_summarizer.services.library.review_fleet import fleet as review_fleet
 from zotero_summarizer.services.search import discovery
 from zotero_summarizer.services.zotero.zotero import (
@@ -173,6 +175,7 @@ async def get_reading_queue(
         reading_queue.build_reading_queue,
         include_read=include_read, limit=limit, refresh=refresh,
         collection=collection, tag=tag, search=search, semantic=semantic,
+        include_abstract=True,  # rows show a 2-line preview (``abstract_preview``)
     )
 
 
@@ -219,6 +222,12 @@ async def get_paper_render(item_key: str) -> dict[str, Any]:
     """Paper-read artifact status/metadata. Use POST ``/build`` to generate the
     HTML presentation, figures, and audit files."""
     return await asyncio.to_thread(paper_render.render_paper, item_key)
+
+
+async def get_section_summaries(item_key: str) -> dict[str, Any]:
+    """Paper-map one-liners, built on first open (idempotent): ``status`` is
+    ``running`` until the background job finishes, then ``ready`` or ``unavailable``."""
+    return await asyncio.to_thread(section_summaries_job.request, validate_paper_item_key(item_key))
 
 
 async def build_paper_render(item_key: str, req: PaperRenderBuildRequest) -> dict[str, Any]:
@@ -466,6 +475,7 @@ router.add_api_route("/api/library/reading-queue", get_reading_queue, methods=["
 router.add_api_route("/api/library/reading-queue/status", get_reading_queue_status, methods=["GET"])
 router.add_api_route("/api/library/pdf/{item_key}", get_item_pdf, methods=["GET"])
 router.add_api_route("/api/library/render/{item_key}", get_paper_render, methods=["GET"])
+router.add_api_route("/api/library/section-summaries/{item_key}", get_section_summaries, methods=["POST"])
 router.add_api_route("/api/library/render/{item_key}/build", build_paper_render, methods=["POST"])
 router.add_api_route("/api/library/render/{item_key}/presentation", get_paper_presentation, methods=["GET"])
 router.add_api_route("/api/library/render/{item_key}/pdf", get_paper_render_pdf, methods=["GET"])
@@ -473,6 +483,7 @@ router.add_api_route("/api/library/render/{item_key}/figures/{name}", get_paper_
 router.add_api_route("/api/library/ask", ask_paper, methods=["POST"])
 router.add_api_route("/api/library/questions", save_paper_question, methods=["POST"])
 router.add_api_route("/api/library/questions", get_paper_questions, methods=["GET"])
+router.add_api_route("/api/library/review-audit/{item_key}", export_review_audit, methods=["GET"])
 router.add_api_route("/api/library/deep-review/run", run_deep_review, methods=["POST"])
 router.add_api_route("/api/library/deep-review/status", get_deep_review_status, methods=["GET"])
 router.add_api_route("/api/library/review-fleet/run", run_review_fleet, methods=["POST"])

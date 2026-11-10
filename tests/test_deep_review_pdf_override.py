@@ -9,6 +9,7 @@ import types
 import pytest
 
 from zotero_summarizer.models import GoalSummary, PaperDigest, QualityEval
+from zotero_summarizer.models.providers import DefaultModelConfig, LLMRoutingConfig, ProviderConfig
 from zotero_summarizer.services.library import deep_review
 
 
@@ -18,8 +19,9 @@ def _config():
         max_text_chars=60_000,
         chunk_strategy="rank",
         map_chunk_chars=8_000,
+        context_window_tokens=256_000,
     )
-    return types.SimpleNamespace(quality_review=qr, research_goals=[])
+    return types.SimpleNamespace(quality_review=qr, research_goals=[], llm_routing=LLMRoutingConfig(providers=[ProviderConfig(name="p", base_url="https://example.test/v1", api_key_env="K")], default=DefaultModelConfig(provider="p", model="m")))
 
 
 def _wire(monkeypatch, *, detail, quality_basis="full_text"):

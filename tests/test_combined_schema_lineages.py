@@ -35,7 +35,7 @@ def _version_twelve(path, lineage):
 def test_complete_isolated_v12_lineages_upgrade_to_both_contracts_without_data_loss(tmp_path, lineage):
     path = tmp_path / "triage.sqlite"
     _version_twelve(path, lineage)
-    assert migrations.run_migrations(path, "triage", migrations.TRIAGE_MIGRATIONS) == 14
+    assert migrations.run_migrations(path, "triage", migrations.TRIAGE_MIGRATIONS) == migrations.SCHEMA_VERSION
     with _connection(path) as conn:
         assert {"proposal_json", "audit_json", "backup_path"} <= repositories.table_columns(conn, "pending_changes")
         assert "initial_window_committed" in repositories.table_columns(conn, "research_feed_telegram_channels")
@@ -44,7 +44,7 @@ def test_complete_isolated_v12_lineages_upgrade_to_both_contracts_without_data_l
         assert conn.execute("SELECT COUNT(*) FROM research_feed_conversations").fetchone()[0] == 0
         assert conn.execute("SELECT name FROM rss_feeds WHERE id=1").fetchone()[0] == "preserved"
         before = list(conn.iterdump())
-    assert migrations.run_migrations(path, "triage", migrations.TRIAGE_MIGRATIONS) == 14
+    assert migrations.run_migrations(path, "triage", migrations.TRIAGE_MIGRATIONS) == migrations.SCHEMA_VERSION
     with _connection(path) as conn:
         assert list(conn.iterdump()) == before
 

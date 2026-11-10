@@ -315,7 +315,7 @@ def test_missing_rss_source_has_typed_settings_recovery_without_writes(tmp_path)
     row = doctor._rss_source(settings)
     assert row["status"] == "needs_action"
     assert row["recovery"]["action"] == "open_sources_settings"
-    assert row["recovery"]["label"] == "Add a source in Settings"
+    assert row["recovery"]["label"] == "Add an RSS source"
     assert settings.triage_db_path.read_bytes() == before
 
 
@@ -435,11 +435,17 @@ def test_credential_change_during_doctor_cannot_restore_stale_ready(tmp_path, mo
         assert entered.wait(5)
         saved = pool.submit(lambda: asyncio.run(setup_route.save_ai_credential(
             setup_route.CredentialRequest(name="HOSTED_KEY", api_key="new credential"))))
-        assert not credential_written.is_set()  # key write waits for Doctor publication
-        resume.set()
+        try:
+            with pytest.raises(APIError) as error:
+                saved.result(timeout=2)
+            assert error.value.error == 'doctor_running'
+            assert not credential_written.is_set()  # Refused promptly, never queued under config locks.
+        finally:
+            resume.set()
         result = run.result(timeout=5)
-        saved.result(timeout=5)
-    assert result["ready"] is True  # certified old key before replacement
+    assert result["ready"] is True  # certified old key; refused replacement changed nothing
+    asyncio.run(setup_route.save_ai_credential(
+        setup_route.CredentialRequest(name="HOSTED_KEY", api_key="new credential")))
     assert credential_written.is_set()
     assert doctor.doctor_status(settings)["ready"] is False
 

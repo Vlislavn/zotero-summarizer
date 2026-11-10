@@ -40,6 +40,7 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setattr(reading_queue, "get_settings", lambda: SimpleNamespace(
         corpus_db_path=tmp_path / "c.db", triage_db_path=tmp_path / "t.db"))
     monkeypatch.setattr(repositories, "list_label_verdict_priorities", lambda db: {})
+    monkeypatch.setattr(repositories, "list_user_verdict_keys", lambda db: set())
     yield
     reading_queue.finish(error=None)
 

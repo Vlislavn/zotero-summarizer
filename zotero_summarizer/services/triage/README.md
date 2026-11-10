@@ -1,5 +1,41 @@
 # services/triage — the RSS daemon pipeline
 
+`daily_members.read_members` reads up to20 requested PKs, including old, handled
+and unavailable rows, without ranking, inference, attribution or writes. It uses
+current verdict precedence, sibling materialization/pending state and bounded
+read-only review projection. Note-delivery snapshots expose revision/target/pending,
+not note bodies. Browser membership is not a daemon queue or write authorization.
+
+`today_exposure` is the owner-approved, local-only record of Today exposure in
+`Settings.today_exposure_log_dir` (`data/today-exposure/<local day>.jsonl`, `run_log` NDJSON,
+envelope `ts/event/schema(2)/git_commit/ranker` — the Today ranker id, see `daily_select/README.md`): `today_slate` (one per `GET /api/daily`:
+`slate_id` — adopted as the browser visit id —, local `day`, policy, `gate_sha`,
+`goals_hash`, `k`, `pool_size`, members in display order with role, `exploration`
++ `pool`, priority/reason and scores), `today_event` (browser `card_shown`,
+`card_dwell`, `open_review`, `open_link`; `POST /api/daily/events`) and `note_saved`
+(length only). It is a separate file because the feedback-analysis reader treats every
+interaction-log line as a decision; Add/Trash/verdicts stay in the interaction log and
+join by `item_key` + `ts`. Ids, scores, enums and durations only. `ZS_TODAY_EXPOSURE_LOG=0`
+writes nothing and disables exploration (the per-day limit is counted from this log).
+`explored_today(day)` reads back the exploration items already shown that local day
+(only that day's file). Write failures are logged and dropped; malformed lines are skipped.
+
+`today_preparation` keeps up to 20 eligible-or-pending candidates analyzed ahead
+of Today. `plan` walks the top 60 of `daily_select.ranked_unhandled_candidates`
+(168 h, existing trash/handled/dedup guards), reuses every current result
+(negative and `needs_pdf` placeholders included) and lists unreviewed stable feed
+keys. `start` runs one background thread per process (`_flight.FlightLatch`), one
+paper at a time: headless acquisition (`allow_headed_fallback=False`; browser only
+when `university_access.headless`), then the existing `deep_review` worker with a
+`pdf_overrides` path, or a `needs_pdf` placeholder when nothing (or only a web page)
+was found. A failing key is not retried in the same process. It runs in whichever
+process ticks (the API's triage button or `feeds serve`); a one-shot `feeds tick`
+exits after at most the paper in flight. `status` derives `ready`/`left` from the
+cache; `running` is process-local. Ranking only orders the work; `daily_select`
+decides what Today shows. One `GET /api/daily` runs inside `runtime.request_memo`:
+review currentness (`deep_review.current_reviews`) and the filtered unhandled pool
+are computed once and shared by the slate, `status` and the header count.
+
 Daily selection now ranks candidates without putting them into Zotero.
 `daily_actions` checks current full-text review eligibility before any Add
 label/pending state/write; mixed batches report blocked rows as
@@ -20,7 +56,8 @@ Zotero feedItems ─feeds.run_daemon_tick→ gate(model) ─reject──> droppe
                                             └─keep──> summarization (LLM) ─score→ row
    recover_abstractless   : acquire-before-score rescue (see below)
    select.plateau_select  : daemon's materialization cutoff (kneedle elbow)
-   daily_select/          : Today's role-mixed slate (model+surprise+diversity)
+   today_preparation      : analyze top-ranked feed papers ahead of Today (background)
+   daily_select/          : Today's slate (analyzed policy for /api/daily; legacy roles)
    daily_actions          : Today "Add to library" / "Trash" (write labels)
    triage_jobs            : on-demand library triage jobs
    triage_backlog         : drain the un-triaged backlog — ML-only by default
@@ -30,9 +67,10 @@ Zotero feedItems ─feeds.run_daemon_tick→ gate(model) ─reject──> droppe
 (`gate_only=True`, `bulk_drain_gate_only` config): the classifier scores every
 survivor from embeddings + prestige with **no per-item LLM call** — fast,
 memory-safe, GPU-accelerated. Rows are written `triaged_pending` + marked read
-(`review_mode=False`) so the slate fills and the picker drains. The full-text
-LLM quality digest is **on-demand per paper** (Library → Deep Review), never run
-in bulk. **Fail-fast precondition:** the gate-only drain MANDATORILY needs a live
+(`review_mode=False`). This scoring phase does not perform full-text analysis;
+the separate bounded `today_preparation` pass runs after a tick only when
+`quality_review.auto_on_tick_k > 0`. Explicit per-paper Deep Review remains available.
+**Fail-fast precondition:** the gate-only drain MANDATORILY needs a live
 classifier gate, so the `POST /api/daily/triage-backlog` route calls
 `services.readiness.require("classifier_gate")` first — a missing gate (e.g.
 `lightgbm` uninstalled, or a retrain still in flight) returns a `503` with the real
@@ -68,7 +106,7 @@ final, as before. Skipped in `gate_only` mode (no LLM).
 | `feeds/` | the daemon orchestrator package — facade re-exports the sub-modules below |
 | `feeds/_common.py` | constants, the tick-report dataclass, low-level helpers (leaf) |
 | `feeds/_triage.py` · `feeds/_gate.py` | abstract triage + concurrent scoring + prestige · classifier gate + audit + retrain. Review payloads carry `summary_schema_version=1`, so delayed materialization after restart reconstructs the full note and rejects future contracts. |
-| `feeds/_daily.py` · `feeds/_tick.py` | daily plateau selection + refine · one daemon tick (orchestration). After triage the tick can auto-review the Today slate IN-PLACE via `_auto_review_slate` (gated by `quality_review.auto_on_tick_k`, no Zotero write). The in-place pass is fire-and-forget on the shared `deep_review` pool and skips only reviews whose PDF/model/config identity is still current. A third step `_auto_render_slate` (gated by `quality_review.render_on_tick_k`, default 3) then builds the paper brief (presentation HTML/audit JSON/figures, no Markdown sidecar) for the TOP-K feed papers — only keys ALREADY reviewed and still current — via `paper_render.start_build`. So a top feed paper opens with the same brief as a library item (`/paper/:stable_feed_key`). On "Add to library", `daily_actions._carry_renders_best_effort` rebuilds the render under the new Zotero key |
+| `feeds/_daily.py` · `feeds/_tick.py` | daily plateau selection + refine · one daemon tick (orchestration). After triage the tick starts Today preparation (`_auto_prepare_today` → `today_preparation`, gated by `quality_review.auto_on_tick_k` = papers per run, 0 = off; no Zotero write). A third step `_auto_render_slate` (gated by `quality_review.render_on_tick_k`, default 3) then builds the paper brief (presentation HTML/audit JSON/figures, no Markdown sidecar) for the TOP-K feed papers — only keys ALREADY reviewed and still current — via `paper_render.start_build`. So a top feed paper opens with the same brief as a library item (`/paper/:stable_feed_key`). On "Add to library", `daily_actions._carry_renders_best_effort` rebuilds the render under the new Zotero key |
 | `feeds/_tick_phases.py` · `feeds/_rescue.py` | the discrete tick phases · capped acquire-before-score policies and shared fetch/re-score primitive |
 | `feeds/_outcomes.py` · `feeds/_loop.py` | outcome detection → feedback · the long-running asyncio loop. `_outcomes` also appends an `outcome_resolved` event to the agentic interaction log (`services.interaction_log.log_behavioural_outcome`) — the daemon-resolved 7-day engaged/moved/trashed signal, joined to the at-triage verdict by `feed_item_id`; this is the second event producer (daemon thread, shared UTC stamp) |
 | `summarization.py` | LLM summarize/refine pipeline, including optional exact-URL `method_and_code`; `run_abstract_dry` reuses its real prompt/scoring path for Doctor but omits corpus context and writes |
@@ -79,14 +117,14 @@ final, as before. Skipped in `gate_only` mode (no LLM).
 | `triage_jobs.py` | owns on-demand triage workers and their item task groups; cancellation is `cancelling` until blocking work drains, then `cancelled`; job snapshots and cancellation/start writes serialize under the existing start lock |
 | `_execution.py` | context-preserving blocking calls that retain thread ownership on timeout/task cancellation, plus cooperative pipeline stop checks; a deadline stops subsequent work and drains the current call before releasing the slot |
 | `triage_backlog.py` | single-thread **ML-only** drain of un-triaged feed backlog (gate scores; no LLM); the UI button never auto-materialises into the Inbox; `status()` surfaces `gate_reject_rate`. On completion it **auto-rescores the slate** (`rescored`/`rescore_error` in `status()`) so freshly-drained rows rank consistently with what was already there |
-| `rescore_slate.py` | re-score the CURRENT Today slate in place with the live gate; rewrites only the gate-derived fields via `storage.feeds.update_scores` — never a card's decision/read-status, and skips already-handled rows so nothing is re-surfaced. It is now triggered **automatically** (not just by `POST /api/daily/rescore-slate`): after a backlog drain, after any gate retrain (daemon or UI `install_gate`), and at startup for a cached gate — so Today always reflects the current model |
+| `rescore_slate.py` | re-score the CURRENT Today slate in place with the live gate; rewrites only the gate-derived fields via `storage.feeds.update_scores` — never a card's decision/read-status, and skips already-handled rows so nothing is re-surfaced. It is now triggered **automatically** (not just by `POST /api/daily/rescore-slate`): after a backlog drain, after any gate retrain (daemon or UI `install_gate`), and at startup for a cached gate — so new Today selections reflect the current model; retained shortlist scores/reasons remain selection-time observations |
 | `daily_select/` | the role-allocated Today slate (see its README) |
 
 **Source: the app-owned RSS pool.** Since the app-RSS migration the daemon's
 default reader is `integrations/app_rss.py` (`AppRssReader`): subscriptions live
 in the app's `rss_feeds` table (seed via Settings or `POST /api/rss/import-zotero`),
 and each tick fetches upstream RSS/Atom directly into `rss_items` — rotating
-least-recently-fetched-first so a bounded pass covers EVERY enabled feed. The
+least-recently-fetched-first so a bounded pass covers EVERY enabled feed; nothing is cut before dedupe (arXiv queries are paged to the watermark/`feeds.backfill_days`), while LLM work stays bounded by `daemon_batch_size` per tick. The
 pipeline stays source-agnostic (any public RSS/Atom URL: arXiv, bioRxiv,
 **PubMed**, HackerNoon); `_tick_dedup` dedups cross-feed on normalized DOI/arXiv. **Zotero
 stays in sync through a separate OPTIONAL `ZoteroReader`/`ZoteroWriter` pair**
@@ -122,7 +160,11 @@ the reading-score cache and interaction log; a training CSV hash is not a model 
 It reuses `daily_select._fetch_primary_unhandled` with the slate and its counter:
 handled/trash/content/GUID filtering precedes fallback and its cap; mixed SQL/ISO
 timestamps are compared as UTC instants. There is no separate rescore candidate
-policy; only abstract-less survivors are omitted from gate prediction.
+policy; only abstract-less survivors are omitted from gate prediction. Reconstructed
+items retain the original numeric feed-item cache key, so unchanged title/abstract
+content reuses the live gate's SPECTER2 vectors instead of loading the encoder and
+recomputing them after every drain. Legacy rows without a feed-item ID keep their
+GUID/row fallback; cache content/revision checks remain unchanged.
 
 Job cancellation returns `cancelling` / `cancelled=false` while work is still
 active; poll the existing status endpoint (MCP forwards the same values).

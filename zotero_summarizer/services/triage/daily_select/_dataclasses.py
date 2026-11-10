@@ -33,6 +33,8 @@ class SlatePaper:
     # ``shap_contribs_json.aux_context.max_author_h_index``. ``None`` when
     # the paper has no OpenAlex match yet — the UI hides the badge.
     max_author_h_index: int | None = None
+    # The LAST author's own h-index (``aux_context.last_author_h_index``); None = unknown.
+    last_author_h_index: int | None = None
     # Provenance: the RSS feed this item came from (``processed_feed_items.
     # feed_name``). The bucket/role is carried by ``role`` above. Empty when
     # the row predates feed_name capture.
@@ -68,6 +70,12 @@ class SlatePaper:
     selection_evidence: dict[str, Any] = field(
         default_factory=lambda: {"basis": "not_observed"},
     )
+    # Analyzed policy only: ``_recommendation.recommendation`` for the joined current
+    # review ({eligible, reason, priority, consumption}). Empty for legacy slates.
+    recommendation: dict[str, Any] = field(default_factory=dict)
+    # Analyzed policy only: ``{status, reason}`` of the joined review (outdated-but-same-PDF
+    # stays on Today, badged); ``None`` for legacy slates.
+    review_freshness: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +106,8 @@ class DailySlate:
     weak_slate: bool = False
     # Assembly supplies its actually resolved mode, including for an empty slate.
     selection_policy: str = "not_observed"
+    # Analyzed policy: top-ranked pool papers with no review at all (``role="unreviewed"``).
+    unreviewed: list[SlatePaper] = field(default_factory=list)
 
 
 __all__ = ["SlatePaper", "DailySlate"]

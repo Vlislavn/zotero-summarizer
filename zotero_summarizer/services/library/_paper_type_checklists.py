@@ -44,6 +44,7 @@ class PaperType(str, Enum):
     POLICY = "policy"
     THEORY = "theory"
     CASE_REPORT = "case_report"
+    EXPERIENCE_REPORT = "experience_report"
     EDITORIAL = "editorial"
     GENERIC_EMPIRICAL = "generic_empirical"
     GENERIC_REVIEW = "generic_review"
@@ -104,6 +105,8 @@ _AMSTAR2 = "https://www.bmj.com/content/358/bmj.j4008"
 _SANRA = "https://pmc.ncbi.nlm.nih.gov/articles/PMC6434870/"
 _WACHSMUTH = "https://aclanthology.org/E17-1017/"
 _CARE = "https://www.care-statement.org/"
+_SIGSOFT_CASE = "https://github.com/acmsigsoft/EmpiricalStandards/blob/master/docs/standards/CaseStudy.md"
+_SIGSOFT_GENERAL = "https://github.com/acmsigsoft/EmpiricalStandards/blob/master/docs/standards/GeneralStandard.md"
 
 
 # ---- reusable item groups -----------------------------------------------------------
@@ -205,6 +208,13 @@ def _argument_items() -> tuple[ChecklistItem, ...]:
     )
 
 
+def _position_items() -> tuple[ChecklistItem, ...]:
+    return _argument_items() + (
+        ChecklistItem("evidence_primary", "Is at least one central premise backed by primary evidence (data, a measurement, a worked example or case), not only by citations to other opinions?", "Argument quality (Wachsmuth); SIGSOFT General", _SIGSOFT_GENERAL, critical=True),
+        ChecklistItem("falsifiable", "Does the paper say what observation or condition would show its thesis wrong?", "Argument quality (Wachsmuth)", _WACHSMUTH),
+    )
+
+
 def _policy_items() -> tuple[ChecklistItem, ...]:
     return _argument_items() + (
         ChecklistItem("consensus_process", "Is the recommendation/consensus process described (stakeholders, method e.g. Delphi)?", "Consensus-reporting practice", _CONSORT_AI),
@@ -227,6 +237,16 @@ def _case_report_items() -> tuple[ChecklistItem, ...]:
         ChecklistItem("intervention_outcome", "Are the intervention and its outcomes described?", "CARE", _CARE, critical=True),
         ChecklistItem("consent", "Is informed consent / de-identification stated?", "CARE", _CARE),
         ChecklistItem("generalizability", "Are generalizability caveats acknowledged?", "CARE", _CARE),
+    )
+
+
+def _experience_report_items() -> tuple[ChecklistItem, ...]:
+    # Judges how far the claims go beyond what was measured (not a controlled-study bar);
+    # outcome/baseline items are "na" when the paper claims no outcome / improvement.
+    return (
+        ChecklistItem("outcome_measured", "Are the key outcomes backed by measured records (logs, invoices, counts, timings) rather than only estimates or recollection (na if the paper claims no outcome)?", "ACM SIGSOFT Empirical Standards (Case Study)", _SIGSOFT_CASE, critical=True),
+        ChecklistItem("comparison_baseline", "Is there a before-state or an alternative to compare against for each claimed improvement (na if no improvement is claimed)?", "ACM SIGSOFT Empirical Standards (General)", _SIGSOFT_GENERAL, critical=True),
+        ChecklistItem("claims_match_evidence", "Do the conclusions stay within what was actually observed (no extrapolation from estimates, no causal claim from a single uncontrolled change)?", "ACM SIGSOFT Empirical Standards (General)", _SIGSOFT_GENERAL, critical=True),
     )
 
 
@@ -261,7 +281,7 @@ CHECKLISTS: dict[PaperType, ChecklistSpec] = {
         _narrative_review_items(), "Survey"),
     PaperType.POSITION: ChecklistSpec(
         (Family.ARG,), (("Argument quality (Wachsmuth)", _WACHSMUTH),),
-        _argument_items(), "Position / perspective"),
+        _position_items(), "Position / perspective"),
     PaperType.POLICY: ChecklistSpec(
         (Family.ARG,), (("Argument quality (Wachsmuth)", _WACHSMUTH),),
         _policy_items(), "Policy / framework / guideline"),
@@ -270,7 +290,10 @@ CHECKLISTS: dict[PaperType, ChecklistSpec] = {
         _theory_items(), "Theory / analysis"),
     PaperType.CASE_REPORT: ChecklistSpec(
         (Family.CLIN,), (("CARE", _CARE),),
-        _case_report_items(), "Case report"),
+        _case_report_items(), "Clinical case report"),
+    PaperType.EXPERIENCE_REPORT: ChecklistSpec(
+        (Family.REPRO, Family.ARG), (("ACM SIGSOFT Empirical Standards (Case Study, General)", _SIGSOFT_CASE),),
+        _experience_report_items(), "Experience report / practitioner case study"),
     PaperType.EDITORIAL: ChecklistSpec(
         (Family.ARG,), (("Argument quality (Wachsmuth)", _WACHSMUTH),),
         _argument_items(), "Editorial / commentary"),

@@ -10,11 +10,13 @@ import pytest
 from tests._interpretation_experiment import CARD, PAYLOAD, TEXT, ScriptedClient, inputs, reply, run_review
 from zotero_summarizer.integrations.llm import InstrumentedLLMClient, build_response_format
 from zotero_summarizer.models import PaperDigest
+from zotero_summarizer.models.digest_generation import PaperDigestGeneration, InterpretationDigestGeneration
 from zotero_summarizer.models.interpretation import InterpretationDigest, InterpretationItem
 from zotero_summarizer.services.library import interpretation, quality_review
 from zotero_summarizer.services.library._digest_audit import digest_contract_payload
 from zotero_summarizer.services.library._interpretation_trace import Trace
 from zotero_summarizer.services.library._prompt_security import untrusted_input
+from tests._interpretation_experiment import generates
 
 REQUIRED = ('read_decision', 'read_why', 'read_parts', 'skip_parts', 'estimated_read_minutes',
             'original_value', 'writing_friction', 'writing_reasons')
@@ -37,7 +39,7 @@ def test_off_keeps_base_prompt_model_serialization_calls_and_no_extra_io(monkeyp
                                          focus_prompt='Methods')
     goals = '; '.join(config.research_goals) or '(not specified)'
     assert client.calls[0] == (quality_review._digest_prompt(config.prompts.paper_digest, 'Paper', TEXT, goals,
-                                                            'Methods'), PaperDigest, {})
+                                                            'Methods'), PaperDigestGeneration, {})
     assert digest.model_dump(mode='json') == PaperDigest.model_validate(PAYLOAD).model_dump(mode='json')
     assert len(client.calls) == 2 and 'interpretation' not in digest.model_dump()
     forbidden.assert_not_called()
@@ -156,14 +158,15 @@ def test_c_uses_same_selected_schema_on_generation_parse_retry_and_correction(fo
     _, config, _ = inputs()
     digest = quality_review.assess_digest(title='Paper', full_text=TEXT, config=config, llm=adapter,
         response_format=build_response_format(PaperDigest) if format_route == 'caller' else None)
-    generated = [(prompt, model, kwargs) for prompt, model, kwargs in provider.calls if issubclass(model, PaperDigest)]
-    assert len(generated) == 3 and all(model is InterpretationDigest for _, model, _ in generated)
-    assert all(interpretation.CARD_REQUEST in prompt for prompt, _, _ in generated)
+    generated = [(prompt, model, kwargs) for prompt, model, kwargs in provider.calls if generates(model)]
+    assert len(generated) == 3 and all(model is InterpretationDigestGeneration for _, model, _ in generated[:2])
+    assert all(interpretation.CARD_REQUEST in prompt for prompt, _, _ in generated[:2])
     assert 'previous reply was not valid' in generated[1][0]
-    assert 'failed source verification' in generated[2][0]
+    assert 'ONLY the fields below failed' in generated[2][0] and generated[2][1].__name__ == 'DigestFieldRepair'
     if format_route != 'prompt':
-        assert all(kwargs['response_format'] == build_response_format(InterpretationDigest) for _, _, kwargs in generated)
-    assert digest.key_findings == PAYLOAD['key_findings'] and adapter.draft == [CARD]
+        assert all(kwargs['response_format'] == build_response_format(InterpretationDigestGeneration) for _, _, kwargs in generated[:2])
+        assert generated[2][2]['response_format'] == build_response_format(generated[2][1])
+    assert digest.key_findings == PAYLOAD['key_findings'] and adapter.draft == [dict(CARD, rationale='First attempt')]
 
 
 @pytest.mark.parametrize('card', [None, [], [CARD]])
@@ -173,7 +176,7 @@ def test_optional_content_never_adds_generator_retry(card, typed_client):
     client = ScriptedClient(cards=False, responses=[reply(payload, 'parsed' if typed_client else 'dict')])
     result = run_review(client)
     assert result['digest']['key_findings'] == PAYLOAD['key_findings']
-    assert sum(issubclass(model, PaperDigest) for _, model, _ in client.calls) == 1
+    assert sum(generates(model) for _, model, _ in client.calls) == 1
     assert len(client.calls) == (3 if card else 2)
 
 
@@ -193,12 +196,13 @@ def test_base_evidence_and_original_spans_cannot_certify_optional_scientific_con
 @pytest.mark.parametrize('failure', ['source', 'parse', 'generator', 'base_rejected', 'verifier', 'correction', 'second_verifier'])
 def test_assessment_failure_clears_existing_collector_and_never_exposes_first_attempt(failure):
     # There is no public optional collector: a failed invocation cannot return a record.
-    client = ScriptedClient(cards=False, responses=[PAYLOAD | {'tldr': 'Unreported 99999%', 'interpretation': [CARD]}] * 2)
+    # #191: the correction may run twice (no-reasoning attempt, then one escalation), so the scripted failures cover both.
+    client = ScriptedClient(cards=False, responses=[PAYLOAD | {'tldr': 'Unreported 99999%', 'interpretation': [CARD]}] * 3)
     paper, _, _ = inputs()
     if failure == 'source':
         paper['text'] = ''
     elif failure in {'parse', 'correction'}:
-        client.responses = ['', ''] if failure == 'parse' else [client.responses[0], '']
+        client.responses = ['', ''] if failure == 'parse' else [client.responses[0], '', '']
     elif failure == 'generator':
         client.pydantic_prompt = Mock(side_effect=RuntimeError('generator unavailable'))
     elif failure in {'verifier', 'second_verifier'}:
@@ -207,7 +211,7 @@ def test_assessment_failure_clears_existing_collector_and_never_exposes_first_at
         attempts = []
         def unavailable(**kwargs):
             value = original(**kwargs)
-            if issubclass(kwargs['pydantic_model'], PaperDigest):
+            if generates(kwargs['pydantic_model']):
                 return value
             attempts.append(value)
             if failure == 'second_verifier' and len(attempts) == 1:
@@ -221,9 +225,9 @@ def test_assessment_failure_clears_existing_collector_and_never_exposes_first_at
         assert client.calls == []
 
 
-def test_correction_missing_card_replaces_not_reuses_first_attempt():
+def test_field_repair_leaves_the_first_attempt_card_for_its_own_verification():
     client = ScriptedClient(cards=False, responses=[PAYLOAD | {'tldr': 'Unreported 99999%', 'interpretation': [CARD]}, PAYLOAD])
     result = run_review(client)
-    assert result['interpretation'] == {'status': 'unavailable'}
+    assert result['interpretation']['status'] == 'accepted' and result['interpretation']['items'] == [CARD]
     assert result['digest']['key_findings'] == PAYLOAD['key_findings']
-    assert len(client.calls) == 3
+    assert len(client.calls) == 4

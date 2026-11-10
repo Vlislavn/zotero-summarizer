@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from zotero_summarizer.models import PaperDigest
+from zotero_summarizer.models.digest_generation import PaperDigestGeneration
 from zotero_summarizer.services.library import (
     _paper_read_brief as brief, _paper_read_html as html, _paper_type_checklists as pc,
     _review_cache, paper_type, quality_eval, quality_review,
@@ -27,7 +28,6 @@ QUALITY = {"quality_band": "highlight", "basis": "full_text", "grade": "B", "pap
     ({"writing_friction": "high", "writing_reasons": ["§2 uses the central state before defining it."]},
      QUALITY, "skim", "writing_friction"),
     ({}, {**QUALITY, "quality_band": "flag"}, "skim", "weak_evidence"),
-    ({}, {**QUALITY, "overstatements": ["A proposal presented as validated."]}, "skim", "weak_evidence"),
     ({"novelty": 2, "significance": 2, "clarity": 5}, QUALITY, "skim", "idea_value_not_high"),
     ({"writing_friction": None}, QUALITY, "skim", "writing_not_assessed"),
     ({"basis": "abstract"}, QUALITY, "skim", "full_text_not_confirmed"),
@@ -37,14 +37,14 @@ QUALITY = {"quality_band": "highlight", "basis": "full_text", "grade": "B", "pap
 ])
 def test_read_intersection_preserves_the_idea_and_independent_signals(changes, quality, expected, flag):
     source = {**DIGEST, **changes}
-    before = deepcopy((source, quality, HIT))
+    before = deepcopy((source, quality))
 
-    applied, raw, flags = propose.apply_reading_policy(source, quality, HIT)
+    applied, raw, flags = propose.apply_reading_policy(source, quality)
 
     assert applied["read_decision"] == expected and raw == "read"
     assert applied["read_parts"] == source["read_parts"]
     assert applied["novelty"] == source["novelty"]
-    assert (source, quality, HIT) == before
+    assert (source, quality) == before
     assert (flag in flags) if flag else not flags
     if flag == "weak_evidence":
         assert "claims not established" in applied["read_why"]
@@ -52,7 +52,7 @@ def test_read_intersection_preserves_the_idea_and_independent_signals(changes, q
 
 def test_cap_without_legacy_targets_withholds_instead_of_inventing_a_skim():
     applied, raw, flags = propose.apply_reading_policy(
-        {**DIGEST, "read_parts": [], "writing_friction": "high"}, QUALITY, HIT,
+        {**DIGEST, "read_parts": [], "writing_friction": "high"}, QUALITY,
     )
     assert raw == "read" and applied["read_decision"] == ""
     assert "reading_targets_not_assessed" in flags
@@ -62,8 +62,8 @@ def test_cap_without_legacy_targets_withholds_instead_of_inventing_a_skim():
 def test_existing_skim_is_qualified_when_evidence_is_weak_and_projection_is_idempotent():
     source = {**DIGEST, "read_decision": "skim"}
     quality = {**QUALITY, "quality_band": "flag"}
-    applied, _, flags = propose.apply_reading_policy(source, quality, HIT)
-    repeated, _, repeated_flags = propose.apply_reading_policy(applied, quality, HIT)
+    applied, _, flags = propose.apply_reading_policy(source, quality)
+    repeated, _, repeated_flags = propose.apply_reading_policy(applied, quality)
     assert applied == repeated and flags == repeated_flags == ["weak_evidence"]
     assert "claims not established" in applied["read_why"]
     assert source["read_why"] == DIGEST["read_why"]
@@ -79,13 +79,14 @@ def test_independent_quality_grade_wins_including_explicit_ungraded(grade, basis
 
 
 def test_new_schema_preserves_raw_high_friction_action_and_legacy_unknown():
-    source = {**DIGEST, "writing_friction": "high", "writing_reasons": ["§2 omits a state transition."]}
+    source = {**PaperDigest().model_dump(exclude={'basis'}), **DIGEST,
+              "writing_friction": "high", "writing_reasons": ["§2 omits a state transition."]}
     parsed = quality_review._coerce_digest(source)
     assert parsed.read_decision == "read"
-    assert propose.apply_reading_policy(parsed.model_dump(), QUALITY, HIT)[0]["read_decision"] == "skim"
+    assert propose.apply_reading_policy(parsed.model_dump(), QUALITY)[0]["read_decision"] == "skim"
     assert PaperDigest.model_validate({"read_decision": "read"}).writing_friction is None
     with pytest.raises(ValueError, match="explicit writing assessment"):
-        quality_review._coerce_digest({**DIGEST, "writing_friction": None})
+        quality_review._coerce_digest({**source, "writing_friction": None})
 
 
 def test_cache_reads_and_current_bulk_projection_preserve_raw_bytes_and_repeat_safely(tmp_path, monkeypatch):
@@ -193,12 +194,13 @@ def test_high_friction_is_generated_in_the_existing_digest_call(monkeypatch):
     from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 
     calls = []
-    source = {**DIGEST, "writing_friction": "high", "writing_reasons": ["§2 omits a state transition."]}
+    source = {**PaperDigest().model_dump(exclude={'basis'}), **DIGEST,
+              "writing_friction": "high", "writing_reasons": ["§2 omits a state transition."]}
     model = SimpleNamespace(pydantic_prompt=lambda **kwargs: calls.append(kwargs) or source)
     monkeypatch.setattr(_digest_verification, "verify_digest", lambda *_args, **_kwargs: None)
     result = quality_review.assess_digest(title="Study", full_text="A concept with a missing exposition link.",
                                           config=_default_goals_config(), llm=model)
-    assert len(calls) == 1 and calls[0]["pydantic_model"] is PaperDigest
+    assert len(calls) == 1 and calls[0]["pydantic_model"] is PaperDigestGeneration
     assert result.writing_reasons == source["writing_reasons"] and result.read_decision == "read"
 
 
@@ -263,18 +265,17 @@ def test_standalone_cache_identity_includes_reused_checklist_and_policy_sources(
 
 
 @pytest.mark.parametrize("decision", ["read", "skim", "skip"])
-@pytest.mark.parametrize("concern", [{"quality_band": "flag"}, {"overstatements": ["Unsupported claim."]},
-                                     {"quality_band": "neutral", "missing_critical": ["scope_match"]}])
+@pytest.mark.parametrize("concern", [{"quality_band": "flag"}, {"quality_band": "neutral", "missing_critical": ["scope_match"]}])
 def test_material_evidence_caveat_is_independent_of_raw_reading_action(decision, concern):
     source = {**DIGEST, "read_decision": decision}
     quality = {**QUALITY, **concern}
-    applied, raw, flags = propose.apply_reading_policy(source, quality, HIT)
+    applied, raw, flags = propose.apply_reading_policy(source, quality)
     assert raw == decision
     assert "weak_evidence" in flags
     assert "Concept/hypothesis source only; claims not established." in applied["read_why"]
     assert applied["read_decision"] == ("skim" if decision == "read" else decision)
     assert source["read_why"] == DIGEST["read_why"]
-    assert propose.apply_reading_policy(applied, quality, HIT)[0] == applied
+    assert propose.apply_reading_policy(applied, quality)[0] == applied
 
 
 @pytest.mark.parametrize("quality", [{}, {"quality_band": "neutral"},

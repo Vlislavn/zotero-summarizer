@@ -20,7 +20,7 @@ class EnrichedClient(ScriptedClient):
 
     def pydantic_prompt(self, *, pydantic_model, **kwargs):
         value = super().pydantic_prompt(pydantic_model=pydantic_model, **kwargs)
-        if pydantic_model is PaperDigest:
+        if issubclass(pydantic_model, PaperDigest):
             return EnrichedDigest.model_validate(value | {'unrelated_metadata': self.metadata})
         return value
 

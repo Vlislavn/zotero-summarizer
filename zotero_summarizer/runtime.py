@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import TYPE_CHECKING, Any
@@ -67,6 +70,9 @@ class RuntimeState:
     # In-flight / persisted triage jobs, keyed by job_id.
     triage_jobs: dict[str, Any] = field(default_factory=dict)
 
+    # Bytes from which the runtime config was loaded/published; no config/secrets here.
+    config_disk_revision: str | None = None
+
     # Serialises concurrent corpus writes (set to an asyncio.Lock at startup).
     corpus_write_lock: "asyncio.Lock | None" = None
 
@@ -111,3 +117,34 @@ def get_context() -> AppContext:
         set_context(AppContext(settings=Settings.load()))
     assert _context is not None
     return _context
+
+
+_request_memo: ContextVar[dict[Any, Any] | None] = ContextVar("request_memo", default=None)
+
+
+@contextmanager
+def request_memo() -> Iterator[None]:
+    """Scope for :func:`memoized` values: one HTTP request / one computation pass.
+
+    Nesting joins the outer scope. The dict is shared by ``asyncio.to_thread``
+    copies of the context; it is dropped on exit, never a cross-request cache."""
+    if _request_memo.get() is not None:
+        yield
+        return
+    token = _request_memo.set({})
+    try:
+        yield
+    finally:
+        _request_memo.reset(token)
+
+
+def memoized(key: Any, compute: Callable[[], Any]) -> Any:
+    """``compute()`` once per :func:`request_memo` scope; plain call outside one.
+
+    Callers must not mutate the shared value."""
+    memo = _request_memo.get()
+    if memo is None:
+        return compute()
+    if key not in memo:
+        memo[key] = compute()
+    return memo[key]

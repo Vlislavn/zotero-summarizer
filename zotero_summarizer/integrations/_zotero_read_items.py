@@ -417,20 +417,7 @@ class ZoteroItemsMixin:
         """Return rich metadata, notes, tags, collections, and attachments for one item."""
 
         def _read(conn: sqlite3.Connection) -> dict[str, Any] | None:
-            item_row = conn.execute(
-                f"""
-                SELECT i.itemID, i.key, i.dateAdded, i.dateModified, i.libraryID, it.typeName AS item_type
-                FROM items i
-                JOIN itemTypes it ON it.itemTypeID = i.itemTypeID
-                LEFT JOIN deletedItems di ON di.itemID = i.itemID
-                WHERE i.key = ?
-                  AND i.libraryID = ({_USER_LIBRARY_ID_SELECT})
-                  AND di.itemID IS NULL
-                  AND it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
-                LIMIT 1
-                """,
-                (item_key,),
-            ).fetchone()
+            item_row = self._bibliographic_item_row(conn, item_key)
             if not item_row:
                 return None
 

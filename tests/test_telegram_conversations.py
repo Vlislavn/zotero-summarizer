@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from copy import deepcopy
-from unittest.mock import Mock
 
 import pytest
 
@@ -15,7 +13,6 @@ from zotero_summarizer.models.telegram_discussion import (
 )
 from zotero_summarizer.integrations.telegram_threads import TelethonConversationClient
 from zotero_summarizer.services.research_feed import telegram_review
-from zotero_summarizer.services.research_feed.profile import load_profile
 from zotero_summarizer.storage import migrations, repositories, research_feed_conversations as store
 from telethon.tl import functions, types
 
@@ -36,16 +33,6 @@ def response():
     return {"topics": [{"title": "Claim evaluation", "source_ids": [citation["source_id"]],
         "context": claim, "news": [], "discussion": [claim], "contrasts": [],
         "evidence": [], "caveats": [claim], "implications": []}]}
-
-
-def generated_response(evidence_id="e1"):
-    value = deepcopy(response())
-    for topic in value["topics"]:
-        del topic["source_ids"]
-        for name in ("context", "news", "discussion", "contrasts", "evidence", "caveats", "implications"):
-            for claim in [topic[name]] if name == "context" else topic[name]:
-                claim["citations"] = [{"evidence_id": evidence_id}]
-    return value
 
 
 def test_target_normalizes_public_links_and_rejects_private_or_wrong_scope():
@@ -146,54 +133,6 @@ def test_citations_are_bound_to_exact_original_not_other_peer_or_thread():
         telegram_review.validate_topics(bad, [batch])
 
 
-def test_remote_default_never_receives_discussion_and_no_implicit_route(tmp_path, monkeypatch):
-    from zotero_summarizer.models import GoalsConfig
-    from zotero_summarizer.services.llm import factory
-    settings = _settings(tmp_path)
-    profile = load_profile(settings.data_dir)
-    from tests.test_research_feed_telegram import _project
-    config = GoalsConfig.model_validate(json.loads(_project(tmp_path).config_path.read_text()))
-    build = Mock(side_effect=AssertionError("must refuse before client construction"))
-    monkeypatch.setattr(factory, "build_client_for_provider", build)
-    with pytest.raises(ValueError, match="local"):
-        telegram_review.generate(config, profile, [snapshot()])
-    build.assert_not_called()
-
-
-def test_explicit_local_selection_single_attempt_untrusted_input_and_budget(tmp_path, monkeypatch):
-    from zotero_summarizer.models import GoalsConfig
-    from zotero_summarizer.models.providers import LLMRoutingConfig, ProviderConfig, DefaultModelConfig
-    from zotero_summarizer.models.telegram_discussion import TelegramModelSelection
-    from zotero_summarizer.services.llm import factory
-    from tests.test_research_feed_telegram import _project
-    config = GoalsConfig.model_validate(json.loads(_project(tmp_path).config_path.read_text()))
-    config.llm_routing = LLMRoutingConfig(providers=[ProviderConfig(name="local", base_url="http://127.0.0.1:11434/v1", api_key_env="LOCAL")],
-        default=DefaultModelConfig(provider="local", model="not-selected"))
-    profile = load_profile(_settings(tmp_path).data_dir)
-    profile.telegram_model = TelegramModelSelection(provider="local", model="synthetic-model")
-    profile.telegram_limits = TelegramLimits(context_tokens=32768)
-    client = Mock(); client.pydantic_prompt.return_value = generated_response()
-    build = Mock(return_value=client); monkeypatch.setattr(factory, "build_client_for_provider", build)
-    review, identity = telegram_review.generate(config, profile, [snapshot()])
-    assert review.topics and identity["model"] == "synthetic-model"
-    assert identity["source_hashes"] == [snapshot().content_hash]
-    assert client.pydantic_prompt.call_count == 1
-    prompt = client.pydantic_prompt.call_args.args[0]
-    assert "<untrusted_input>" in prompt and "participant claim" in prompt
-    assert build.call_args.args[0].num_ctx == profile.telegram_limits.context_tokens
-    schema = client.pydantic_prompt.call_args.args[1].model_json_schema()
-    required = len(prompt.encode()) + len(json.dumps(schema, ensure_ascii=False).encode()) + profile.telegram_limits.output_tokens + 1024
-    boundary = profile.model_copy(deep=True)
-    boundary.telegram_limits = boundary.telegram_limits.model_copy(update={"context_tokens": required - 1})
-    with pytest.raises(ValueError, match="context budget"):
-        telegram_review.generate(config, boundary, [snapshot()])
-    assert build.call_count == 1
-    profile.telegram_limits = TelegramLimits(prompt_characters=1000)
-    with pytest.raises(ValueError, match="budget"):
-        telegram_review.generate(config, profile, [snapshot("x" * 1001)])
-    assert client.pydantic_prompt.call_count == 1
-
-
 @pytest.mark.parametrize("reverse", [False, True])
 def test_known_linked_news_mirror_is_not_independent_discussion_in_any_group_order(reverse):
     from zotero_summarizer.models.research_feed import TelegramPost
@@ -224,26 +163,6 @@ def test_known_linked_news_mirror_is_not_independent_discussion_in_any_group_ord
         telegram_review.validate_topics(forged, batches)
 
 
-def test_compact_multi_source_prompt_excludes_redundant_provenance_and_admits_explicit_context(tmp_path):
-    from tests.test_research_feed_telegram import _project
-    from zotero_summarizer.models import GoalsConfig
-    from zotero_summarizer.models.providers import ProviderConfig
-    from zotero_summarizer.models.research_feed import TelegramModelSelection
-    settings = _project(tmp_path)
-    config = GoalsConfig.model_validate(json.loads(settings.config_path.read_text()))
-    config.llm_routing.providers.append(ProviderConfig(name="local", base_url="http://127.0.0.1:11434/v1", api_key_env="LOCAL"))
-    profile = load_profile(settings.data_dir)
-    profile.telegram_model = TelegramModelSelection(provider="local", model="synthetic")
-    profile.telegram_limits = TelegramLimits(context_tokens=32768, replies_per_thread=10)
-    batches = [snapshot("Discussion about controlled experiments. " * 30, peer=-1000000000000 - i) for i in range(2, 5)]
-    _route, prompt, identity = telegram_review.prepare(config, profile, batches)
-    assert "published_at" not in prompt and "content_hash" not in prompt and "skip_reason" not in prompt
-    assert all(batch.content_hash not in prompt for batch in batches)
-    assert identity["source_hashes"] == [batch.content_hash for batch in batches]
-    assert "controlled experiments" in prompt and "telegram:-1000000000002:51" in prompt
-    assert len(prompt) <= 24000
-
-
 def test_nested_reply_keeps_thread_root_and_group_overlap_is_one_canonical_evidence_record():
     from zotero_summarizer.models.telegram_discussion import source_records
     group = channel(native=2, username="group", broadcast=False, megagroup=True, forum=True)
@@ -269,26 +188,6 @@ def test_group_nontext_messages_are_retained_with_scanned_skipped_cap_coverage()
         TelegramTarget(kind="group", username="group"), TelegramLimits(replies_per_thread=1)))[0]
     assert batch.status == "truncated" and batch.scanned_count == 2 and batch.skipped_count == 1
     assert len(batch.messages) == 1 and batch.messages[0].skip_reason == "empty_message"
-
-
-def test_flood_wait_stops_other_sources_and_retains_durable_deadline(tmp_path):
-    from tests.test_research_feed_telegram import _project
-    from zotero_summarizer.models.research_feed import TelegramTransportError
-    from zotero_summarizer.services.research_feed import telegram_conversations
-    from zotero_summarizer.storage.research_feed_telegram import read_retry_at
-    settings = _project(tmp_path)
-    profile = load_profile(settings.data_dir)
-    profile.telegram_targets = [TelegramTarget(kind="broadcast", username=name) for name in ["alpha", "beta"]]
-    class AuthorizedSDK(ScriptSDK):
-        async def is_user_authorized(self):
-            return True
-    sdk = AuthorizedSDK(TelegramTransportError("flood_wait", retry_seconds=20))
-    result = asyncio.run(telegram_conversations.collect(settings, sdk, profile, now=lambda: NOW))
-    assert len(sdk.calls) == 1 and result["account"]["status"] == "deferred"
-    assert [row["reason"] for row in result["conversations"]] == ["flood_wait", "flood_wait"]
-    assert all(row["status"] == "unavailable" for row in result["conversations"])
-    with repositories._connect_to(settings.triage_db_path) as conn:
-        assert read_retry_at(conn) == result["account"]["retry_at"]
 
 
 def test_request_admission_is_checked_before_each_scoped_rpc_and_request_mutation_refuses():

@@ -129,8 +129,15 @@ def _urls(raw_text: str, entities) -> list[str]:
         visible = utils.get_inner_text(raw_text, selected)
     except UnicodeError:
         raise ValueError("invalid Telegram entity Unicode") from None
-    return [_text(entity.url if isinstance(entity, types.MessageEntityTextUrl) else text)
-            for entity, text in zip(selected, visible)]
+    return [_text(_entity_url(entity, text)) for entity, text in zip(selected, visible)]
+
+
+def _entity_url(entity, text: str) -> str:
+    # TextUrl carries an explicit href; a bare auto-linked Url span is the link itself,
+    # which Telegram opens over http:// when the visible domain omits a scheme.
+    if isinstance(entity, types.MessageEntityTextUrl):
+        return entity.url
+    return text if text.lower().startswith(("http://", "https://")) else "http://" + text
 
 
 def _compatible_url(value: str) -> bool:
@@ -140,6 +147,26 @@ def _compatible_url(value: str) -> bool:
         return parsed.scheme in {"http", "https"} and bool(parsed.hostname)
     except ValueError:
         return False
+
+
+def _forward(message) -> list[int] | None:
+    """[marked channel id, post id] of a forwarded channel post; None otherwise. Never raises."""
+    header = getattr(message, "fwd_from", None)
+    source = getattr(header, "from_id", None)
+    number = getattr(header, "channel_post", None)
+    if isinstance(source, types.PeerChannel) and type(number) is int and 1 <= number <= TL_INT32_MAX:
+        return [utils.get_peer_id(source), number]
+    return None
+
+
+def _reply_to(message, channel_id: int) -> int | None:
+    """Replied-to post id; None when the reply points into another chat (its id is not a post of this channel)."""
+    header = getattr(message, "reply_to", None)
+    peer = getattr(header, "reply_to_peer_id", None)
+    if peer is not None and not (isinstance(peer, types.PeerChannel) and utils.get_peer_id(peer) == channel_id):
+        return None
+    number = getattr(header, "reply_to_msg_id", None)
+    return number if type(number) is int and 1 <= number <= TL_INT32_MAX else None
 
 
 def _post(message, *, channel_id: int, username: str) -> TelegramPost | None:
@@ -167,10 +194,24 @@ def _post(message, *, channel_id: int, username: str) -> TelegramPost | None:
             reason = "media_only" if media is not None else "empty_message"
     if published is None or not all(_compatible_url(url) for url in urls):
         return None
-    return TelegramPost(schema_version=1, channel_id=channel_id, message_id=message.id,
+    return TelegramPost(schema_version=2, channel_id=channel_id, message_id=message.id,
                         username=username, permalink=f"https://t.me/{username}/{message.id}",
                         text=text, published_at=published, updated_at=edited,
-                        urls=urls, skip_reason=reason)
+                        urls=urls, skip_reason=reason, replies_count=_replies_count(message),
+                        fwd_from=_forward(message), reply_to_id=_reply_to(message, channel_id))
+
+
+def _replies_count(message) -> int:
+    # Broadcast posts expose their linked-discussion comment count via MessageReplies
+    # (comments=True); the digest fetches threads only when this is positive.
+    replies = getattr(message, "replies", None)
+    if replies is None:
+        return 0
+    if not isinstance(replies, types.MessageReplies):
+        raise ValueError("invalid Telegram replies")
+    if _flag(replies.comments) is not True:
+        return 0
+    return _integer(replies.replies, 0, TL_INT32_MAX)
 
 
 def _page(result, *, native_channel_id: int, channel_id: int, username: str, after: int) -> TelegramPage:

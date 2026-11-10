@@ -21,6 +21,8 @@ class QualityClient:
             return qp.RubricLLMResponse(checks=CHECKS, evidence={key: BODY for key in CHECKS})
         if pydantic_model is qp.OverstatementLLMResponse:
             return qp.OverstatementLLMResponse(overstatements=[])
+        if pydantic_model is qp.SelfVerifyResponse:  # full-review path self-verifies critical items
+            return qp.SelfVerifyResponse()
         raise AssertionError("No classifier, extra generator or quality call expected")
 
 
@@ -46,10 +48,11 @@ def test_search_keeps_its_existing_assumed_mode_and_quality_budget():
     assert client.calls == [qp.RubricLLMResponse]
 
 
+# Owner decision 11-10 (#180 item 9): an UNCERTAIN type is graded with its safe generic checklist
+# and marked type_uncertain; only a detection ERROR stays not_assessed (no quality call).
 @pytest.mark.parametrize("detected", [{"type": "generic_empirical", "uncertain": True},
-                                     {"type": "generic_review", "uncertain": True},
                                      {"type": "", "uncertain": True, "source": "error"}])
-def test_full_review_never_treats_uncertain_detection_as_assumed_empirical(monkeypatch, detected):
+def test_full_review_grades_uncertain_type_generically_and_marks_it(monkeypatch, detected):
     from zotero_summarizer.services.library import _deep_review_layers, _paper_read_pdf, paper_type
     from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 
@@ -63,9 +66,13 @@ def test_full_review_never_treats_uncertain_detection_as_assumed_empirical(monke
                                             prestige=None, prestige_floor_value=None, lean_tier=True)
     quality, _, stored_type, _, _ = _deep_review_layers.extra_layers(ctx)
     assert stored_type == detected
-    assert quality["basis"] == "not_assessed" and quality["paper_type"] == ""
-    assert quality["grade"] == "" and quality["coverage_fraction"] is None
-    assert client.calls == []
+    if detected.get("source") == "error":
+        assert quality["basis"] == "not_assessed" and quality["paper_type"] == ""
+        assert quality["grade"] == "" and quality["coverage_fraction"] is None
+        assert client.calls == []
+    else:
+        assert quality["type_uncertain"] is True and quality["paper_type"] == "generic_empirical"
+        assert quality["grade"] and client.calls[0] is qp.RubricLLMResponse
 
 
 def test_verify_cli_keeps_assumed_rubric_and_existing_quality_call_budget(tmp_path, monkeypatch, capsys):

@@ -41,11 +41,11 @@ class _FakeLLM:
 
 
 def _digest(**updates):
-    return PaperDigest(
+    return PaperDigest(**{**PaperDigest().model_dump(exclude={'basis'}), **dict(
         read_decision="skip", read_why="The digest is sufficient.", read_parts=[],
         skip_parts=[], estimated_read_minutes=0, original_value="No extra value.",
         writing_friction="low", writing_reasons=[], **updates,
-    )
+    )})
 
 
 def test_digest_with_no_parameters_yields_none_not_a_guess():

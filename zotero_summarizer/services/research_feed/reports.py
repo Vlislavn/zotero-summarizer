@@ -134,7 +134,7 @@ def _telegram_identity(meta, batches):
 
 
 def _validate_telegram(payload):
-    from zotero_summarizer.models.research_feed import TelegramPost, TelegramNewsVerdict, TelegramLimits
+    from zotero_summarizer.models.research_feed import TelegramLimits
     from zotero_summarizer.models.telegram_discussion import TelegramConversation, source_records
     from zotero_summarizer.services.research_feed.telegram_review import validate_topics, admitted_sources
 
@@ -147,43 +147,21 @@ def _validate_telegram(payload):
     if (not isinstance(counts, dict) or any(type(value) is not int or value < 0 for value in counts.values())
             or "cards_generated" not in counts):
         raise ValueError("invalid Telegram counts")
-    if meta["schema_version"] == 2:
-        TelegramLimits.model_validate(meta["limits"])
-        batches = [TelegramConversation.model_validate(value) for value in payload["conversations"]]
-        topics, errors = payload["topics"], payload["errors"]
-        if not isinstance(topics, list) or not isinstance(errors, list):
-            raise ValueError("invalid Telegram topics/errors")
-        if topics:
-            validate_topics({"topics": topics}, batches)
-            _telegram_identity(meta, batches)
-        elif admitted_sources(batches) and meta["mode"] == "review" and not errors:
-            raise ValueError("nonempty review requires topics or errors")
-        if (counts["cards_generated"] != len(topics) or counts["conversations"] != len(batches)
-                or counts["messages"] != len(source_records(batches)) or counts["errors"] != len(errors)):
-            raise ValueError("Telegram report counts differ")
-        return
-    posts = payload["posts"]
-    if not isinstance(posts, list) or not isinstance(payload["cards"], list) or not isinstance(payload["uncertain"], list):
-        raise ValueError("invalid saved-news report")
-    records = {}
-    for record in posts:
-        original = TelegramPost.model_validate(record["post"])
-        if record["source_id"] != original.source_id or original.source_id in records:
-            raise ValueError("invalid saved-news identity")
-        if record["state"] not in {"keep", "drop", "uncertain", "pending", "error", "skipped"}:
-            raise ValueError("invalid saved-news state")
-        if record["state"] in {"keep", "drop", "uncertain"}:
-            verdict = TelegramNewsVerdict.model_validate(record["verdict"])
-            if verdict.decision != record["state"] or verdict.evidence_quote not in original.text:
-                raise ValueError("saved-news verdict differs from original")
-        records[original.source_id] = record
-    if len(payload["cards"]) != counts["cards_generated"]:
-        raise ValueError("saved-news cards count differs")
-    for card in payload["cards"]:
-        record = records[card["source_id"]]
-        expected = {"source_id": record["source_id"], "permalink": record["post"]["permalink"], **record["verdict"]}
-        if record["state"] != "keep" or card != expected:
-            raise ValueError("saved-news card differs from retained verdict")
+    if meta["schema_version"] != 2:
+        raise ValueError("unsupported telegram report schema")
+    TelegramLimits.model_validate(meta["limits"])
+    batches = [TelegramConversation.model_validate(value) for value in payload["conversations"]]
+    topics, errors = payload["topics"], payload["errors"]
+    if not isinstance(topics, list) or not isinstance(errors, list):
+        raise ValueError("invalid Telegram topics/errors")
+    if topics:
+        validate_topics({"topics": topics}, batches)
+        _telegram_identity(meta, batches)
+    elif admitted_sources(batches) and meta["mode"] == "review" and not errors:
+        raise ValueError("nonempty review requires topics or errors")
+    if (counts["cards_generated"] != len(topics) or counts["conversations"] != len(batches)
+            or counts["messages"] != len(source_records(batches)) or counts["errors"] != len(errors)):
+        raise ValueError("Telegram report counts differ")
 
 
 def report_path(settings: Settings, run_id: str, extension: str = "json") -> Path:
@@ -213,7 +191,7 @@ def _read_validated_report(path: Path) -> tuple[bytes, dict[str, Any]]:
         payload = json.loads(text, parse_float=_finite_number, parse_constant=_finite_number)
         metadata = payload.get("metadata") if isinstance(payload, dict) else None
         expected_source = "app_rss" if path.parent.name.startswith("weekly-") else "telegram"
-        versions = {1} if expected_source == "app_rss" else {1, 2}
+        versions = {1} if expected_source == "app_rss" else {2}
         if isinstance(metadata, dict) and (
             (type(metadata.get("schema_version")) is int and metadata["schema_version"] not in versions)
             or (isinstance(metadata.get("source"), str) and metadata["source"] != expected_source)
@@ -266,10 +244,15 @@ def _publication_time(bundle: Path, generated_at=None) -> float:
 
 
 def _listed_report(settings, bundle):
-    entry = {"run_id": bundle.name, "available": False}
+    legacy = bundle.is_file() and not bundle.is_symlink()  # pre-bundle flat .json/.md pair
+    entry = {"run_id": bundle.stem if legacy else bundle.name, "available": False}
+    if legacy:
+        entry["reason"] = "Old flat-file digest saved before bundles; it cannot be opened here"
+        return _publication_time(bundle), entry
     try:
         payload = get_report(settings, bundle.name)
-    except APIError:
+    except APIError as exc:
+        entry["reason"] = "Unsupported format" if exc.error == "report_unsupported" else "Unreadable or invalid"
         return _publication_time(bundle), entry
     meta = payload["metadata"]
     entry.update(available=True, source=meta["source"], start=meta.get("from"), end=meta.get("to"),
@@ -296,6 +279,7 @@ def list_reports(settings: Settings, *, limit: int = 50) -> dict[str, Any]:
                        status_code=503) from exc
     # Merge all sources before applying the shared limit. Retain only small list
     # entries, not every report body; bundle names break equal-time ties only.
-    observed = [_listed_report(settings, bundle) for bundle in bundles]
+    observed = list({entry["run_id"]: (when, entry) for when, entry in
+                     (_listed_report(settings, bundle) for bundle in bundles)}.values())
     observed.sort(key=lambda value: (value[0], value[1]["run_id"]), reverse=True)
     return {"items": [entry for _time, entry in observed[:limit]]}

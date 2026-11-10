@@ -1,4 +1,4 @@
-"""Unknown goal assessment cannot become a negative action at a consumer boundary."""
+"""The standing-goal board is a badge: it never gates a proposal, read decision or card."""
 from __future__ import annotations
 
 import pytest
@@ -26,11 +26,12 @@ QUALITY = {"quality_band": "neutral"}
 
 @pytest.mark.parametrize("board", [
     None, [], [{}], [{"relevant": False}], [UNKNOWN], [ABSTAINED_HIT],
-    [MISS, UNKNOWN], [MISS, {}], [MISS, "invalid"],
+    [MISS, UNKNOWN], [MISS, {}], [MISS, "invalid"], [MISS], [MISS, MISS], [HIT], [MISS, HIT],
 ])
-def test_unknown_board_withholds_negative_action_in_proposal_and_weekly_card(board):
+def test_goal_board_is_a_badge_not_a_gate_in_proposal_and_weekly_card(board):
+    """Whatever the board says, a grade-C skip stays could_read / skip and no goal flag appears."""
     proposal = propose.propose_verdict(DIGEST, QUALITY, goal_summaries=board)
-    action, flags = propose.effective_read_decision(DIGEST, QUALITY, goal_summaries=board)
+    action, flags = propose.effective_read_decision(DIGEST, QUALITY)
     card = build_card(
         ResearchCandidate(source_id="paper", source="fixture", title="Agent evaluation"),
         ResearchFeedTriage(include=True, score=3, confidence=0.5, rationale="Fixture"),
@@ -40,31 +41,26 @@ def test_unknown_board_withholds_negative_action_in_proposal_and_weekly_card(boa
 
     assert proposal.proposed == "could_read"
     assert proposal.confidence < 0.6
-    assert action == ""
-    assert "goals_not_assessed" in flags
-    assert card.worth_reading == "unknown"
-    assert "goals_not_assessed" in card.evidence_gaps
-
-
-@pytest.mark.parametrize("board, expected", [
-    ([MISS], "dont_read"), ([MISS, MISS], "dont_read"),
-    ([HIT], "could_read"), ([MISS, HIT], "could_read"),
-])
-def test_only_explicit_complete_miss_licenses_hide(board, expected):
-    assert propose.propose_verdict(DIGEST, QUALITY, goal_summaries=board).proposed == expected
-    action, _ = propose.effective_read_decision(DIGEST, QUALITY, goal_summaries=board)
     assert action == "skip"
+    assert "goals_not_assessed" not in flags and "active_goal_not_confirmed" not in flags
+    assert "goals_not_assessed" not in card.evidence_gaps
 
 
-def test_cached_review_projection_withholds_legacy_skip_without_rewriting_source():
+@pytest.mark.parametrize("board", [[MISS], [HIT], None])
+def test_only_grade_d_licenses_hide_on_skip(board):
+    assert propose.propose_verdict({**DIGEST, "grade": "D"}, {**QUALITY, "grade": "D"},
+                                   goal_summaries=board).proposed == "dont_read"
+    assert propose.propose_verdict(DIGEST, QUALITY, goal_summaries=board).proposed == "could_read"
+
+
+def test_cached_review_projection_keeps_skip_and_ignores_goal_board():
     entry = {"digest": DIGEST, "quality": QUALITY, "goal_summaries": [UNKNOWN]}
     _review_cache._write_one("PAPER001", entry)
 
     projected = _review_cache.get_cached_review("PAPER001")
 
-    assert projected["digest"]["read_decision"] == ""
-    assert projected["model_read_decision"] == "skip"
-    assert "goals_not_assessed" in projected["reading_policy_flags"]
+    assert projected["digest"]["read_decision"] == "skip"
+    assert not projected["reading_policy_flags"]
     assert _review_cache._read_all()["PAPER001"] == entry
 
 

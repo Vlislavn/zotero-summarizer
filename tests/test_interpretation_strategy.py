@@ -7,10 +7,11 @@ import pytest
 
 from tests._interpretation_experiment import CARD, PAYLOAD, TEXT, ScriptedClient, inputs, run_review
 from zotero_summarizer.models import PaperDigest
-from zotero_summarizer.models.interpretation import InterpretationDigest
+from zotero_summarizer.models.digest_generation import PaperDigestGeneration, InterpretationDigestGeneration
 from zotero_summarizer.services.library import _map_reduce, interpretation
 from zotero_summarizer.services.library._digest_verification import DigestVerifierUnavailable
 from zotero_summarizer.services.library._interpretation_trace import Trace
+from tests._interpretation_experiment import generates
 
 STRATEGIES = ['rank', 'prefix', 'map_reduce', 'direct_map_reduce']
 
@@ -37,8 +38,8 @@ def test_explicit_collector_reaches_native_assessment_unchanged_with_original_ev
     assert interpretation.selected_original(result) == TEXT
     assert result['digest']['basis'] == ('map_reduce' if 'map_reduce' in strategy else 'full_text')
     assert direct.call_count == (1 if 'map_reduce' in strategy else 0)
-    generated = [(model, kwargs) for _, model, kwargs in client.calls if model is not None and issubclass(model, PaperDigest)]
-    assert len(generated) == 1 and generated[0][0] is InterpretationDigest
+    generated = [(model, kwargs) for _, model, kwargs in client.calls if model is not None and generates(model)]
+    assert len(generated) == 1 and generated[0][0] is InterpretationDigestGeneration
     if format_arg:
         assert 'interpretation' in generated[0][1]['response_format']['json_schema']['schema']['properties']
     else:
@@ -68,7 +69,7 @@ def test_off_preserves_native_kwargs_prompt_model_calls_and_no_optional_import_i
     actual = _map_reduce.digest_for_strategy(paper['title'], TEXT, config, map_llm=client, reduce_llm=client,
                                             budget=budget, response_format=format_arg)
     assert actual.model_dump() == expected.model_dump() and client.calls == baseline.calls
-    assert all(model is PaperDigest for _, model, _ in client.calls if model is not None and issubclass(model, PaperDigest))
+    assert all(model is PaperDigestGeneration for _, model, _ in client.calls if model is not None and generates(model))
 
 
 @pytest.mark.parametrize('strategy', STRATEGIES)
@@ -98,16 +99,15 @@ def test_partial_map_failure_clears_prior_collector_without_reduction_or_verific
 
 
 @pytest.mark.parametrize('strategy', STRATEGIES)
-def test_native_parse_retry_and_base_correction_retain_only_final_collector_and_original_source(strategy):
+def test_native_parse_retry_and_base_field_repair_retain_the_first_card_and_original_source(strategy):
     client = ScriptedClient(cards=False, responses=['', PAYLOAD | {'tldr': 'Unreported 99999%',
         'interpretation': [dict(CARD, rationale='First attempt')]}, PAYLOAD | {'interpretation': [CARD]}])
     result = _run(client, strategy)
-    assert interpretation.qualify(result)['items'] == [CARD]
+    assert interpretation.qualify(result)['items'] == [dict(CARD, rationale='First attempt')]
     assert interpretation.selected_original(result) == TEXT
-    generated = [model for _, model, _ in client.calls if model is not None and issubclass(model, PaperDigest)]
-    assert generated == [InterpretationDigest] * 3
+    generated = [model for _, model, _ in client.calls if model is not None and generates(model)]
+    assert [m.__name__ for m in generated] == ['InterpretationDigestGeneration'] * 2 + ['DigestFieldRepair']
     assert [row['outcome'] for row in result['verification_audit']['lineage']] == ['support_not_established', 'accepted']
-    assert not any('First attempt' in claim for claim in result['interpretation']['claims'])
 
 
 @pytest.mark.parametrize('direct', [False, True])
@@ -129,7 +129,7 @@ def test_optional_semantic_rejection_reuses_native_base_without_reduce_regenerat
     result = _run(client, 'direct_map_reduce' if direct else 'map_reduce')
     assert result['interpretation']['status'] == 'support_not_established'
     assert result['digest']['basis'] == 'map_reduce'
-    assert sum(model is InterpretationDigest for _, model, _ in client.calls) == 1
+    assert sum(model is InterpretationDigestGeneration for _, model, _ in client.calls) == 1
     assert result['verification_audit']['lineage'][-1]['outcome'] == 'accepted'
 
 
@@ -138,11 +138,11 @@ def test_native_unavailable_fallback_clears_both_collectors_and_never_returns_ba
     class Unavailable(ScriptedClient):
         def pydantic_prompt(self, **kwargs):
             result = super().pydantic_prompt(**kwargs)
-            return result if issubclass(kwargs['pydantic_model'], PaperDigest) else {}
+            return result if generates(kwargs['pydantic_model']) else {}
 
     mapper, reducer = Unavailable(), Unavailable()
     with pytest.raises(DigestVerifierUnavailable):
         _run(reducer, strategy, mapper=mapper)
-    assert sum(model is InterpretationDigest for _, model, _ in reducer.calls) == 1
+    assert sum(model is InterpretationDigestGeneration for _, model, _ in reducer.calls) == 1
     assert len([model for _, model, _ in mapper.calls if model is not None]) == 2
     assert len(reducer.calls) == 3

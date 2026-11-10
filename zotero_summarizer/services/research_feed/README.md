@@ -1,63 +1,147 @@
 # services/research_feed — weekly Research Intelligence
 
-Telegram’s additive conversation path stays in this feature: `telegram_workflow`
-owns narrow Sources save/status and an explicit synchronous action under one
-cross-process lock; it reuses the CLI collection child, never interactive web auth
-or a background runner. `telegram_conversations` collects selected newest post/reply,
-group or forum windows and publishes immutable v2 bundles using `render.persist`.
-`telegram_review` makes one structured semantic grouping/mini-review call through
-an explicitly selected Telegram-only local provider/model; no global/feed fallback,
-reranker/classifier or lexical topic assignment. Per-send local-only transport,
-no repair/retry/cache, compact ID/role/text/context model inputs (raw metadata and
-hashes retained outside the prompt), prompt/schema/provider/source identity, literal citation
-membership and quote checks fail closed. Empty/nontext contexts skip generation;
-failed generation preserves raw inputs and a visible error. Conservative UTF-8
-prompt+schema/output context allowance can refuse before model construction.
-Bounds are configurable operational caps, not measured tokenizer/hardware capacity.
-Default/max: 3 sources, 3 newest posts/channel, 30 newest replies/thread, 120 model
-messages, 24,000 prompt characters; context 8,192 (max 32,768), output 2,048
-(max 4,096). No silent clipping. Reduce selected work before raising context.
-The operation keeps only provider-declared chat-template/reasoning/output wire
-controls, forces off through the existing factory dialect mapping, and rewrites
-every declared `max_tokens`/`max_completion_tokens` to its actual output budget.
-It does not invent vLLM chat-template flags or infer API dialect from model/provider
-names. Server context must be independently established: sending a `num_ctx` option
-does not prove the compatible backend honors it. Failed generation retains only a
-safe underlying exception type, not its text/path/prompt, alongside its identity.
-Generation uses a separate compact schema: up to one short point per category,
-short literal quotes and a topic work limit allocated from the output budget
-(one topic per 1,024-token allowance, capped at six). This allowance is operational,
-not a guarantee every possible response fits; decoder-length failures remain errors.
-The model selects role-scoped evidence IDs instead of copying quotes or membership.
-Exact original spans reuse `faithbench._corpus.chunk_spans` (320 characters, no
-overlap); ordered excerpts preserve all non-whitespace content, with immutable full
-originals outside the prompt. The service expands references into source/quote pairs
-and membership; canonical role/literal-quote validation still runs independently.
-The evidence-map fingerprint joins the prompt/schema/source identity. Prompt v2.6
-inventories distinct substantive news/discussion issues before grouping; interests
-are a lens, not a filter. Assertions must follow their selected excerpts. This is
-concise principal-issue synthesis, not a guarantee of exhaustive detail coverage.
-Input JSON is compact and omits only empty URL metadata; every nonempty URL,
-excerpt and context edge remains. Formatting overhead is subtracted before the
-unchanged prompt/context admission, never by clipping source content. Retained broader v2 topics remain readable without rewritten saved bytes.
+The fork-A pipeline is `telegram_collect.collect_pages`: per channel it fetches
+incremental `min_id` posts and commits them, then (when a reply client, embedding
+`scorer` and owner `goals` are supplied) runs the post-commit digest in
+`telegram_digest.run`. `telegram_relevance` holds the pure helpers — `dedup`
+collapses exact forwards (`fwd_from`) and near-duplicate normalised text keeping
+the earliest; `gate` scores posts against the goals (SPECTER2 via `specter2_scorer`
+for Latin text; non-Latin posts use the injected `keyword_probe`, because SPECTER2 cosine on
+Russian is ~0.9 for every post) and carries the matched 'why-for-you' goal. **The digest is
+discussion-first** (Todo #119): only posts with `replies_count > 0` are candidates; the
+`POOL_FACTOR × summary_top` most-replied get a goal score (embedding is the slow part), then
+comments are fetched for the `FETCH_FACTOR × summary_top` best by `telegram_ranking.prior`
+(serial; a FloodWait stops comments, defers the account and keeps posts; a post whose
+discussion cannot be resolved is skipped, not the run). The final order is
+`telegram_ranking.score`: reply count + total comment length (primary; link-only, self-promo/CV and one-word
+comments weigh a tenth, a link with real text counts in full) plus a soft goal
+boost (`goal_fit`, 0 at or below `tau`), so a lively off-goal post can make the digest and a
+silent on-goal one cannot; posts below `MIN_SCORE` are not shown. Snapshots go to
+`research_feed_conversations`, `last_comment_id` into `evaluation_json`, and the top
+`summary_top` (default 8) are read **in full** (Todo #121: ≤300 comments, `GetReplies` paged
+100/request, `replies_per_thread`/`messages` ≤300) and get a **faithful gist** (Todo #174, `GIST_VERSION` g4; measured in `data/perf-20261107/telegram/faith/phase3/report.md`).
+`telegram_extract`: **code picks up to 4 comments** (substantive ≥60 chars; score = replies underneath + bge-m3 relevance, MMR-diversified;
+greetings/promo never reach it — `Thread` keeps only `ranking.weight ≥ 1` comments), then **ONE call per thread** writes one line (≤15 words,
+the thread's language) per picked comment. **Ids come from code** (`k:` ↔ the k-th pick; the model never writes an id; unmapped rows are dropped). A **local gate**
+(`telegram_nli`: mDeBERTa-v3 XNLI, CPU, ≈0.55 GB, loaded lazily from `Settings.nli_model_dir` = `data/models/nli-mdeberta`; get it with
+`huggingface-cli download MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7 --local-dir data/models/nli-mdeberta`) scores «parent +
+cited comment ⇒ line» and drops lines below 0.5; **without the folder lines stay unchecked** (warning in the log). Measured on 30 threads
+(hand labels, strict): lines supported 85 % (held-out) → 93 % gated, 0 contradictions; a «Спор:» disagreement line (g2) was dropped in g3: on the 30 labelled threads it was ≈63 % supported and no gate threshold reached 0.85 precision (best 0.80 at p ≥ 0.95, n=10). Sub-thread lines (root + replies per line) were tried and rejected: 65 % held-out. **Disagreement (g4, Todo #184).** The generated «Спор:» line is not coming back; a disagreement is *detected*, not written. `telegram_dispute`: candidate pairs are reply pairs touching a picked comment plus the picked comments among themselves (≤12, reply pairs first); ONE `integrations.jev.noul` request per thread asks Jev two Noul questions per pair («Комментарий B возражает комментарию A?» / «…утверждает противоположное…»); a pair counts when the smaller answer is ≥ `TAU` 0.70 and the best one (≤1 per thread) becomes a point `{kind:'disagreement', text, cites:[A,B]}` whose text is the two sides' own gated lines (or a ≤100-char verbatim «quote» when a side has no line) joined by « ↔ » — no new sentence; the page shows a «Disagreement» label and the usual expand opens both cited comments. Measured on 371 hand-labelled pairs (all candidates of the 30 threads; labels written before any score; single labeller): precision 19/19 at 0.70 (Wilson 0.83–1.00), 11/11 at 0.75; held-out 20 threads 11/11 at 0.70 (0.74–1.00) but 6/6 at 0.75 (0.61–1.00); dev-tuned thresholds did **not** transfer (held-out 0.51–0.65), so 0.70 is the docs' starter value, not a fitted number; it meets the ship bar on held-out (11/11, lower CI 0.74). Production `extract()` with real Jev at 0.70: 10/10 and 11/12 blocks right in two runs (≈1/3 of threads; one label-ambiguous pair moves across the threshold between runs). Local alternatives measured and rejected: mDeBERTa contradiction AUC 0.56, cue words 0.65, local 4B yes/no 0.52 (says «да» 97 %) → **no Jev (no `TYPESAFE_API`, `ZS_OFFLINE`, request failure) = no disagreement block**, never a weak fallback. Jev sees the pair's comment text (owner-approved 11-10); `integrations/jev.py::endpoint` is the single place that resolves URL + key, where the Cloud/Local engine setting (Todo #147, REQ-S35) plugs in. A line whose comment answers another picked comment whose line survived carries `reply_to` (the parent comment's stored id) and the page shows «↳ reply to …» — pure reply structure. `gist_points` replaced `gist`/`points` (points are built once, never re-parsed from text). `summaries()` returns per
+post `points` (`{text, cites}`) and `continues`; the digest records `gist_version`. Comments are **not** in `telegram-today.json` (≈840 KB → ≈30 KB for 11 posts): the page loads them on expand through `GET /telegram/thread/{source_id}` (`telegram_today.thread`: `id`, `reply_to`, `text` merged over the post's `research_feed_conversations` snapshots; a malformed id → 404; `read_today` also strips `thread` from payloads written earlier).
+With no model, no survivor line or no substantive comment the page shows the top 3 comment ids labelled 'no summary'. **«Важное»**:
+up to 3 comments from anywhere in the thread (e.g. #250) that carry concrete facts (number,
+tool names, link with text; two facts, or a number/tool names in a ≥60-character comment) or hit a goal probe
+are stored as `important` (`id`, `goal`, `quote`) and shown on the card; a goal match is a
+bonus, never required (comments are for staying in the loop, not goal matching). `telegram-today.json` posts are in rank order. Topic
+labels are requested in the posts' language. The source cap is the 30-channel `max_length`
+(the stored `limits.sources` is not enforced); measured 23 channels end-to-end ~2–3 min on a
+local 4B model (collection wall 480 s, max 600 s).
+`TelegramPost` schema_version 2 carries `fwd_from`/`reply_to_id`/`replies_count` inside
+`post_json` (no SQL migration; `fwd_from` and `reply_to_id` are captured at ingest from now on, older rows stay empty, and `reply_to_id=None`
+is left out of the content hash so old rows are not re-evaluated); `TelegramMessage.sender_id` (numeric user id only) is captured the same way.
+`telegram_series.parents(posts)` links a post to the earlier stored post it continues: `reply_to_id`, or a `t.me/<channel>/<id>` link under a marker
+(«часть N», «продолжение», «предыдущий пост») written within 40 characters of that link; a reply into another chat is not a parent (`reply_to_id` is None); the digest feeds the parent into the gist and `telegram-today.json` gets `continues`.
+Posts in the today payload also carry `also_in` (the weekly topic they belong to, from `topics[].source_ids`). The Telegram model is chosen under
+Settings → Telegram sources (own provider/model/limits; it is deliberately not a 'Choose models' scope). The source cap allows ~30 channels.
 
-Peer+message evidence is canonical across overlapping group/thread scopes;
-memberships/root/parent IDs remain separate. Raw snapshot hashes observe edits
-within the re-fetched newest window; no cache claims old messages are current.
-Coverage distinguishes observed empty, unavailable, fetched and truncated, with
-scanned/skipped counts and reported reply totals when available. Broadcast
-post-window lookahead/scanned/retained/truncated observations are separate from
-reply coverage; post-window truncation makes the report partial even with empty
-replies. Later per-post flood/auth/admission/validation stops retain prior threads,
-current origin/root observations and unattempted selected posts before stopping
-RPCs, persisting the account deadline/state and immutable evidence. Group prompt
-projection includes peer-qualified parent/top relationships; missing/out-of-window,
-non-reviewable, mirrored-news and unknown/cross-peer contexts are explicit rather
-than inferred joins. All contexts are
-partial history; participant claims are not paper-verified science. Reports/read
-GETs never activate Telegram/models; Sources GET/save also remain effect-free
-except the explicit save. Successful child authorization plus clean receipt permits
-historical verified status, not a session-file guess or continuing validity claim.
+`telegram_trends.weekly_trends(conn, now, *, scorer=None, model=None, gists=None, cache_path=None)`
+builds the page's **Trends** topics from the posts stored for the last 14 days (deduplicated
+text posts; digested posts add their gist, other read threads their two longest comments).
+SPECTER2 vectors are centred on the two-week mean (raw cosines on Russian sit at ≈0.93) and
+joined with TF-IDF over 5-letter word stems; average-linkage groups over BOTH weeks (an oversized
+group is split once) that hold ≥3 of this week's posts from ≥3 channels become topics (≤15,
+most channels first), and the trend marker compares the same group's posts of the two weeks
+(`new` ≤1 earlier post, `growing` ≥1.5×, else `steady`). **One** local-model call (`model` is a
+`prompt -> text` callable from `telegram_processing.model`: local by default, remote only with
+consent; none → headline labels) returns per topic a short label, a one-line gist (≤12 words, no «обсуждают/спорят» opener) and
+1–2 notable ideas/tools, in the posts' language; a topic the model answers `-` for (memes, ads, digests) is dropped.
+Result JSON: `topics` (`label`, `gist`, `ideas`, `trend`, `posts`, `baseline_posts`,
+`channels`, `source_ids`, `examples` with permalinks), `posts` counts (schema 3); cached at `cache_path` for an
+unchanged week (the fingerprint carries a prompt version, `tp5`, so a prompt change regenerates labels) — no table, no migration. The pass adds `counts.trends_s` to the today payload.
+
+`telegram_workflow` owns narrow Sources save/status and `begin` (validate sources/provider via
+`telegram_review.resolve_local`, publish the `collecting` state, return `execute()`), under one
+cross-process lock. `telegram_job.start` is the **«Check channels»** background job behind
+`POST /telegram/runs` (202): it needs the remembered one-time consent
+(`telegram_processing.set_collect_consent`, `POST /telegram/collect-consent`, file
+`collect-consent.json`, revocable; the old per-run checkbox is gone), takes `_exclusive`, runs
+`execute()` on one daemon thread and returns at once; a second call while it lives returns the
+running status (never a second run; another action holding the lock → `409 telegram_busy`).
+`GET /telegram/status` adds `running`, `consented`, `started_at`, `elapsed_s`, `retry_at` (account
+flood-wait still ahead) and `progress` (`stage` channels→comments→summaries with `done/total`,
+written by the child through `telegram_progress`, a no-op outside the digest child). `operation.json`
+keeps the server `pid`; a `collecting` state whose pid is dead or older than 10 min reads as
+`error: interrupted` (server restart mid-run never sticks). Errors are codes the UI renders in
+English: `missing_session|session_unauthorized|revoked_session` (the only case that shows the
+`telegram-auth` hint), `deferred` (+`retry_at`), `busy`, `model_unavailable` (`telegram_live`
+probes the model endpoint before the child starts), `telegram_incomplete`, `interrupted`,
+`telegram_action_failed`. The job runs the **one pipeline** behind an
+injectable `run_collect` seam: the default `telegram_live.collect` spawns the dedicated
+Telegram child (`run_child` purpose `digest`), which runs `collect_pages` + digest and
+persists the result through `telegram_today`. `telegram_live.digest_seam` builds the live
+reply client (`integrations.telegram_reply_adapter.ThreadReplyClient`, reusing the bounded
+read-only `telegram_threads` discussion fetch), the SPECTER2 scorer, owner goals, the
+summary/label models and the trends model; the offline harness injects a fake collector so
+the only code not exercised by tests is Telethon construction (verified live only after the
+owner authorizes Telegram, Todo #99). `telegram_today.collect_and_persist` writes a
+latest-wins `telegram-today.json` under `data/research_feed/telegram/` (and caches weekly
+trends in `telegram-trends.json`); `read_today` serves it to `GET /telegram/today` (posts,
+discussion summaries, weekly trends) without any collection, model or network call. This
+one pipeline is the only Telegram collection path: the old `conversations` child
+purpose, `telegram_conversations.collect/publish` and the topic-generation prompt
+(`telegram_review.prepare/generate`, `models/telegram_generation.py`) were retired (Todo
+#109). `telegram_selection` holds the saved source selection (`targets`) and the report
+directory; `telegram_review` keeps only `resolve_local` (the Telegram-only loopback route
+check) and `validate_topics`/`admitted_sources`, which `reports` uses to keep reading
+historical v2 bundles unchanged.
+
+Decisions (Todo #109). **Interests:** posts are ranked against the app's research goals
+(`config.research_goals`, Settings → Article selection), so no CLI is needed; the legacy
+profile themes/projects are only a fallback when that list is empty (they still drive the
+weekly engineering digest). **Providers:** summaries and trend labels stay local-only
+(`resolve_local`, loopback) unless the owner consents to a non-local provider (Todo #112,
+below). **Times:** the page shows relative ages (`12 min ago`, `3 d ago`, `Updated 1 h ago`) and, for a Telegram wait, a clock time in
+the browser's time zone (`frontend/src/components/telegramRunText.js`).
+
+Decisions (Todo #112). **Remote summaries (brief §2.5):** `telegram_processing` admits the
+saved Telegram provider/model if it is loopback (unchanged default) or if it is non-loopback AND
+`data/research_feed/telegram/remote-consent.json` holds the token of that live boundary — the
+`services/card/_consent.py` pattern, with the token a hash of provider name + endpoint + model
+(changing any drops the consent; `ZS_OFFLINE` refuses remote). `POST /telegram/processing
+{token, allow}` records/withdraws it; `GET /telegram/sources` returns `providers` (non-loopback
+names) and `processing` (`provider`, `model`, `local`, `token`, `remote_consented`) so the UI shows
+what will see the text. Saving sources, the run consent and the digest never imply it; without
+consent a remote selection refuses the run (`telegram_local_required`) and the seam yields no
+model (top-comment fallback). Only the summary and trend-label calls use it; collection stays
+Telegram-read-only. **'Не подошло' chips:** `telegram_reasons` stores the owner's rejection in
+`research_feed_telegram_posts.reasons_json` (numbered migration 16, nullable; NULL = not rejected,
+`{"chips": [...], "v": 1}` = rejected, chips may be empty). A column was chosen over the
+interaction/exposure log because that log is an append-only JSONL, not queryable per post, and a
+post row already survives re-collection (upserts do not touch the column). Chip ids are Today's
+negative set (`_daily_verdict`; services cannot import api, unification is Todo #108).
+**Liked feedback (Todo #169):** the same column holds payload v2 `{v, rejected, chips, liked, note}` (v1 = rejected; no migration):
+`liked` ∈ `useful|new_to_me|want_to_try|good_discussion`, `note` ≤1000 chars; `POST /telegram/feedback {source_id, liked, note}`;
+`GET /telegram/feedback/export` downloads every post with feedback (text, permalink, reasons, liked, note, `at` = last change, `done_at`) as JSON. Stored and exported only — nothing ranks by it yet.
+**Past digests:** `telegram_history.archive` writes each finished run once to `data/research_feed/telegram/history/<UTC stamp>.json`
+(append-only, `-2`… suffix for a second run in the same second; `persist_today` also archives the file it overwrites; the today payload as is — comments stay in `research_feed_conversations`; cited ids are kept).
+Feedback writes use `BEGIN IMMEDIATE` and `mark_done` a process lock (no lost updates); an unreadable trends cache is a miss; failed snapshot/cursor/deferral writes are logged and counted in `counts.write_failures`. `history/done.json` maps `source_id` -> time for discussions marked done (global across digests). `GET /telegram/history` lists runs
+(`run_id`, `generated_at`, `discussions`, `unread`, `lead` = first trend label or busiest channel); `GET /telegram/history/{run_id}` serves a snapshot with the live owner state overlaid;
+`POST /telegram/done {source_ids, done}`. `read_today` overlays `done`, `reasons`, `liked`, `note` the same way. Archived files are never pruned.
+`POST /telegram/reasons {source_id, chips|null}` (null undoes; unknown chip 422, unknown post
+404); `GET /telegram/today` overlays `reasons` from the rows. The workflow status no longer
+carries `report_id` (no Weekly report is produced by the one pipeline).
+
+Reports/read GETs never activate Telegram/models; Sources GET/save also remain
+effect-free except the explicit save. Successful child authorization plus a clean receipt
+permits historical verified status, not a session-file guess or continuing validity claim.
+
+Connection-task impact includes Telegram's independent model/profile revision and
+literal-loopback admission (ordinary `.is_local` is insufficient). Default changes
+do not repoint this route. Source saves share the configuration publication lock
+inside the existing operation lock. App credential replacement also requires that
+operation lock, so a started Telegram config snapshot cannot later receive a newly
+replaced shared slot through the app editor. This does not cancel a run, roll back
+keyring effects or serialize external/uninstrumented credential/profile writers.
 
 One bounded command projects the existing app RSS and current deep-review
 artifacts into a project-specific engineering digest. Missing abstract triage
@@ -74,6 +158,7 @@ rss_items → source/dedupe → prior triage → budget → existing deep_review
 
 | file | responsibility |
 |---|---|
+| `telegram_reasons.py` · `telegram_history.py` · `telegram_processing.py` | Per-post feedback (negative chips, liked chips, note) on the post row; per-run digest archive + done state; local-by-default Telegram model resolution with token-bound remote consent (Todo #112). |
 | `profile.py` | Versioned user-editable profile and controlled topic taxonomy under `data/research_feed/profile.json`. |
 | `source.py` | Bounded RSS adapter/dedupe, history identity/text and native-state admission primitives, final one-home provenance. |
 | `cursor.py` | Source/profile/config/model/schema-bound successful abstract-stage cache; no derived-card/report replay. |
@@ -81,7 +166,7 @@ rss_items → source/dedupe → prior triage → budget → existing deep_review
 | `runner.py` | Budgeted triage, optional missing deep reviews through `library.deep_review`, per-paper failure isolation, metrics/watermark, and dry-run/idempotent writeback. Tag idempotency looks up pending changes by target Zotero item, so unrelated older queue rows cannot push a matching writeback beyond a global scan cap. |
 | `card.py` | Base-qualified engineering-card assembly; only exact validated artifact URLs survive. No extraction or model calls. |
 | `render.py` | Canonical JSON and compact Markdown persistence. |
-| `reports.py` | Read-only list/detail/download lookup of published v1 RSS, retained v1 Telegram news and additive v2 Telegram conversation bundles, validated with existing candidate/triage/card models and present source/generation provenance references. Missing legacy provenance stays optional; malformed present references refuse. Source observations can retain an unqualified generation field; card provenance requires a valid generation hash. Reject symlink/path escapes; never generate or migrate artifacts. |
+| `reports.py` | Read-only list/detail/download lookup of published v1 RSS, retained v1 Telegram news and additive v2 Telegram conversation bundles, validated with existing candidate/triage/card models and present source/generation provenance references. Missing legacy provenance stays optional; malformed present references refuse. Source observations can retain an unqualified generation field; card provenance requires a valid generation hash. Listing labels unopenable runs with a one-line `reason` (old flat-file digests appear once, not openable). Reject symlink/path escapes; never generate or migrate artifacts. |
 
 Run weekly: `uv run zotero-summarizer research-feed run --from 2026-08-22
 --to 2026-08-29`. Add `--venue NeurIPS` for conference mode, `--cached-only`
@@ -257,8 +342,12 @@ optional pending actions only; default runs are dry-run.
 The [Telegram source](../../../docs/features.md#telegram-news) has explicit CLI
 authorization, collection and saved-report paths. Transport/session state remains
 private; report reads do not activate an account or model. Saved-input processing
-refuses symlinked known parent/news/state owners after request admission but before
-inputs or models, and rechecks before publication projection. Direct publisher
+selects the explicit JSONL post identities from stored rows, including older posts
+outside the global newest window; an empty input yields an empty report. Cached
+and live collection still use their bounded newest saved window. New reports label
+the selected scope; retained bundles are not rewritten. Known parent/news/state
+symlinks are rejected before inputs or models; the parent is rechecked before
+publication projection. Direct publisher
 leaf-directory checks remain separate; none is filesystem-race containment.
 Live account/network
 acceptance is separate from the synthetic contracts.

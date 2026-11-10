@@ -9,6 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from zotero_summarizer.settings import automatic_gate_updates_enabled
+
 from zotero_summarizer.services.triage.feeds._common import (
     LOGGER,
     TriagedCandidate,
@@ -233,6 +235,8 @@ def schedule_gate_retrain_async(reason: str, *, allow_initial: bool = False) -> 
     blocking startup; the swap target requires ``classifier_gate_lock`` to
     be set by the caller.
     """
+    if not automatic_gate_updates_enabled():
+        return False
     app_state = get_state()
     if getattr(app_state, "classifier_gate_training", False):
         return False

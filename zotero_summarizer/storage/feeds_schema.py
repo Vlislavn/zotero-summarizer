@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS rss_feeds (
     last_error TEXT,
     etag TEXT,
     modified TEXT,
+    fetch_watermark TEXT,
+    fetch_incomplete INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(url)

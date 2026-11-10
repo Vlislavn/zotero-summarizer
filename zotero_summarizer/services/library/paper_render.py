@@ -46,7 +46,7 @@ _BUILD_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="paper-build"
 def artifact_text(artifact: dict[str, Any], *, max_chars: int) -> str:
     """Build comprehensive Q&A context from structured review state + PDF text."""
     item_key = str(artifact.get("item_key") or "")
-    review = deep_review.get_current_review(item_key) if item_key else None
+    review = deep_review.get_current_review(item_key) if item_key else None  # current-only: stale reviews aren't paper evidence
     return _paper_read_meta.artifact_text(artifact, max_chars=max_chars, review=review)
 
 

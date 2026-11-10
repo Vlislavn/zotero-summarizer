@@ -95,7 +95,7 @@ def _publish_with_grade(env, monkeypatch, grade):
     original = ScriptedClient.pydantic_prompt
     def generated(self, *, pydantic_model, **kwargs):
         result = original(self, pydantic_model=pydantic_model, **kwargs)
-        return result.model_copy(update={'grade': grade}) if pydantic_model is PaperDigest else result
+        return result.model_copy(update={'grade': grade}) if issubclass(pydantic_model, PaperDigest) else result
     monkeypatch.setattr(ScriptedClient, 'pydantic_prompt', generated)
     return publish(env)
 

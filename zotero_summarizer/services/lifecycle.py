@@ -15,7 +15,7 @@ from zotero_summarizer.services import corpus
 from zotero_summarizer.services.triage import triage_jobs
 from zotero_summarizer.services._adapters import build_pdf_extractor
 from zotero_summarizer.services._common import LOGGER, read_config, settings, setup_logging, state
-from zotero_summarizer.settings import Settings
+from zotero_summarizer.settings import Settings, automatic_gate_updates_enabled
 from zotero_summarizer.storage import repositories as triage_db
 from zotero_summarizer.storage.corpus import EmbeddingCache
 
@@ -34,7 +34,14 @@ def _load_config(current_settings: Settings, override_model: str | None) -> Goal
     if not current_settings.config_path.exists():
         raise RuntimeError(f"Missing config file: {current_settings.config_path}")
 
-    config = read_config(current_settings.config_path, current_settings.calibration_path)
+    from zotero_summarizer.storage.configuration_lock import configuration_lock, file_revision
+
+    with configuration_lock(current_settings.data_dir):
+        loaded_revision = file_revision(current_settings.config_path)
+        config = read_config(current_settings.config_path, current_settings.calibration_path)
+        if loaded_revision != file_revision(current_settings.config_path):
+            raise RuntimeError('Configuration changed while loading')
+        state().config_disk_revision = loaded_revision
     if override_model:
         LOGGER.info(
             "LLM model override: default stage model %r -> %r",
@@ -121,6 +128,9 @@ def _init_metadata_clients(app_state: RuntimeState, config: GoalsConfig, current
 
 
 def _schedule_startup_gate_refresh(gate: object | None, reason: str = "startup") -> None:
+    if not automatic_gate_updates_enabled():
+        LOGGER.info("Automatic classifier training and startup rescoring disabled")
+        return
     from zotero_summarizer.services.triage import feeds
 
     started = feeds.schedule_gate_retrain_async(reason, allow_initial=gate is None)
@@ -159,7 +169,7 @@ def _init_classifier_gate(
     from zotero_summarizer.services.triage.feeds._gate import _gate_quality_label
 
     golden_csv = current_settings.golden_csv_path
-    if not golden_csv.exists():
+    if not golden_csv.exists() and automatic_gate_updates_enabled():
         LOGGER.warning(
             "classifier_gate.enabled but %s missing; gate disabled "
             "(run `zotero-summarizer goldenset export` first)",
@@ -184,8 +194,7 @@ def _init_classifier_gate(
     if gate is not None and gate.feature_dim != classifier.FEATURE_DIM:
         LOGGER.warning(
             "Cached classifier %s has feature_dim=%d but the builder now "
-            "emits %d; ignoring the stale model and retraining in "
-            "background (gate off until ready)",
+            "emits %d; ignoring the incompatible model",
             config.classifier_gate.model_name,
             gate.feature_dim,
             classifier.FEATURE_DIM,
@@ -211,8 +220,8 @@ def _init_classifier_gate(
         if background and not defer_retrain:
             _schedule_startup_gate_refresh(gate)
     else:
-        if not background:
-            raise RuntimeError("No compatible cached classifier; train it before a dry-run")
+        if not background or not automatic_gate_updates_enabled():
+            raise RuntimeError("No compatible cached classifier; train it explicitly before startup")
         # No usable cached model (missing, or rejected as stale above).
         LOGGER.info(
             "Classifier gate %s not ready; training in background "
@@ -280,9 +289,8 @@ def _schedule_startup_rss_refresh(
 ) -> bool:
     """Schedule a small fetch-only app RSS refresh on startup."""
     max_feeds = int(os.environ.get("ZS_STARTUP_RSS_MAX_FEEDS", "5"))
-    max_new = int(os.environ.get("ZS_STARTUP_RSS_MAX_NEW_PER_FEED", "10"))
     timeout = float(os.environ.get("ZS_STARTUP_RSS_TIMEOUT_SECS", "8"))
-    if loop is None or max_feeds <= 0 or max_new <= 0:
+    if loop is None or max_feeds <= 0:
         return False
 
     def _run_refresh() -> None:
@@ -291,7 +299,6 @@ def _schedule_startup_rss_refresh(
         reader = AppRssReader(current_settings.triage_db_path)
         result = reader.refresh_feeds(
             max_feeds=max_feeds,
-            max_new_items_per_feed=max_new,
             per_feed_timeout=timeout,
         )
         LOGGER.info("startup app RSS refresh complete: %s", result)

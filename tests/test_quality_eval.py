@@ -67,6 +67,9 @@ class _CapReporter:
     def sub(self, done, total):
         self.subs.append((done, total))
 
+    def finish(self, name):
+        pass
+
 
 def test_evaluate_quality_reports_phase_and_subprogress():
     cap = _CapReporter()
@@ -121,10 +124,9 @@ def test_review_paper_not_judged_on_empirical_criteria():
     assert out.paper_type == "narrative_review"
 
 
-def test_overstatements_below_threshold_do_not_flag_well_covered_paper():
-    # Layer-3 fix: 1-2 abstract-vs-body overstatements (often false-positives on a
-    # faithful paper) must NOT alone drag a fully-covered paper to `flag`; only a
-    # cluster (>=3) does. Was the bug: a coverage-1.0 case report flagged on 2 overstatements.
+def test_overstatements_never_flag_a_well_covered_paper():
+    # #189/#194: overstatement flags are advisory only (stored precision 0.03 on 132
+    # hand-labelled claims), so even a cluster never moves the band.
     two = _eval(
         _FakeLLM([ALL_YES, ALL_YES, ALL_YES],
                  overstatements=["claims causality without RCT", "SOTA without baseline table"]),
@@ -136,7 +138,7 @@ def test_overstatements_below_threshold_do_not_flag_well_covered_paper():
                  overstatements=["causal claim, no design", "SOTA, no baseline", "generalizes, no external data"]),
         digest={"tldr": "we prove X causes Y", "key_findings": ["SOTA"], "grade": "B"},
     )
-    assert three.quality_band == "flag" and len(three.overstatements) == 3
+    assert three.quality_band == "highlight" and len(three.overstatements) == 3
 
 
 def test_self_consistency_disagreement_is_uncertain():

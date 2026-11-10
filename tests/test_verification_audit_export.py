@@ -31,11 +31,11 @@ class ScriptedClient(_Verifier):
 
     def pydantic_prompt(self, *, pydantic_model, **kwargs):
         from zotero_summarizer.models import PaperDigest
-        if pydantic_model is not PaperDigest:
+        if not (issubclass(pydantic_model, PaperDigest) or pydantic_model.__name__ == 'DigestFieldRepair'):
             return super().pydantic_prompt(pydantic_model=pydantic_model, **kwargs)
         self.generated += 1
         if self.correction and self.generated == 1:
-            return _digest('The paper reports 999% accuracy.')
+            return _digest('The paper reports 999% accuracy.').model_copy(update={'key_findings': ['Held-out data were used.']})
         return _digest().model_copy(update={'key_findings': ['Held-out data were used.']})
 
 

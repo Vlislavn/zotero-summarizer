@@ -34,9 +34,11 @@ from zotero_summarizer.domain import (
     normalize_arxiv_id,
     normalize_doi,
 )
+from zotero_summarizer.runtime import memoized
 from zotero_summarizer.services._common import rank_interleave_enabled, rank_quality_first_enabled
 from zotero_summarizer.services.model.team_draft import team_draft_merge
 from zotero_summarizer.services.triage.daily_select._allocation import allocate, _passes_model_floor
+from zotero_summarizer.services.triage.daily_select._analyzed import build_analyzed_slate, exploration_context
 from zotero_summarizer.services.triage.daily_select._candidate import (
     attach_quality_from_reviews,
     attach_rank_scores,
@@ -173,25 +175,8 @@ def _drop_content_dupes(
     return survivors
 
 
-def _fetch_primary_unhandled(
-    conn,
-    *,
-    lookback_hours: int,
-    backlog_cap: int,
-    now: datetime,
-) -> tuple[list[dict], bool]:
-    """Primary-pool rows (awaiting_review + triaged_pending) within the window,
-    minus papers the user already acted on AND minus content duplicates (by
-    DOI/arXiv) of a paper already decided on / in the library, with the
-    never-empty recent fallback. Returns ``(rows, fellback_to_recent)``.
-
-    The single source of truth for "what's genuinely awaiting the user" —
-    the slate, header counter and rescoring consume this pool.
-    """
-    if backlog_cap <= 0:
-        raise ValueError(f"backlog_cap must be positive; got {backlog_cap}")
-    if lookback_hours <= 0:
-        raise ValueError(f"lookback_hours must be positive; got {lookback_hours}")
+def _unhandled_pool(conn) -> list[dict]:
+    """Awaiting rows minus trashed / handled / content-duplicate ones, newest kept."""
     handled_guids, handled_label_keys = fetch_handled_keys(conn)
     blocked_doi, blocked_arxiv = fetch_decided_content_keys(
         conn,
@@ -214,11 +199,40 @@ def _fetch_primary_unhandled(
     rows = dedup_keep_newest(_drop_content_dupes(
         rows, blocked_doi=blocked_doi, blocked_arxiv=blocked_arxiv,
     ))
+    return rows
+
+
+def _fetch_primary_unhandled(
+    conn,
+    *,
+    lookback_hours: int,
+    backlog_cap: int,
+    now: datetime,
+) -> tuple[list[dict], bool]:
+    """Primary-pool rows (awaiting_review + triaged_pending) within the window,
+    minus papers the user already acted on AND minus content duplicates (by
+    DOI/arXiv) of a paper already decided on / in the library, with the
+    never-empty recent fallback. Returns ``(rows, fellback_to_recent)``.
+
+    The single source of truth for "what's genuinely awaiting the user" —
+    the slate, header counter and rescoring consume this pool.
+    """
+    if backlog_cap <= 0:
+        raise ValueError(f"backlog_cap must be positive; got {backlog_cap}")
+    if lookback_hours <= 0:
+        raise ValueError(f"lookback_hours must be positive; got {lookback_hours}")
+    # One read per ``request_memo`` scope (daily: slate, preparation status, header
+    # count); the window below is cheap. Callers get private row copies (columns are
+    # scalars) because scoring mutates rows.
+    pool = memoized(
+        ("unhandled_pool", conn.execute("PRAGMA database_list").fetchone()[2]),
+        lambda: _unhandled_pool(conn),
+    )
     cutoff = now.astimezone(timezone.utc) - timedelta(hours=lookback_hours)
-    recent = [row for row in rows if row_created_at(row) >= cutoff]
+    recent = [row for row in pool if row_created_at(row) >= cutoff]
     if recent:
-        return recent, False
-    return rows[:backlog_cap], bool(rows)
+        return [dict(row) for row in recent], False
+    return [dict(row) for row in pool[:backlog_cap]], bool(pool)
 
 
 def count_awaiting_unhandled(
@@ -243,6 +257,38 @@ def count_awaiting_unhandled(
     finally:
         conn.close()
     return len(rows)
+
+
+def ranked_unhandled_candidates(
+    db_path: Path, *, lookback_hours: int, now: datetime | None = None,
+) -> list[dict]:
+    """The unhandled primary pool in the window, ranked by the control blend.
+
+    Same guards as the slate (trash, handled, DOI/arXiv dedup); an empty window
+    yields ``[]`` instead of old-row filler. Shared by Today preparation and the
+    analyzed slate so both see one candidate order.
+    """
+    effective_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    conn = open_ro(db_path)
+    try:
+        rows, fellback = _fetch_primary_unhandled(
+            conn, lookback_hours=lookback_hours, backlog_cap=1, now=effective_now,
+        )
+    finally:
+        conn.close()
+    return [] if fellback else _prepare_cohort(rows, False)[0]
+
+
+def _assemble_analyzed(
+    db_path: Path, *, K: int, lookback_hours: int, now: datetime | None,
+) -> DailySlate:
+    from zotero_summarizer.services.library import deep_review  # lazy cross-domain read
+
+    candidates = ranked_unhandled_candidates(db_path, lookback_hours=lookback_hours, now=now)
+    return build_analyzed_slate(
+        candidates, deep_review.usable_reviews(), K=K, lookback_hours=lookback_hours,
+        **exploration_context(now),
+    )
 
 
 def _assemble_interleaved(
@@ -339,10 +385,12 @@ def assemble_daily_slate(
     lookback_hours: int = 168,
     now: datetime | None = None,
     quality_first: bool | None = None,
+    policy: str = "legacy",
 ) -> DailySlate:
-    """Build today's role-allocated slate.
+    """Build today's slate: ``policy="analyzed"`` (``/api/daily``) shows only
+    eligible analyzed papers (``_analyzed``); ``"legacy"`` is role-allocated.
 
-    Steps (see module docstring for the full contract):
+    Legacy steps (see module docstring for the full contract):
 
       1. Fetch ``awaiting_review`` + ``triaged_pending`` rows from the last
          ``lookback_hours``.
@@ -364,6 +412,10 @@ def assemble_daily_slate(
     """
     if K <= 0:
         raise ValueError(f"K must be positive; got {K}")
+    if policy == "analyzed":
+        return _assemble_analyzed(db_path, K=K, lookback_hours=lookback_hours, now=now)
+    if policy != "legacy":
+        raise ValueError(f"unknown slate policy {policy!r}")
     if quality_first is None and rank_interleave_enabled():
         # P3 online interleave (ADR-A9/GAP-G11): both arms compete inside one slate.
         # Only the top-level call dispatches — the two arm builds below pass an
@@ -444,4 +496,5 @@ __all__ = [
     "DailySlate",
     "assemble_daily_slate",
     "count_awaiting_unhandled",
+    "ranked_unhandled_candidates",
 ]

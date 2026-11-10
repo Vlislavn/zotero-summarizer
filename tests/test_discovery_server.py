@@ -176,6 +176,7 @@ def test_metadata_constructs_no_clients_and_native_failure_is_unverified(journey
     monkeypatch.setattr(discovery, "_search_openalex_client", lambda *a: pytest.fail("provider construction on GET"))
     metadata = discovery.discovery_metadata("SEED0001")
     assert metadata["context_fingerprint"]
+    monkeypatch.setattr(discovery, "_membership_cache", None)  # membership is cached until a DB file changes
     monkeypatch.setattr(journey.reader, "get_field_values", lambda *a: (_ for _ in ()).throw(OSError("unavailable")))
     unavailable = discovery.discovery_metadata("SEED0001")
     assert unavailable["admission"]["state"] == "unknown"
@@ -184,16 +185,15 @@ def test_metadata_constructs_no_clients_and_native_failure_is_unverified(journey
 
 
 @pytest.mark.parametrize("decision", ["selected", "black_swan", "user_rejected"])
-def test_selected_or_stored_materialized_key_is_not_seed_authority(journey, decision):
+def test_selected_or_stored_materialized_key_is_not_saved_admission_but_may_search(journey, decision):
     journey.runtime.zotero_reader = None
     with sqlite3.connect(journey.paths.triage_db_path) as conn:
         conn.execute("UPDATE processed_feed_items SET decision=?", (decision,))
     metadata = discovery.discovery_metadata(STABLE)
     assert metadata["admission"] == {"state": "not_saved", "basis": None}
-    with pytest.raises(APIError) as error:
-        discovery.find_new(STABLE, context_fingerprint=metadata["context_fingerprint"])
-    assert error.value.status_code == 409
-    assert journey.requests == []
+    # Not saved: no saved authority, but public-metadata discovery is still allowed (feed-only papers).
+    assert metadata["context_fingerprint"] and metadata["reason"] is None
+    assert discovery.find_new(STABLE, context_fingerprint=metadata["context_fingerprint"]).status == "discovery_ready"
 
 
 def test_latest_row_before_filter_and_membership_beyond_5000(journey):
@@ -442,6 +442,7 @@ def test_durable_only_sentinel_never_crosses_any_session_http_response(journey, 
     assert stale["discovery"]["seed_comments"] is None
     assert stale["discovery"]["assessment"]["items"] == []
     assert PRIVATE not in json.dumps(stale, ensure_ascii=False)
+    monkeypatch.setattr(discovery, "_membership_cache", None)  # membership is cached until a DB file changes
     monkeypatch.setattr(journey.reader, "get_field_values", lambda *a: (_ for _ in ()).throw(OSError("unavailable")))
     unverified = journey.client.get(f"/api/search/{saved.id}").json()
     assert unverified["discovery"]["freshness"] == "unverified"

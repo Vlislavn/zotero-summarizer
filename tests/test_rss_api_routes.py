@@ -112,10 +112,11 @@ def test_rss_refresh_route_uses_bounded_app_reader(tmp_path, monkeypatch) -> Non
         def __init__(self, db_path):
             seen["db_path"] = db_path
 
-        def refresh_feeds(self, *, max_feeds, max_new_items_per_feed, per_feed_timeout):
+        def refresh_feeds(self, *, max_feeds, backfill_days, max_pages_per_feed, per_feed_timeout):
             seen.update(
                 max_feeds=max_feeds,
-                max_new_items_per_feed=max_new_items_per_feed,
+                backfill_days=backfill_days,
+                max_pages_per_feed=max_pages_per_feed,
                 per_feed_timeout=per_feed_timeout,
             )
             return {"feeds": max_feeds, "inserted": 0, "updated": 0, "errors": []}
@@ -125,7 +126,8 @@ def test_rss_refresh_route_uses_bounded_app_reader(tmp_path, monkeypatch) -> Non
         rss_routes.refresh_feeds(
             rss_routes.RssRefreshRequest(
                 max_feeds=3,
-                max_new_items_per_feed=4,
+                backfill_days=4,
+                max_pages_per_feed=2,
                 per_feed_timeout_secs=5,
             )
         )
@@ -135,6 +137,7 @@ def test_rss_refresh_route_uses_bounded_app_reader(tmp_path, monkeypatch) -> Non
     assert seen == {
         "db_path": tmp_path / "triage.db",
         "max_feeds": 3,
-        "max_new_items_per_feed": 4,
+        "backfill_days": 4,
+        "max_pages_per_feed": 2,
         "per_feed_timeout": 5.0,
     }

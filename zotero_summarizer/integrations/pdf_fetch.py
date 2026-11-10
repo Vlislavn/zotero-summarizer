@@ -8,6 +8,9 @@ HTML error page into the PDF extractor.
 
 `resolve_pdf_url` produces a URL given paper identifiers; it prefers arXiv
 direct PDFs, then Unpaywall, then any URL provided as a fallback.
+`biorxiv_pdf_url` turns a bioRxiv/medRxiv landing page into its full-text PDF —
+RSS feeds mangle the preprint DOI so Unpaywall/OpenAlex miss it, yet the PDF is
+served at a constructible ``<landing>.full.pdf`` path.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from zotero_summarizer.integrations.app_rss import (
     stream_public_url,
     validate_rss_url,
 )
+from zotero_summarizer.integrations.github import BROWSER_UA
 from zotero_summarizer.settings import offline_requested
 
 
@@ -112,6 +116,7 @@ def fetch_pdf(
         timeout=timeout,
         follow_redirects=False,
         trust_env=False,
+        headers={"User-Agent": BROWSER_UA, "Accept": "application/pdf,*/*"},
         limits=httpx.Limits(max_keepalive_connections=0),
     )
     try:
@@ -144,6 +149,26 @@ def valid_pdf_path(path: Path, *, max_bytes: int = _DEFAULT_MAX_BYTES) -> bool:
             return handle.read(4) == _PDF_MAGIC
     except OSError:
         return False
+
+
+_PREPRINT_LANDINGS = ("biorxiv.org/content/", "medrxiv.org/content/")
+
+
+def biorxiv_pdf_url(url: str | None) -> str | None:
+    """A bioRxiv/medRxiv ``/content/<doi>vN`` landing page → its full-text PDF URL.
+
+    RSS feeds mangle the preprint DOI (``10.64898/…vN?rss=1``) so the Unpaywall/
+    OpenAlex rungs 404 on it, but the full text is reliably served at
+    ``<landing>.full.pdf``. Returns ``None`` for any non-preprint URL, a collection
+    page (no ``/content/``), or a URL that already points at a PDF.
+    """
+    low = (url or "").strip().lower()
+    if not any(host in low for host in _PREPRINT_LANDINGS):
+        return None
+    base = (url or "").strip().split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    if base.lower().endswith(".pdf"):
+        return None
+    return f"{base}.full.pdf"
 
 
 def resolve_pdf_url(

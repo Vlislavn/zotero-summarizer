@@ -65,6 +65,10 @@ class LlmStatus(BaseModel):
     default_model: str | None = None
     api_key_env: str | None = None  # name only; never the secret
     api_key_present: bool
+    auth_required: bool = True
+    auth_status: str = 'unknown'
+    reachability: str = 'unknown'
+    reason_code: str | None = None
     reachable: bool
     detail: str = ""
 

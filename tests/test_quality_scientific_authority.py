@@ -48,7 +48,7 @@ def test_evaluator_to_worker_cache_proposal_and_saved_note_share_grade(
     from zotero_summarizer.services.library import _review_identity
     from zotero_summarizer.services.zotero import pending
 
-    source = PaperDigest(**SOURCE)
+    source = PaperDigest(**{**PaperDigest().model_dump(exclude={'basis'}), **SOURCE})
     before = source.model_dump()
 
     class SourceClient(_Verifier):
@@ -57,7 +57,7 @@ def test_evaluator_to_worker_cache_proposal_and_saved_note_share_grade(
             self.generated = 0
 
         def pydantic_prompt(self, *, pydantic_model, **kwargs):
-            if pydantic_model is PaperDigest:
+            if issubclass(pydantic_model, PaperDigest):
                 self.generated += 1
                 return source.model_copy(deep=True)
             return super().pydantic_prompt(pydantic_model=pydantic_model, **kwargs)
@@ -133,8 +133,9 @@ def test_evaluator_to_worker_cache_proposal_and_saved_note_share_grade(
     assert json.loads(row["payload_json"]) == row["approval_preview"]["payload"]
     assert note_html == '<div class="zotero-note znv1">' + fragment + '</div>'
     note = ET.fromstring(note_html)
-    assert note.find("h2").text.endswith(" · Quality " + (expected_grade or "—"))
-    assert "quality " + (expected_grade or "—") in note.findall("p")[-1].find("em").text
+    heading = note.find("h2").text
+    # Full-review note (#152): heading carries the evaluator grade (+ band); no grade -> no 'Quality'.
+    assert (" · Quality " + expected_grade in heading) if expected_grade else ("Quality" not in heading)
     assert "Quality A" not in note_html and "quality A" not in note_html
     assert asyncio.run(pending.apply_pending_changes(approved))["applied"] == 0
     writer.apply_changes.assert_called_once()
@@ -166,7 +167,7 @@ def test_evaluator_to_worker_cache_proposal_and_saved_note_share_grade(
 ])
 def test_applied_grade_and_proposal_share_authority_without_mutating_model(quality, expected):
     original = deepcopy((SOURCE, quality))
-    applied, raw, _ = propose.apply_reading_policy(SOURCE, quality, [HIT])
+    applied, raw, _ = propose.apply_reading_policy(SOURCE, quality)
     proposal = propose.propose_verdict(SOURCE, quality, goal_summaries=[HIT])
     assert applied["grade"] == proposal.grade == expected
     assert raw == "read" and (SOURCE, quality) == original

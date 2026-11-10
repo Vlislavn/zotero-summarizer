@@ -129,6 +129,14 @@ Training saves the pre-training identity, never a later CSV hash. Concurrent
 input edits therefore remain detectable by the next reuse check; this is not a
 cross-store snapshot or a lock on human labeling. Encoder provenance and
 train/evaluation fit-recipe consistency have separate checks below.
+`_text.paper_text` removes HTML tags, comments and script/style bodies, decodes
+entities and normalizes whitespace at the SPECTER2 boundary. Both inference and
+training use the same conversion, including the content-cache identity. Raw
+source records remain intact; old HTML-derived vectors miss rather than being
+reused for different encoder input. Plain unchanged inputs keep their cache hits.
+The tokenizer's 512-token limit remains; preserving full exported abstracts does
+not claim unlimited encoder context.
+
 The SPECTER2 tokenizer/base and proximity adapter are pinned to immutable Hub
 commits in `classifier_const.py`, shared by loading, input identity and the
 single/batch vector-cache key. Pins match the pre-existing local snapshots:

@@ -117,11 +117,11 @@ def test_overlapping_hackernoon_tag_feeds_deduplicate_by_generic_stable_identity
     )
 
     reader = AppRssReader(db_path)
-    result = reader.refresh_feeds(max_feeds=2, max_new_items_per_feed=5)
+    result = reader.refresh_feeds(max_feeds=2)
     items = reader.get_feed_items(limit=None)
     expected_key = "feed:g:adffc19dd59a091f56058c7b3f1124ac3271a379453b639437869d9f047d9f50"
 
-    assert result == {"feeds": 2, "inserted": 1, "updated": 1, "errors": []}
+    assert result == {"feeds": 2, "inserted": 1, "updated": 1, "incomplete": 0, "errors": []}
     assert len(items) == 1
     assert items[0]["stable_feed_key"] == expected_key
     assert items[0]["guid"] == "shared-hackernoon-story"
@@ -145,7 +145,7 @@ def test_generic_cross_host_guid_identity_survives_store_reopen(tmp_path, monkey
     result = reader.refresh_feeds(max_feeds=2)
     reopened = AppRssReader(db_path).get_feed_items(limit=None)
 
-    assert result == {"feeds": 2, "inserted": 1, "updated": 1, "errors": []}
+    assert result == {"feeds": 2, "inserted": 1, "updated": 1, "incomplete": 0, "errors": []}
     assert len(reopened) == 1
     assert reopened[0]["stable_feed_key"] == reader.get_feed_items(limit=None)[0]["stable_feed_key"]
     assert reopened[0]["guid"] == "generic-shared-story"
@@ -165,7 +165,7 @@ def test_valid_empty_tag_feeds_record_checks_without_fabricating_items(tmp_path,
     result = AppRssReader(db).refresh_feeds(max_feeds=2)
     reopened = AppRssReader(db)
 
-    assert result == {"feeds": 2, "inserted": 0, "updated": 0, "errors": []}
+    assert result == {"feeds": 2, "inserted": 0, "updated": 0, "incomplete": 0, "errors": []}
     assert reopened.get_feed_items(limit=None) == []
     groups = reopened.get_feed_groups()
     assert len(groups) == 2
@@ -215,7 +215,7 @@ def test_ingested_story_reaches_shared_scoring_and_processed_pool(
     item, = reader.get_feed_items(limit=None)
     candidate, error, fatal = feed_triage._triage_one(item, log_prefix="journey", triage_llm=llm)
 
-    assert refreshed == {"feeds": 2, "inserted": 1, "updated": 1, "errors": []}
+    assert refreshed == {"feeds": 2, "inserted": 1, "updated": 1, "incomplete": 0, "errors": []}
     assert candidate is not None and error is None and fatal is False
     assert candidate.feed_item["stable_feed_key"] == item["stable_feed_key"]
     assert candidate.summary.relevance_score == 3

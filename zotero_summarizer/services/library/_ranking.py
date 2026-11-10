@@ -9,14 +9,15 @@ re-exports these so ``reading_queue._dedup_by_content`` etc. remain the public s
     """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from zotero_summarizer.domain import score_to_priority
 from zotero_summarizer.services._common import band_primary_enabled
 from zotero_summarizer.services._common import quality_promote_enabled
-from zotero_summarizer.services._common import settings as get_settings
-from zotero_summarizer.services._common import state as get_state
 from zotero_summarizer.services.emoji_signals import HARD_VETO_EMOJIS, READ_EMOJIS
+from zotero_summarizer.services.library._row_nearest import attach_nearest_kept, corpus_cache
+from zotero_summarizer.services.library._row_why import concrete_why
 from zotero_summarizer.services.library._score_distribution import _entry_prestige
 from zotero_summarizer.services.library._score_distribution import entry_prestige_evidence
 from zotero_summarizer.services.model.rank_blend import (
@@ -33,6 +34,8 @@ from zotero_summarizer.services.model.rank_blend import (
 # emoji, but the triage system applies this tag without user action.
 _READ_TAGS: frozenset[str] = READ_EMOJIS | HARD_VETO_EMOJIS
 _TRIAGE_APPROVED_TOKEN = "triage-approved"
+_PREVIEW_CHARS = 260
+_EMAIL_ONLY = re.compile(r"\S+@\S+\.\S+")
 
 
 def _is_read(tags: list[str]) -> bool:
@@ -52,11 +55,12 @@ _PRIORITY_RANK: dict[str, int] = {
     "must_read": 3, "should_read": 2, "could_read": 1, "": 0, "dont_read": -1,
 }
 
-# The user's explicit verdict OUTRANKS the model: a paper labelled must/should/
-# could_read pins to the top of Read next (priority order), so a label makes it
-# findable rather than burying it in the ranked majority. ``dont_read`` never
-# reaches the sort — it's handled-filtered out of ``unread`` upstream.
-_USER_VERDICT_RANK: dict[str, int] = {"must_read": 3, "should_read": 2, "could_read": 1}
+
+def _plain_authors(authors: Any) -> Any:
+    """Some feeds put a publisher e-mail in the creator field; show no author instead."""
+    if isinstance(authors, str) and _EMAIL_ONLY.fullmatch(authors.strip()):
+        return ""
+    return authors or ""
 
 
 def _content_key(rec: dict[str, Any]) -> str:
@@ -90,19 +94,8 @@ def _goal_affinity(item_keys: list[str]) -> dict[str, float]:
     """``{item_key: goal-text similarity}`` for the unread items, from the corpus
     EmbeddingCache (cached embeddings → goal embeddings; no model load). Empty
     when the corpus isn't enabled, so the sort cleanly falls back to gate-only."""
-    if not item_keys:
-        return {}
-    # Optional-feature boundary (mirrors classifier._build_aux_providers): no
-    # config / corpus-disabled → no goal signal → caller sorts by the gate alone.
-    app_state = getattr(get_state(), "app_state", None)
-    config = getattr(app_state, "config", None) if app_state is not None else None
-    corpus_cfg = getattr(config, "corpus", None) if config is not None else None
-    if corpus_cfg is None or not getattr(corpus_cfg, "enabled", False):
-        return {}
-    from zotero_summarizer.storage.corpus import EmbeddingCache
-
-    cache = EmbeddingCache(get_settings().corpus_db_path, corpus_cfg.embedding_model)
-    return cache.goal_affinity_for_items(item_keys)
+    cache = corpus_cache() if item_keys else None
+    return cache.goal_affinity_for_items(item_keys) if cache is not None else {}
 
 
 def _known_prestige(rec: dict[str, Any]) -> float | None:
@@ -177,15 +170,11 @@ def sort_unread(unread: list[dict[str, Any]], *, model_ready: bool) -> None:
             key=lambda c: (_PRIORITY_RANK.get(c["reading_priority"], 0), c["date_added"]),
             reverse=True,
         )
-    # The user's explicit verdict wins over the model's order: pin labelled
-    # papers (must/should/could_read) to the top in priority order. Stable, so
-    # the blended/recency order is preserved within each verdict tier AND across
-    # the unlabelled rank-0 majority (a no-op when nothing is labelled).
-    if any(r.get("user_priority") in _USER_VERDICT_RANK for r in unread):
-        unread.sort(
-            key=lambda c: _USER_VERDICT_RANK.get(c.get("user_priority") or "", 0),
-            reverse=True,
-        )
+    # Papers the owner already decided (own verdict) go LAST: Read next leads with
+    # what still needs a decision. Stable, so the blended order is kept within each
+    # group; they stay findable (verdict shown on the row), never hidden.
+    if any(r.get("decided") for r in unread):
+        unread.sort(key=lambda c: -1 if c.get("decided") else 0, reverse=True)
 
 
 def _build_recs(
@@ -195,12 +184,14 @@ def _build_recs(
     verdict_priority: dict[str, str],
     reviews: dict[str, Any],
     proposed_verdicts: dict[str, Any],
+    own_verdicts: frozenset[str] | set[str] = frozenset(),
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Partition library rows into ``(unread, read/handled)`` queue records.
 
     "Handled" = engaged (emoji) OR explicitly rejected (``dont_read``); those drop
     out of the unread queue. A POSITIVE verdict is a reading intent — the paper
-    stays in ``unread`` and pins to the top (``sort_unread``). The
+    stays in ``unread`` but is flagged ``decided`` (own verdict, ``own_verdicts``)
+    and sorts after the undecided papers (``sort_unread``). The
     ``proposed_verdict`` and quality fields are display-only sidecars (never fed to
     the hide/pin logic)."""
     from zotero_summarizer.services.library.review_fleet.verdict_store import proposal_matches_review
@@ -235,20 +226,24 @@ def _build_recs(
         rec = {
             "item_key": it["item_key"],
             "title": it.get("title") or "",
-            "authors": it.get("authors") or "",
+            "authors": _plain_authors(it.get("authors")),
             "venue": it.get("venue") or "",
             "reading_priority": reading_priority,
             "user_priority": user_priority,
+            "decided": it["item_key"] in own_verdicts,
             "has_pdf": bool(it.get("has_pdf")),
             "date_added": it.get("date_added") or "",
             # Zotero-column sort fields (client-side sort in the Library UI).
             "publication_date": it.get("publication_date") or "",
             "year": str(it.get("publication_date") or "")[:4],
-            "abstract_preview": str(it.get("abstract") or "")[:500],
+            # Two lines of the row; the full abstract stays server-side.
+            "abstract_preview": " ".join(str(it.get("abstract") or "").split())[:_PREVIEW_CHARS],
             "date_modified": it.get("date_modified") or "",
             "read": is_read,
             "relevance_score": relevance_score,
-            "why_reason": entry["why_reason"] if entry else None,
+            # Concrete sentence (see _row_why); None when only bookkeeping features
+            # (title length, DOI…) contributed — no reason beats a generic one.
+            "why_reason": concrete_why(entry),
             # Carried from the score cache (computed at rescore time) so the open
             # path skips the corpus matmul; None when absent (legacy entry / no
             # embedding) — sort_unread does a cheap live lookup for those.
@@ -268,8 +263,11 @@ def _build_recs(
             ),
             "quality_grade": quality_grade,
             "quality_band": quality_band,
+            "quality_met": qual.get("coverage_met"),
+            "quality_applicable": qual.get("coverage_applicable"),
         }
         (read if (is_read or user_priority == "dont_read") else unread).append(rec)
+    attach_nearest_kept(unread)
     return unread, read
 
 
@@ -303,7 +301,6 @@ def _order_and_dedup(
 
 __all__ = [
     "_PRIORITY_RANK",
-    "_USER_VERDICT_RANK",
     "_content_key",
     "_dedup_by_content",
     "_goal_affinity",

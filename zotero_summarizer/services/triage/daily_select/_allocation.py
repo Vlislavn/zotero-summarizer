@@ -61,6 +61,7 @@ def _to_slate_paper(
         shap_top=cand["shap_top"],
         decision=cand["decision"],
         max_author_h_index=cand.get("max_author_h_index"),
+        last_author_h_index=cand.get("last_author_h_index"),
         feed_name=cand.get("feed_name", ""),
         quality=cand.get("quality") or {},
         review_ready=bool(cand.get("review_ready")),
@@ -72,6 +73,8 @@ def _to_slate_paper(
         selection_evidence=(
             deepcopy(selection) if selection is not None else {"basis": "not_observed"}
         ),
+        recommendation=dict(cand.get("recommendation") or {}),
+        review_freshness=cand.get("review_freshness"),
     )
 
 

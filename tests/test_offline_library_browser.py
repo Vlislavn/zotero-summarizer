@@ -36,6 +36,10 @@ def _ready(lab, record_property):
       const cache = await caches.open('zs-app-shell-v1');
       return (await cache.keys()).some(row => row.url.includes('/assets/'));
     }""")
+    with page.expect_response(lambda response: "/api/sync/pull?" in response.url) as pulled:
+        page.get_by_role("button", name="Sync now", exact=True).click()
+    assert pulled.value.status == 200
+    expect(page.get_by_text("Connected to the app", exact=False)).to_be_visible()
     return page
 
 

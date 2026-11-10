@@ -24,7 +24,7 @@ def test_hosted_provider_is_saved_before_optional_probe(tmp_path, monkeypatch):
     assert config.llm_routing.providers[0].type.value == "anthropic"
 
 
-def test_cli_doctor_saved_custom_provider_is_authorized_without_live_startup(tmp_path, monkeypatch, capsys):
+def test_cli_doctor_saved_custom_provider_needs_approval_but_declared_none_is_admitted(tmp_path, monkeypatch, capsys):
     import json
     import pytest
     from zotero_summarizer import cli, runtime
@@ -50,9 +50,16 @@ def test_cli_doctor_saved_custom_provider_is_authorized_without_live_startup(tmp
     payload = json.loads(capsys.readouterr().out)
     assert result == 1  # only inventory was selected, not full readiness
     assert runtime.get_context().state.app_state is None
-    assert next(row for row in payload["checks"] if row["id"] == "runtime_model")["status"] == "ready"
-    assert calls == [("credential", provider.name), ("inventory", provider.base_url, "synthetic")]
-    unsaved = provider.model_copy(update={"base_url": "https://unsaved-custom.invalid/v1"})
+    row = next(row for row in payload['checks'] if row['id'] == 'runtime_model')
+    assert row['status'] == 'needs_action' and row['reason_code'] == 'provider_approval_required'
+    assert row['recovery']['action'] == 'open_ai_settings' and calls == []
+    config.llm_routing.providers[0].auth_mode = 'none'
+    write_user_config(settings.config_path, config)
+    cli.main(['doctor', '--project-root', str(tmp_path), '--check', 'runtime_model', '--json'])
+    no_auth = json.loads(capsys.readouterr().out)
+    assert next(row for row in no_auth['checks'] if row['id'] == 'runtime_model')['status'] == 'ready'
+    assert calls == [('inventory', provider.base_url, None)]
+    unsaved = provider.model_copy(update={'base_url': 'https://unsaved-custom.invalid/v1', 'auth_mode': 'legacy'})
     with pytest.raises(APIError) as error:
         model_list.list_models_for_provider(unsaved)
-    assert error.value.error == "unsafe_provider_discovery" and len(calls) == 2
+    assert error.value.error == 'provider_approval_required' and len(calls) == 1

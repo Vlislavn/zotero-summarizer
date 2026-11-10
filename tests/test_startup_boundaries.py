@@ -111,8 +111,8 @@ def test_health_before_startup(monkeypatch):
 def test_startup_rss_reads_project_env_after_import(tmp_path, monkeypatch):
     from zotero_summarizer.integrations.app_rss import AppRssReader
 
-    (tmp_path / ".env").write_text("ZS_STARTUP_RSS_MAX_FEEDS=2\nZS_STARTUP_RSS_MAX_NEW_PER_FEED=3\nZS_STARTUP_RSS_TIMEOUT_SECS=1.5\n")
-    for key in ("ZS_STARTUP_RSS_MAX_FEEDS", "ZS_STARTUP_RSS_MAX_NEW_PER_FEED", "ZS_STARTUP_RSS_TIMEOUT_SECS"):
+    (tmp_path / ".env").write_text("ZS_STARTUP_RSS_MAX_FEEDS=2\nZS_STARTUP_RSS_TIMEOUT_SECS=1.5\n")
+    for key in ("ZS_STARTUP_RSS_MAX_FEEDS", "ZS_STARTUP_RSS_TIMEOUT_SECS"):
         monkeypatch.delenv(key, raising=False)
     settings = Settings.load(project_root=tmp_path)
     seen = []
@@ -125,7 +125,7 @@ def test_startup_rss_reads_project_env_after_import(tmp_path, monkeypatch):
         assert not lifecycle._schedule_startup_rss_refresh(asyncio.get_running_loop(), settings)
 
     asyncio.run(run())
-    assert seen == [{"max_feeds": 2, "max_new_items_per_feed": 3, "per_feed_timeout": 1.5}]
+    assert seen == [{"max_feeds": 2, "per_feed_timeout": 1.5}]
 
 
 def test_startup_corpus_sync_precedes_gate_refresh(monkeypatch):

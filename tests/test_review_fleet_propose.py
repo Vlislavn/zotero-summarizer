@@ -8,10 +8,11 @@ deterministic mapping assertion; nothing is mocked because there is nothing to m
 
 Coverage map:
   - the full read/skim/skip × grade × goal-match truth table (the four priorities);
-  - the load-bearing ASYMMETRY: a goal-matched ``skip`` stays ``could_read`` (a wrong
-    HIDE costs more than a wrong KEEP), only a goal-MISS skip may propose ``dont_read``;
-  - the low-confidence WITHHOLD signals: ``quality_band == "uncertain"`` OR any
-    non-empty ``overstatements`` cut confidence and raise a flag (the "double-check" hint);
+  - the load-bearing ASYMMETRY: a ``skip`` stays ``could_read`` (a wrong HIDE costs more
+    than a wrong KEEP), only a grade-D skip may propose ``dont_read``; the goal board
+    is a badge and never changes the verdict;
+  - the low-confidence WITHHOLD signals: ``quality_band == "uncertain"`` cuts
+    confidence and raises a flag (the "double-check" hint); ``overstatements`` are display-only;
   - the safe degrade-to-``could_read`` when no digest / no signals exist (never a hide).
 """
 from __future__ import annotations
@@ -64,16 +65,15 @@ def _goals(*, matched):
 # Each row expresses the reading-policy requirement for an assessed goal board:
 #   read  -> must (A/B) / should (C/D/?)
 #   skim  -> should (A/B) / could (C/D/?)
-#   skip  -> could (goal matched) / dont (goal miss)     <- the asymmetry
-# Full read additionally requires a confirmed goal match and highlighted evidence.
+#   skip  -> could, dont only on grade D                 <- the asymmetry
+# The goal board (matched / missed) never changes a row; it is a badge only.
 
 _TRUTH_TABLE = [
-    # read: a missing goal match caps to skim before the grade mapping.
     ("read", "A", True, "must_read"),
-    ("read", "A", False, "should_read"),
+    ("read", "A", False, "must_read"),
     ("read", "B", True, "must_read"),
     ("read", "C", True, "should_read"),
-    ("read", "D", False, "could_read"),
+    ("read", "D", False, "should_read"),
     ("read", "", True, "should_read"),
     # skim: strong grade -> should_read, weak/none -> could_read (goal-neutral)
     ("skim", "A", True, "should_read"),
@@ -81,13 +81,15 @@ _TRUTH_TABLE = [
     ("skim", "C", True, "could_read"),
     ("skim", "D", False, "could_read"),
     ("skim", "", True, "could_read"),
-    # skip: goal-matched -> could_read (kept), goal-miss -> dont_read (the only hide)
+    # skip: could_read (kept) whatever the board says; grade D is the only hide
     ("skip", "A", True, "could_read"),
     ("skip", "C", True, "could_read"),
     ("skip", "", True, "could_read"),
-    ("skip", "A", False, "dont_read"),
-    ("skip", "C", False, "dont_read"),
-    ("skip", "", False, "dont_read"),
+    ("skip", "A", False, "could_read"),
+    ("skip", "C", False, "could_read"),
+    ("skip", "", False, "could_read"),
+    ("skip", "D", True, "dont_read"),
+    ("skip", "D", False, "dont_read"),
 ]
 
 
@@ -107,21 +109,14 @@ def test_truth_table_maps_to_expected_priority(read_decision, grade, goal_matche
     assert 0.0 <= out.confidence <= 1.0
 
 
-def test_read_requires_goal_match_but_skim_does_not():
-    matched = propose.propose_verdict(
-        _digest(read_decision="read", grade="A"), _quality(band="highlight"),
-        goal_summaries=_goals(matched=True),
-    )
-    missed = propose.propose_verdict(
-        _digest(read_decision="read", grade="A"), _quality(band="highlight"),
-        goal_summaries=_goals(matched=False),
-    )
-    assert matched.proposed == "must_read" and missed.proposed == "should_read"
-    for goal_matched in (True, False):
-        assert propose.propose_verdict(
-            _digest(read_decision="skim", grade="A"), _quality(band="neutral"),
-            goal_summaries=_goals(matched=goal_matched),
-        ).proposed == "should_read"
+def test_goal_board_never_changes_read_or_skim():
+    for decision, grade, band, expected in (("read", "A", "highlight", "must_read"),
+                                            ("skim", "A", "neutral", "should_read")):
+        for goal_matched in (True, False):
+            assert propose.propose_verdict(
+                _digest(read_decision=decision, grade=grade), _quality(band=band),
+                goal_summaries=_goals(matched=goal_matched),
+            ).proposed == expected
 
 
 # --- 2. the dont_read-conservatism (asymmetry) -------------------------------------
@@ -138,24 +133,24 @@ def test_goal_matched_skip_is_could_read_not_dont_read():
     assert out.proposed != "dont_read"
 
 
-def test_goal_miss_skip_is_the_only_path_to_dont_read():
+def test_grade_d_skip_is_the_only_path_to_dont_read():
     out = propose.propose_verdict(
-        _digest(read_decision="skip", grade="C"),
+        _digest(read_decision="skip", grade="D"),
         _quality(band="ok"),
-        goal_summaries=_goals(matched=False),
+        goal_summaries=_goals(matched=True),
     )
     assert out.proposed == "dont_read"
 
 
 @pytest.mark.parametrize("goal_summaries", [_goals(matched=False), _goals(matched=False) * 2])
-def test_evaluated_goal_miss_allows_dont_read_on_skip(goal_summaries):
-    """Every cell explicitly records a retrieval miss; summary abstention is valid."""
+def test_goal_miss_skip_is_not_a_hide(goal_summaries):
+    """A complete miss board no longer licenses a hide: it is a badge only."""
     out = propose.propose_verdict(
         _digest(read_decision="skip", grade="C"),
         _quality(band="ok"),
         goal_summaries=goal_summaries,
     )
-    assert out.proposed == "dont_read"
+    assert out.proposed == "could_read"
 
 
 @pytest.mark.parametrize("goal_summaries", [
@@ -230,8 +225,8 @@ def test_uncertain_band_lowers_confidence_and_flags():
     assert shaky.confidence < clean.confidence
 
 
-def test_overstatements_lower_confidence_and_flag():
-    """A non-empty overstatements list is shaky even with a confident band."""
+def test_overstatements_change_nothing():
+    """Overstatements are display-only (#189): no flag, no confidence cut."""
     clean = propose.propose_verdict(
         _digest(read_decision="read", grade="A"),
         _quality(band="highlight", overstatements=[]),
@@ -242,9 +237,8 @@ def test_overstatements_lower_confidence_and_flag():
         _quality(band="highlight", overstatements=["abstract claims X, body shows only Y"]),
         goal_summaries=_goals(matched=True),
     )
-    assert "overstatements" in shaky.flags
-    assert "weak_evidence" in shaky.flags and shaky.proposed == "should_read"
-    assert shaky.confidence < clean.confidence
+    assert "overstatements" not in shaky.flags and "weak_evidence" not in shaky.flags
+    assert shaky.proposed == clean.proposed and shaky.confidence == clean.confidence
 
 
 def test_blank_overstatements_are_ignored():

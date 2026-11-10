@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from zotero_summarizer.models import PaperDigest
+from tests.test_digest_verification import _digest
 from zotero_summarizer.services.library._map_reduce import (
     ChunkBudget,
     digest_for_strategy,
@@ -50,12 +51,7 @@ class _ReduceLLM:
     def pydantic_prompt(self, *, prompt, pydantic_model):
         # The reduce model sees the chunk notes as its source text.
         assert "note 1" in prompt and "chunk 1" in prompt
-        return PaperDigest(
-            tldr="synthesized from notes", read_decision="skip",
-            read_why="The synthesis is sufficient.", read_parts=[], skip_parts=[],
-            estimated_read_minutes=None, original_value="",
-            writing_friction="low", writing_reasons=[],
-        )
+        return _digest('synthesized from notes')
 
 
 def test_map_reduce_maps_each_chunk_then_reduces():
@@ -90,11 +86,7 @@ class _DigestLLM:
     def pydantic_prompt(self, *, prompt, pydantic_model):
         self.seen_text = prompt
         self.pydantic_calls += 1
-        return PaperDigest(
-            tldr="ok", read_decision="skip", read_why="The digest is sufficient.",
-            read_parts=[], skip_parts=[], estimated_read_minutes=None, original_value="",
-            writing_friction="low", writing_reasons=[],
-        )
+        return _digest('ok')
 
 
 def test_digest_for_strategy_dispatches_by_chunk_strategy():

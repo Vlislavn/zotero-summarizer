@@ -1,286 +1,196 @@
 # integrations — external-system adapters
 
-`telegram_threads.py` reuses the explicit Telethon request/error leaf for selected
-public broadcasts, megagroups and forum roots. `GetDiscussionMessage` routes linked
-replies via the returned group/root, with complete direct-origin or saved-from
-origin consistency; `GetReplies` retains nested parent/top IDs. One bounded newest
-window is re-fetched per run (no whole-history promise). Validate peer/order/route
-before retaining originals; nontext/skipped and cap counts remain explicit.
-Broadcast lookahead/scanned/retained/truncated counts are separate from reply
-coverage. A later post stop carries completed observations plus origin-bound
-unavailable/not-attempted rows; it cannot discard earlier threads or continue RPCs.
-Reply-peer scope is retained as a boolean, never a sender/user identity; cross-peer
-or historically unknown scope must not become an invented same-peer parent. No
-join/send/delete, personal peer, convenience iterator, SDK lifecycle or model work
-is added here; the existing dedicated session owner still owns connect/disconnect.
+Contract for changing this package: thin I/O clients for everything outside the app (no business logic).
+Product behavior: [docs/features.md](../../docs/features.md); placement: [docs/architecture.md](../../docs/architecture.md).
 
-Opt-in OpenAlex search receipts reject nonfinite decoded JSON as parse failure
-before publishing hits. Ordinary/no-receipt payload policy remains unchanged;
-malformed variants do not invalidate independently usable neighboring requests.
+## Boundaries
 
-Verification uses one explicit `llm_requests.py` inventory through native callbacks
-and the owned HTTPX pre-send hook. Exact model/run/terminal observations stay
-separate from callback return, cache/text and client close. Ordinary client options
-are unchanged; verification disables cache/retries/redirects. Pre-send entry is
-conservative ownership evidence, not remote acceptance, process termination or
-hardware safety. Persisted receipt policy remains service-owned; lower adapters
-import no services. Verification normalizes configured base prefixes with the
-native operation path: Anthropic uses `/v1/messages`, not an assumed OpenAI-style
-versioned base. Its unspecified verification base is explicitly the official
-native target, not an ambient SDK override. Ordinary client defaults stay intact.
+- Leaves depend only on stdlib, third-party clients and `models`/`domain`; they never import `services/` or `api/`
+  (enforced by pre-commit). Persisted receipt policy is service-owned.
+- HTTP and browser PDF functions take an explicit `cache_dir` (callers pass `Settings.pdf_cache_dir`); no import-time
+  HOME path or service lookup lives here.
+- Best-effort scholarly leaves return `[]`/`None` on transport or parse error; unexpected runtime failures propagate.
+  Hosts are locked per adapter (SSRF guard) and rate-limited by `_rate_limiter.RateLimiter`.
 
-Thin, low-level clients for everything outside the app: the local Zotero
-SQLite DB, PDFs, the LLM, OpenAlex (prestige), Unpaywall (OA PDFs), and the
-Targeted Search sources (arXiv/EuropePMC/Crossref/Semantic Scholar + the
-authenticated OpenReview peer-review channel). No business logic — just I/O with
-clear types.
-
-```
-services/ ─calls→ integrations/ ─talks to→  Zotero DB | PDFs | LLM API | OpenAlex | Unpaywall
-```
-
-Raw `mark_feed_items_read(list[int]) -> int` reuses `backup_database()` before
-its native retry, then `_prune_backups()` only after commit. A nonblocking
-per-library file lock serializes raw admission through commit/pruning. Admission
-allows the existing five retained app backups plus one attempt slot; six existing
-app-pattern artifacts refuse before backup/native effects. Failure never prunes
-snapshots: review/export enough to leave at most five before retrying. Normal
-success applies shared retention to five, including older failed-attempt copies,
-so successive successful calls continue.
-Empty input has no probe/lock/backup/write. Backup refusal prevents effects; SQL
-failure rolls back and preserves the completed backup. Postcommit retention errors
-propagate outside replay. This is not backup-to-write isolation against other native
-writers, typed approval or rollback-on-every-error. Other native ABIs are unchanged.
+## Files
 
 | file | responsibility |
 |---|---|
-| `_search_http.py` | Shared request/owned-client lifecycle for arXiv, Crossref, Europe PMC and Semantic Scholar; optional request-local transport/parser receipts, with no ambient capture state or retry. Provider parsing and locked endpoint parameters remain in each adapter. |
-| `zotero_read.py` | `ZoteroReader`: read-only WAL-aware connections, bounded lock retries and user-library collection helpers. Persistent locks raise; no raw snapshot copy or immutable WAL-skipping mode. Statistics scope collections/tags to the user library and exclude trashed items/attachments. `get_collections` scopes its collection and item counts; `collection_name_for_key` validates picker keys. Collection sorting pins Inbox and read-next, then alphabetical, recursively. |
-| `_zotero_read_items.py` · `_zotero_read_lookup.py` · `_zotero_read_feeds.py` | reader query mixins (items/detail — now also selects Zotero `typeName` as `item_type`, a weak paper-type prior for deep-review type detection, and `publicationTitle` as `venue` so the Library can filter by journal · `get_items` (paged, 500/call) + `get_all_items` (whole-library passes) share one SQL builder (`_build_list_query`) + row mapper (`_row_to_item`); `get_all_items` runs that query UN-paged in a SINGLE `_execute_read`, so a whole-library read uses one connection/query rather than repeated 500-item pages · find/membership/tags — DOI dedup matches all `domain.normalize_doi` variants · feeds — incl. `get_unread_feed_guid_map` (guid → unread `feedItems.itemID`; the read-sync reconciler's join key, see `services/triage/feeds/_zotero_readsync.py`)) |
-| `app_rss.py` | `AppRssReader`: app-owned RSS items and rotating bounded refresh; offline returns before network/DB writes. Each feed commits independently; HTTP/DNS/document failures are recorded and the remaining feeds continue. Partial success returns `errors` with feed IDs and URLs; when every feed fails, the last exception propagates. Storage/programming failures still abort immediately with rollback. Counts include committed items only. Text is sanitized before DOI/key derivation and storage. `stream_public_url` is shared with PDF fetching: validated numeric destination + original Host/TLS identity on every hop. |
-| `_zotero_read_common.py` | `ZoteroReadError` + arXiv/sanitize helpers + `_NON_BIBLIOGRAPHIC_TYPES_SQL` (the single `('attachment','note','annotation')` exclusion every "library items" query shares so PDF annotations never appear as papers) + `_USER_LIBRARY_ID_SELECT` (the single `type='user'` library scope every whole-library read injects — Zotero keeps ~dozens of `type='feed'` RSS libraries in the same `items` table, so an unscoped read leaks feed items into the corpus/ranker/tag writes/full-text; this caused cross-library 403 attachments) (leaf) |
-| `zotero_write.py` | `ZoteroWriter`: WAL-consistent backup and apply dispatcher. An explicit transaction encloses per-row savepoints; lock errors roll back the entire batch before retry, invalid rows return individual failures, and unexpected errors propagate. WAL setup failures are not swallowed. Backup pruning follows a successful write. |
-| `_zotero_write_items.py` · `_zotero_write_feed.py` · `_zotero_write_fields.py` · `_zotero_write_attachments.py` · `_zotero_write_tags.py` · `_zotero_write_collections.py` | writer mixins (item creation/materialization · idempotent feed-read bookkeeping · `set_field` single-field upsert e.g. Call Number · native imported_url attachment · tag/note helpers · collections) |
-| `_zotero_write_common.py` | `ZoteroWriteError` + LOGGER + `resolve_user_library_item_id` — the single guard every write that targets an item by key routes through, scoping resolution to `type='user'` so a feed item's key can never be mutated/parented into the user library (`required=False` for the best-effort batch remove). Mirrors `_USER_LIBRARY_ID_SELECT` on the read side (leaf) |
-| `pdf.py` · `pdf_fetch.py` | extract local PDFs as plain analysis text using OnPrem's existing `pdf_markdown=False` backend; triage captures immutable selected text, verbatim SDK annotation URI tuples and full-document SHA-256 together; fetch OA PDFs with size/timeout/magic caps. Automatic destinations/redirects use the shared public-IP pinning boundary; proxy env is ignored. Cached paths remain usable offline. |
-| `browser_fetch.py` | Institutional-access PDF acquisition with optional Patchright/Playwright Chromium and a persistent login profile. Bounded decoded CDP streams preserve HTML/JS/cookies and follow citation metadata plus Download PDF links; PDF bytes are identified by magic even with a wrong MIME type. A declared-but-unavailable scholarly PDF does not become a rendered paywall stub. HTML-only article review uses bounded text-only snapshots, not Chromium printing. The canonical `article_snapshot_path(url, cache_dir)` identifies only those derivatives: they use `cache_dir/article-snapshots/<full SHA-256(raw URL)>.pdf`; captured publisher PDFs from either browser entrypoint use the unchanged root-level `cache_dir/<first 16 hex SHA-256(raw URL)>.pdf` key. Persistent snapshots are reused only with `render_fallback=True`, after the source-PDF cache check. Legacy prefixed root-level snapshot files remain untouched; there is no alias, migration, or deletion. See the [reading source boundary](../../docs/features.md#reading-reviews). Browser sessions share the public-only proxy and one lock; `channel` selects Chrome/bundled Chromium. Optional cookie-store import and headed login readiness remain here. Missing dependency/non-PDF returns `None`; oversized bodies and unexpected acquisition errors propagate. |
-| [`_browser_response.py`](./_browser_response.py) | Bounded decoded Fetch/CDP response capture and proxy authentication. A captured PDF requires actual `%PDF-` bytes within `max_bytes`, independent of MIME; a typed missing-PDF status is recorded only when the main-frame response declares `application/pdf` and returns HTTP 400+ (except 407). |
-| [`_browser_article.py`](./_browser_article.py) | Complete admitted-scope `document.body` text-node collection in a CDP isolated world, in ≤8 KiB UTF-8 chunks with text-byte, DOM-node and deadline limits. It does not collect images, layout, CSS-generated content, embedded frames, or shadow trees. Mutation, partial traversal, invalid/empty text, or exhausted limits fail closed rather than returning a prefix. |
-| [`_article_pdf.py`](./_article_pdf.py) | Bounded fixed-layout text-only PDF writer with source/page/output caps and a text round-trip check. Uses PyMuPDF's built-in Helvetica and `cjk` fallback, subset by PyMuPDF itself; no `fontTools` import or dependency. PDF Subject is `Text-only conversion; original visual layout is not preserved.` |
-| `llm.py` | `LLMClient` protocol + `InstrumentedLLMClient`: logging and capability-gated JSON Schema constraints for every Pydantic call. Reuses `build_response_format`; explicit per-call formats take precedence and plain prompts stay unconstrained. |
-| `llm_callbacks.py` | Completion metadata guard, registered by the shared OnPrem builder: logs actual token usage and finish reason without response text. `length` raises before parsing, so truncated reasoning/JSON cannot be mistaken for a factual error and regenerated with the same exhausted budget. |
-| `llm_anthropic.py` | `AnthropicLLMClient`: native Anthropic messages-API client implementing the same `LLMClient` protocol (`.prompt` / `.pydantic_prompt`). Lazy `import anthropic`. Optional `thinking_budget` (set from the provider's `thinking_effort`) enables extended thinking — passes `thinking={type:enabled,budget_tokens}` and clamps `max_tokens` up to `budget+1024` (the API requires `max_tokens > budget`); `None` keeps thinking off. Temperature is never sent (Opus 4.x rejects it). |
-| `llm_models.py` | List a provider's available model ids for the Settings picker: `list_openai_models` (httpx `GET {base_url}/models`) · `list_anthropic_models` (SDK `models.list`). Read-only; key passed in already resolved. |
-| `openalex.py` · `openalex_cache.py` | prestige lookups + their SQLite cache. `OpenAlexClient(allow_network=False)` is cache-only (a miss → None, no HTTP) for interactive request paths that must not block on a search. An unresolved author list yields `max_author_h_index=None` (never a fabricated zero). For **cold-start** works (no own percentile) `_enrich_with_authors` also fetches each author's field-normalized standing (`max_author_field_percentile` = median of the author's works' `citation_normalized_percentile`) — skipped for established papers to bound the extra `/works` calls. `OpenAlexWork.abstract` exposes the abstract reconstructed (`_abstract_from_inverted_index`) from the work's `abstract_inverted_index` (already in the cached payload) — the gate's `_backfill_abstracts` uses it to recover title-only RSS items so they become scorable. `search_works(query, *, per_page, semantic)` is the Targeted Search candidate-generation leaf: `search`/`search.semantic` relevance ranking (citation-weighted lexical → a candidate-gen signal, NOT our relevance) with a bounded `select=`; returns `OpenAlexSearchHit` (id/title/abstract/doi/authors/venue/cited_by/oa/retracted/source_rank). Keyless polite pool has a tiny per-request budget, so it fills in behind arXiv+EuropePMC |
-| `arxiv.py` | Keyless arXiv Atom search leaf for Targeted Search (`search_arxiv(query, *, max_results)` → `ArxivHit`). Host-locked to `export.arxiv.org` (SSRF guard), `RateLimiter(3)`, stdlib `ElementTree` parse of the Atom feed. Best-effort: HTTP/parse error → `[]` (documented leaf boundary, mirrors `unpaywall.py`) |
-| `europepmc.py` | Keyless Europe PMC REST leaf. `search_europepmc(query, *, page_size)` → `EuropePmcHit` (`resultType=core`, carries the abstract). `fetch_fulltext_xml(pmcid)` → plain body text of a PMC open-access article via the REST `fullTextXML` endpoint, `<body>`-only JATS strip (drops journal metadata/refs, `html.unescape`) — the reliable machine-readable OA full-text path where the `fullTextUrlList` `?pdf=render` link 404s and NCBI's `/pdf/` mirror serves a bot-block page. Host-locked to `ebi.ac.uk`, `RateLimiter(5)`. Recovers biomedical/PubMed literature the arXiv/OpenAlex channels miss. Best-effort: HTTP/parse error → `[]` / `""` |
-| `crossref.py` | Keyless Crossref works-search leaf for Targeted Search (`search_crossref(query, *, rows, mailto)` → `CrossrefHit`). Host-locked to `api.crossref.org` (SSRF guard), `RateLimiter(5)`, optional `mailto` → the faster polite pool. ~150M works across every publisher (broadest recall channel); every hit carries a DOI so it dedupes cleanly. JATS `<jats:p>` abstracts stripped to plain text. Best-effort: HTTP/parse error → `[]` |
-| `semantic_scholar.py` | Keyless Semantic Scholar Graph paper-search leaf (`search_semantic_scholar(query, *, limit)` → `SemanticScholarHit`). Host-locked to `api.semanticscholar.org` (SSRF guard). Strong relevance ranking + abstracts; exposes DOI/ArXiv/PubMed ids for cross-source dedup. The keyless tier is heavily throttled (shared ~1 req/s, frequent 429s) so it's gated on a conservative `RateLimiter(1)` and a 429/any error → `[]` (a throttled source contributes nothing this run, never raises) |
-| `openreview.py` | **Authenticated** OpenReview peer-review leaf for Targeted Search (`search_openreview(client, query, *, limit, with_ratings=False)` → `OpenReviewHit`). Anonymous access is walled (403 ChallengeRequired on structured `/notes`), so `OpenReviewClient` logs in with `OPENREVIEW_USERNAME`/`OPENREVIEW_PASSWORD` read from the ENV at point-of-use (never config, never logged) → JWT, re-login-once on a 401. Host-locked to `api2.openreview.net`, `RateLimiter(3)`. Returns only ACCEPTED papers at configured venues (host-substring match on `venueid`) in the year window, each with its main-conference `tier` (oral/spotlight/poster; **workshop is a separate tier detected from the `.../Workshop/...` venueid path**, since a workshop's own "Poster" label is not a main-conf prestige signal) + reviewer-rating aggregate (`mean_rating`/`n_reviews`, RAW per-venue scale — normalization needs the whole pool so it lives in the ranker). The per-paper `forum_reviews` GET that fills the rating is **opt-in via `with_ratings=True`** — production consumes only the venue+tier chip (`services/search/_relevance._peer_review_chip`), so the default skips the fan-out; the two OpenReview benches opt in to exercise the rating arms. Per-forum review aggregates cached in `OpenAlexCache` (`openreview:reviews:<id>`). Absent creds or `allow_network=False` → `enabled=False` → `[]`; any transport/parse error → `[]` (leaf boundary). The tier/rating signal drives **search ranking ONLY** — deliberately kept out of the triage citation-prestige blend (Leiden: venue prestige is gameable) |
-| `unpaywall.py` | DOI → open-access PDF URL |
-| `github.py` | `check_repo(owner, repo)` → `RepoCheck(exists, status, description, title)`. **Keyless, host-locked** repo validator for the deep-review code-link layer (`services.library._code_link`): scrapes the public `github.com/{owner}/{repo}` HTML page (NOT the REST API — its 60 req/hr unauth cap would exhaust a fleet run) so liveness (200 / 404→dead / error→`exists=None` unknown) AND the OpenGraph description/title come from ONE request. Host is hard-pinned to `github.com` (SSRF / indirect-prompt-injection guard — paper text can't steer the outbound request). Short timeout (`_DEFAULT_TIMEOUT`, `ZS_GITHUB_TIMEOUT` override). Best-effort: a transport error → `exists=None`, never raises (mirrors `unpaywall.py`) |
-| `_rate_limiter.py` | `RateLimiter` — per-process token bucket (≤ rate calls/sec); the single shared limiter for `openalex.py` (10 req/s) and `pubmed.py` (3 req/s) |
-| `pubmed.py` | PMID/DOI → PMC article PDF URL (keyless NCBI ID-Converter → PMCID; cached `pmc:<id>` in `OpenAlexCache`, 3 req/s). Recovers PubMed papers in PMC with **no DOI** (e.g. AMIA proceedings) that the DOI-keyed Unpaywall/OpenAlex rungs can't reach. Fresh PMC has no reliable headless download (bot-wall interstitial), so the URL is for `_pdf_acquire`'s **browser** rung; the headless attempt falls through. Best-effort: network/parse errors → `None` (mirrors `unpaywall.py`) |
+| `zotero_read.py` | `ZoteroReader`: read-only WAL-aware connections, bounded lock retries (persistent lock raises), collection/stat helpers scoped to the user library, trashed items/attachments excluded; `collection_name_for_key` validates picker keys; Inbox and read-next sort first |
+| `_zotero_read_items.py` · `_zotero_read_lookup.py` · `_zotero_read_feeds.py` | reader mixins: items/detail/notes/annotations (`item_type`, `venue`; `get_items` paged 500, `get_all_items` one unpaged query) · find/membership/tags (DOI match over all `normalize_doi` variants; `get_pdf_paths(keys)` = each key's `get_item_detail` `pdf_path` over one connection, without fields/notes/annotations) · feeds (`get_unread_feed_guid_map`; `get_feed_items(limit=None)` returns all rows) |
+| `_zotero_read_common.py` | `ZoteroReadError`, arXiv/sanitize helpers, `_NON_BIBLIOGRAPHIC_TYPES_SQL`, `_USER_LIBRARY_ID_SELECT` (leaf) |
+| `zotero_write.py` | `ZoteroWriter`: WAL-consistent backup, `apply_changes` dispatcher, `_prune_backups` |
+| `_zotero_write_items.py` · `_zotero_write_feed.py` · `_zotero_write_fields.py` · `_zotero_write_attachments.py` · `_zotero_write_tags.py` · `_zotero_write_collections.py` | writer mixins: item creation/feed materialization · feed-read bookkeeping · single-field upsert · imported_url attachments · tag/note appliers · collections |
+| `_zotero_write_common.py` | `ZoteroWriteError`, `resolve_user_library_item_id` (user-library item resolution; `required=False` for best-effort batch removes) |
+| `app_rss.py` · `rss_paging.py` | `AppRssReader`: app-owned RSS items, rotating bounded refresh, `stream_public_url` (shared with PDF fetch). **No entry is sliced before dedupe** (REQ-S4): every entry is upserted; arXiv `api/query` URLs sorted `submittedDate desc` are paged via `start` (≥3 s apart per arXiv terms) until `max(feed watermark, now − feeds.backfill_days)` or `feeds.max_pages_per_feed`. The per-feed `fetch_watermark` advances only on a confirmed boundary; a cut-off sets `fetch_incomplete` (Settings shows “Incomplete fetch”) and the next refresh re-reads the tail |
+| `pdf.py` · `pdf_fetch.py` | local PDF → analysis text via OnPrem `pdf_markdown=False`; OA PDF download with size/timeout/magic caps; `valid_pdf_path` cache admission; `biorxiv_pdf_url` maps a bioRxiv/medRxiv `/content/` landing to `<landing>.full.pdf` (RSS mangles the preprint DOI, so Unpaywall/OpenAlex miss it) |
+| `browser_fetch.py` | institutional PDF acquisition with Patchright/Playwright Chromium and a persistent login profile; `article_snapshot_path` |
+| `_browser_network.py` · `_browser_response.py` · `_browser_article.py` · `_article_pdf.py` | public-only loopback egress proxy · bounded CDP response capture + proxy auth · isolated-world `document.body` text collection · bounded text-only PDF writer (PyMuPDF Helvetica/`cjk`) |
+| `llm.py` · `llm_callbacks.py` · `llm_models.py` | `LLMClient` protocol + `InstrumentedLLMClient` (logging, capability-gated JSON Schema via `build_response_format`) · completion-metadata guard that raises `LLMOutputTruncated` on `length`; `llm_models.py` lists provider models for the Settings picker (read-only, key already resolved) |
+| `llm_anthropic.py` · `_anthropic_http.py` | native Anthropic client (lazy `import anthropic`; `thinking_budget` ⇒ `thinking` + `max_tokens ≥ budget+1024`; temperature never sent) · no-auth native HTTP helpers |
+| `llm_transport.py` · `llm_requests.py` | request-owned destination/auth/headers for catalog and no-auth clients · explicit `RequestInventory` for verification calls |
+| `jev.py` | Typed-decision (Noul/Choice) wire client: `ask(target, state, questions)` → `{id: raw answer}` / `noul(...)` → `{id: P(yes)}`, `None` on any failure (never a 'no'); `Target(engine, url, key)` is passed in — Cloud default `CLOUD_URL`, Local = any Jev-compatible server (`LOCAL_URL`). Which target to use is decided by `services/llm/jev_engine.py` (Settings → Checklist engine); the key is never logged |
+| `ollama_runtime.py` · `_ollama_store.py` · `_process_guard.py` | isolated native runtime from installed weights · read-only manifest/blob snapshot into a private store · finite owned-process guard |
+| `ollama_inventory.py` | read-only `/api/tags` size + `/api/ps` residency of an Ollama daemon, and a best-effort `keep_alive: 0` unload (memory-checked local Test) |
+| `openalex.py` · `openalex_cache.py` · `_rate_limiter.py` | prestige lookups (`OpenAlexClient(allow_network=False)` is cache-only) and `search_works` · SQLite cache shared with Unpaywall/PubMed/OpenReview; `_rate_limiter.RateLimiter` is the shared per-process token bucket |
+| `arxiv.py` · `europepmc.py` · `crossref.py` · `semantic_scholar.py` · `_search_http.py` | keyless search leaves (`ArxivHit`, `EuropePmcHit` + `fetch_fulltext_xml`, `CrossrefHit` with `mailto`, `SemanticScholarHit`) · shared request/owned-client lifecycle |
+| `openreview.py` | authenticated OpenReview leaf (`search_openreview` → `OpenReviewHit`) |
+| `unpaywall.py` · `pubmed.py` · `github.py` | DOI → OA PDF URL · PMID/DOI → PMC PDF URL (browser rung) · `check_repo` scrapes the public HTML page (not the REST API); transport error ⇒ `exists=None` |
+| `telegram.py` · `telegram_threads.py` · `telegram_reply_adapter.py` · `telegram_session.py` · `telegram_auth.py` | injected Telethon page client · bounded read-only conversation collector · thin adapter exposing the conversation fetch as the one-pipeline digest `reply_client.get_replies` seam (adds no capability; live-only) · dedicated macOS CLI session lifetime · explicit auth callback |
 
-**Boundaries:** must NOT import `services/` or `api/` (enforced by pre-commit).
+## Zotero reads
 
-RSS/PDF connections use a validated numeric IP, never a second hostname lookup.
+- Every whole-library read injects `_USER_LIBRARY_ID_SELECT` (`type='user'`): Zotero keeps feed libraries in the same
+  `items` table, so an unscoped read leaks feed items into corpus, ranker, tag writes and full text.
+- Library lists exclude attachments, notes and annotations (`_NON_BIBLIOGRAPHIC_TYPES_SQL`); lists, details, notes and
+  annotations exclude trashed children, including annotations on trashed PDFs.
+- Item detail projects annotation key, parent attachment key and `dateModified`; IDs are never invented from position.
+- Collection lookup scopes key, name and every path segment to the user library; a foreign key never falls through to
+  another name. Requested materialization collections must resolve or the transaction fails.
 
-Browser PDF acquisition and the headed login window use `_browser_network.public_browser_options`:
-a session-scoped authenticated loopback HTTP/CONNECT proxy reuses the RSS/PDF
-public-address resolver and connects only to its validated numeric destination.
-Chromium and its context API requests use that proxy; there is no DIRECT fallback,
-and Chromium's implicit localhost bypass, QUIC and non-proxied WebRTC UDP are
-disabled. CONNECT preserves origin TLS and browser cookies. Metadata PDF links
-are validated before navigation, including rejection of non-HTTP schemes.
-Unresolved proxy hostnames return HTTP 502 for that request, so Chromium's
-unrelated background DNS requests cannot invalidate a fetched paper. Initial
-article DNS failures still raise; non-public addresses remain blocked and fatal.
-Other proxy worker errors are rethrown before publication; navigation/DOM/transport
-errors no longer become an empty PDF result. This is an egress restriction, not
-a browser sandbox or process-RAM limit. Article byte/node/page caps do not bound
-native browser, JavaScript, image, or library transient allocations. The final
-synthetic-origin live receipt (`data/a111-live-final-provenance/summary.md`) has
-18 passed, 0 skipped, 217 CDP calls and zero `Page.printToPDF`; it is path/contract
-proof, not a Chromium/OS RSS bound.
-Login navigation/close failures return an explicit failed result and never create
-the completion marker. An existing marker is retained; it records a completed
-flow, not proof that authentication is currently valid. Blank login URLs still
-open a guarded window for manual navigation; non-public SSO destinations are blocked.
-The proxy is session-local, authenticated with a random ephemeral secret, limited
-to 32 concurrent connections and closes with the browser. It is not an app endpoint.
-The normal suite checks socket framing/pinning and browser adapters; run
-`ZS_BROWSER_EGRESS_SMOKE=1 KMP_DUPLICATE_LIB_OK=TRUE .venv/bin/pytest -q --forked tests/test_browser_egress_live.py`
-for actual Chromium against synthetic origins (no internet or real browser profile).
-Proxy routing follows [Playwright's supported options](https://playwright.dev/python/docs/network#http-proxy)
-and [Chromium's explicit loopback-bypass override](https://chromium.googlesource.com/chromium/src/+/HEAD/net/docs/proxy.md#overriding-the-implicit-bypass-rules).
+## Zotero writes
 
-HTTP and browser PDF functions require an explicit `cache_dir`; their service
-callers pass `Settings.pdf_cache_dir` (`data/pdfs/`). No import-time HOME path or
-runtime/service lookup lives inside these integration leaves.
+- Every write that targets an item by key resolves through `resolve_user_library_item_id`, so a feed item's key is
+  never mutated or parented into the user library.
+- `apply_changes`: backup first; one explicit transaction encloses per-row savepoints; a lock error rolls the whole
+  batch back before retry; invalid rows return individual failures; unexpected errors propagate; WAL setup failures
+  are not swallowed; backups prune only after a successful write (`_BACKUP_KEEP`, app-pattern files only, never
+  Zotero's own).
+- `mark_feed_items_read(list[int]) -> int`: nonblocking per-library file lock through commit and pruning; more than
+  five retained app backups refuses before any backup/native effect (a failure never prunes — the operator leaves at
+  most five and retries); backup precedes the native retry; success prunes. Empty input does nothing. Not
+  backup-to-write isolation from other native writers and not rollback-on-every-error. Queued feed-read writes verify
+  item and feed-library IDs and keep an existing read timestamp.
+- Feed materialization takes `BEGIN IMMEDIATE` before its existing-key probe and writes item/collection/tag/note in
+  that transaction. Replaying a committed user-library key is a whole-operation no-op (later user edits survive);
+  callers reuse a reserved key only for the same creation intent. `existing_only=True` opens `mode=ro` + `query_only`,
+  acknowledges only that user-library key (missing → `None`), and bypasses backup, pruning, mutating PRAGMAs and
+  materialization; it works while Zotero runs and does not certify an earlier raised attempt or live membership.
+- Notes: insertion dedups identical visible HTML; upsert matches a marker literally among live notes. Notes use
+  Zotero's `<div class="zotero-note znv1">` envelope (existing envelopes unchanged; legacy fragments replay
+  idempotently; user notes are never migrated).
+- Ownership is structural, never a substring search: the final meaningful paragraph's ` · `-separated metadata suffix
+  wins; malformed/duplicate fields fail safe; escaped comments and code/quote blocks never establish ownership;
+  leading legacy HTML comments are honored; a comment-free native note is unowned. Triage metadata needs version,
+  generated_at and source; verdict/digest/user_note keep their version-1 two-field protocol.
+- Tag removal deletes every case variant (SQLite `lower`) linked to the selected item and leaves shared tag rows and
+  other items' links.
+- Stored-attachment names strip separators and non-printable characters; known PDF/PNG extensions are reserved before
+  the 120-char limit; empty/`.`/`..` stems become `fulltext` + the content-type extension; the copied file and the
+  SQLite `storage:` path use the same name.
 
-Both browser cache readers use `pdf_fetch.valid_pdf_path` with the caller's
-`max_bytes`, like the HTTP cache: a nonempty file within the limit and `%PDF`
-magic. This is a cheap cache-admission check, not full PDF structural validation.
-Valid cache hits need neither a browser dependency nor network access. Invalid
-entries are not returned as PDFs; they remain untouched until a successful
-replacement, including when the browser is absent or acquisition raises.
+## Network egress, RSS and PDFs
 
-Browser body reads request at most 64,000 bytes or the remaining limit plus one
-detection byte; rejected chunks never enter the accumulated body and stream
-handles close on success/error. Fetch interception covers the main document and
-PDF responses before the driver collects a complete body. Non-PDF HTML is
-fulfilled with its decoded bytes so scripts and session cookies still work. For
-HTML-only article output, the selected main-document response is capped before
-fulfillment; a CDP isolated-world walk either completes the admitted `document.body`
-text scope under byte/node/time and mutation checks or fails closed. It does not
-return a clipped prefix or collect visual/generated/embedded content. A fixed
-PyMuPDF text layout writes to a bounded PDF sink; `Page.printToPDF` is not used.
-Main-document and text/output caps do not limit subresource traffic, all browser
-network activity, or Chromium's DOM, JavaScript, image-decoding, or rendering
-memory. See the [reading source boundary](../../docs/features.md#reading-reviews).
-Both Fetch request and response stages are enabled: the request stage is needed
-for authenticated-proxy challenges. Only the exact session proxy receives its
-ephemeral credentials, once per request; origin/foreign/repeated challenges are
-cancelled. No proxy credential is added to an article request's headers.
+- RSS and PDF connections use a validated numeric IP resolved once; the original Host header and certificate name use
+  HTTPX's `sni_hostname`. Idle connection reuse is off, every redirect re-resolves, proxy env is ignored.
+- RSS bodies are identity/gzip only, capped at 8 MiB on the wire and decoded (gzip bounded during decompression);
+  invalid/trailing gzip and unnegotiated encodings are errors. Only a typed SAX/Expat unbound-prefix warning may use
+  namespace compatibility (a DOCTYPE-forbidding namespace-neutral parse, then an in-memory namespace-aware check);
+  extraction always consumes the original feedparser result. Other syntax/encoding/depth failures are typed source
+  rejections; storage/programming `ValueError` aborts.
+- `refresh_feeds`: offline returns before network/DB writes; each feed commits independently; HTTP/DNS/document
+  failures are recorded and the rest continue (partial → `errors`; all failed → last exception propagates;
+  storage/programming errors abort with rollback). Counts are committed items only; text is sanitized before DOI/key
+  derivation. `last_error` may carry the `RssNamespaceWarning:` marker, cleared by a clean refresh; a warning or
+  compatibility never certifies source meaning.
+- `get_feed_items(limit=None)` (app RSS and Zotero) returns all rows; finite limits keep their cap.
+- `pdf_fetch` streams with a size cap, timeout and `%PDF` magic, sending the browser-like `github.BROWSER_UA` (publishers such as nature.com serve HTML to the default client UA; RSS fetching keeps its own UA); SSRF/redirect guards are unchanged. Cache admission (`valid_pdf_path`, shared by HTTP and
+  browser readers) is nonempty, within `max_bytes`, `%PDF` magic — not structural validation. Valid hits need neither
+  browser nor network; invalid entries are never returned and stay untouched until a successful replacement.
+- Browser egress (`_browser_network.public_browser_options`): a session-scoped loopback HTTP/CONNECT proxy,
+  authenticated with a random ephemeral secret, reuses the public-address resolver and connects only to the validated
+  numeric destination (≤32 connections; closes with the browser; not an app endpoint). No DIRECT fallback; implicit
+  localhost bypass, QUIC and non-proxied WebRTC UDP are disabled; CONNECT preserves origin TLS and cookies. Metadata
+  PDF links are validated before navigation (non-HTTP schemes rejected). An unresolved proxy hostname returns 502 for
+  that request; an initial article DNS failure raises; non-public addresses stay blocked. Only the exact session proxy
+  receives the credential, once per request; other challenges are cancelled. This is egress restriction, not a sandbox
+  or RAM limit.
+- Browser reads: chunks ≤64,000 bytes or remaining limit plus one detection byte. A captured PDF needs real `%PDF-`
+  bytes within `max_bytes` regardless of MIME; a typed missing-PDF status needs a main-frame `application/pdf`
+  response with HTTP 400+ (not 407). A declared-but-unavailable scholarly PDF never becomes a rendered paywall stub.
+  Missing dependency/non-PDF → `None`; oversized bodies and unexpected acquisition errors propagate.
+- HTML-only articles: the main-document response is capped before fulfillment; `_browser_article` walks
+  `document.body` text nodes in a CDP isolated world (≤8 KiB chunks; byte/node/deadline limits) and fails closed on
+  mutation, partial traversal, invalid/empty text or exhausted limits (never a prefix). `_article_pdf` writes a
+  fixed-layout text-only PDF with source/page/output caps and a text round-trip check; `Page.printToPDF` is never
+  used. These caps do not bound Chromium's own memory or subresource traffic.
+- Snapshot cache keys: derivatives use `cache_dir/article-snapshots/<full SHA-256(raw URL)>.pdf`, reused only with
+  `render_fallback=True` after the source-PDF cache check; captured publisher PDFs use `cache_dir/<first 16 hex
+  SHA-256(raw URL)>.pdf`. See [reading source boundary](../../docs/features.md#reading-reviews).
+- Headed login: navigation/close failures return an explicit failed result and never create the completion marker (an
+  existing marker records a completed flow, not valid authentication); non-public SSO destinations are blocked. Egress
+  smoke: `ZS_BROWSER_EGRESS_SMOKE=1 KMP_DUPLICATE_LIB_OK=TRUE .venv/bin/pytest -q --forked
+  tests/test_browser_egress_live.py`.
 
-Both app-RSS and Zotero `get_feed_items(limit=None)` return all matching rows;
-finite read limits retain their existing cap. Unlimited CLI runs pass None
-explicitly, so neither the 1000-row default nor the 5000-row finite cap truncates them.
-The original Host header and certificate name use HTTPX's documented
-[`sni_hostname` extension](https://www.python-httpx.org/advanced/extensions/#sni_hostname).
-Automatic clients disable idle connection reuse so unrelated hostnames sharing
-an IP cannot reuse each other's TLS session. Every redirect is resolved afresh.
-RSS requests negotiate identity/gzip and cap both wire and decoded bodies at
-8 MiB; gzip output is bounded during decompression. Invalid/trailing gzip and
-unnegotiated encodings are errors. Original XML bytes preserve declared encodings.
+## PDF analysis text
 
-`_read_item_annotations` projects native annotation key, parent attachment key and
-`dateModified` alongside complete comment/highlight text in item detail. Related
-saved-paper context can therefore retain original source identity and observe
-same-count edits; it never invents IDs from positions or treats a highlight as a
-user comment. Existing ordering and deleted annotation/attachment exclusions are
-preserved. `tests/test_zotero_read_items.py` covers this read-only contract.
+- `pdf.py` loads analysis text with `load_single_document(path, pdf_markdown=False)` (Markdown conversion interleaves
+  signs and super/subscripts); presentation keeps its own parser. Source-length budgets use the extracted length.
+- Triage's `capture_pdf_source` hashes in 64 KiB reads before and after extraction/annotation reading; changed
+  identity/content, malformed SDK data and read/hash/extraction failures raise before corpus/model work (ordinary
+  changes only, not a hostile writer restoring identical bytes). SDK annotation URI tuples keep order and duplicates
+  verbatim; abstract-only calls never import the PDF reader or probe a path.
 
-Item lists, details, notes and annotations exclude trashed children (including
-annotations on trashed PDFs); note lists/detail share one query. Collection lookup
-belongs to the collection mixin and scopes key/name/every path segment to the user
-library. An explicit foreign key never falls through to another name. Requested
-materialization collections must resolve or the transaction fails.
-Feed materialization acquires `BEGIN IMMEDIATE` before its existing-key probe
-and writes all item/collection/tag/note steps in that transaction. Replaying a
-committed user-library key is a no-op for the whole operation, preserving later
-user edits; callers must reuse a reserved key only for the same creation intent.
-Explicit `existing_only=True` instead opens SQLite URI `mode=ro` with `query_only`
-and acknowledges only that user-library key (missing→None), bypassing backup,
-pruning, mutating PRAGMAs and materialization. This read-only lookup remains
-available while Zotero is running; the close-Zotero guard still protects ordinary
-materialization. This current no-op ACK does not
-certify an earlier raised attempt, live/untrashed membership or physical DB identity.
-Ordinary WAL-read filesystem effects remain possible.
-Queued feed-read writes verify both item and feed-library IDs and preserve an
-existing read timestamp. Note insertion deduplicates identical visible HTML;
-upsert requires a marker in its HTML and matches it literally among live notes.
-Note add/upsert stores Zotero's native `<div class="zotero-note znv1">` envelope
-so the native loader treats fragments as HTML, not escaped legacy plain text.
-Existing native envelopes stay unchanged; exact legacy-fragment replay remains
-idempotent without rewriting it. This does not auto-migrate existing user notes.
-Tag removal deletes all matching case variants linked to the selected item,
-using the existing SQLite `lower` matching semantics. It does not delete the
-shared tag records or links belonging to other items. A one-row lookup is still
-appropriate for tag creation/reuse, but cannot implement complete removal.
-Adapters are leaves — they depend only on stdlib, third-party clients, and
-`models`/`domain`.
+## LLM adapters
 
-OpenAlex search retains declared DOI/arXiv aliases from work `locations` in
-`OpenAlexSearchHit.family_identifier_keys`, including versioned arXiv URLs. URLs
-are parsed for identity only, never followed; no title-based identity inference or
-extra lookup request is introduced. Missing locations preserve legacy empty aliases.
+- `CompletionGuard` logs usage/finish reason without response text; `length` raises `LLMOutputTruncated` before
+  parsing. `observe_completions` is an explicit invocation-scoped observer that runs before parsing/truncation
+  rejection (a typed SDK length error is normalized from its decoded single completion, empty content, explicit
+  provenance). No observer ⇒ no retention; missing usage/model metadata is unknown; observed model names do not pin
+  mutable remote weights.
+- Setup verification (`RequestInventory` + the owned HTTPX pre-send hook) needs observed exact model identity and a
+  successful terminal reason; missing observations, truncation, model mismatch and cached text cannot verify. Cache,
+  retries and redirects are off, cancellation is checked before every request, owned transport closes, and paper text
+  never controls these options. Pre-send entry is ownership evidence, not remote acceptance or termination proof.
+- `llm_transport`: raw proxy-prefix admission compares authorities through the HTTPX URL parser (case/default port
+  equivalent; origin, port, path or userinfo changes rejected); no ambient proxies/redirects. Owned headers are
+  reconstructed, not allowlisted, so poisoned User-Agent, `anthropic-beta`/`version` and `x-stainless-*` values cannot
+  survive; per-request `Omit` is required (constructor defaults are insufficient). Helpers require an explicit
+  timeout; OpenAI's webhook secret is explicit-empty.
+- The synchronous OnPrem owner must keep `x-stainless-raw-response: true`: LangChain needs the response wrapper, not a
+  parsed object (`root_client` for the schema path, `client` for raw Chat, one owned SDK root).
+- Native Anthropic no-auth skips the SDK constructor's ambient active-config lookup; `_anthropic_http.py` reuses pure
+  SDK schema/parse helpers. A null native base is the official API. Requires Anthropic ≥0.105.2 and OpenAI ≥2.36.0;
+  parsing uses the pinned private `anthropic.lib._parse._response.parse_response` with no import fallback.
 
-OpenAlex, arXiv, Crossref, Europe PMC and Semantic Scholar search accept optional
-request-local `outcome` receipts: status, returned count and bounded error code,
-never query, URL, response body or exception text. Observed empty results have
-count zero; failed/unknown requests have no count. Blank input does no HTTP and
-stays unknown. The four non-OpenAlex adapters reuse `_search_http` for request and
-owned-client cleanup; receipt parsing refuses malformed result containers/rows.
-Caller-owned clients remain open. Unexpected runtime failures propagate. Ordinary
-calls retain their list-returning best-effort interface, without a receipt or new
-work. Saved-paper Discovery still admits only its declared OpenAlex variants;
-this does not imply all-provider coverage, relevance or scientific correctness.
-See [discovery boundary](../../docs/features.md#saved-paper-discovery).
+## Native runtime (`ollama_runtime.py`)
 
-Stored-attachment names strip separators and non-printable Unicode characters.
-Known PDF/PNG extensions are normalized and reserved before the 120-character
-limit; empty, `.` and `..` stems use `fulltext` plus the content-type extension.
-The same sanitized name is used for the copied file and SQLite `storage:` path.
+- Prepares an isolated store from installed manifests and weights; never pulls and never modifies the user's daemon or
+  store. Weights are hard-linked on one volume; only a cross-device link error selects an absolute symlink (external
+  weights need their disk connected); missing sources, changed sizes and other link errors refuse; cleanup leaves
+  sources untouched. A private `num_batch` manifest (default 128) is the only change; blobs and sampling parameters
+  stay unchanged.
+- `_process_guard` owns the evaluator/daemon/runner group: available-RAM floor 20%, swap growth ≤2 GiB, combined RSS 4
+  GiB by default; one finite run may be scoped with a positive integral `--rss-mib` that the runtime must also accept
+  via `rss_limit_mib` (a guard receipt alone never raises admission). A pipe sentinel reaps on monitor death or
+  command exit; absence evidence observes physical termination only and never creates model success.
+- Admission needs native observations, not declared options: `/api/ps` digest, effective context and placement joined
+  to the owned listener/runner; matching `-b`/`-ub`; allocated K/V types (`f16`/`q8_0`/`q5_0`/`q4_0`, agreeing with
+  worker flags; defaults need both K and V facts); disabled host prompt-state cache and context checkpoints
+  (`LLAMA_ARG_CACHE_RAM=0`, `LLAMA_ARG_CTX_CHECKPOINTS=0` plus the log observation). Only a proven CPU/host or Apple
+  Silicon unified domain may use fresh OS availability; missing/foreign evidence refuses. Load/unload cannot certify
+  inference. Declared `thinking_effort`/`max_tokens` are configuration, not proof. No ambient environment passthrough.
 
-Search metadata preserves Europe PMC `pubTypeList.pubType` and OpenAlex work
-`type` as publication-type lists (unknown/malformed values stay empty). These are
-source metadata, not prose-derived methodology classifications. OpenAlex search
-requests include `type` in the selected fields.
+## Search leaves
 
-Ownership matching for note upserts is structural, never a substring search.
-The final meaningful paragraph's metadata suffix (separated by ` · `) wins
-against earlier comments/body mentions; malformed or duplicate fields fail safe.
-Triage requires version, generated_at and source; verdict, digest and user_note
-retain their actual version-1 two-field protocol. Percent-encoded type names
-are not decoded. Leading real legacy HTML metadata comments remain supported;
-escaped comments and code/quotation blocks do not establish ownership.
-Removing a native editor's footer leaves its comment-free note unowned. No
-migration or rewriting of unrelated notes is performed.
+- Opt-in `outcome` receipts (OpenAlex, arXiv, Crossref, Europe PMC, Semantic Scholar): status, returned count (never
+  query, URL, body or exception text), bounded error code. Observed empty ⇒ count 0; failed/unknown ⇒ no count; blank
+  input does no HTTP. Malformed containers/rows and nonfinite OpenAlex JSON are parse failures; neighboring requests
+  stay usable; caller-owned clients stay open; ordinary calls return plain lists. `europepmc.fetch_fulltext_xml(pmcid,
+  outcome=None)` clears its outcome per call and records only the public XML endpoint as `source_uri` on nonempty
+  success, never a local path.
+- OpenAlex keeps DOI/arXiv aliases from `locations` in `family_identifier_keys` (URLs parsed, never followed);
+  unresolved authors give `max_author_h_index=None`. Enrichment visits the first `max_authors` (3) **plus the last author** of any list; `OpenAlexWork.last_author = {name, h_index}` is the last author's OWN h (`None` = unknown, a real 0 stays 0), flowing to `aux_context.last_author_h_index` and the Today card. Search keeps Europe PMC `pubTypeList.pubType` and OpenAlex `type`
+  as publication-type lists (unknown → empty).
+- OpenReview credentials come from `OPENREVIEW_USERNAME`/`OPENREVIEW_PASSWORD` at point of use (never config, never
+  logged; re-login once on 401); none or `allow_network=False` ⇒ `[]`. Per-paper rating fan-out is opt-in
+  (`with_ratings=True`). Its signal drives Search chips only, never the triage prestige blend.
 
-Envelope fixtures use real legacy ownership comments, not bare body markers.
-Digest metadata remains the final meaningful paragraph after strengths/weaknesses,
-so comment-stripped native notes retain ownership without broadening adoption.
-Ownership, replay and manual-note isolation are covered by
-`tests/test_note_ownership.py`, `tests/test_zotero_audit_boundaries.py` and
-`tests/test_zotero_note_envelope.py`. Native acceptance receipts remain private.
+## Telegram
 
-CompletionGuard raises typed `LLMOutputTruncated(RuntimeError)` for ordinary observed `length`.
-Setup verification additionally requires observed exact model identity and a successful
-terminal reason before accepting text/typed output. Missing observations, truncation,
-model mismatch and cached text cannot establish verification. Verification wrappers
-support cancellation checks before every request and close their owned transport;
-native Anthropic checks its actual response model/stop reason. Ordinary inference
-keeps its existing behavior; no paper text controls these verification options.
-`observe_completions` is an explicit invocation-scoped observer before parsing or
-truncation rejection. The interpretation experiment attaches it inside each
-client call, including parallel map workers; aggregate provider usage is one event,
-not multiplied by generation count. No observer means no decoded/raw retention.
-Missing provider usage/model metadata stays unknown; observed model names do not
-pin mutable remote weights. Ordinary logging remains metadata-only.
-
-Analysis-source serialization correction (CAPA: proven for the checked PDF):
-
-```
-Same PDF -> OnPrem Markdown -> interleaved signed uncertainty -> analysis input
-         -> OnPrem plain    -> intact upper/lower signed text -> analysis input
-Presentation PDF parser / HTML rendering: separate path, unchanged
-```
-
-The adapter uses `load_single_document(path, pdf_markdown=False)` for analysis.
-Markdown conversion can interleave signs and superscript/subscript fragments;
-this boundary reuses the existing plain backend rather than patching individual
-measurements or changing presentation parsing. No universal mathematical-layout
-guarantee is implied; primary evidence still needs checking.
-
-Callers consume strings: deep review, triage summarization, search full text,
-and the faithbench corpus; QA consumes the extracted raw body. No Markdown
-schema is required at this boundary. Presentation retains its own PDF parser.
-Triage's `capture_pdf_source` hashes in finite 64 KiB reads (opening size plus
-one growth-detection byte) before and after extraction/annotation reading. Changed
-identity/content, malformed SDK data and read/hash/extraction failures raise before
-corpus/model work. This detects ordinary file changes, not a hostile concurrent
-writer restoring identical bytes between checks. SDK annotation strings retain
-order and duplicates without trimming, unwrapping or URI normalization; their
-HTTP(S) admission belongs to triage, not presentation's sanitized link list.
-Abstract-only calls do not import the PDF reader or probe a path. Other existing
-text-only consumers retain `extract_text`; no adapter/backend setting changes.
-`tests/test_pdf_source_authority.py` and `tests/test_method_pdf_authority.py`
-cover capture identity, annotation authority and failure sequencing on owned PDFs.
-
-Prevention: `tests/test_pdf_analysis_text.py` checks the exact loader flag,
-page joining, and the real OnPrem backend on an original generated PDF with
-signed superscript/subscript uncertainty, title/Methods text and a URL.
-Source-length-dependent budgets must use the new extracted length, not old
-Markdown counts. Prompts, settings, limits and models are unchanged.
+- `telegram.py` is an injected Telethon leaf with no session, lifecycle, retry or store ownership. It emits schema-v2 posts with `replies_count` (from `MessageReplies`), `fwd_from` (a forwarded channel post) and `reply_to_id` (a post replying to a post of the same channel; a reply into another chat is None), and `telegram_threads` stores the numeric `sender_id` of each comment (no names), and gives schemeless auto-linked domains (`Z.ai`) an `http://` prefix so one such post cannot void a whole page. The reply adapter passes a `TelegramPost` origin (`telegram_threads._post_origin`).
+  `telegram_threads.py` reuses it for public broadcasts, megagroups and forum roots: `GetDiscussionMessage` routes
+  linked replies with origin consistency, `GetReplies` keeps nested parent/top IDs, one bounded newest window (≤300 replies, paged 100 per `GetReplies`) is
+  refetched per run, and peer/order/route are validated before originals are retained. Reply-peer scope is a boolean,
+  never a user identity. A later-post stop keeps completed observations plus origin-bound unavailable/not-attempted
+  rows and makes no further RPCs. No join/send/delete; the dedicated session owner connects/disconnects.

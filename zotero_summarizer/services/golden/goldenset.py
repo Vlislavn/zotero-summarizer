@@ -77,10 +77,14 @@ def export_golden_dataset(
     output_csv: Path,
     output_jsonl: Path,
     *,
-    abstract_chars: int = 1000,
+    abstract_chars: int = 0,
     triage_db_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Export the golden-set CSV + JSONL. Returns counts for the CLI to print.
+    """Export CSV + JSONL with full source abstracts by default.
+
+    An explicit positive ``abstract_chars`` retains the optional preview cap.
+    Markup stays in the source snapshot; the encoder owns plain-text conversion.
+    Returns counts for the CLI to print.
 
     When ``triage_db_path`` is given, rows for user-verdicted items are preserved
     across the re-export, so a verdict on a materialized library item (e.g. a

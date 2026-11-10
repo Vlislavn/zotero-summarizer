@@ -23,6 +23,7 @@ from zotero_summarizer.services.library import (
     _deep_review_layers,
     _deep_review_progress,
     _map_reduce,
+    _paper_body,
     _review_cache,
     quality_review,
     reading_queue,
@@ -40,7 +41,10 @@ from zotero_summarizer.services.library._review_cache import (  # noqa: F401
     current_reviews,
     get_cached_review,
     get_current_review,
+    get_usable_review,
     review_is_current,
+    review_status,
+    usable_reviews,
 )
 from zotero_summarizer.services._common import state as get_state
 from zotero_summarizer.services.llm import factory
@@ -64,13 +68,15 @@ def _ensure_pool(provider: Any) -> ThreadPoolExecutor:
     behind the 1st), remote→``max_sub_concurrency`` else ``_MAX_CONCURRENT``. Rebuilt
     when the size changes (a provider / LLM-routing edit).
 
-    # ponytail: a rebuild just swaps the pool ref — in-flight reviews finish on the
-    # old pool's threads; a size change is a rare config edit, so this is cheap.
+    The replaced pool is shut down without waiting: its queued and in-flight reviews
+    still finish on its own threads, but its threads are released afterwards.
     """
     global _POOL, _POOL_SIZE
     size = deep_review_fleet_concurrency(provider, _MAX_CONCURRENT)
     with _POOL_LOCK:
         if _POOL is None or size != _POOL_SIZE:
+            if _POOL is not None:
+                _POOL.shutdown(wait=False)
             _POOL = ThreadPoolExecutor(max_workers=size, thread_name_prefix="deep-review")
             _POOL_SIZE = size
         return _POOL
@@ -194,7 +200,7 @@ def _review_one(
     Accepted original-source evidence accompanies the policy-adjusted digest.
     Publication and generated-note staging belong to the worker, not computation.
     """
-    from zotero_summarizer.services.library._review_identity import build_review_identity, _source_sha
+    from zotero_summarizer.services.library._review_identity import build_review_identity
     from zotero_summarizer.services.library._digest_audit import bind_cached_audit
     item_key = str(item["item_key"])
     detail = reader.get_item_detail(item_key)
@@ -208,44 +214,45 @@ def _review_one(
         config=config, pdf_path=pdf_path, source_kind=source_kind, focus_prompt=focus_prompt)
     verification_audit: dict[str, Any] = {}
 
-    model_digest = digest_dump = quality_dump = goal_dump = paper_type_dump = section_overlay = code_link_dump = None
+    model_digest = digest_dump = quality_dump = goal_dump = paper_type_dump = section_overlay = code_link_dump = text_window = None
     reading_policy_flags: list[str] = []
 
     if pdf_path and quality_enabled:
         sink = progress_sink if progress_sink is not None else (lambda _p: None)
         reporter = _deep_review_progress.ReviewReporter(item_key, title, sink)
         reporter.phase("extract")
-        text = extractor.extract_text(pdf_path).strip()
+        text, text_window = _paper_body.read_body(extractor, pdf_path, config, lean_tier)  # ONE cleaned body for every stage
         if not text:
             raise ValueError("PDF extraction returned no text")
-        if text:
-            qr = config.quality_review
-            max_chars = int(qr.lean_max_text_chars if lean_tier else qr.max_text_chars)
+        def compute_digest() -> Any:
             reporter.phase("digest", is_call=True)
             digest = _map_reduce.digest_for_strategy(
                 title, text, config, map_llm=llm_map or llm, reduce_llm=llm_digest or llm,
                 budget=_map_reduce.ChunkBudget(
-                    max_chars=max_chars, chunk_chars=qr.map_chunk_chars, sub_concurrency=sub_concurrency,
+                    max_chars=text_window["cap"], chunk_chars=config.quality_review.map_chunk_chars, sub_concurrency=sub_concurrency, whole_body=text_window["whole_body"],
                 ),
                 focus_prompt=focus_prompt, response_format=response_format, verification_audit=verification_audit,
                 **({"feed_context": feed_context, "feed_out": feed_out} if feed_context is not None else {}))
-            model_digest = digest_dump = digest.model_dump()
-            quality_dump, goal_dump, paper_type_dump, section_overlay, code_link_dump = _deep_review_layers.extra_layers(_deep_review_layers.ExtraLayersCtx(
-                item_key=item_key, title=title, pdf_path=pdf_path, text=text,
-                digest_dump=digest_dump, llm=llm, llm_light=llm_map, config=config,
+            reporter.finish("digest")
+            return digest
+
+        digest, (quality_dump, goal_dump, paper_type_dump, section_overlay, code_link_dump) = _deep_review_layers.digest_with_layers(
+            compute_digest, _deep_review_layers.ExtraLayersCtx(
+                item_key=item_key, title=title, pdf_path=pdf_path, text=text, max_chars=text_window["cap"],
+                llm=llm, llm_light=llm_map, config=config,
                 prestige=(prestige_scores or {}).get(item_key),
                 prestige_floor_value=prestige_floor_value, reporter=reporter, lean_tier=lean_tier,
                 sub_concurrency=sub_concurrency, item_type=detail.get("item_type"),
                 web_article=bool(item.get("web_article")),
-            ))  # noqa: E501
-            from zotero_summarizer.services.library.review_fleet.propose import apply_reading_policy
-            digest_dump, _, reading_policy_flags = apply_reading_policy(
-                digest_dump, quality_dump, goal_dump,
-            )
-            PaperDigest.model_validate(digest_dump)
-            if _source_sha(pdf_path) != review_identity['source_sha256']:
-                raise ValueError('Review source changed during verification')
-            reporter.summary()
+                abstract=str(detail.get("abstract") or item.get("abstract") or ""),
+            ))
+        model_digest, digest_dump = digest.model_dump(), digest.model_dump()  # distinct: projection must not alias the retained raw digest
+        from zotero_summarizer.services.library.review_fleet.propose import apply_reading_policy
+        digest_dump, _, reading_policy_flags = apply_reading_policy(
+            digest_dump, quality_dump,
+        )
+        PaperDigest.model_validate(digest_dump)
+        reporter.summary()
 
     final_identity = build_review_identity(config=config, pdf_path=pdf_path, source_kind=source_kind, focus_prompt=focus_prompt)
     if review_identity != final_identity:
@@ -254,7 +261,9 @@ def _review_one(
         "review_contract_version": REVIEW_CONTRACT_VERSION,
         "review_identity": final_identity,
         "verification_audit": verification_audit or None,
+        "not_established_fields": ((verification_audit.get("lineage") or [{}])[-1]).get("not_established_fields", []),
         "provenance": provenance or {},
+        "text_window": text_window,
         "digest": digest_dump,
         "quality": quality_dump,
         "goal_summaries": goal_dump,
@@ -271,6 +280,7 @@ def _review_one(
         "reviewed_at": now_iso_z(),
         "zotero_note_written": False,
         "zotero_note_error": None,
+        "timings": _review_attempt.current_timings(),
     })
 
 
@@ -318,7 +328,7 @@ def _build_ctx(reader: Any = None) -> dict[str, Any]:
         "extractor": extractor,
         "quality_enabled": bool(cfg.enabled and extractor is not None),
         "llm": factory.resolve_stage_client(app, "deep_review", enable_thinking=False),
-        "llm_digest": factory.resolve_stage_client(app, "deep_review", enable_thinking=provider.thinking_on),  # DIGEST reasons unless provider thinking_effort=off
+        "llm_digest": factory.resolve_stage_client(app, "deep_review", enable_thinking=provider.thinking_on and config.review_depth != "fast"),  # DIGEST reasons unless provider thinking_effort=off or review_depth=fast
         "llm_map": factory.resolve_stage_client(app, "feed", enable_thinking=False) if cfg.chunk_strategy == "map_reduce" else None,
         "prestige_scores": prestige_scores,
         "prestige_floor_value": prestige_floor_value,
@@ -332,6 +342,7 @@ def _build_ctx(reader: Any = None) -> dict[str, Any]:
             "provider": getattr(provider, "name", resolved.provider.name),
             "model": resolved.model,
             "prompt_schema_version": REVIEW_CONTRACT_VERSION,
+            "review_depth": str(config.review_depth),
         },
         "_provider": provider,
     }
@@ -406,6 +417,7 @@ def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str)
                     entry["login_url"] = acquired.login_url
             if _review_attempt.publishable_entry(entry, get_current_review(item_key), acquired):
                 with _review_cache.review_publication_lock():
+                    _review_cache.keep_previous_if_downgraded(entry, _read_all().get(item_key))
                     _write_one(item_key, entry)
                     if entry.get("digest"):
                         from zotero_summarizer.services.zotero.generated_notes import stage_current_digest
@@ -429,7 +441,11 @@ def _submit(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str) -> Non
         if existing is not None and existing.get("status") == "running":
             return  # already in flight for this paper — don't double-review
         _JOBS[item_key] = {"status": "running", "started_at": now_iso_z(), "completed": 0, "progress": {}, "error": None}
-    _ensure_pool(ctx.get("_provider")).submit(_review_worker, item, ctx, focus_prompt)
+    try:
+        _ensure_pool(ctx.get("_provider")).submit(_review_worker, item, ctx, focus_prompt)
+    except Exception as exc:  # noqa: BLE001 — never leave the job 'running' without a worker
+        LOGGER.warning("deep_review could not start item=%s: %s", item_key, exc)
+        _set_job(item_key, status="error", completed=1, progress={}, error=f"{type(exc).__name__}: {exc}")
 
 
 def start(
@@ -479,5 +495,6 @@ def start(
 
 __all__ = [
     "start", "status", "get_cached_review", "get_current_review",
-    "review_is_current", "cached_review_keys", "current_review_keys", "current_reviews", "copy_review",
+    "review_is_current", "review_status", "get_usable_review", "usable_reviews",
+    "cached_review_keys", "current_review_keys", "current_reviews", "copy_review",
 ]

@@ -112,6 +112,32 @@ def get_processed_feed_item_by_pk(
     return _fetch_one_processed(conn, pk, "pk", "id = ?")
 
 
+def materialized_key_for(conn: sqlite3.Connection, row: dict[str, Any]) -> str | None:
+    """Existing Zotero identity on this row or a stable-key sibling; no writes."""
+    direct = str(row.get("materialized_zotero_key") or "").strip()
+    if direct:
+        return direct
+    stable = str(row.get("stable_feed_key") or "").strip()
+    if not stable:
+        return None
+    sibling = conn.execute(
+        "SELECT materialized_zotero_key FROM processed_feed_items "
+        "WHERE stable_feed_key = ? AND materialized_zotero_key IS NOT NULL "
+        "AND materialized_zotero_key <> '' LIMIT 1", (stable,),
+    ).fetchone()
+    return str(sibling["materialized_zotero_key"]) if sibling else None
+
+
+def has_pending_materialization(conn: sqlite3.Connection, row: dict[str, Any]) -> bool:
+    """A retained older row can share a later sibling's accepted pending Add."""
+    stable = str(row.get("stable_feed_key") or "").strip()
+    return conn.execute(
+        "SELECT 1 FROM processed_feed_items WHERE zotero_sync_status = 'pending' "
+        "AND (id = ? OR (? <> '' AND stable_feed_key = ?)) LIMIT 1",
+        (row["id"], stable, stable),
+    ).fetchone() is not None
+
+
 def fetch_processed_content_pairs(
     conn: sqlite3.Connection,
     *,

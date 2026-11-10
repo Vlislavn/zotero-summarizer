@@ -73,7 +73,7 @@ def _render_presentation(
         interpretation_block = section(interpretation, digest, content=content)
     saved_read_estimate = False
     if digest:
-        digest, raw, _ = apply_reading_policy(digest, quality, goal_summaries)
+        digest, raw, _ = apply_reading_policy(digest, quality)
         original = raw if model_read_decision is None else model_read_decision
         saved_read_estimate = original in {"read", "skim", "skip"} and original != str(digest.get("read_decision") or "")
     title = str(content.get("title") or "Untitled")

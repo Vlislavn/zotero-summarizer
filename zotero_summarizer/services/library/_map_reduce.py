@@ -71,6 +71,7 @@ class ChunkBudget(NamedTuple):
     max_chars: int
     chunk_chars: int
     sub_concurrency: int
+    whole_body: bool = False  # remote tier: above ``max_chars`` read the WHOLE body in parts (map_reduce), never a selection
 
 
 def digest_for_strategy(
@@ -106,6 +107,8 @@ def digest_for_strategy(
         feed_context = prepare_context(feed_context, feed_out)
     admit_source(full_text)
     strategy = config.quality_review.chunk_strategy
+    if budget.whole_body and len(full_text) > budget.max_chars:
+        strategy = "map_reduce"
     if strategy == "map_reduce":
         return map_reduce_digest(
             title=title, full_text=full_text, config=config, map_llm=map_llm,

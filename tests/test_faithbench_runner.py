@@ -283,15 +283,15 @@ def test_parse_answer_abstention_and_retry():
 
 class FakeDigestModel:
     def pydantic_prompt(self, *, prompt, pydantic_model):
-        assert pydantic_model is PaperDigest
-        return PaperDigest(
+        assert issubclass(pydantic_model, PaperDigest)
+        return PaperDigest(**{**PaperDigest().model_dump(exclude={'basis'}), **dict(
             tldr="GlassNet reaches 85.3 percent top-1 on ImageNet.",
             read_decision="read", read_why="strong result", grade="A",
             read_parts=["§4 Results"], skip_parts=[], estimated_read_minutes=15,
             original_value="The complete experimental evidence.",
             key_strength="large training set", key_weakness="no ablations",
             writing_friction="low", writing_reasons=[],
-        )
+        )})
 
 
 class FakeDecomposer:

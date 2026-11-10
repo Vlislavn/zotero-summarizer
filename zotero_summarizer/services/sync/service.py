@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK
+from zotero_summarizer.runtime import request_memo
 from zotero_summarizer.services.golden import label_verdicts, verdict_effects
 from zotero_summarizer.services.library import deep_review, reading_queue
 from zotero_summarizer.services.library.review_eligibility import ReviewRequired, require_feed_review
@@ -87,7 +88,8 @@ def pull(db_path: Path, since: int) -> dict[str, Any]:
     if since < 0:
         raise ValueError("since must be non-negative")
     delta = repositories.pull_sync_changes(db_path, since)
-    return {"protocol": 1, **delta, "papers": _paper_snapshots(db_path)}
+    with request_memo():  # the queue and the snapshots share one review-currentness pass
+        return {"protocol": 1, **delta, "papers": _paper_snapshots(db_path)}
 
 
 def questions_for_paper(db_path: Path, item_key: str) -> list[dict[str, Any]]:

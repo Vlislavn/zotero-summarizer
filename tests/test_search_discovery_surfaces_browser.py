@@ -1,8 +1,3 @@
-"""Four opt-in built-UI cases over owned synthetic HTTP DTOs, not science.
-
-Reuse the ASGI/Chromium sandbox, offline/disabled-AI policy and cleanup unchanged.
-No real Search service, provider, Add, review, PDF or native-library work is run.
-"""
 from copy import deepcopy
 import hashlib
 import json
@@ -28,6 +23,7 @@ RECEIPT = {
     'answer': 'No improvement was observed.', 'source_kind': 'acquired_original',
     'complete': False, 'source_id': 'original-identity', 'source_version_id': 'extraction-version',
     'source_sha256': 'source-fingerprint', 'generator_id': 'configured-feed-generator',
+    'source_uri': 'https://example.org/acquired-original.pdf',
     'verifier_id': 'configured-deep-verifier', 'input_id': 'input-fingerprint',
     'evaluator_id': 'protocol-fingerprint', 'checked_scope': {'start': 0, 'end': 3000},
     'checked_passages': [{'start': 1500, 'end': 1600}],
@@ -281,6 +277,12 @@ def _search_evidence(page):
     expect(card.get_by_text('Extracted characters 1500–1600', exact=False)).to_be_visible()
     expect(card.get_by_text('extraction completeness and the remainder are unchecked', exact=False)).to_be_visible()
     _open(page, card.get_by_text('Source and evaluator provenance', exact=True))
+    source = card.get_by_role('link', name='Open acquired original source', exact=True)
+    expect(source).to_be_visible()
+    expect(source).to_have_attribute('href', RECEIPT['source_uri'])
+    expect(source).to_have_attribute('rel', 'noopener noreferrer')
+    source.focus()
+    expect(source).to_be_focused()
     for value in ('original-identity', 'source-fingerprint', 'question-fingerprint',
                   'configured-feed-generator', 'configured-deep-verifier', 'input-fingerprint'):
         expect(card.get_by_text(value, exact=False)).to_be_visible()
@@ -322,7 +324,7 @@ def test_built_search_explicit_policy_and_positive_evidence(surface_browser, wid
     expect(sort).to_have_count(1)
     expect(sort).to_have_value('recommended')
     expect(page.locator('article a[target="_blank"]').first).to_have_text('Lower-ranked answer')
-    assert page.locator('article a[target="_blank"]').all_text_contents() == [
+    assert page.locator('article .font-semibold a[target="_blank"]').all_text_contents() == [
         'Lower-ranked answer', 'Top terminology match', 'Partial', 'Unchecked candidate']
     sort.select_option('relevance')
     expect(page.locator('article a[target="_blank"]').first).to_have_text('Top terminology match')

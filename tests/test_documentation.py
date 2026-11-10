@@ -35,7 +35,7 @@ def test_docs_directory_contains_three_main_documents_and_declared_validation_ar
         "ui-fleet50": {"README.md", "results.json", "findings.json", "coverage.json", "source-manifest.json"},
         "pr208": {"README.md", "manual-checklist.md", "issue-scope.md", "results.json", "swarm.json", "source-manifest.json"},
     }
-    assert files == {"architecture.md", "features.md", "overrides.md"} | {
+    assert files == {"architecture.md", "features.md", "overrides.md", "settings-ux-research.md"} | {
         f"validation/{directory}/{name}" for directory, names in validation.items() for name in names
     }
 

@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 import re
 
-from zotero_summarizer.models.research_feed import FeedAssessment, FeedDigestResponse, FeedProjectAssessment, FeedReviewContext
+from zotero_summarizer.models.research_feed import FeedAssessment, FeedProjectAssessment, FeedReviewContext
+from zotero_summarizer.models.digest_generation import FeedDigestGeneration
 from zotero_summarizer.services.library._prompt_security import untrusted_input
 
 
@@ -51,16 +52,16 @@ def context_for(source_id, profile) -> FeedReviewContext:
 
 def contract() -> dict:
     root = Path(__file__).parents[2]
-    names = ("models/research_feed.py", "services/library/_feed_assessment.py",
+    names = ("models/research_feed.py", "models/digest_generation.py", "services/library/_feed_assessment.py",
              "services/library/quality_review.py", "services/library/_map_reduce.py")
-    return {"version": "feed-assessment-v1", "schema": fingerprint(FeedDigestResponse.model_json_schema()),
+    return {"version": "feed-assessment-v1", "schema": fingerprint(FeedDigestGeneration.model_json_schema()),
             "sources": {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in names}}
 
 
 def response_contract(prompt, response_format, context):
-    from zotero_summarizer.integrations.llm import build_response_format
+    from zotero_summarizer.services.library.quality_review import _decoder_kwargs
 
-    extra = {"response_format": build_response_format(FeedDigestResponse)} if response_format else {}
+    extra = _decoder_kwargs(FeedDigestGeneration, response_format)
     return prompt + PROMPT.replace("{context}", untrusted_input(context.model_dump_json())), extra
 
 

@@ -353,7 +353,7 @@ def test_changed_source_after_extraction_rejects_before_cache_publication(
             _supplied_review_input(lab, record_property)
         observed.update(exception_type=type(rejected.value).__name__, exception_message=str(rejected.value))
         assert type(rejected.value) is ValueError
-        assert str(rejected.value) == "Review source changed during verification"
+        assert str(rejected.value) == "Review source changed during generation"
         assert observed["generation_calls"] == 1 and observed["cache_writes"] == []
     finally:
         observed["cache_after"] = _review_cache._read_all().get(lab.stable)

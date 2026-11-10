@@ -34,8 +34,9 @@ def read_context(db_path, item_keys):
         conn.execute("PRAGMA query_only = ON")
         conn.execute("BEGIN")
         result = {}
+        resolve = review_notes.alias_resolver(conn)
         for key in item_keys:
-            aliases = review_notes.resolve_item_key_aliases(conn, key)
+            aliases = resolve(key)
             placeholders = ",".join("?" for _ in aliases)
             row = conn.execute(
                 f"WITH changes AS ({label_mirrors._CURRENT_CHANGES}) SELECT c.*, v.source "
@@ -43,6 +44,6 @@ def read_context(db_path, item_keys):
                 f"WHERE c.item_key IN ({placeholders}) "
                 "ORDER BY c.revision DESC, v.created_at DESC, c.item_key LIMIT 1", aliases,
             ).fetchone()
-            result[key] = {"aliases": aliases, "manual": review_notes.current(conn, key),
+            result[key] = {"aliases": aliases, "manual": review_notes.current(conn, key, aliases),
                            "verdict": dict(row) if row is not None else None}
         return result

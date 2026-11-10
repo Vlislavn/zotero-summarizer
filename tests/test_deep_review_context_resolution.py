@@ -69,7 +69,8 @@ def test_factory_preserves_exact_objects_keys_routing_and_callback_order(context
     assert ctx["prestige_scores"] is io.prestige and ctx["prestige_floor_value"] == 2.0
     assert ctx["lean_tier"] is lean and ctx["sub_concurrency"] == 7 and ctx["_provider"] is io.provider
     assert ctx["provenance"] == {"provider": "owned-provider", "model": expected_route.model,
-                                  "prompt_schema_version": deep_review.REVIEW_CONTRACT_VERSION}
+                                  "prompt_schema_version": deep_review.REVIEW_CONTRACT_VERSION,
+                                     "review_depth": "thorough"}
     io.state.assert_called_once_with()
     io.routing.assert_called_once_with(io.config.llm_routing, "deep_review")
     io.app.resolve_stage_provider.assert_called_once_with("deep_review")

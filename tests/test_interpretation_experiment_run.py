@@ -100,3 +100,39 @@ def test_generation_failures_retain_four_failed_questions_not_successful_abstent
     assert all(row['status'] == 'failed' and 'output' not in row for record in records for row in record['questions'])
     assert all(record['calls'][0]['status'] == 'failed' for record in records)
     assert all(not (root / record['assignment']['directory'] / 'zotero-note.html').exists() for record in records)
+
+
+@pytest.mark.parametrize('failure_index', [0, 1, 2])
+def test_actual_disabled_ai_factory_retains_every_frozen_assignment_as_readable_failures(tmp_path, failure_index):
+    from zotero_summarizer.services.faithbench._interpretation import execute, read_run
+    from zotero_summarizer.services.faithbench._interpretation_inputs import inspect
+    from zotero_summarizer.services.llm.factory import resolve_stage_client
+    from zotero_summarizer.runtime import RuntimeState
+    from types import SimpleNamespace
+
+    settings, path, _, config, profiles = cohort(tmp_path)
+    config.llm_enabled = False
+    runtime = RuntimeState()
+    runtime.app_state = SimpleNamespace(config=config)
+    constructed = []
+
+    def build(role, profile):
+        assert list((settings.faithbench_dir / 'interpretation').glob('*/inputs.json'))
+        assert list((settings.faithbench_dir / 'interpretation').glob('*/plan.json'))
+        constructed.append(role)
+        if len(constructed) <= failure_index:
+            return ObservedSyntheticProvider()
+        return resolve_stage_client(runtime, 'feed')
+
+    root = execute(settings, inspect(settings, path), config, profiles, build)
+    frozen, records = read_run(root)
+    assert constructed == list(profiles)[:failure_index + 1]
+    assert len(records) == len(frozen['evaluation']) * len(frozen['recipe']['labels'])
+    assert all(record['review'] is None and record['review_status'] == 'failed' for record in records)
+    assert all(record['review_failure_type'] == 'APIError' for record in records)
+    assert all(record['calls'] == [] for record in records)
+    assert all(len(record['questions']) == 4 for record in records)
+    assert all(row['status'] == 'failed' and row['failure_type'] == 'APIError' and 'output' not in row
+               for record in records for row in record['questions'])
+    assert all(not (root / record['assignment']['directory'] / 'zotero-note.html').exists() for record in records)
+    assert read_run(root)[1] == records

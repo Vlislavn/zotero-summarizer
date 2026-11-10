@@ -12,6 +12,36 @@ from zotero_summarizer.integrations._zotero_read_common import (
 
 
 class ZoteroLookupMixin:
+    @staticmethod
+    def _bibliographic_item_row(conn: sqlite3.Connection, item_key: str) -> sqlite3.Row | None:
+        """The live user-library bibliographic item row for ``item_key`` (else None)."""
+        return conn.execute(
+            f"""
+            SELECT i.itemID, i.key, i.dateAdded, i.dateModified, i.libraryID, it.typeName AS item_type
+            FROM items i
+            JOIN itemTypes it ON it.itemTypeID = i.itemTypeID
+            LEFT JOIN deletedItems di ON di.itemID = i.itemID
+            WHERE i.key = ?
+              AND i.libraryID = ({_USER_LIBRARY_ID_SELECT})
+              AND di.itemID IS NULL
+              AND it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
+            LIMIT 1
+            """,
+            (item_key,),
+        ).fetchone()
+
+    def get_pdf_paths(self, item_keys: list[str]) -> dict[str, str | None]:
+        """First resolved PDF path per item key (== ``get_item_detail(key)["pdf_path"]``,
+        ``None`` for an unknown key) over one connection, without reading fields,
+        notes, tags or annotations."""
+
+        def _read(conn: sqlite3.Connection) -> dict[str, str | None]:
+            rows = {key: self._bibliographic_item_row(conn, key) for key in item_keys}
+            return {key: self._read_attachments(conn, int(row["itemID"]))[1] if row else None
+                    for key, row in rows.items()}
+
+        return self._execute_read(_read)
+
     def find_by_external_id(
         self, doi: str | None = None, arxiv_id: str | None = None
     ) -> str | None:

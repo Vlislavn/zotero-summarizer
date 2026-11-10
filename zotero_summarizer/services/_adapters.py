@@ -44,10 +44,25 @@ def require_loopback_endpoint(value: str) -> None:
         raise ValueError("local-only generation requires a literal loopback HTTP API")
 
 
+def _verification_send(guard, api_key, before_request):
+    from zotero_summarizer.integrations.llm_transport import own_headers
+
+    def send(request):
+        try:
+            if before_request:
+                before_request()
+            own_headers(request, api_key, raw_response=True)
+        except BaseException:
+            guard.refuse_before_dispatch()
+            raise
+        guard.transport_started(request)
+    return send
+
+
 def build_llm(
     model_url: str,
     model_name: str,
-    api_key: str,
+    api_key: str | None,
     # PROVISIONAL: 4096 is an operational baseline, not measured (OnPrem.LLM's own default is
     # 512; reasoning providers raise it to 16384). Per-provider override via ProviderConfig.
     # See docs/onprem_llm_evidence.md.
@@ -63,6 +78,7 @@ def build_llm(
     before_request: Any = None,
     request_owner: Any = None,
     local_only: bool = False,
+    no_auth: bool = False,
 ) -> InstrumentedLLMClient:
     from zotero_summarizer.integrations.llm_callbacks import CompletionGuard
 
@@ -85,6 +101,8 @@ def build_llm(
         inventory = RequestInventory(uuid4().hex, before_start=before_request)
         request_owner = partial(inventory.expect, "direct-verification", model_name,
                                 _generation_endpoint(model_url, "/chat/completions"), local=False)
+    if no_auth and request_timeout_seconds is None:
+        raise ValueError("Declared no-auth requires an explicit request timeout")
     guard = CompletionGuard(expected_model=model_name if verification else None, request_owner=request_owner)
     llm_cls, _ = _load_onprem()
     kwargs: dict[str, Any] = dict(
@@ -105,7 +123,7 @@ def build_llm(
     if verification:
         from zotero_summarizer.integrations.llm_requests import verification_http_client
 
-        transport = verification_http_client(guard.transport_started)
+        transport = verification_http_client(_verification_send(guard, api_key, before_request))
         kwargs.update(max_retries=0, cache=False, http_client=transport)
     if local_only:
         from zotero_summarizer.integrations.llm_requests import verification_http_client
@@ -115,6 +133,15 @@ def build_llm(
 
         transport = verification_http_client(require_local_request)
         kwargs.update(max_retries=0, cache=False, http_client=transport)
+    if no_auth:
+        from zotero_summarizer.integrations.llm_transport import no_auth_onprem_options
+
+        if transport is not None:
+            transport.close()
+        before = _verification_send(guard, None, before_request) if verification else (lambda request: require_loopback_endpoint(str(request.url))) if local_only else None
+        transport, owned_options = no_auth_onprem_options(model_url, before, timeout=request_timeout_seconds)
+        kwargs.update(owned_options)
+        kwargs.pop('http_client', None)
     try:
         inner = llm_cls(**kwargs)
     except BaseException:

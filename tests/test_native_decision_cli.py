@@ -103,6 +103,32 @@ def test_default_cli_is_read_only_and_does_not_construct_http(tmp_path, monkeypa
     assert not (tmp_path / 'selected').exists()
 
 
+@pytest.mark.parametrize('kind', ['native', 'recorded', 'blocked'])
+def test_default_cli_discloses_admitted_arms_and_effective_limits(tmp_path, monkeypatch, capsys, kind):
+    from test_support_fixtures import write_json
+
+    cfg, _, _, path = fixture(tmp_path, kind=kind)
+    if kind == 'blocked':
+        cfg['arms'][0]['blocked_reason'] = 'runtime smoke unavailable'
+        write_json(path, cfg)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError('preview must not construct HTTP')
+
+    monkeypatch.setattr(httpx, 'Client', forbidden)
+    monkeypatch.setenv('ZS_SUPPORT_OVERRIDES', '{"max_calls":7}')
+    monkeypatch.setenv('ZS_SOURCE_WORK_SAFETY_MS', '90000')
+    assert main(['support', '--config', str(path)]) == 0
+    output = loads(capsys.readouterr().out.encode())
+    assert output['arms'] == [{'arm_id': 'native', 'kind': kind,
+                               'blocked_reason': 'runtime smoke unavailable' if kind == 'blocked' else None}]
+    assert output['limits']['max_calls'] == 7
+    assert output['limits']['max_run_seconds'] == 90
+    assert output['limits']['max_work_units'] == validated(cfg).max_work_units
+    assert output['model_calls'] == output['writes'] == 0
+    assert not (tmp_path / 'selected').exists()
+
+
 def malformed_cases():
     for field, value in [('choice', 'foreign'), ('choice', None), ('type', 'score'),
                          ('confidence', True), ('confidence', 1.1), ('confidence', '0.7'),

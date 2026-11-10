@@ -1,16 +1,11 @@
 # cli — the `zotero-summarizer` command-line interface
 
-The existing `_telegram-child` adds `purpose=conversations` for the consented
-Settings source action. It retains the dedicated session/fuse/lease, no model work
-before clean exit, and hash-verified immutable export receipt. Authorization remains
-interactive terminal-only. Conversation failures expose bounded status codes, not
-raw SDK messages/account paths; the existing v1 collect/saved-news CLI stays intact.
-A cleanly disconnected conversation failure with retained observations can publish
-a raw partial bundle. Its receipt/files are hash-verified before exposing only the
-safe report ID; the action still fails/needs authorization and never enters model
-processing. Failure/partial evidence is not a successful collection receipt.
-The child kickoff imports its runtime owner; saved-news publication retains its
-separate import owner rather than an unused child-local binding.
+The `_telegram-child` has two purposes: `auth` (interactive terminal only) and `digest`
+(the Settings 'Collect' action: `collect_pages` + digest, persisted in-child as
+`telegram-today.json`). It retains the dedicated session/fuse/lease and a receipt
+verified before the parent proceeds; failures expose bounded status codes, never raw
+SDK messages/account paths. The `conversations` purpose and its v2 bundle export were
+removed (retired; historical bundles stay readable in Weekly).
 
 `faithbench interpretation` inspects a frozen recipe by default, without provider
 construction or output effects. Explicit `--run --capture-local` records a private
@@ -50,10 +45,10 @@ main() = parse args → validate command budgets → selected Settings/.env → 
 | `__main__.py` | enables `python -m zotero_summarizer.cli` |
 | `_helpers.py` | shared CLI helpers: feed-id resolution, run-log writing, slugs |
 | `_app.py` | `serve` (uvicorn `api.app:create_app`, `factory=True`; leaves existing listeners intact and reports a bind error on an occupied port; the process-killing helper and `--no-kill` option are removed) / `mcp` / `migrate` / `smoke-test` / `prefetch-models` (download the ML models for offline use; `--check` reports cache status; includes the MiniCheck claim-checker only when `quality_review.shadow_claim_check` is on). `__init__.apply_offline_env()` projects the selected Settings environment before handler model imports; importing CLI or building its parser reads no default `.env` or model SDK. `ZS_OFFLINE`/`HF_HUB_OFFLINE` still select cache-only model loading. `verify-deep-review` runs the real digest + quality path headlessly against the live `deep_review` model on ONE already-built paper's cached `qa_text` (`--item-key`, default `4NIMLFMV`; `--with-goals` adds the heavier goal board) — prints per-phase timing + the digest JSON; the end-to-end "does a review actually produce a digest" check without Zotero or the server. It computes `sub_concurrency` via the SAME `_common.deep_review_sub_concurrency` helper the background job uses (and prints it in the tier line), so its wall-clock is a faithful production receipt — a remote provider's rubric/goal sub-calls run in parallel here exactly as they would in the app. `--provider`/`--model` override the deep_review stage for THIS run only (e.g. `--provider default --model qwen3.5:4b` to drive the pipeline against a local ollama model when the configured provider is unreachable/over-budget) |
-| `_mobile_serve.py` | Explicit `serve-mobile --origin HTTPS_TS_ORIGIN --owner-login EXACT_LOGIN`: existing app through an owned private Unix listener, never a TCP fallback or automatic Tailscale configuration. Bound directory/socket ownership and signal cleanup; configurable graceful wait, not downstream cancellation proof. |
+| `_mobile_serve.py` | Explicit `serve-mobile --origin HTTPS_TS_ORIGIN --owner-login EXACT_LOGIN`: owned private Unix by default. `--trusted-loopback-port PORT` consciously trusts local host processes and binds only 127.0.0.1:PORT (1024..65535), retaining owner/HTTPS admission. Never auto-falls back or configures Tailscale. Original signal/resource lifetime covers both transports. |
 | `_setup.py` | `setup` reuses bootstrap/path/goals services; `--mode local --profile light\|balanced\|existing` resolves the same hardware-gated profile definitions as web and prints (never runs) an explicit model pull command. Hosted and skip/no-LLM paths remain. `doctor [--json|--fix|--check id]` runs the shared persisted real-pipeline checklist; `calibrate` retains measured hardware/endpoint tuning. |
-| `_feeds.py` | the `feeds` subcommands (drive the RSS daemon) |
-| `_goldenset.py` | golden-set export + ML lifecycle (train/eval/tune/suggest) + group wiring |
+| `_feeds.py` | the `feeds` subcommands (drive the RSS daemon). `feeds list --json` exposes `last_check_error` as last-source-issue text: the exact `RssNamespaceWarning:` marker is nonfatal, not an attempt-failed flag. Refresh counts/`errors[]` describe actual commits/failures; listing does not refresh or clear the saved issue. |
+| `_goldenset.py` | golden-set export + ML lifecycle (train/eval/tune/suggest) + group wiring. Export defaults to full source abstracts; `--abstract-chars N` is an explicit optional cap, not a training default. |
 | `_goldenset_classify.py` · `_goldenset_predict.py` | the heavier classify/predict/analyze commands (`classify-llm` runs any OpenAI-compatible model) |
 | `_goldenset_migrate.py` | `migrate-verdicts-to-zotero` — one-time transfer of in-app verdicts (`label_verdicts`) into Zotero `label:<priority>` tags (`--dry-run`, idempotent, library items only, single batch backup) |
 | `_goldenset_setup_colors.py` | `setup-tag-colors` — prints the one-time Zotero setup (colors + number keys 1-4 for the four `label:<priority>` tags) for native keypress labeling. Non-destructive (prints the plan; writes nothing into your synced Zotero settings); `--json` for machine output |
@@ -63,13 +58,21 @@ main() = parse args → validate command budgets → selected Settings/.env → 
 Handlers use lazy imports inside the function bodies to keep CLI startup fast.
 
 `serve` refuses non-loopback binds at parser and handler boundaries and disables
-proxy-header rewriting. `serve-mobile` is a separate explicit POSIX command;
+proxy-header rewriting. `serve-mobile` defaults to an explicit POSIX Unix command;
 project/data ancestry must be owner-controlled, private socket paths are never
-silently replaced, and no foreign process is stopped. Signal capture covers the
+silently replaced, and no foreign process is stopped. Where an installed gateway
+cannot dial private Unix (for example, a sandboxed macOS extension), consciously
+select `--trusted-loopback-port PORT`;this trusts local host processes, not merely
+same-UID/root. It binds only 127.0.0.1, requires exact owner/HTTPS metadata for the
+whole app, and refuses an occupied port without killing its owner. Configure
+Tailscale Serve separately to proxy `http://127.0.0.1:PORT`;never expose this backend
+to LAN/Funnel or silently choose TCP after a Unix failure. Signal capture covers the
 whole socket lifetime, including bind and pre-server startup, and replays the
-interruption only after owned cleanup. `make iphone` only refuses
-with guidance; it does not inspect deployed state. Gateway origin/owner, trust,
-manual activation, shutdown and unperformed device checks are described in
+interruption only after owned cleanup. The CLI itself never configures Tailscale;
+the `make iphone` launcher ([`tools/serve-iphone.sh`](../../tools/serve-iphone.sh))
+reads the owner/origin from `tailscale status --json`, maps Serve HTTPS:443 to
+`127.0.0.1:8000` while it runs and starts this command with `--trusted-loopback-port 8000`.
+General limits are described in
 [remote-access boundary](../../docs/features.md#remote-access).
 
 Faithbench run IDs are single ASCII alphanumeric/underscore/hyphen names, not
@@ -193,10 +196,11 @@ persists a valid ML-only choice that can later be changed in Settings.
 5000-row cutoff. Dry-run and apply use the same list; library-only checks, connector
 guard, idempotent tag comparison and the single batch backup remain unchanged.
 
-Feedback review stack part 4: weekly local reports are off by default. Enable with
-`ZS_FEEDBACK_SCHEDULE_ENABLED=true python -m zotero_summarizer.cli feeds serve --project-root ROOT`.
+Feedback review stack part 4: weekly local reports run by default inside `feeds serve`
+(turn off in Ops → System → Your decisions, or `ZS_FEEDBACK_SCHEDULE_ENABLED=false`).
 Reports precede feed ticks. Owned SIGINT/SIGTERM during reporting stop cleanly
-after child drain, with no cursor advancement; unrelated interruptions propagate.
+after child drain, with no cursor advancement; other failures are logged and retried
+hourly without stopping feed ticks; unrelated interruptions propagate.
 The prerequisite admitted-root handler/factory pin remains intact. See the
 Feedback package README for cap compatibility and conservative recovery rules.
 
@@ -224,9 +228,8 @@ see [feedback analysis](../services/golden/feedback_analysis/README.md).
 Retain original explicit default-no inference consent; use the existing canonical provider verification boundary.
 
 Telegram account/session activation and collection are explicit operations; retained
-report viewing does not activate them. Saved JSONL replay uses `--input-jsonl`, and
-`--collect-only` publishes originals without ML/LLM work. Telegram mode rejects the
-RSS-only `--from`, `--to`, and `--review-timeout` options instead of silently ignoring
-them; it also rejects unsupported `--venue` and `--queue-zotero`. See
+report viewing does not activate them. There is no Telegram CLI run path: collection
+runs only from **Weekly → Telegram** in the UI, and the one-time `telegram-auth`
+command is the sole terminal step. The `research-feed run` command is RSS-only. See
 [Telegram news](../../docs/features.md#telegram-news). Source and synthetic lifecycle
 tests are not live-account acceptance.

@@ -18,7 +18,8 @@ from zotero_summarizer.models import (
     PendingChangesResponse,
     SummarizeResponse,
 )
-from zotero_summarizer.services._common import LOGGER, unique_non_empty_strings
+from zotero_summarizer.services._common import LOGGER, settings as get_settings, unique_non_empty_strings
+from zotero_summarizer.storage import item_titles
 
 # Re-exported so callers keep using `pending.build_*` / `from ...pending import *`.
 from zotero_summarizer.services.zotero._notes import (  # noqa: F401
@@ -252,6 +253,14 @@ def plan_changes_for_item(
     return planner.to_repository_rows(changes)
 
 
+def _with_paper_titles(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Rows staged with the bare item key as title get the library paper's title for display."""
+    bare = {row["item_key"] for row in items if row.get("item_title") in (None, "", row["item_key"])}
+    titles = item_titles.titles_for_keys(get_settings().corpus_db_path, list(bare))
+    return [{**row, "item_title": titles.get(row["item_key"], row["item_title"])} if row["item_key"] in bare else row
+            for row in items]
+
+
 async def list_pending_changes(
     status: str = ChangeStatus.PENDING.value, limit: int = 500, item_key: str | None = None
 ) -> PendingChangesResponse:
@@ -264,6 +273,7 @@ async def list_pending_changes(
     from zotero_summarizer.services.zotero.zotero import get_zotero_writer_or_raise
 
     items = await asyncio.to_thread(triage_db.get_pending_changes, safe_status, limit, item_key=item_key)
+    items = await asyncio.to_thread(_with_paper_titles, items)
     try:
         writer = get_zotero_writer_or_raise()
     except APIError as exc:

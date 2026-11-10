@@ -75,13 +75,16 @@ def rank_observations(
     *,
     quality_first: bool,
     key: Any,
+    goal: str | None = None,
 ) -> dict[str, Any]:
-    """Project the resolved mode and the same key returned by the cohort scorer."""
+    """Project the resolved mode and the same key returned by the cohort scorer
+    (+ the best-matching goal text for the card's why-line, when known)."""
     observed = deepcopy(evidence) if evidence is not None else {}
     observed["mode"] = "quality_first" if quality_first else "control"
     observed["rank"] = {
         "basis": "quality_first" if quality_first else "relevance_goal_citation",
         "key": _finite_or_none(key),
+        **({"goal": goal} if goal else {}),
     }
     return observed
 

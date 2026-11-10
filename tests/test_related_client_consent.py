@@ -9,7 +9,7 @@ from test_related_saved_papers import Model
 from zotero_summarizer.models import AppState, GoalsConfig
 from zotero_summarizer.models.config import LLMConfig
 from zotero_summarizer.models.providers import LLMRoutingConfig
-from zotero_summarizer.runtime import RuntimeState
+from zotero_summarizer.runtime import AppContext, RuntimeState, set_context
 from zotero_summarizer.services import config as config_service
 from zotero_summarizer.services.library import _related_assessment as semantic
 from zotero_summarizer.services.llm import factory
@@ -36,10 +36,8 @@ def test_private_payload_never_uses_client_built_before_actual_config_swap(tmp_p
     app = RuntimeState(app_state=AppState(config=config_a))
     selected = Settings.load(project_root=tmp_path)
     selected.data_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(config_service, "settings", lambda: selected)
-    monkeypatch.setattr(config_service, "state", lambda: app)
+    set_context(AppContext(settings=selected, state=app))
     monkeypatch.setattr(config_service, "EmbeddingCache", lambda path, name: SimpleNamespace(model_name=name))
-    monkeypatch.setattr(semantic, "state", lambda: app)
     monkeypatch.setattr(semantic, "offline_requested", lambda: False)
     model_a, model_b = Model(), Model()
     entered_a, release_a = Event(), Event()

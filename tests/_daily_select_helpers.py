@@ -158,4 +158,4 @@ def seed_reviews(monkeypatch, mapping: dict[str, str]) -> None:
         key: {"quality": {"grade": grade, "quality_band": "neutral"}}
         for key, grade in mapping.items()
     }
-    monkeypatch.setattr(deep_review, "current_reviews", lambda: reviews)
+    monkeypatch.setattr(deep_review, "usable_reviews", lambda: reviews)

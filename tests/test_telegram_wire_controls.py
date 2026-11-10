@@ -5,15 +5,13 @@ import json
 import sys
 from copy import deepcopy
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 import httpx
 import pytest
 from pydantic import BaseModel
 
-from tests.test_telegram_conversations import snapshot
 from tests.test_telegram_review_corrections import local_context
-from zotero_summarizer.services.research_feed import telegram_review, telegram_conversations
+from zotero_summarizer.services.research_feed import telegram_review
 from zotero_summarizer.services.llm import factory
 from zotero_summarizer.integrations import llm_requests
 
@@ -84,18 +82,3 @@ def test_undeclared_vllm_options_are_not_manufactured(tmp_path):
     assert "chat_template_kwargs" not in (resolved.provider.extra_body or {})
 
 
-def test_failure_records_only_safe_underlying_type_not_exception_text(tmp_path, monkeypatch):
-    from tests.test_research_feed_telegram import _project
-    from zotero_summarizer.services.research_feed import reports
-    config, profile = local_context(tmp_path)
-    client = Mock()
-    client.pydantic_prompt.side_effect = httpx.ReadTimeout("PRIVATE prompt and path /private/session")
-    monkeypatch.setattr(factory, "build_client_for_provider", lambda *_args, **_kwargs: client)
-    # A separate owned settings root avoids reading any actual app configuration.
-    settings = _project(tmp_path / "publication")
-    result = telegram_conversations.publish(settings, [snapshot()], collection={}, profile=profile, config=config)
-    payload = reports.get_report(settings, result["run_id"])
-    assert payload["errors"][0]["type"] == "ReadTimeout"
-    assert payload["metadata"]["evaluation_identity"]["local_only"] is True
-    assert "PRIVATE" not in json.dumps(payload) and "/private/session" not in json.dumps(payload)
-    client.close.assert_called_once()

@@ -3,7 +3,7 @@ from copy import deepcopy
 
 import pytest
 
-from tests._interpretation_experiment import CARD, PAYLOAD, TEXT, ScriptedClient, run_review
+from tests._interpretation_experiment import CARD, PAYLOAD, TEXT, ScriptedClient, generates, run_review
 from zotero_summarizer.models import PaperDigest
 from zotero_summarizer.services.library import interpretation
 from zotero_summarizer.services.library._digest_verification import (
@@ -33,7 +33,7 @@ def test_closed_projection_uses_five_roles_and_native_sentence_parts_in_supplied
     verifier = ScriptedClient()
     checks = verify_digest(PaperDigest.model_validate(PAYLOAD), TEXT, verifier, scientific_claims=claims)
     assert len(checks.checks) == len(claims) and verifier.calls[0][1] is _ScientificChecks
-    assert '[0] ' + claims[0] in verifier.calls[0][0]
+    assert '[0] CLAIM_ID=0: ' + claims[0] in verifier.calls[0][0]
     assert all('origin' not in claim and 'ai_draft' not in claim for claim in claims)
 
 
@@ -95,8 +95,9 @@ def test_accepted_optional_support_is_separate_from_base_audit_and_scientific_st
 
 @pytest.mark.parametrize('phase', ['numeric', 'semantic'])
 @pytest.mark.parametrize('mixed', [False, True])
-def test_base_or_mixed_rejection_uses_one_correction_with_fresh_projection_and_offset(phase, mixed):
-    first = PAYLOAD | {'interpretation': [dict(CARD, rationale='Unreported 88888%' if mixed else 'First rationale')]}
+def test_base_or_mixed_rejection_repairs_only_rejected_base_fields_and_keeps_the_draft_card(phase, mixed):
+    card = dict(CARD, rationale='Unreported 88888%' if mixed else 'First rationale')
+    first = PAYLOAD | {'interpretation': [card]}
     if phase == 'numeric':
         first['tldr'] = 'Unreported 99999%'
 
@@ -105,18 +106,18 @@ def test_base_or_mixed_rejection_uses_one_correction_with_fresh_projection_and_o
 
         def pydantic_prompt(self, *, prompt, pydantic_model, **kwargs):
             result = super().pydantic_prompt(prompt=prompt, pydantic_model=pydantic_model, **kwargs)
-            if phase == 'semantic' and not issubclass(pydantic_model, PaperDigest) and not self.rejected:
+            if phase == 'semantic' and not generates(pydantic_model) and not self.rejected:
                 self.rejected = True
                 result['checks'][0] = dict(result['checks'][0], supported=False, evidence=[])
             return result
 
     client = FirstBaseRejects(cards=False, responses=[first, PAYLOAD | {'interpretation': [CARD]}])
     result = run_review(client)
-    assert result['interpretation']['items'] == [CARD]
-    assert sum(issubclass(model, PaperDigest) for _, model, _ in client.calls) == 2
-    assert len(client.calls) == (4 if phase == 'numeric' else 5)
+    # Field repair never regenerates the optional card: it is verified (or rejected) as drafted.
+    assert (result['interpretation']['status'] == 'support_not_established') if mixed else result['interpretation']['items'] == [card]
+    assert sum(generates(model) for _, model, _ in client.calls) == 2
+    assert len(client.calls) == ((3 if mixed else 4) if phase == 'numeric' else (4 if mixed else 5))
     assert [row['outcome'] for row in result['verification_audit']['lineage']] == ['support_not_established', 'accepted']
-    assert all('First rationale' not in claim for claim in result['interpretation']['claims'])
 
 
 @pytest.mark.parametrize('phase', ['numeric', 'semantic'])
@@ -127,15 +128,15 @@ def test_second_base_rejection_fails_closed_and_clears_both_public_collectors(ph
 
     def reject(**kwargs):
         result = original(**kwargs)
-        if not issubclass(kwargs['pydantic_model'], PaperDigest):
+        if not generates(kwargs['pydantic_model']):
             result['checks'][0] = dict(result['checks'][0], supported=False, evidence=[])
         return result
 
     client.pydantic_prompt = reject
     with pytest.raises(DigestSourceRejected):
         run_review(client)
-    assert len(client.calls) == (2 if phase == 'numeric' else 4)
-    assert all('interpretation[' not in prompt for prompt, model, _ in client.calls if not issubclass(model, PaperDigest))
+    assert len(client.calls) == (4 if phase == 'numeric' else 6)  # #191: + one escalation
+    assert all('interpretation[' not in prompt for prompt, model, _ in client.calls if not generates(model))
 
 
 def test_optional_numeric_removal_cannot_accept_a_semantically_rejected_base():
@@ -144,14 +145,14 @@ def test_optional_numeric_removal_cannot_accept_a_semantically_rejected_base():
 
     def reject(**kwargs):
         result = original(**kwargs)
-        if not issubclass(kwargs['pydantic_model'], PaperDigest):
+        if not generates(kwargs['pydantic_model']):
             result['checks'][0] = dict(result['checks'][0], supported=False, evidence=[])
         return result
 
     client.pydantic_prompt = reject
     with pytest.raises(DigestSourceRejected):
         run_review(client)
-    assert len(client.calls) == 4
+    assert len(client.calls) == 6  # #191: base verify, repair + re-check, escalation + re-check
 
 
 @pytest.mark.parametrize('defect', ['missing_base', 'duplicate_base', 'invalid_optional_evidence'])
@@ -162,7 +163,7 @@ def test_malformed_combined_checks_never_partially_accept_and_fallback_keeps_pro
 
         def pydantic_prompt(self, **kwargs):
             result = super().pydantic_prompt(**kwargs)
-            if not issubclass(kwargs['pydantic_model'], PaperDigest):
+            if not generates(kwargs['pydantic_model']):
                 self.attempts += 1
                 if recovery == 'unavailable' or self.attempts <= (1 if recovery == 'repair' else 2):
                     if defect == 'missing_base':
@@ -212,14 +213,14 @@ def test_invalid_typed_rejection_cannot_be_reused_or_trigger_generation_correcti
     result = run_review(client)
     assert result['interpretation']['status'] == 'unavailable'
     assert len(client.calls) == 4
-    assert sum(issubclass(model, PaperDigest) for _, model, _ in client.calls) == 1
+    assert sum(generates(model) for _, model, _ in client.calls) == 1
 
 
 @pytest.mark.parametrize('card', [None, [CARD]])
 def test_c_never_accepts_unknown_checks_as_a_valid_base_or_empty_card(card):
     client = ScriptedClient(cards=False, responses=[PAYLOAD | {'interpretation': card}])
     original = client.pydantic_prompt
-    client.pydantic_prompt = lambda **kw: original(**kw) if issubclass(kw['pydantic_model'], PaperDigest) else {}
+    client.pydantic_prompt = lambda **kw: original(**kw) if generates(kw['pydantic_model']) else {}
     with pytest.raises(DigestVerifierUnavailable):
         run_review(client)
     assert len(client.calls) == 1
@@ -228,7 +229,7 @@ def test_c_never_accepts_unknown_checks_as_a_valid_base_or_empty_card(card):
 def test_optional_numeric_rejection_cannot_pass_when_base_verifiers_are_unavailable():
     client = ScriptedClient(cards=False, responses=[PAYLOAD | {'interpretation': [dict(CARD, rationale='99999%')]}])
     original = client.pydantic_prompt
-    client.pydantic_prompt = lambda **kw: original(**kw) if issubclass(kw['pydantic_model'], PaperDigest) else ''
+    client.pydantic_prompt = lambda **kw: original(**kw) if generates(kw['pydantic_model']) else ''
     with pytest.raises(DigestVerifierUnavailable):
         run_review(client)
     assert len(client.calls) == 1

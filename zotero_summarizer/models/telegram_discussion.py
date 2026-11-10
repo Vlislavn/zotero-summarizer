@@ -19,7 +19,7 @@ def digest(value) -> str:
 
 
 class TelegramMessage(BaseModel):
-    """No sender/account identity or transient SDK access hashes."""
+    """Numeric sender id only (no names, account identity or transient SDK access hashes)."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
     peer_kind: Literal["channel"] = "channel"
@@ -29,6 +29,7 @@ class TelegramMessage(BaseModel):
     reply_to_id: int | None = Field(default=None, ge=1, le=2**31 - 1)
     reply_to_top_id: int | None = Field(default=None, ge=1, le=2**31 - 1)
     reply_peer_is_current: bool | None = None
+    sender_id: int | None = None  # the author's Telegram user id (captured from schema 2 on; no names)
     text: str
     published_at: str
     updated_at: str | None = None
@@ -60,6 +61,8 @@ class TelegramMessage(BaseModel):
         value = self.model_dump(mode="json")
         if self.reply_peer_is_current is None:
             value.pop("reply_peer_is_current")
+        if self.sender_id is None:
+            value.pop("sender_id")
         return digest(value)
 
 
@@ -89,11 +92,11 @@ class TelegramConversation(BaseModel):
     peer_id: LiveTelegramChannelId | None = None
     root_id: int | None = Field(default=None, ge=1, le=2**31 - 1)
     root: TelegramMessage | None = None
-    messages: list[TelegramMessage] = Field(default_factory=list, max_length=30)
+    messages: list[TelegramMessage] = Field(default_factory=list, max_length=300)
     status: Literal["fetched", "truncated", "unavailable", "empty"]
     reason: str | None = None
     scanned_count: int = Field(default=0, ge=0)
-    text_count: int = Field(default=0, ge=0, le=30)
+    text_count: int = Field(default=0, ge=0, le=300)
     skipped_count: int = Field(default=0, ge=0)
     reported_reply_count: int | None = Field(default=None, ge=0)
     post_window: TelegramPostWindow | None = None

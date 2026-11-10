@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import os
 from pathlib import Path
 import socket
@@ -90,8 +90,9 @@ def _serve_mobile(args: argparse.Namespace) -> int:
     from zotero_summarizer.api.mobile_access import MobileAccessPolicy
 
     settings = Settings.load(project_root=args.project_root)
-    path = settings.data_dir.absolute() / "mobile" / "api.sock"
-    policy = MobileAccessPolicy(args.origin, args.owner_login, path)
+    port = getattr(args, "trusted_loopback_port", None)
+    path = settings.data_dir.absolute() / "mobile" / "api.sock" if port is None else None
+    policy = MobileAccessPolicy(args.origin, args.owner_login, path, trusted_loopback_port=port)
     shutdown_seconds = _shutdown_seconds()
     import uvicorn
     from zotero_summarizer.api.app import create_app
@@ -103,23 +104,29 @@ def _serve_mobile(args: argparse.Namespace) -> int:
             yield
 
     config = uvicorn.Config(
-        create_app(settings, mobile_access=policy), uds=str(path),
+        create_app(settings, mobile_access=policy), uds=str(path) if path is not None else None,
+        host="127.0.0.1", port=port or 0,
         proxy_headers=False, workers=1, http="h11", access_log=False,
         timeout_graceful_shutdown=shutdown_seconds,
     )
     server = GatewayServer(config)
-    with uvicorn.Server.capture_signals(server):
-        with private_listener(settings) as (listener, _path, _release_path):
-            if not server.should_exit:
-                server.run(sockets=[listener])
+    with uvicorn.Server.capture_signals(server), ExitStack() as stack:
+        if port is None:
+            listener, _path, _release_path = stack.enter_context(private_listener(settings))
+        else:
+            listener = stack.enter_context(config.bind_socket())
+        if not server.should_exit:
+            server.run(sockets=[listener])
     return 0 if server.started else 3
 
 
 def register_mobile_serve(subparsers: argparse._SubParsersAction) -> None:
     command = subparsers.add_parser(
-        "serve-mobile", help="Serve through a private Unix socket + owner-authenticated Tailscale HTTPS"
+        "serve-mobile", help="Serve through owner-authenticated Tailscale HTTPS (private Unix by default)"
     )
     command.add_argument("--origin", required=True, help="Exact HTTPS .ts.net origin served by Tailscale Serve")
     command.add_argument("--owner-login", required=True, help="Exact allowed owner login (not an API key)")
     command.add_argument("--project-root", default=None)
+    command.add_argument("--trusted-loopback-port", type=int, default=None,
+                         help="Explicitly trust local Mac/host processes; bind only 127.0.0.1 on this port (1024..65535)")
     command.set_defaults(func=_serve_mobile)

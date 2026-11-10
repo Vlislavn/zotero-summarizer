@@ -31,8 +31,10 @@ def apply_schema(conn: sqlite3.Connection) -> None:
 
 
 def upsert_post(conn: sqlite3.Connection, post: TelegramPost) -> str:
-    payload = json.dumps(post.model_dump(mode="json"), ensure_ascii=False,
-                         sort_keys=True, separators=(",", ":"), allow_nan=False)
+    value = post.model_dump(mode="json")
+    if value["reply_to_id"] is None:
+        del value["reply_to_id"]  # rows stored before the field existed keep their hash
+    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
     content_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     previous = conn.execute(
         "SELECT content_hash FROM research_feed_telegram_posts "
@@ -60,13 +62,9 @@ def _nonfinite(value):
     raise ValueError(f"nonfinite stored evaluation value: {value}")
 
 
-def list_posts(conn: sqlite3.Connection, *, limit: int) -> list[dict]:
-    rows = conn.execute(
-        "SELECT post_json, content_hash, evaluation_json FROM research_feed_telegram_posts "
-        "ORDER BY published_at DESC, channel_id DESC, message_id DESC LIMIT ?", (limit,),
-    ).fetchall()
+def _decode_posts(rows) -> list[dict]:
     result = []
-    for row in reversed(rows):
+    for row in rows:
         evaluation = (json.loads(row["evaluation_json"], parse_constant=_nonfinite)
                       if row["evaluation_json"] else None)
         if evaluation is not None and not isinstance(evaluation, dict):
@@ -74,6 +72,14 @@ def list_posts(conn: sqlite3.Connection, *, limit: int) -> list[dict]:
         result.append({"post": TelegramPost.model_validate_json(row["post_json"]),
                        "content_hash": row["content_hash"], "evaluation": evaluation})
     return result
+
+
+def list_posts(conn: sqlite3.Connection, *, limit: int) -> list[dict]:
+    rows = conn.execute(
+        "SELECT post_json, content_hash, evaluation_json FROM research_feed_telegram_posts "
+        "ORDER BY published_at DESC, channel_id DESC, message_id DESC LIMIT ?", (limit,),
+    ).fetchall()
+    return _decode_posts(reversed(rows))
 
 
 def save_evaluation(conn: sqlite3.Connection, row: dict, evaluation: dict) -> bool:
@@ -85,6 +91,34 @@ def save_evaluation(conn: sqlite3.Connection, row: dict, evaluation: dict) -> bo
         (payload, post.channel_id, post.message_id, row["content_hash"]),
     )
     return changed.rowcount == 1
+
+
+def set_reasons(conn: sqlite3.Connection, channel_id: int, message_id: int, reasons_json: str | None) -> bool:
+    """Store (or clear with None) the owner's 'не подошло' reasons for one post (#112)."""
+    changed = conn.execute(
+        "UPDATE research_feed_telegram_posts SET reasons_json=? WHERE channel_id=? AND message_id=?",
+        (reasons_json, channel_id, message_id))
+    return changed.rowcount == 1
+
+
+def get_reasons(conn: sqlite3.Connection, channel_id: int, message_id: int) -> str | None:
+    row = conn.execute("SELECT reasons_json FROM research_feed_telegram_posts WHERE channel_id=? AND message_id=?",
+                       (channel_id, message_id)).fetchone()
+    return row[0] if row else None
+
+
+def read_reasons(conn: sqlite3.Connection) -> dict[str, str]:
+    """``source_id -> reasons_json`` for every rejected post."""
+    rows = conn.execute("SELECT channel_id, message_id, reasons_json FROM research_feed_telegram_posts "
+                        "WHERE reasons_json IS NOT NULL").fetchall()
+    return {f"telegram:{channel}:{message}": value for channel, message, value in rows}
+
+
+def feedback_rows(conn: sqlite3.Connection) -> list[tuple[str, str, str]]:
+    """``(source_id, post_json, reasons_json)`` for every post with owner feedback (export)."""
+    rows = conn.execute("SELECT channel_id, message_id, post_json, reasons_json FROM research_feed_telegram_posts "
+                        "WHERE reasons_json IS NOT NULL ORDER BY published_at DESC").fetchall()
+    return [(f"telegram:{channel}:{message}", post, value) for channel, message, post, value in rows]
 
 
 def apply_live_schema(conn: sqlite3.Connection) -> None:
@@ -255,7 +289,7 @@ def defer_account(conn: sqlite3.Connection, *, retry_at: datetime) -> str:
 
 
 __all__ = [
-    "apply_schema", "upsert_post", "list_posts", "save_evaluation",
+    "apply_schema", "upsert_post", "list_posts", "save_evaluation", "set_reasons", "read_reasons", "get_reasons", "feedback_rows",
     "apply_live_schema", "read_channel_state", "bind_channel", "commit_page",
     "read_retry_at", "defer_account",
 ]

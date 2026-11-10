@@ -25,7 +25,17 @@ def diagnostic_for_exception(exc: Exception) -> dict[str, Any]:
         status = exc.details.get('http_status')
         if type(status) is int and 100 <= status <= 599:
             diagnostic['http_status'] = status
+        if exc.error == 'review_provider_unavailable' and isinstance(exc.details.get('reason_code'), str):
+            diagnostic['reason_code'] = exc.details['reason_code']
         return diagnostic
+    from zotero_summarizer.integrations.llm_callbacks import LLMOutputTruncated
+
+    if isinstance(exc, LLMOutputTruncated):
+        return {
+            'code': 'review_output_truncated', 'stage': str(getattr(exc, 'review_stage', 'generation')),
+            'reason_code': 'request_output_truncated',
+            'recovery': 'Use a lower thinking effort or a larger output budget, then rerun the review. The incomplete response was rejected.',
+        }
     if isinstance(exc, DigestVerifierUnavailable):
         return {
             "code": "digest_verifier_unavailable", "stage": "verification",
@@ -41,6 +51,7 @@ def diagnostic_for_exception(exc: Exception) -> dict[str, Any]:
     if isinstance(exc, DigestGenerationFailed):
         return {
             "code": "digest_generation_failed", "stage": "generation",
+            "reason_code": exc.reason_code,
             "recovery": "The model returned an invalid digest after bounded recovery; inspect the attempt and retry",
         }
     if isinstance(exc, ValueError):

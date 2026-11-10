@@ -8,6 +8,8 @@ exists to serialise LOCAL triage for RAM safety, and pinning it to ``1`` (as the
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from zotero_summarizer.models.providers import ProviderConfig
 from zotero_summarizer.services._common import deep_review_fleet_concurrency
 
@@ -47,9 +49,13 @@ def test_independent_of_triage_job_concurrency(monkeypatch):
     # in .env for local-RAM triage). Make settings() blow up — the width still resolves.
     import zotero_summarizer.services._common as common
 
-    def _boom():
-        raise AssertionError("deep_review_fleet_concurrency must not read the triage knob")
+    class _NoTriageKnob:
+        config_path = calibration_path = Path("/nonexistent/goals.yaml")  # → knobs unset
 
-    monkeypatch.setattr(common, "settings", _boom)
+        @property
+        def triage_job_concurrency(self):
+            raise AssertionError("deep_review_fleet_concurrency must not read the triage knob")
+
+    monkeypatch.setattr(common, "settings", lambda: _NoTriageKnob())
     assert deep_review_fleet_concurrency(_remote(max_sub=4), 5) == 4
     assert deep_review_fleet_concurrency(_local(), 5) == 1

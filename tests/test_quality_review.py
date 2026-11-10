@@ -7,12 +7,14 @@ from pydantic import ValidationError
 import pytest
 
 from zotero_summarizer.models import PaperDigest, QualityReview
+from zotero_summarizer.models.digest_generation import PaperDigestGeneration, InterpretationDigestGeneration
 from zotero_summarizer.services.triage.daily_select import _candidate as cand
 
 
 @pytest.fixture(autouse=True)
 def _isolate_digest_generation(monkeypatch):
-    from zotero_summarizer.services.library import _digest_verification
+    from zotero_summarizer.services.library import _digest_verification, interpretation  # noqa: F401
+    # interpretation from-imports verify_digest: import it before patching so the stub is not bound for good.
     monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
 
 
@@ -53,6 +55,7 @@ def test_digest_llm_cannot_silently_default_the_writing_assessment():
 
 def _complete_reading_assessment(action):
     return {
+        **PaperDigest().model_dump(exclude={'basis'}),
         "read_decision": action, "read_why": "Changes the design decision.",
         "read_parts": ["§4.2, Table 3"], "skip_parts": [],
         "estimated_read_minutes": 18, "original_value": "The ablation details.",
@@ -119,7 +122,7 @@ def test_interpretation_typed_adapter_cannot_supply_a_missing_base_field(field):
         _coerce_digest(result)
     assert adapter.draft is None
     assert trace.invoke.call_count == 1
-    assert trace.invoke.call_args.args[3]["pydantic_model"] is InterpretationDigest
+    assert trace.invoke.call_args.args[3]["pydantic_model"] is InterpretationDigestGeneration
 
 
 def test_new_reading_action_requires_decision_evidence():
@@ -161,11 +164,11 @@ class _RfCaptureLLM:
 
     def pydantic_prompt(self, *, prompt, pydantic_model, **kwargs):
         self.captured_rf = kwargs.get("response_format", None)
-        return PaperDigest(
-            tldr="ok", read_decision="skip", read_why="The digest is sufficient.",
-            read_parts=[], skip_parts=[], estimated_read_minutes=None, original_value="",
-            writing_friction="low", writing_reasons=[],
-        )
+        return PaperDigest(**{
+            **_complete_reading_assessment('skip'), 'tldr': 'ok',
+            'read_why': 'The digest is sufficient.', 'read_parts': [],
+            'skip_parts': [], 'estimated_read_minutes': None, 'original_value': '',
+        })
 
 
 def test_assess_digest_threads_response_format_to_llm():
@@ -179,11 +182,13 @@ def test_assess_digest_threads_response_format_to_llm():
     llm = _RfCaptureLLM()
     assess_digest(title="T", full_text="body text " * 200, config=cfg, llm=llm,
                   max_chars=60000, response_format=rf)
-    assert llm.captured_rf is rf  # forwarded to the pydantic_prompt call
+    assert llm.captured_rf == build_response_format(PaperDigestGeneration)
+    assert rf == build_response_format(PaperDigest)  # caller-owned legacy schema is not mutated
 
 
 def _reading_reply(decision):
     return {
+        **PaperDigest().model_dump(exclude={'basis'}),
         "read_decision": decision, "read_why": "The original changes the design.",
         "read_parts": ["Section 2"], "skip_parts": [], "estimated_read_minutes": 5,
         "original_value": "Implementation details.", "writing_friction": "low", "writing_reasons": [],

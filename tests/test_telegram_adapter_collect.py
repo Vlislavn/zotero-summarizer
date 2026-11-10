@@ -262,7 +262,7 @@ def test_real_second_connection_retry_admission_and_max_later(env, boundary):
 
 def test_saved_live_overlap_hash_reuse_and_edit_invalidation_real_store(env):
     seed(env)
-    saved = [TelegramPost(schema_version=1, channel_id=A, message_id=n, username="alpha",
+    saved = [TelegramPost(schema_version=2, channel_id=A, message_id=n, username="alpha",
                          permalink=f"https://t.me/alpha/{n}", text=original(n).message,
                          published_at=NOW.isoformat()) for n in (2, 9)]
     with closing(env.open(env.settings.triage_db_path)) as conn:

@@ -7,7 +7,7 @@ import pytest
 
 from zotero_summarizer.services.library import _digest_verification, _map_reduce, _review_cache, deep_review
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
-from test_digest_verification import _accepted_checks
+from test_digest_verification import _accepted_checks, _digest
 @pytest.fixture(autouse=True)
 def _isolate_digest_generation(monkeypatch):
     monkeypatch.setattr(_digest_verification, "verify_digest", _accepted_checks)
@@ -42,7 +42,7 @@ class _StubLLM:
     def pydantic_prompt(self, *, prompt, pydantic_model):
         if "BAD" in prompt:
             raise RuntimeError("LLM blew up on this one")
-        return pydantic_model(
+        return pydantic_model(**{**_digest().model_dump(exclude={'basis'}), **dict(
             tldr="What it is.", read_decision="read", read_why="useful",
             read_parts=["Methods"], skip_parts=[], estimated_read_minutes=15,
             original_value="The detailed evidence.", relevance="fits goals", controversies="c",
@@ -51,7 +51,7 @@ class _StubLLM:
             reproducibility=3, clarity=4, key_strength="s", key_weakness="w", confidence=0.9,
             writing_friction="low", writing_reasons=[],
             parameters={"dataset": "DATASET"},
-        )
+        )})
 
 
 class _StubExtractor:
@@ -389,10 +389,10 @@ def test_assess_digest_maps_fields_and_injects_goals(config):
     class LLM:
         def pydantic_prompt(self, *, prompt, pydantic_model):
             captured["prompt"] = prompt
-            return pydantic_model(tldr="t", read_decision="SKIM", read_why="Inspect the evidence.",
+            return pydantic_model(**{**_digest().model_dump(exclude={'basis'}), **dict(tldr="t", read_decision="SKIM", read_why="Inspect the evidence.",
                                   read_parts=["§3.2"], skip_parts=[], estimated_read_minutes=10,
                                   original_value="The complete method.", grade="b",
-                                  writing_friction="low", writing_reasons=[])
+                                  writing_friction="low", writing_reasons=[])})
 
     from zotero_summarizer.services.library import quality_review
 
@@ -419,7 +419,7 @@ def test_assess_digest_salvages_raw_json_string_and_fails_loud_on_empty(config):
             return self.out  # a STR, exactly as onprem returns on a parse failure
 
     # Markdown-fenced JSON (onprem's parser fails; extract_json_blob recovers it).
-    raw = '```json\n{"read_decision":"read","read_why":"Inspect the evidence.","read_parts":["§4"],"skip_parts":[],"estimated_read_minutes":10,"original_value":"The full evidence.","grade":"A","tldr":"ok","writing_friction":"low","writing_reasons":[]}\n```'
+    raw = '```json\n' + _digest('ok').model_copy(update={'read_decision': 'read', 'read_why': 'Inspect the evidence.', 'read_parts': ['§4'], 'estimated_read_minutes': 10, 'original_value': 'The full evidence.', 'grade': 'A'}).model_dump_json() + '\n```'
     d = quality_review.assess_digest(title="T", full_text="BODY", config=config, llm=_StrLLM(raw))
     assert d.read_decision == "read" and d.grade == "A" and d.basis == "full_text"
 
@@ -482,7 +482,7 @@ def test_build_library_detail_surfaces_deep_review(monkeypatch):
         "needs_pdf": False, "gate_relevance": 3.0, "reviewed_at": "2026-05-23T00:00:00Z",
         "zotero_note_written": True, "zotero_note_error": None,
     }
-    monkeypatch.setattr(deep_review, "get_current_review", lambda key: entry if key == "K1" else None)
+    monkeypatch.setattr(deep_review, "get_usable_review", lambda key: entry if key == "K1" else None)
     monkeypatch.setattr(reading_queue, "get_cached_scoring", lambda key: None)
     monkeypatch.setattr(reading_queue, "live_scoring", lambda item: None)
 

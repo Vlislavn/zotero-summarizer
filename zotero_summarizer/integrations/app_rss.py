@@ -9,10 +9,14 @@ import zlib
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
+from xml.etree import ElementTree
+from xml.parsers import expat
+from xml.sax import SAXParseException
 
 import httpx
 
 from zotero_summarizer.integrations._zotero_read_common import _INJECTION_CHAR_PATTERN, _arxiv_id_from_url_or_doi
+from zotero_summarizer.integrations import rss_paging
 from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.storage import rss as rss_storage
 from zotero_summarizer.storage.feed_identity import (
@@ -28,6 +32,46 @@ class RssUrlRejected(ValueError):
 
 class RssHostUnresolved(RssUrlRejected):
     """DNS failed before any connection could be made."""
+
+
+def _reject_rss_doctype(_name, _system_id, _public_id, _has_internal_subset):
+    raise RssUrlRejected("DOCTYPE is not admitted during XML namespace recovery")
+
+
+def _rss_namespace_warning(body: bytes) -> str:
+    target = ElementTree.TreeBuilder()
+    parser = expat.ParserCreate()
+    parser.StartElementHandler = target.start
+    parser.EndElementHandler = target.end
+    parser.CharacterDataHandler = target.data
+    parser.StartDoctypeDeclHandler = _reject_rss_doctype
+    try:
+        parser.Parse(body, True)
+    except RssUrlRejected:
+        raise
+    except (expat.ExpatError, LookupError, ValueError) as exc:
+        raise RssUrlRejected("Invalid RSS/Atom feed document") from exc
+    root = target.close()
+    declared = {"xml", "xmlns"}
+    used = set()
+    for node in root.iter():
+        for name in [node.tag, *node.attrib]:
+            prefix, separator, suffix = name.partition(":")
+            if prefix == "xmlns" and separator:
+                declared.add(suffix)
+            elif separator:
+                used.add(prefix)
+    missing = used - declared
+    for prefix in sorted(missing):
+        root.set("xmlns:" + prefix, "urn:zotero-summarizer:rss-unresolved:" + prefix)
+    # Only this validation copy receives opaque bindings; extraction uses the original.
+    try:
+        ElementTree.fromstring(ElementTree.tostring(root, encoding="utf-8"))
+    except (ElementTree.ParseError, RecursionError) as exc:
+        raise RssUrlRejected("Invalid RSS/Atom feed document") from exc
+    if not missing:
+        raise RssUrlRejected("Invalid RSS/Atom feed document")
+    return f"RssNamespaceWarning: Parsed feed has {len(missing)} undeclared XML namespace prefixes; repair the source XML."
 
 
 def _reject_private_ip(host: str) -> None:
@@ -201,32 +245,70 @@ class AppRssReader:
     def _conn(self):
         return feeds_storage.open_triage_conn(self.triage_db_path)
 
-    def _refresh_feed(self, conn, feed: dict[str, Any], *, timeout: float, limit: int) -> tuple[int, int]:
+    @staticmethod
+    def _parse_url(url: str, timeout: float):
         import feedparser
 
-        body, headers = _fetch_public_url(str(feed["url"]), timeout=timeout)
+        body, headers = _fetch_public_url(url, timeout=timeout)
         parsed = feedparser.parse(body)
-        if parsed.bozo or not parsed.version:
+        if not parsed.version:
             raise RssUrlRejected("Invalid RSS/Atom feed document")
+        warning = None
+        if parsed.bozo:
+            error = parsed.get("bozo_exception")
+            cause = error.getException() if isinstance(error, SAXParseException) else None
+            if not isinstance(cause, expat.ExpatError) or cause.code != expat.errors.codes[expat.errors.XML_ERROR_UNBOUND_PREFIX]:
+                raise RssUrlRejected("Invalid RSS/Atom feed document")
+            warning = _rss_namespace_warning(body)
+        return parsed, headers, warning
+
+    @staticmethod
+    def _total(parsed) -> int | None:
+        try:
+            return int((parsed.feed or {}).get("opensearch_totalresults"))
+        except (TypeError, ValueError):
+            return None
+
+    def _refresh_feed(self, conn, feed: dict[str, Any], *, timeout: float,
+                      backfill_days: int, max_pages: int) -> tuple[int, int, bool]:
+        """Store every entry of the source newer than the feed's watermark.
+
+        No slicing before dedupe (REQ-S4). Paginated arXiv queries are read until
+        a confirmed boundary (older than max(watermark, backfill horizon)); other
+        feeds are one response, all entries kept. The watermark advances, and the
+        'incomplete' flag clears, only when the boundary was confirmed."""
+        url = str(feed["url"])
+        parsed, headers, warning = self._parse_url(url, timeout)
         title = str((parsed.feed or {}).get("title") or feed.get("name") or "")
+        entries, complete = list(parsed.entries or []), True
+        if rss_paging.is_paginated_arxiv(url):
+            entries, complete = rss_paging.collect_pages(
+                lambda u: (lambda p: (list(p[0].entries or []), self._total(p[0])))(self._parse_url(u, timeout)),
+                url, (entries, self._total(parsed)),
+                cutoff=rss_paging.cutoff_iso(feed.get("fetch_watermark"), backfill_days), max_pages=max_pages,
+            )
         inserted = updated = 0
-        for entry in list(parsed.entries or [])[:limit]:
+        newest = ""
+        for entry in entries:
             item = _entry_to_item(entry, feed=feed, feed_title=title)
             if not item.get("stable_feed_key"):
                 continue
             _, was_inserted = rss_storage.upsert_rss_item(conn, rss_feed_id=int(feed["id"]), item=item)
             inserted += int(was_inserted)
             updated += int(not was_inserted)
-        rss_storage.record_rss_fetch_result(conn, int(feed["id"]), error=None,
-                                           etag=headers.get("etag"), modified=headers.get("last-modified"))
+            newest = max(newest, rss_paging.entry_time(entry))
+        rss_storage.record_rss_fetch_result(conn, int(feed["id"]), error=warning,
+                                           etag=headers.get("etag"), modified=headers.get("last-modified"),
+                                           watermark=newest if complete else None, incomplete=not complete)
         conn.commit()
-        return inserted, updated
+        return inserted, updated, not complete
 
     def refresh_feeds(
         self,
         *,
         max_feeds: int = 10,
-        max_new_items_per_feed: int = 25,
+        backfill_days: int = 7,
+        max_pages_per_feed: int = 10,
         per_feed_timeout: float = 10.0,
     ) -> dict[str, Any]:
         """Fetch a bounded pass of enabled feeds and store parsed items.
@@ -246,11 +328,13 @@ class AppRssReader:
                 "inserted": 0,
                 "updated": 0,
                 "errors": [],
+                "incomplete": 0,
                 "offline": True,
             }
         fetched = 0
         inserted = 0
         updated = 0
+        incomplete = 0
         errors = []
         last_failure = None
         with self._conn() as conn:
@@ -262,11 +346,13 @@ class AppRssReader:
             for feed in feeds:
                 fetched += 1
                 try:
-                    new, changed = self._refresh_feed(
-                        conn, feed, timeout=float(per_feed_timeout), limit=max(0, int(max_new_items_per_feed)),
+                    new, changed, cut_off = self._refresh_feed(
+                        conn, feed, timeout=float(per_feed_timeout),
+                        backfill_days=int(backfill_days), max_pages=int(max_pages_per_feed),
                     )
                     inserted += new
                     updated += changed
+                    incomplete += int(cut_off)
                 except Exception as exc:
                     conn.rollback()
                     rss_storage.record_rss_fetch_result(
@@ -286,6 +372,7 @@ class AppRssReader:
             "feeds": fetched,
             "inserted": inserted,
             "updated": updated,
+            "incomplete": incomplete,
             "errors": errors,
         }
 

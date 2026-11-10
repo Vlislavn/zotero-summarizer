@@ -24,6 +24,7 @@ def test_opt_in_promotes_eleventh_before_both_cutoffs_and_persists(journey):
     assert len(journey.generator.calls) == len(journey.verifier.calls) == 12
     assert journey.acquired.count("P11") == 1
     row = result.candidates[0].question_evidence[0]
+    assert 'source_uri' not in row
     text = "P11: original text\n" + QUOTE
     assert row["state"] == "sufficient" and row["complete"] is False
     assert row["source_sha256"] == hashlib.sha256(text.encode()).hexdigest()

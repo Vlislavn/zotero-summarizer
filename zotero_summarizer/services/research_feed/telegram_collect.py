@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from zotero_summarizer.models.research_feed import (
     ResolvedTelegramChannel, TelegramTransportError, normalize_telegram_username,
 )
+from zotero_summarizer.services.research_feed import telegram_progress as progress
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.storage import migrations, repositories
 from zotero_summarizer.storage import research_feed_telegram as store
@@ -75,11 +76,16 @@ def _record_error(conn, error: TelegramTransportError, channel: dict, account: d
 
 async def collect_pages(
     settings: Settings, usernames: list[str], client, *, now: Callable[[], datetime],
+    reply_client=None, scorer=None, goals: list[str] | None = None, model=None,
+    summary_top: int = 8, tau: float | None = None,
+    probe=None,
 ) -> dict:
     """Explicit caller owns content permission, serialization and client lifecycle.
 
-    Uses short BEGIN IMMEDIATE transactions with rollback on error, never across
-    awaits. not_deferred is only absence of an observed future durable deadline.
+    The single incremental-post pipeline. When ``reply_client``, ``scorer`` and
+    ``goals`` are supplied the committed window is additionally deduped, gated,
+    enriched with gated-post comments and summarised (fork A). Uses short BEGIN
+    IMMEDIATE transactions with rollback on error, never across awaits.
     """
     channels = _channel_receipts(usernames)
     result = {"channels": channels, "account": {"status": "not_checked", "retry_at": None},
@@ -90,7 +96,8 @@ async def collect_pages(
     migrations.run_migrations(settings.triage_db_path, "triage", migrations.TRIAGE_MIGRATIONS)
     with closing(repositories._connect_to(settings.triage_db_path)) as conn:
         attempted = set()
-        for channel in channels:
+        for index, channel in enumerate(channels):
+            progress.report("channels", index, len(channels))
             if not _admit_request(conn, now, result["account"]):
                 break
             try:
@@ -142,7 +149,28 @@ async def collect_pages(
             channel.update(status="committed", counts=counts)
             for name, count in counts.items():
                 result["counts"][name] += count
+        if reply_client is not None and scorer is not None and goals:
+            from zotero_summarizer.services.llm import jev_engine
+            from zotero_summarizer.services.research_feed import telegram_digest
+            from zotero_summarizer.services.research_feed.telegram_relevance import DEFAULT_TAU
+
+            await telegram_digest.run(conn, result, telegram_digest.DigestRequest(
+                reply_client=reply_client, scorer=scorer, goals=goals, model=model, now=now,
+                summary_top=summary_top,
+                tau=DEFAULT_TAU if tau is None else tau, limits=settings_limits(settings),
+                probe=probe, nli_dir=settings.nli_model_dir, noul=jev_engine.noul_for(settings)))
     return result
+
+
+def settings_limits(settings: Settings):
+    """Resolve the owner's Telegram work caps for the digest stage."""
+    from zotero_summarizer.services.research_feed import profile as profiles
+
+    try:
+        return profiles.load_profile(settings.data_dir, persist_default=False).telegram_limits
+    except Exception:
+        from zotero_summarizer.models.research_feed import TelegramLimits
+        return TelegramLimits()
 
 
 __all__ = ["collect_pages"]

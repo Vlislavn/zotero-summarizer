@@ -109,6 +109,12 @@ def _runtime_model(settings: Settings) -> dict[str, Any]:
         try:
             served[item.provider.name] = list_models_for_provider(item.provider)
         except Exception as exc:  # noqa: BLE001 — inventory failures retain the failing route
+            if isinstance(exc, APIError) and exc.error in {'provider_approval_required', 'connection_conflict', 'configuration_busy'}:
+                row = _row('runtime_model', 'needs_action', 'Server approval required before checking models',
+                           exc.message, action='Approve server in AI connection settings')
+                row['reason_code'] = exc.error
+                row['recovery']['action'] = 'open_ai_settings'
+                return row
             row = _row(
                 "runtime_model", "needs_action",
                 "Ollama is not running" if ollama else f"Endpoint for {item.provider.name} is unavailable",
@@ -196,7 +202,7 @@ def _rss_source(settings: Settings) -> dict[str, Any]:
         if count
         else "No RSS source is enabled",
         "Today needs at least one source.",
-        action="Add a source in Settings",
+        action="Add an RSS source",
     )
     row["recovery"]["action"] = "open_sources_settings"
     return row
@@ -230,16 +236,31 @@ def _invalidate_doctor_unlocked(settings: Settings) -> None:
     _save(settings, {"status": "not_started", "ready": False, "config_signature": ""})
 
 
-def store_credential_and_invalidate(settings: Settings, name: str, key: str) -> dict[str, Any]:
-    """A credential cannot change between Doctor's final check and Ready reply."""
+def store_credential_and_invalidate(settings: Settings, name: str, key: str, *, expected_revision: str | None = None, impact_approved: bool = False) -> dict[str, Any]:
+    """Serialize app auth edits; an already-started Telegram snapshot keeps its key."""
     from zotero_summarizer.services.llm.credentials import store_api_key
+    from zotero_summarizer.services.llm import connection_state
+    from zotero_summarizer.services.llm.connection_credentials import credential_impact
+    from zotero_summarizer.services.research_feed.telegram_workflow import _exclusive
 
-    with _LOCK:
-        _invalidate_doctor_unlocked(settings)
-        try:
-            return store_api_key(name, key)
-        finally:
-            state().invalidate_stage_clients()
+    if not _LOCK.acquire(blocking=False):
+        raise APIError('doctor_running', 'Verification is active. No credential was stored; wait for it to return before a new authorization review.', status_code=409)
+    try:
+        with _exclusive(settings), connection_state.editing(settings):
+            if expected_revision is not None:
+                connection_state.require_revision(expected_revision)
+            if not impact_approved:
+                effects = credential_impact(name, settings)
+                if len(effects['providers']) > 1 or 'telegram' in effects['consumers']:
+                    raise APIError('credential_impact_required', 'Use the connection authorization task to review shared consumers.', status_code=409)
+            _invalidate_doctor_unlocked(settings)
+            try:
+                result = store_api_key(name, key)
+                return {**result, '_revision': connection_state.revision()} if expected_revision is not None else result
+            finally:
+                state().invalidate_stage_clients()
+    finally:
+        _LOCK.release()
 
 
 def _config_signature(settings: Settings) -> str:
@@ -247,6 +268,7 @@ def _config_signature(settings: Settings) -> str:
     import hashlib
     import yaml
     from zotero_summarizer.services.llm.credentials import get_api_key
+    from zotero_summarizer.services.llm.connection_approval import is_approved
 
     digest = hashlib.sha256(OWNERSHIP_REVISION.encode())
     digest.update(policy_configuration_signature(settings).encode())
@@ -254,7 +276,7 @@ def _config_signature(settings: Settings) -> str:
         try:
             config = read_config(settings.config_path, settings.calibration_path)
             for provider in config.llm_routing.providers:
-                if not provider.is_local:
+                if not provider.is_local and provider.auth_mode != 'none' and is_approved(provider):
                     digest.update(repr((provider.name, get_api_key(provider.api_key_env))).encode())
         except (ValueError, yaml.YAMLError):
             digest.update(b"invalid-credential-configuration")
@@ -371,6 +393,7 @@ def _modes(settings: Settings, rows: list[dict[str, Any]]) -> dict[str, str]:
 
 def _redact_details(settings: Settings, rows: list[dict[str, Any]]) -> None:
     from zotero_summarizer.services.llm.credentials import get_api_key
+    from zotero_summarizer.services.llm.connection_approval import is_approved
 
     try:
         providers = read_config(
@@ -379,7 +402,7 @@ def _redact_details(settings: Settings, rows: list[dict[str, Any]]) -> None:
         secrets = [
             resolved[0]
             for provider in providers
-            if (resolved := get_api_key(provider.api_key_env))
+            if provider.auth_mode != 'none' and is_approved(provider) and (resolved := get_api_key(provider.api_key_env))
         ]
     except Exception:  # noqa: BLE001 — withhold diagnostics rather than risk leaking a secret
         rows[:] = [_row(row["id"], "needs_action", "Credential redaction failed; review AI settings") for row in rows]

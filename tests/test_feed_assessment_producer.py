@@ -13,6 +13,7 @@ from tests.test_digest_verification import PAPER, _Verifier, _digest
 from tests.test_review_source_boundary import _Mapper
 from zotero_summarizer.integrations.llm import build_response_format
 from zotero_summarizer.models import PaperDigest, ResearchProfile
+from zotero_summarizer.models.digest_generation import PaperDigestGeneration, FeedDigestGeneration
 from zotero_summarizer.models.research_feed import FeedDigestResponse
 from zotero_summarizer.services.library import _feed_assessment, _map_reduce, deep_review, quality_review
 from zotero_summarizer.services.library._prompt_security import untrusted_input
@@ -101,12 +102,12 @@ def test_selected_schema_same_call_source_and_actual_generation_provenance(tmp_p
     assert selected == payload and selected["status"] == "assessed"
     assert generator.pydantic_prompt.call_count == mapper.calls == 1
     call = generator.pydantic_prompt.call_args.kwargs
-    assert call["pydantic_model"] is FeedDigestResponse
-    assert call["response_format"] == build_response_format(FeedDigestResponse)
+    assert call["pydantic_model"] is FeedDigestGeneration
+    assert call["response_format"] == build_response_format(FeedDigestGeneration)
     assert untrusted_input(context.model_dump_json()) in call["prompt"]
     assert payload["prompt_sha256"] == hashlib.sha256(call["prompt"].encode()).hexdigest()
     assert payload["contract"] == _feed_assessment.contract()
-    assert payload["contract"]["schema"] == _feed_assessment.fingerprint(FeedDigestResponse.model_json_schema())
+    assert payload["contract"]["schema"] == _feed_assessment.fingerprint(FeedDigestGeneration.model_json_schema())
     assert payload["context"] == context.model_dump(mode="json")
     assert payload["review_identity"] == entry["review_identity"]
     assert payload["digest_sha256"] == _feed_assessment.fingerprint(entry["digest"])
@@ -268,21 +269,22 @@ def test_failure_clears_collector_without_publishing_first_attempt(failure):
     assert out == {}
 
 
-def test_parse_retry_and_base_correction_use_final_same_call_assessment_only():
+def test_parse_retry_and_base_repair_keep_the_same_call_assessment_only():
     first, corrected = reply(assessment()), reply(assessment())
     first["tldr"] = "Unsupported 99999%."
-    corrected["feed_assessment"]["projects"][0]["proposed_change"] = "Final accepted change"
+    corrected["feed_assessment"]["projects"][0]["proposed_change"] = "Ignored: repair returns digest fields only"
     generator, verifier, out = Mock(), _Verifier(), {}
     generator.pydantic_prompt.side_effect = ["", first, corrected]
     quality_review.assess_digest(title="Paper", full_text=PAPER, config=_default_goals_config(),
         llm=generator, verifier_llm=verifier, feed_context=_feed_assessment.context_for("paper", profile()),
         feed_out=out, response_format=build_response_format(PaperDigest))
-    assert out["content"]["projects"][0]["proposed_change"] == "Final accepted change"
-    assert len(generator.pydantic_prompt.call_args_list) == 3 and verifier.calls == 1
-    for call in generator.pydantic_prompt.call_args_list:
-        assert call.kwargs["pydantic_model"] is FeedDigestResponse
-        assert call.kwargs["response_format"] == build_response_format(FeedDigestResponse)
-    assert out["prompt_sha256"] == hashlib.sha256(generator.pydantic_prompt.call_args.kwargs["prompt"].encode()).hexdigest()
+    assert out["content"]["projects"][0]["proposed_change"] == first["feed_assessment"]["projects"][0]["proposed_change"]
+    assert len(generator.pydantic_prompt.call_args_list) == 3 and verifier.calls == 2  # #191: the first repair attempt runs on the verifier-class client
+    for call in generator.pydantic_prompt.call_args_list[:2]:
+        assert call.kwargs["pydantic_model"] is FeedDigestGeneration
+        assert call.kwargs["response_format"] == build_response_format(FeedDigestGeneration)
+    assert generator.pydantic_prompt.call_args.kwargs["pydantic_model"].__name__ == "DigestFieldRepair"
+    assert out["prompt_sha256"] == hashlib.sha256(generator.pydantic_prompt.call_args_list[1].kwargs["prompt"].encode()).hexdigest()
 
 
 @pytest.mark.parametrize("field", ["read_decision", "read_why", "writing_friction", "read_parts", "original_value"])
@@ -305,7 +307,7 @@ def test_map_verifier_fallback_keeps_original_and_one_feed_generation():
     verifier = _Verifier()
 
     def answer(*, prompt, pydantic_model, **kwargs):
-        if pydantic_model is FeedDigestResponse:
+        if pydantic_model is FeedDigestGeneration:
             return reply(assessment())
         assert pydantic_model is _Checks
         assert untrusted_input(PAPER) in prompt and "Generated notes only." not in prompt
@@ -316,7 +318,7 @@ def test_map_verifier_fallback_keeps_original_and_one_feed_generation():
         reduce_llm=generator, feed_context=_feed_assessment.context_for("paper", profile()), feed_out=out)
     assert out["status"] == "assessed"
     assert mapper.pydantic_prompt.call_count == 2 and verifier.calls == 1
-    assert sum(call.kwargs["pydantic_model"] is FeedDigestResponse for call in generator.pydantic_prompt.call_args_list) == 1
+    assert sum(call.kwargs["pydantic_model"] is FeedDigestGeneration for call in generator.pydantic_prompt.call_args_list) == 1
 
 
 def test_none_preserves_default_exact_call_schema_prompt_and_no_optional_io(monkeypatch):
@@ -336,6 +338,6 @@ def test_none_preserves_default_exact_call_schema_prompt_and_no_optional_io(monk
     monkeypatch.setattr(Path, "open", no_io)
     result = quality_review.assess_digest(title="Paper", full_text=PAPER, config=config, llm=generator,
                                          verifier_llm=verifier, feed_context=None, feed_out=None)
-    assert generator.pydantic_prompt.call_args.kwargs == {"prompt": expected, "pydantic_model": PaperDigest}
+    assert generator.pydantic_prompt.call_args.kwargs == {"prompt": expected, "pydantic_model": PaperDigestGeneration}
     assert result.model_dump() == _digest().model_dump() and generator.pydantic_prompt.call_count == verifier.calls == 1
     no_io.assert_not_called()

@@ -49,13 +49,18 @@ _TOKEN_RE = re.compile(r"[a-z0-9]+")
 # false rejections without loosening either strictness level: the same
 # normalization applies to quote and context, so hallucinated content still fails.
 _HYPHEN_SPLIT_RE = re.compile(r"(\w)-\s+(?=[a-z])")
+# A passage may begin INSIDE a hyphen-broken word ("- nesses under the same model"
+# cut from "weak-\nnesses"): the context joins the pair, the fragment cannot, so a
+# verbatim-in-source passage failed grounding and the whole review was lost (#149).
+# Drop the orphan hyphen; the remaining span must still match verbatim.
+_LEADING_HYPHEN_RE = re.compile(r"^-\s+(?=[a-z])")
 # PDF extraction emits typographic punctuation (LLM’s, “quoted”); model quotes of
 # the same span use ASCII. Fold before matching — symmetric on both sides.
 _PUNCT_FOLD = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"'})
 
 
 def _dehyphenate(text: str) -> str:
-    return _HYPHEN_SPLIT_RE.sub(r"\1", text)
+    return _HYPHEN_SPLIT_RE.sub(r"\1", _LEADING_HYPHEN_RE.sub("", text))
 
 
 def _match_normalize(text: str) -> str:

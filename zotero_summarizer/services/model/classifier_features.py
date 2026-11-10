@@ -110,6 +110,10 @@ def _populate_work_context(
     """Fill ``ctx`` from an OpenAlex Work (early-returns keep the nesting shallow)."""
     max_author_h = getattr(work, "max_author_h_index", None)
     ctx["max_author_h_index"] = float(max_author_h) if max_author_h is not None else None
+    # The LAST author's own h (0 is a real value; None = unknown), never the max.
+    last = getattr(work, "last_author", None) or {}
+    last_h = last.get("h_index")
+    ctx["last_author_h_index"] = float(last_h) if last_h is not None else None
     ctx["venue_works_count"] = float(getattr(work, "venue_works_count", 0) or 0)
     ctx["cited_by_count"] = float(getattr(work, "cited_by_count", 0) or 0)
     pct = getattr(work, "citation_percentile", None)
@@ -145,6 +149,7 @@ def _compute_aux_with_context(
     The third element is an ``aux_context`` dict consumed by the review UI:
 
       ``max_author_h_index`` — highest h-index across all authors (int)
+      ``last_author_h_index`` — the LAST author's own h-index (None = unknown)
       ``venue_works_count``  — host journal/conference output count (int)
       ``cited_by_count``     — citations of THIS work to date (int)
       ``max_author_field_percentile`` — authors' field-normalized standing [0,1]
@@ -165,6 +170,7 @@ def _compute_aux_with_context(
     prestige = float(prestige_neutral)
     ctx: dict[str, float | None] = {
         "max_author_h_index": None,
+        "last_author_h_index": None,
         "venue_works_count": 0.0,
         "cited_by_count": 0.0,
         # Field-normalized citation percentile [0,1] (None = unknown / cold-start).

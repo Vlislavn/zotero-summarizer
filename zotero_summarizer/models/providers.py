@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_valid
 
 __all__ = [
     "STAGES",
+    "ROUTABLE_STAGES",
     "DefaultModelConfig",
     "LLMRoutingConfig",
     "LLMCapability",
@@ -24,7 +25,11 @@ __all__ = [
     "resolve_stage",
 ]
 
+# User-routable stages shown in Settings / connection / setup surfaces.
 STAGES = ("feed", "backlog", "deep_review")
+# Every resolvable stage, including the operational ``card`` stage (Todo #92),
+# which is deliberately NOT a user-facing connection/admission stage.
+ROUTABLE_STAGES = STAGES + ("card",)
 
 class ProviderType(str, Enum):
     openai = "openai"  # OpenAI-compatible chat (reuses build_llm / OnPrem)
@@ -45,6 +50,7 @@ class ProviderConfig(BaseModel):
     api_key_env: str = Field(
         ..., min_length=1
     )  # env var NAME (never the secret itself)
+    auth_mode: Literal['legacy', 'none'] = 'legacy'
     extra_body: dict[str, Any] | None = None
     max_tokens: int = Field(default=4096, ge=1)
     temperature: float = Field(default=0.0, ge=0, le=2)
@@ -61,6 +67,8 @@ class ProviderConfig(BaseModel):
         payload = handler(self)
         if self.capabilities is None:
             payload.pop("capabilities", None)
+        if self.auth_mode == 'legacy':
+            payload.pop('auth_mode', None)  # retain legacy serialized identities
         return payload
 
     @property
@@ -136,6 +144,9 @@ class LLMRoutingConfig(BaseModel):
     feed: StageModelConfig = Field(default_factory=StageModelConfig)
     backlog: StageModelConfig = Field(default_factory=StageModelConfig)
     deep_review: StageModelConfig = Field(default_factory=StageModelConfig)
+    # Operational Today-card stage (Todo #92). Not part of the deep-review
+    # identity allowlist (#88): a card-model change must never stale a review.
+    card: StageModelConfig = Field(default_factory=StageModelConfig)
 
     @model_validator(mode="after")
     def _validate_refs(self) -> LLMRoutingConfig:
@@ -147,7 +158,7 @@ class LLMRoutingConfig(BaseModel):
             raise ValueError(
                 f"default.provider {self.default.provider!r} is not in the providers registry"
             )
-        for stage in STAGES:
+        for stage in ROUTABLE_STAGES:
             sm: StageModelConfig = getattr(self, stage)
             if sm.provider is not None and sm.provider not in known:
                 raise ValueError(
@@ -178,10 +189,10 @@ class ResolvedStage(BaseModel):
 
 
 def resolve_stage(routing: LLMRoutingConfig, stage: str) -> ResolvedStage:
-    """Resolve ``stage`` (one of :data:`STAGES`) to its effective provider+model,
-    inheriting any unset field from ``routing.default``."""
-    if stage not in STAGES:
-        raise ValueError(f"unknown stage {stage!r}; expected one of {STAGES}")
+    """Resolve ``stage`` (one of :data:`ROUTABLE_STAGES`) to its effective
+    provider+model, inheriting any unset field from ``routing.default``."""
+    if stage not in ROUTABLE_STAGES:
+        raise ValueError(f"unknown stage {stage!r}; expected one of {ROUTABLE_STAGES}")
     selection: StageModelConfig = getattr(routing, stage)
     provider_name = selection.provider or routing.default.provider
     model = selection.model or routing.default.model

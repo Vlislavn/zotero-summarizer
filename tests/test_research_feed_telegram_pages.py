@@ -98,7 +98,7 @@ def test_existing_model_exports_unchanged_and_new_contracts_direct_only():
         "TOPIC_TAXONOMY", "ResearchCandidate", "ResearchEngineeringCard",
         "ResearchFeedTriage", "ResearchIdea", "ResearchProfile",
         "FeedReviewContext", "FeedProjectAssessment", "FeedReproduction", "FeedImpact",
-        "FeedAssessment", "FeedDigestResponse", "parse_run_budgets", "TelegramPost", "TelegramNewsVerdict",
+        "FeedAssessment", "FeedDigestResponse", "parse_run_budgets", "TelegramPost",
     ]
     assert all(getattr(models, name) is getattr(research_feed, name) for name in research_feed.__all__)
     for name in ("TelegramPage", "LiveTelegramChannelId", "validate_live_telegram_channel_id",
@@ -121,7 +121,7 @@ def test_v11_upgrade_preserves_original_evaluation_and_legacy_cursor(tmp_path):
     assert migrations.run_migrations(path, "triage", migrations.TRIAGE_MIGRATIONS) == migrations.SCHEMA_VERSION
     assert migrations.run_migrations(path, "triage", migrations.TRIAGE_MIGRATIONS) == migrations.SCHEMA_VERSION
     with closing(repositories._connect_to(path)) as conn:
-        assert tuple(conn.execute("SELECT * FROM research_feed_telegram_posts").fetchone()) == original
+        assert tuple(conn.execute("SELECT * FROM research_feed_telegram_posts").fetchone())[:-1] == original  # v16 appends NULL reasons_json
         assert tuple(conn.execute("SELECT * FROM research_feed_telegram_channels").fetchone()) == (A, 7, 0)
         assert telegram.read_channel_state(conn, username="Example") is None
         with pytest.raises(ValueError, match="state"):
@@ -129,14 +129,14 @@ def test_v11_upgrade_preserves_original_evaluation_and_legacy_cursor(tmp_path):
         assert conn.execute("SELECT count(*) FROM research_feed_telegram_bindings").fetchone()[0] == 0
     corpus = tmp_path / "corpus.db"
     # Only the new no-op alignment step: no EmbeddingCache/weights or invented corpus schema.
-    assert [m.name for m in migrations.CORPUS_MIGRATIONS[-2:]] == ["combined_live_telegram_review_alignment", "telegram_conversation_snapshots_alignment"]
-    assert [m.name for m in migrations.TRIAGE_MIGRATIONS[-2:]] == ["combined_live_telegram_review", "telegram_conversation_snapshots"]
+    assert [m.name for m in migrations.CORPUS_MIGRATIONS[12:14]] == ["combined_live_telegram_review_alignment", "telegram_conversation_snapshots_alignment"]
+    assert [m.name for m in migrations.TRIAGE_MIGRATIONS[12:14]] == ["combined_live_telegram_review", "telegram_conversation_snapshots"]
     assert migrations.run_migrations(corpus, "corpus", migrations.CORPUS_MIGRATIONS[-1:]) == migrations.SCHEMA_VERSION
     assert migrations.run_migrations(corpus, "corpus", migrations.CORPUS_MIGRATIONS[-1:]) == migrations.SCHEMA_VERSION
     with closing(repositories._connect_to(corpus)) as conn:
         assert [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")] == [
             "schema_migrations"]
-    assert migrations.SCHEMA_VERSION == 14
+    assert migrations.SCHEMA_VERSION == 18
 
 
 def test_saved_upsert_stays_uninitialized_unbound_and_nonpaper(store):

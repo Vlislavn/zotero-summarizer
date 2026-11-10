@@ -143,7 +143,7 @@ def _computed_review(key, entry, *, source_text=None, source_path=None, config=N
 
     class FixtureClient(_Verifier):
         def pydantic_prompt(self, *, pydantic_model, **kwargs):
-            if pydantic_model is PaperDigest:
+            if issubclass(pydantic_model, PaperDigest):
                 return digest.model_copy(deep=True)
             return super().pydantic_prompt(pydantic_model=pydantic_model, **kwargs)
 

@@ -126,8 +126,8 @@ def test_today_library_questions_offline_restart_and_real_sync(question_browser)
     expect(_notes_editor(page)).to_have_value(draft)
     expect(page.get_by_role("alert").filter(has_text="Ask failed")).to_be_visible()
     original = _questions(lab)
-    page.get_by_role("button", name="Retry answer", exact=True).click()
-    expect(page.get_by_role("button", name="Retry answer", exact=True)).to_be_enabled()
+    page.get_by_role("button", name="Retry", exact=True).click()
+    expect(page.get_by_role("button", name="Retry", exact=True)).to_be_enabled()
     assert _questions(lab) == original
     retry_bodies = [row["body"] for row in lab.server.receipts if row["path"] == "/api/library/ask"]
     assert len(retry_bodies) == 2 and retry_bodies[0] == retry_bodies[1]
@@ -308,15 +308,15 @@ def test_acknowledged_retry_preserves_the_composite_delivery_receipt(question_br
     assert first["note_error"] is None and first["target_key"] == LIBRARY_KEY
     caption = f'Zotero note delivery: acknowledged (revision {first["projection_revision"]}).'
     expect(page.get_by_text(caption, exact=True)).to_be_visible()
-    expect(page.get_by_role("button", name="Retry answer", exact=True)).to_be_enabled()
+    expect(page.get_by_role("button", name="Retry", exact=True)).to_be_enabled()
     original = _questions(lab)
     native_note = _assert_native_projection(lab, 1)
     with page.expect_response(lambda response: response.url.endswith("/api/library/questions")) as retried:
-        page.get_by_role("button", name="Retry answer", exact=True).click()
+        page.get_by_role("button", name="Retry", exact=True).click()
     second = retried.value.json()["question_mirror"]
     assert second == {**first, "note_written": False}
     expect(page.get_by_text(caption, exact=True)).to_be_visible()
-    expect(page.get_by_role("button", name="Retry answer", exact=True)).to_be_enabled()
+    expect(page.get_by_role("button", name="Retry", exact=True)).to_be_enabled()
     assert _questions(lab) == original
     assert _assert_native_projection(lab, 1) == native_note
     assert _post_count(lab, "/api/library/ask") == 2
@@ -364,7 +364,7 @@ def test_sync_first_receipt_is_acknowledged_without_another_native_write(questio
     assert first == {**leader, "note_written": False}
     caption = f'Zotero note delivery: acknowledged (revision {first["projection_revision"]}).'
     expect(page.get_by_text(caption, exact=True)).to_be_visible()
-    expect(page.get_by_role("button", name="Retry answer", exact=True)).to_be_enabled()
+    expect(page.get_by_role("button", name="Retry", exact=True)).to_be_enabled()
     assert ordering["leader_status"] == 200 and ordering["follower_released"] is True
     assert sorted(ordering["held"]) == ["direct", "sync"]
     assert _post_count(lab, "/api/library/ask") == 1
@@ -418,4 +418,39 @@ def test_local_storage_rejection_and_invalid_input_never_start_http(question_bro
     expect(_saved_questions(page).get_by_text(PAGE_COUNT_QUESTION, exact=True)).to_be_visible()
     assert len(_questions(lab)) == 1
     lab.checkpoint("invalid-and-device-write-error", page)
+    print("QUESTION_BROWSER_ARTIFACT", lab.artifact)
+
+
+def test_library_without_pdf_preserves_a_question_after_unavailable_answer_and_reload(question_browser):
+    from patchright.sync_api import expect
+
+    lab = question_browser
+    native = lab.settings.zotero_data_dir / "zotero.sqlite"
+    assert native.resolve().is_relative_to(lab.artifact.resolve())
+    with sqlite3.connect(native) as conn:
+        conn.execute("INSERT INTO deletedItems(itemID) SELECT itemID FROM items WHERE key='ATTACH01'")
+    page = lab.open_browser()
+    page.goto(lab.server.origin + "/library")
+    detail = _http(page, "/api/golden/review-detail?item_key=" + LIBRARY_KEY)
+    assert detail["status"] == 200 and detail["body"]["has_pdf"] is False
+    page.get_by_role("button").filter(has_text="Synthetic library paper").first.click()
+    page.get_by_text("Ask the paper", exact=True).click()
+    expect(page.get_by_role("textbox", name="Question about this paper")).to_be_visible()
+    expect(page.get_by_role("combobox", name="Answer mode")).to_have_count(0)
+    question = "Is there external validation without an attached PDF?"
+    with page.expect_response(lambda response: response.url.endswith("/api/library/ask")) as answered:
+        _submit(page, question)
+    assert answered.value.status == 404
+    failure = answered.value.json()
+    assert failure["error"] == "needs_pdf" and failure["details"]["question_saved"] is True
+    expect(_saved_questions(page).get_by_text(question, exact=True)).to_be_visible()
+    original = _questions(lab)
+    assert len(original) == 1 and original[0]["question"] == question
+    assert failure["details"]["question_submission"]["submission_id"] == original[0]["submission_id"]
+    lab.checkpoint("library-no-pdf-answer-unavailable", page)
+    page.reload()
+    page.get_by_role("button").filter(has_text="Synthetic library paper").first.click()
+    expect(_saved_questions(page).get_by_text(question, exact=True)).to_be_visible()
+    assert _questions(lab) == original
+    lab.checkpoint("library-no-pdf-reload", page)
     print("QUESTION_BROWSER_ARTIFACT", lab.artifact)

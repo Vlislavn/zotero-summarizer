@@ -10,6 +10,7 @@ from zotero_summarizer.services.llm import operational_check
 from zotero_summarizer.services.setup import doctor
 from zotero_summarizer.services.setup.bootstrap import bootstrap_phase0
 from zotero_summarizer.settings import Settings
+from tests.test_connection_task import connection_home, register
 
 
 _LOCAL_HOSTS = ["localhost", "127.0.0.1", "127.0.0.2", "127.1.2.3", "127.255.255.254",
@@ -43,7 +44,7 @@ def test_hosted_probe_rejects_an_empty_real_response(monkeypatch):
     result = operational_check.probe_provider(provider, "public-model")
 
     assert result["status"] == "fail"
-    assert result["reason_code"] == "inference_failed"
+    assert result["reason_code"] == "inference_empty_response"
     assert result["request_completion"]["expected"] == 0
 
 
@@ -382,14 +383,17 @@ def test_verification_factory_refuses_local_before_credentials_or_adapter(monkey
 @pytest.mark.parametrize("host", ["192.0.2.2", "10.0.0.2", "[2001:db8::2]", "[::ffff:192.0.2.2]", "example.test",
                                  "localhost.example.test", "notlocalhost.test"])
 @pytest.mark.parametrize("kind", ["openai", "anthropic"])
-def test_remote_verification_retains_credential_and_adapter_path(monkeypatch, kind, host):
+def test_remote_verification_retains_credential_and_adapter_path(connection_home, monkeypatch, kind, host):
     from dataclasses import replace
     from tests._setup_request_events import observed_client
     from zotero_summarizer.integrations import llm_anthropic
     from zotero_summarizer.services._common import settings
     from zotero_summarizer.services.llm import factory
 
-    provider = ProviderConfig(name="remote", type=kind, base_url=f"https://{host}:8080/v1", api_key_env="PUBLIC_KEY")
+    from zotero_summarizer.services.llm import connections
+    registered = register(connections, type=kind, base_url=f'https://{host}:8080/v1',
+                          auth='existing', authorization='old')
+    provider = ProviderConfig.model_validate(registered['provider'])
     calls = []
 
     def credentials(_provider):

@@ -99,14 +99,12 @@ def _nodes(markup, **attrs):
             if all(node.attrs.get(key) == value for key, value in attrs.items())]
 
 
-def test_unknown_goal_skip_is_withheld_without_stale_action_details():
+def test_unknown_goal_board_does_not_withhold_a_skip():
     digest = {**deepcopy(DIGEST), "read_decision": "skip", "estimated_read_minutes": 0}
     original = deepcopy(digest)
     html = renderer._render_presentation(CONTENT, digest, goal_summaries=[])
-    assert _nodes(html, **{"class": "v-word"})[0].text() == "REVIEW"
-    assert _nodes(html, **{"aria-label": "Reading plan"}) == []
-    for text in [DIGEST["read_why"], *DIGEST["read_parts"], *DIGEST["skip_parts"], DIGEST["original_value"], "0 MIN"]:
-        assert text not in html
+    assert _nodes(html, **{"class": "v-word"})[0].text() == "DIGEST IS ENOUGH · 0 MIN"
+    assert DIGEST["read_why"] in html
     assert digest == original
 
 

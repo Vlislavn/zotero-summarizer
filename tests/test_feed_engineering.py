@@ -17,7 +17,8 @@ from tests.test_research_feed import _review, _seed, _settings
 from tests.test_research_feed_boundaries import START, END
 from zotero_summarizer import cli
 from zotero_summarizer.models import ResearchCandidate, ResearchProfile, SummarizeResponse
-from zotero_summarizer.models.research_feed import FeedDigestResponse, FeedProjectAssessment
+from zotero_summarizer.models.research_feed import FeedProjectAssessment
+from zotero_summarizer.models.digest_generation import FeedDigestGeneration
 from zotero_summarizer.services.library import _feed_assessment as feed, deep_review
 from zotero_summarizer.services.research_feed import runner
 from zotero_summarizer.services.research_feed.cursor import CandidateCursor
@@ -63,7 +64,7 @@ def test_same_review_call_generates_original_bound_project_proposal(tmp_path, mo
     entry, generator, verifier = _generated_entry(tmp_path, monkeypatch, "paper", profile, strategy=strategy)
     assessment = feed.qualify(entry, feed.context_for("paper", profile))
 
-    assert len(generator.calls) == 1 and generator.models == [FeedDigestResponse]
+    assert len(generator.calls) == 1 and generator.models == [FeedDigestGeneration]
     assert verifier.calls == 1
     assert assessment["status"] == "assessed"
     assert assessment["evidence"]["/projects/0"] == {"quote": PAPER, "start": 0, "end": len(PAPER)}

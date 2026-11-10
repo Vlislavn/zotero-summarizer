@@ -23,7 +23,7 @@ def _conflict(message: str) -> APIError:
 def _proposal(item_key: str, entry: dict, revision: str,
               target: ZoteroTargetIdentity) -> GeneratedNoteProposal:
     target = ZoteroTargetIdentity.model_validate(target, strict=True)
-    body = build_digest_note_html(PaperDigest.model_validate(entry["digest"]))
+    body = build_digest_note_html(PaperDigest.model_validate(entry["digest"]), entry=entry)
     return GeneratedNoteProposal(
         item_key=item_key, target=target, review_revision=revision,
         source_sha256=preview_hash(entry["review_identity"]),

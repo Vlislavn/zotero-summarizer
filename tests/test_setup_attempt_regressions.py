@@ -125,7 +125,8 @@ def test_effective_environment_credential_changes_invalidate_ready(tmp_path, mon
 
     settings = _settings(tmp_path)
     config = doctor.read_config(settings.config_path, settings.calibration_path)
-    config.llm_routing.providers[0].base_url = "https://example.test/v1"
+    from zotero_summarizer.services.llm.presets import _compile_preset
+    config.llm_routing.providers[0] = _compile_preset('openai')
     monkeypatch.setattr(doctor, "read_config", lambda *_a: config)
     name = config.llm_routing.providers[0].api_key_env
     monkeypatch.setenv(name, "original-fixture")
@@ -144,7 +145,8 @@ def test_keyring_replacement_and_credential_source_change_invalidate_ready(tmp_p
 
     settings = _settings(tmp_path)
     config = doctor.read_config(settings.config_path, settings.calibration_path)
-    config.llm_routing.providers[0].base_url = "https://example.test/v1"
+    from zotero_summarizer.services.llm.presets import _compile_preset
+    config.llm_routing.providers[0] = _compile_preset('openai')
     monkeypatch.setattr(doctor, "read_config", lambda *_a: config)
     name = config.llm_routing.providers[0].api_key_env
     monkeypatch.setenv(name, "environment-fixture")

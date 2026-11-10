@@ -20,8 +20,6 @@ def _date(value: str) -> datetime:
 
 
 def _run(args: argparse.Namespace) -> int:
-    if args.source == "telegram":
-        return _run_telegram(args)
     from zotero_summarizer.services import lifecycle
     from zotero_summarizer.services._common import settings as current_settings
     from zotero_summarizer.services.research_feed import run_weekly
@@ -38,31 +36,6 @@ def _run(args: argparse.Namespace) -> int:
         )
     print(json.dumps(result, indent=2))
     return 1 if result.get("failed", 0) else 0
-
-
-def _run_telegram(args: argparse.Namespace) -> int:
-    from zotero_summarizer.services._common import settings as current_settings
-    from zotero_summarizer.services.research_feed.telegram import run_saved
-
-    settings = current_settings()
-    live = None
-    inputs = Path(args.input_jsonl) if args.input_jsonl else None
-    if not args.cached_only and inputs is None:
-        from zotero_summarizer.cli._telegram import run_child
-
-        receipt = run_child(settings, "collect")
-        if args.collect_only:
-            print(json.dumps(receipt["export"], indent=2))
-            return 0
-        inputs = Path(receipt["export"]["inputs_path"])
-        live = receipt["result"]
-    result = run_saved(
-        settings, input_jsonl=inputs, collect_only=args.collect_only,
-        cached_only=args.cached_only, shortlist_budget=args.shortlist_budget,
-        card_budget=args.card_budget, live_collection=live,
-    )
-    print(json.dumps(result, indent=2))
-    return 0
 
 
 def _view(args: argparse.Namespace) -> int:
@@ -99,20 +72,8 @@ def _validate_research_feed_args(args: argparse.Namespace, parser: argparse.Argu
         return
     from zotero_summarizer.models.research_feed import parse_run_budgets
 
-    if args.source == "app_rss":
-        if args.start is None or args.end is None:
-            parser.error("RSS research-feed run requires --from and --to")
-        if args.input_jsonl or args.collect_only:
-            parser.error("--input-jsonl and --collect-only require --source telegram")
-    else:
-        if args.start is not None or args.end is not None or args.review_timeout is not None:
-            parser.error("--from, --to, and --review-timeout require --source app_rss")
-        if args.queue_zotero or args.venue:
-            parser.error("Telegram news does not support --queue-zotero or --venue")
-        if args.collect_only and args.cached_only:
-            parser.error("--collect-only and --cached-only are mutually exclusive")
-        if args.cached_only and args.input_jsonl:
-            parser.error("--cached-only cannot import new input")
+    if args.start is None or args.end is None:
+        parser.error("RSS research-feed run requires --from and --to")
     if args.review_timeout is None:
         args.review_timeout = DEFAULT_REVIEW_TIMEOUT_SECONDS
     try:
@@ -131,9 +92,6 @@ def register_research_feed(subparsers: argparse._SubParsersAction) -> None:
     run = actions.add_parser("run", help="Generate canonical JSON and Markdown")
     run.add_argument("--from", dest="start", type=_date)
     run.add_argument("--to", dest="end", type=_date)
-    run.add_argument("--source", choices=("app_rss", "telegram"), default="app_rss")
-    run.add_argument("--input-jsonl", help="Saved news originals; processing calls the default LLM")
-    run.add_argument("--collect-only", action="store_true", help="Import/export news without model work")
     run.add_argument("--venue", default="", help="Optional conference/feed-name filter")
     run.add_argument("--shortlist-budget", type=int, default=None)
     run.add_argument("--card-budget", type=int, default=None)
@@ -153,7 +111,7 @@ def register_research_feed(subparsers: argparse._SubParsersAction) -> None:
     auth.add_argument("--project-root", default=None)
     auth.set_defaults(func=_telegram_auth)
     child = actions.add_parser("_telegram-child", help=argparse.SUPPRESS)
-    child.add_argument("--purpose", choices=("auth", "collect", "conversations"), required=True)
+    child.add_argument("--purpose", choices=("auth", "digest"), required=True)
     child.add_argument("--receipt", required=True)
     child.add_argument("--project-root", required=True)
     child.set_defaults(func=_telegram_child)

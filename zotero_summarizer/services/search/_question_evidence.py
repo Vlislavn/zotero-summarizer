@@ -63,7 +63,8 @@ def _receipt(candidate: Any, sess: Any, index: int) -> dict:
 
 
 def _snapshot(candidate: Any, sess: Any, deps: Any, fulltext: dict) -> tuple[list[list[dict]], dict]:
-    text = acquire_full_text(candidate, extractor=deps.extractor, unpaywall=deps.unpaywall_client)
+    outcome = {}
+    text = acquire_full_text(candidate, extractor=deps.extractor, unpaywall=deps.unpaywall_client, outcome=outcome)
     if store.is_deleted(sess.id):
         raise ValueError("cancelled")
     if not text.strip():
@@ -82,7 +83,7 @@ def _snapshot(candidate: Any, sess: Any, deps: Any, fulltext: dict) -> tuple[lis
                     or not 0 <= row["start"] < row["end"] <= len(text)
                     or text[row["start"]:row["end"]] != row["text"]):
                 raise ValueError("invalid_original_locator")
-    return passages, {"source_version_id": sha, "source_sha256": sha,
+    return passages, {**outcome, "source_version_id": sha, "source_sha256": sha,
                       "checked_scope": {"start": 0, "end": len(text)}, "complete": False,
                       "retrieval_mode": "hybrid_occurrence_spans", "capabilities": capabilities}
 

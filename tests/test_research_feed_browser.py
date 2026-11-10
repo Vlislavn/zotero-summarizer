@@ -11,6 +11,7 @@ import sqlite3
 import pytest
 
 from tests.test_application_browser_live import application_browser  # noqa: F401 — shared fixture
+from tests.test_connection_browser import connection_build  # noqa: F401 — explicit disposable build
 from tests.test_research_feed import _review, _seed
 from zotero_summarizer.services.research_feed.runner import run_weekly
 from zotero_summarizer.storage.feed_identity import stable_feed_key_from_parts

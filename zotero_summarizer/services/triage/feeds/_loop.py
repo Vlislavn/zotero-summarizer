@@ -4,9 +4,11 @@ from __future__ import annotations
 import asyncio
 import signal
 import sys
+import time
 from typing import Any
 from datetime import datetime, timezone
 
+from zotero_summarizer.services.golden.feedback_analysis import weekly_switch
 from zotero_summarizer.settings import Settings
 
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
@@ -50,13 +52,15 @@ async def run_daemon_loop(
     loop = asyncio.get_running_loop()
     registered = []
     tick_count = 0
+    feedback_retry_at = 0.0  # monotonic; a failed weekly analysis is retried hourly, never every tick
     try:
         if sys.platform != "win32":
             for sig in (signal.SIGINT, signal.SIGTERM):
                 loop.add_signal_handler(sig, _on_signal)
                 registered.append(sig)
         while not stop_event.is_set():
-            if feedback_settings is not None and feedback_settings.feedback_schedule_enabled:
+            if (feedback_settings is not None and feedback_settings.feedback_schedule_enabled
+                    and weekly_switch.is_enabled(feedback_settings) and time.monotonic() >= feedback_retry_at):
                 from zotero_summarizer.services.golden.feedback_analysis.scheduler import run_due_feedback
                 try:
                     feedback = await run_due_feedback(feedback_settings, now=datetime.now(timezone.utc))
@@ -65,6 +69,10 @@ async def run_daemon_loop(
                         raise
                     _on_signal()
                     break
+                except Exception:  # the analysis is optional: it must never stop feed ingestion
+                    LOGGER.exception("weekly feedback analysis failed; retrying in 1h")
+                    feedback_retry_at = time.monotonic() + 3600
+                    feedback = {"status": "failure"}
                 LOGGER.info("weekly feedback: %s", feedback)
                 if stop_event.is_set():
                     break

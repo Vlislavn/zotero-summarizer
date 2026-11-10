@@ -111,9 +111,7 @@ def build_card(
         str(digest.get("methods") or ""), " ".join(digest.get("implementation") or []),
     ])
     topics = topic_tags(evidence_text, profile)
-    worth, flags = effective_read_decision(
-        digest, quality, goal_summaries=review.get("goal_summaries"),
-    )
+    worth, flags = effective_read_decision(digest, quality)
     tier, missing = _reproducibility(review, code_urls)
     fields = {"reproducibility_tier": tier, "missing_reproduction_inputs": missing,
               "reproducibility_rationale": "Reproduction effort has not been assessed." if not missing else "; ".join(missing),

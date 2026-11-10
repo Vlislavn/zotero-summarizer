@@ -138,8 +138,8 @@ def test_detail_off_exact_shape_getter_position_and_no_optional_import(tmp_path,
     key = FEED_KEY if kind == 'feed' else LIBRARY_KEY
     if stored_c:
         _review_cache._write_one(key, run_review(ScriptedClient()))
-    getter = Mock(wraps=deep_review.get_current_review)
-    monkeypatch.setattr(deep_review, 'get_current_review', getter)
+    getter = Mock(wraps=deep_review.get_usable_review)
+    monkeypatch.setattr(deep_review, 'get_usable_review', getter)
     original_import = builtins.__import__
     def guarded(name, globals=None, locals=None, fromlist=(), level=0):
         assert 'interpretation' not in name
@@ -155,7 +155,7 @@ def test_detail_off_exact_shape_getter_position_and_no_optional_import(tmp_path,
 @pytest.mark.parametrize('feed_key', [42, '42'])
 def test_legacy_nonstable_feed_does_not_import_or_lookup_view(tmp_path, detail_io, monkeypatch, feed_key):
     forbidden = Mock(side_effect=AssertionError('legacy nonstable keys do not resolve cached reviews'))
-    monkeypatch.setattr(deep_review, 'get_current_review', forbidden)
+    monkeypatch.setattr(deep_review, 'get_usable_review', forbidden)
     result = rd.build_feed_detail_by_key(tmp_path / 'owned-triage.db', tmp_path, feed_key)
     assert result['deep_review'] is None and set(result) == DETAIL_KEYS
     detail_io.legacy.assert_called_once()
@@ -168,7 +168,7 @@ def test_missing_detail_returns_before_optional_import_or_getter(tmp_path, detai
     detail_io.stable.return_value = None
     detail_io.reader.get_item_detail.return_value = None
     forbidden = Mock(side_effect=AssertionError('missing source detail cannot consult reviews'))
-    monkeypatch.setattr(deep_review, 'get_current_review', forbidden)
+    monkeypatch.setattr(deep_review, 'get_usable_review', forbidden)
     assert _call_detail(kind, detail_io, tmp_path) is None
     forbidden.assert_not_called()
 

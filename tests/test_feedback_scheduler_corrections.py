@@ -139,7 +139,7 @@ else:
     raise AssertionError("unsupported activation did not refuse")
 '''
     result = subprocess.run([sys.executable, "-c", code, str(tmp_path)], capture_output=True,
-                            text=True, env=os.environ.copy(), timeout=_TEST_CAP_SECONDS)
+                            text=True, env={**os.environ, "ZS_FEEDBACK_SCHEDULE_ENABLED": "false"}, timeout=_TEST_CAP_SECONDS)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "disabled-importable; activated-refusal"
 

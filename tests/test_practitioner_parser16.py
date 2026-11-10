@@ -144,7 +144,7 @@ def test_requested_feed_registration_empty_capture_ingestion_reopen(
     result = AppRssReader(db).refresh_feeds(max_feeds=2)
     reopened = AppRssReader(db)
 
-    assert result == {'feeds': 2, 'inserted': 0, 'updated': 0, 'errors': []}
+    assert result == {'feeds': 2, 'inserted': 0, 'updated': 0, 'errors': [], 'incomplete': 0}
     assert set(fetched) == set(FEEDS)
     assert {f['url'] for f in reopened.get_feed_groups()} == set(FEEDS)
     assert reopened.get_feed_items(limit=None) == []

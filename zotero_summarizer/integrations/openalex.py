@@ -6,8 +6,8 @@ moves you into the polite pool (faster, lower error rate). Rate limit is
 
 The client returns a normalized :class:`OpenAlexWork` with the fields needed
 for :mod:`zotero_summarizer.services.model.prestige`. Author h-index requires a
-follow-up call to ``/authors/{id}`` — we look up at most ``max_authors`` (default
-3) to keep latency bounded.
+follow-up call to ``/authors/{id}`` — we look up the first ``max_authors`` (default
+3) PLUS the last author, to keep latency bounded.
 
 All HTTP responses are cached via :class:`OpenAlexCache`. Network errors and
 4xx/5xx responses are swallowed (logged) so prestige never blocks triage.
@@ -52,7 +52,7 @@ class OpenAlexWork:
     # fwci = field-weighted citation impact (1.0 == field average).
     citation_percentile: float | None = None
     fwci: float | None = None
-    # Cold-start author-reputation prior: the MAX across the work's (≤max_authors)
+    # Cold-start author-reputation prior: the MAX across the work's visited
     # authors of each author's FIELD-NORMALIZED standing = median of that author's
     # works' citation_normalized_percentile, in [0,1]. None when the work already
     # has its own percentile (not cold-start, so not computed) or no author has any
@@ -63,6 +63,10 @@ class OpenAlexWork:
     # title but no abstract so the classifier gate can score them. None when the
     # work has no abstract index (some records omit it).
     abstract: str | None = None
+    # The LAST author's own record ``{"name", "h_index"}`` (h_index None = unknown:
+    # no OpenAlex id / profile unavailable; a real 0 stays 0). None = no authorships
+    # or a payload cached before this field existed.
+    last_author: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,7 +223,16 @@ class OpenAlexClient:
         h_indices: list[int] = []
         author_pcts: list[float] = []
         enrichment_incomplete = False
-        for auth in authorships[: self.max_authors]:
+        # First ``max_authors`` + ALWAYS the last author (senior/PI slot), however long
+        # the list is. ``author_hs`` keeps each visited author's OWN h (None = unknown).
+        visit = list(authorships[: self.max_authors])
+        if len(authorships) > self.max_authors:
+            visit.append(authorships[-1])
+        last_auth = authorships[-1] if authorships else None
+        last_author: dict[str, Any] | None = (
+            {"name": _author_name(last_auth), "h_index": None} if last_auth is not None else None
+        )
+        for auth in visit:
             author = (auth or {}).get("author") or {}
             author_id = author.get("id")
             if not author_id:
@@ -234,14 +247,16 @@ class OpenAlexClient:
                 profile = self._get(f"/authors/{short_id}")
                 h = None
                 if profile is not None:
-                    h = int(
-                        ((profile.get("summary_stats") or {}).get("h_index")) or 0
-                    )
-                    self.cache.set(cache_key, {"h_index": h})
+                    raw_h = (profile.get("summary_stats") or {}).get("h_index")
+                    h = int(raw_h) if raw_h is not None else None
+                    if h is not None:
+                        self.cache.set(cache_key, {"h_index": h})
                 else:
                     enrichment_incomplete = True
             if h is not None:
                 h_indices.append(h)
+            if auth is last_auth and last_author is not None:
+                last_author["h_index"] = h
             if want_author_pct:
                 ap = self._author_field_percentile(short_id)
                 if ap is not None:
@@ -254,6 +269,7 @@ class OpenAlexClient:
                     # caching and the next pass retries.
                     enrichment_incomplete = True
         work["__max_author_h_index"] = max(h_indices) if h_indices else None
+        work["__last_author"] = last_author
         # MAX across the work's authors (mirrors __max_author_h_index): a paper
         # inherits the standing of its STRONGEST author — the common junior-first-
         # author / senior-PI case is exactly what the cold-start prior should
@@ -335,6 +351,7 @@ class OpenAlexClient:
                 abstract=_abstract_from_inverted_index(
                     payload.get("abstract_inverted_index")
                 ),
+                last_author=payload.get("__last_author") or None,
             )
         except (ValueError, TypeError) as exc:
             LOGGER.debug("openalex: payload parse failed: %s", exc)
@@ -376,6 +393,11 @@ class OpenAlexClient:
             if outcome is not None:
                 outcome.update(status="failed", error_code="parse_error")
             return None
+
+def _author_name(authorship: Any) -> str:
+    a = (authorship or {}).get("author") or {}
+    return str(a.get("display_name") or (authorship or {}).get("raw_author_name") or "").strip()
+
 
 def _abstract_from_inverted_index(inv: dict[str, list[int]] | None) -> str | None:
     """Reconstruct plain abstract text from OpenAlex's ``abstract_inverted_index``.

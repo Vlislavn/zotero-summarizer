@@ -7,11 +7,11 @@ from zotero_summarizer.services.library._map_reduce import ChunkBudget
 
 TEXT = ("The sample retained alpha. The studied cohort was adults. The design was observational. "
         "External validation was not performed. Treatment recommendations were not established. ") * 20
-PAYLOAD = dict(tldr="The sample retained alpha", key_findings=["The sample retained alpha"],
+PAYLOAD = {**PaperDigest().model_dump(exclude={'basis'}), **dict(tldr="The sample retained alpha", key_findings=["The sample retained alpha"],
                methods="The design was observational", limitations="External validation was not performed",
                parameters={"external_validation": False}, read_decision="skip", read_why="", read_parts=[],
                skip_parts=[], estimated_read_minutes=None, original_value="", writing_friction="low",
-               writing_reasons=[])
+               writing_reasons=[])}
 CARD = dict(finding_index=0, finding=PAYLOAD['key_findings'][0], basis_refs=['methods', 'parameters'],
             studied_context="The studied cohort was adults", inference_strength="association",
             rationale="The design was observational", uncertainties=["External validation was not performed"],
@@ -25,6 +25,11 @@ def inputs():
     return {'title': content['title'], 'text': TEXT, 'content': content}, config, ChunkBudget(len(TEXT) + 10, 8000, 1)
 
 
+def generates(model):
+    """A digest generation call: the whole digest or the one field-repair call."""
+    return issubclass(model, PaperDigest) or model.__name__ == 'DigestFieldRepair'
+
+
 class ScriptedClient:
     def __init__(self, *, cards=True, responses=None, reject_optional=False):
         self.calls = []
@@ -32,9 +37,9 @@ class ScriptedClient:
 
     def pydantic_prompt(self, *, prompt, pydantic_model, **kwargs):
         self.calls.append((prompt, pydantic_model, deepcopy(kwargs)))
-        if issubclass(pydantic_model, PaperDigest):
+        if generates(pydantic_model):
             value = deepcopy(self.responses.pop(0) if self.responses else PAYLOAD)
-            if self.cards and 'interpretation' in pydantic_model.model_fields:
+            if self.cards and 'interpretation' in getattr(pydantic_model, 'model_fields', {}):
                 value['interpretation'] = [deepcopy(CARD)]
             return value
         count = max(map(int, re.findall(r'\[(\d+)\]', prompt)), default=-1) + 1

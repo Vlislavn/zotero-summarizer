@@ -13,7 +13,7 @@ from zotero_summarizer.domain import VERDICT_SOURCE_MACHINE_ADD, VERDICT_SOURCE_
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.services import interaction_log
-from zotero_summarizer.services.golden import label_verdicts
+from zotero_summarizer.services.golden import label_verdicts, proposal_snapshot
 from zotero_summarizer.services.library import deep_review, fulltext, review
 from zotero_summarizer.services.library.review_eligibility import ReviewedFeed, ReviewRequired, require_review
 from zotero_summarizer.services._common import LOGGER, is_app_rss_source
@@ -21,6 +21,7 @@ from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.storage.feed_identity import LEGACY_FEED_PREFIX, row_feed_keys
 from zotero_summarizer.storage import rss as rss_storage
+from zotero_summarizer.storage.feeds_lookup import materialized_key_for
 
 # Provisional positive label for "add to library": the user signalled the
 # paper is worth reading, but hasn't read it yet. Stage-2 annotation overrides
@@ -84,6 +85,8 @@ def _record_label(
         surface=surface,
         comment=note,
         source=source,
+        proposal_json=proposal_snapshot.build_proposal(
+            surface=surface, row=row, priority=original_priority if original_priority != "unknown" else None),
     )
     interaction_log.log_feed_decision(
         row=row, item_key=item_key, surface=surface, source=source,
@@ -319,19 +322,12 @@ def _materialized_key_for(row: dict[str, Any]) -> str | None:
     direct = str(row.get("materialized_zotero_key") or "").strip()
     if direct:
         return direct
-    sfk = str(row.get("stable_feed_key") or "").strip()
-    if not sfk:
+    if not str(row.get("stable_feed_key") or "").strip():
         return None
     conn = sqlite3.connect(str(_db_path()))
     conn.row_factory = sqlite3.Row
     try:
-        sibling = conn.execute(
-            "SELECT materialized_zotero_key FROM processed_feed_items "
-            "WHERE stable_feed_key = ? AND materialized_zotero_key IS NOT NULL "
-            "AND materialized_zotero_key <> '' LIMIT 1",
-            (sfk,),
-        ).fetchone()
-        return str(sibling["materialized_zotero_key"]) if sibling else None
+        return materialized_key_for(conn, row)
     finally:
         conn.close()
 

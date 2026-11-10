@@ -80,7 +80,7 @@ def test_hosted_calibration_keeps_ordinary_adapter_and_skips_local_probe(calibra
 
     assert result["tier1"]["status"] == "calibrated"
     assert result["tier2"]["status"] == "calibrated"
-    assert seen == ["credential", "adapter"]
+    assert seen == ["credential", "adapter", "credential", "adapter"]  # generator and production verifier
     assert settings.calibration_path.is_file()
 
 
@@ -113,14 +113,14 @@ def test_later_digest_construction_rechecks_admission(calibration_trial, monkeyp
 
     def first_only_permitted(actual_provider, model):
         checks.append((actual_provider.name, model))
-        return None if len(checks) == 1 else real_refusal(actual_provider, model)
+        return None if 'prompt' not in seen else real_refusal(actual_provider, model)
 
     monkeypatch.setattr(load_admission, "refused_local_load", first_only_permitted)
     with pytest.raises(APIError) as error:
         calibration.run_full_calibration(settings, item_keys=["SYNTHETIC1"])
 
     assert error.value.error == "effective_envelope_unknown"
-    assert checks == [(provider.name, "fixture-model"), (provider.name, "fixture-model")]
+    assert checks == [(provider.name, "fixture-model")] * 3  # construction, pre-credential, later construction
     assert seen == ["credential", "adapter", "prompt", "preflight"]
 
 

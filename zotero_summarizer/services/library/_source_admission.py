@@ -15,6 +15,14 @@ _EDGE_TEMPLATE = re.compile(
     r'(?P<header>[^\n]+)\n(?P<message>[^\n]+)\nReference #(?P<reference>[\w.]+)\n'
     r'https://errors\.edgesuite\.net/(?P=reference)', re.IGNORECASE,
 )
+_BOT_CHALLENGE = re.compile(
+    r'(?P<host>[a-z0-9.-]+) Performing security verification '
+    r'This website uses a security service to protect against malicious bots\. '
+    r'This page is displayed while the website verifies you are not a bot\. '
+    r'Verification successful\. Waiting for (?P=host) to res\s*pond '
+    r'Ray ID: [a-f0-9]+ Performance and Security by Cloudflare(?: Privacy)?',
+    re.IGNORECASE,
+)
 
 
 def operational_template(text: str) -> str | None:
@@ -23,6 +31,8 @@ def operational_template(text: str) -> str | None:
     match = _EDGE_TEMPLATE.fullmatch(normalized)
     if match and match['header'].casefold() in _DENIAL_HEADINGS:
         return 'edge_denial_template'
+    if _BOT_CHALLENGE.fullmatch(' '.join(normalized.split())):
+        return 'bot_challenge_template'
     from zotero_summarizer.services.library._auth_envelope import authentication_envelope
 
     if authentication_envelope(normalized):

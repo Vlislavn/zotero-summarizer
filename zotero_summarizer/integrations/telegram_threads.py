@@ -41,6 +41,11 @@ def _messages(result, peer, limit):
     return result.messages
 
 
+def _sender(message) -> int | None:
+    from_id = getattr(message, "from_id", None)
+    return from_id.user_id if isinstance(from_id, types.PeerUser) and type(from_id.user_id) is int else None
+
+
 def _original(message, peer, username, root=None):
     marked = validate_live_telegram_channel_id(utils.get_peer_id(peer))
     original = _post(message, channel_id=marked, username=username or "unavailable")
@@ -59,11 +64,21 @@ def _original(message, peer, username, root=None):
     reply_peer = getattr(header, "reply_to_peer_id", None)
     current_peer = reply_peer is None or (isinstance(reply_peer, types.PeerChannel) and reply_peer.channel_id == peer.channel_id)
     return TelegramMessage(peer_id=marked, message_id=message.id, thread_id=root,
-        reply_to_id=reply, reply_to_top_id=getattr(header, "reply_to_top_id", None),
-        reply_peer_is_current=current_peer,
+        reply_to_id=reply if current_peer else None, reply_to_top_id=getattr(header, "reply_to_top_id", None),
+        reply_peer_is_current=current_peer, sender_id=_sender(message),
         text=original.text, published_at=original.published_at,
         updated_at=original.updated_at, urls=original.urls, skip_reason=original.skip_reason,
         permalink=f"https://t.me/{username}/{message.id}" if username else None)
+
+
+def _post_origin(message, peer, username):
+    # The conversation origin is the broadcast news post (TelegramPost), matching
+    # ``_broadcast``; the adapter must not pass the reply-shaped TelegramMessage.
+    marked = validate_live_telegram_channel_id(utils.get_peer_id(peer))
+    original = _post(message, channel_id=marked, username=username or "unavailable")
+    if original is None:
+        raise TelegramTransportError("channel_unavailable")
+    return original
 
 
 def _origin_matches(forward, peer, number):
@@ -129,10 +144,17 @@ class TelethonConversationClient(TelethonPageClient):
         base = dict(target=target, origin=origin, peer_id=utils.get_peer_id(peer), root_id=root,
                     root=root_message, observed_at=datetime.now(timezone.utc).isoformat())
         try:
-            result = await self._routed(functions.messages.GetRepliesRequest(
-                peer=peer, msg_id=root, offset_id=0, offset_date=None, add_offset=0,
-                limit=limits.replies_per_thread + 1, max_id=0, min_id=0, hash=0))
-            raw = _messages(result, peer, limits.replies_per_thread + 1)
+            want, raw, offset = limits.replies_per_thread + 1, [], 0
+            while len(raw) < want:  # newest first, paged by offset_id (Telegram serves <=100 per request)
+                size = min(100, want - len(raw))
+                result = await self._routed(functions.messages.GetRepliesRequest(
+                    peer=peer, msg_id=root, offset_id=offset, offset_date=None, add_offset=0,
+                    limit=size, max_id=0, min_id=0, hash=0))
+                page = _messages(result, peer, size)
+                raw += page
+                if len(page) < size:
+                    break
+                offset = page[-1].id
             rows = [_original(item, peer, username, root) for item in raw]
             # Some servers include the root; it is retained separately, not counted as a reply.
             rows = [row for row in rows if row.message_id != root]

@@ -10,6 +10,7 @@ from zotero_summarizer.services.library._digest_verification import verify_diges
 from zotero_summarizer.services.library._map_reduce import map_reduce_digest
 from zotero_summarizer.services.library.quality_review import assess_digest
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
+from tests._interpretation_experiment import generates
 
 
 HTTP_ACCESS = "Full text is inaccessible (HTTP 403 from MDPI);"
@@ -87,7 +88,7 @@ def test_reported_outputs_get_one_bounded_correction(prefix, read_why, weakness,
         with pytest.raises(ValueError, match="Digest contains"):
             assess_digest(**kwargs)
     assert len(generator.prompts) == 2
-    assert "failed source verification" in generator.prompts[1]
+    assert "ONLY the fields below failed" in generator.prompts[1]
 
 
 @pytest.mark.parametrize("field, claim", [
@@ -103,7 +104,7 @@ def test_generated_map_notes_cannot_authorize_source_absent_numbers(field, claim
         map_reduce_digest("Paper", PAPER, _default_goals_config(),
                           map_llm=mapper, reduce_llm=generator)
     assert len(generator.prompts) == 2
-    assert mapper.calls == 0  # deterministic guard rejects before semantic verification
+    assert mapper.calls == 1  # no semantic verification; only the first (no-reasoning) repair attempt
 
 
 def test_map_reduce_correction_is_grounded_in_original_not_generated_notes():
@@ -114,9 +115,10 @@ def test_map_reduce_correction_is_grounded_in_original_not_generated_notes():
     result = map_reduce_digest("Paper", source, _default_goals_config(),
                                map_llm=mapper, reduce_llm=generator)
     assert result.read_why == good.read_why and result.basis == "map_reduce"
-    assert len(generator.prompts) == 2 and mapper.calls == 1
-    assert source in mapper.verification_prompts[0]
-    assert HTTP_ACCESS not in mapper.verification_prompts[0]
+    assert len(generator.prompts) == 2 and mapper.calls == 2  # verification + first repair attempt
+    verification = [p for p in mapper.verification_prompts if 'ONLY the fields below failed' not in p]
+    assert source in verification[0]
+    assert HTTP_ACCESS not in verification[0]
 
 
 def test_source_supported_http_number_in_read_why_is_not_blanket_rejected():
@@ -183,8 +185,10 @@ def test_number_free_access_story_in_map_notes_is_not_paper_evidence(corrected):
     else:
         with pytest.raises(ValueError, match="unsupported fields"):
             map_reduce_digest(**kwargs)
-    assert len(generator.prompts) == 2 and mapper.calls == 2
+    assert len(generator.prompts) == 2 and mapper.calls == 3  # 2 verifications + first repair attempt
     for prompt in mapper.verification_prompts:
+        if 'ONLY the fields below failed' in prompt:
+            continue  # the first (no-reasoning) repair attempt, not a verification
         evidence = prompt.split("Paper text (numbered verbatim passages):", 1)[1]
         evidence = evidence.split("Reader goals", 1)[0]
         assert PAPER in evidence and NO_ACCESS not in evidence
@@ -267,7 +271,7 @@ def test_map_reduce_malformed_verifier_fallback_keeps_original_source(corrected)
             self.verification_prompts = []
 
         def pydantic_prompt(self, *, prompt, pydantic_model, **kwargs):
-            if pydantic_model is PaperDigest:
+            if generates(pydantic_model):
                 return super().pydantic_prompt(prompt=prompt, pydantic_model=pydantic_model, **kwargs)
             assert pydantic_model is _Checks
             self.verification_prompts.append(prompt)
@@ -283,14 +287,16 @@ def test_map_reduce_malformed_verifier_fallback_keeps_original_source(corrected)
     assert result.read_why == good.read_why and result.basis == "map_reduce"
     pathways = 2 if corrected else 1
     assert len(generator.prompts) == pathways
-    assert len(mapper.verification_prompts) == 2 * pathways
+    assert len(mapper.verification_prompts) == 2 * pathways + int(corrected)  # + first repair attempt
     assert len(generator.verification_prompts) == pathways
     for prompt in mapper.verification_prompts + generator.verification_prompts:
+        if 'ONLY the fields below failed' in prompt:
+            continue
         evidence = prompt.split("Paper text (numbered verbatim passages):", 1)[1]
         evidence = evidence.split("Reader goals", 1)[0]
         assert PAPER in evidence and NO_ACCESS not in evidence
     if corrected:
-        assert "failed source verification" in generator.prompts[1]
+        assert "ONLY the fields below failed" in generator.prompts[1]
 
 
 @pytest.mark.parametrize('corrected', [False, True])
@@ -307,7 +313,7 @@ def test_retained_map_fallback_receipt_uses_actual_original_and_lineage(correcte
         verifier_calls = 0
 
         def pydantic_prompt(self, *, pydantic_model, prompt, **kwargs):
-            if pydantic_model is PaperDigest:
+            if generates(pydantic_model):
                 return super().pydantic_prompt(pydantic_model=pydantic_model, prompt=prompt, **kwargs)
             self.verifier_calls += 1
             assert pydantic_model is _Checks and PAPER in prompt
@@ -325,7 +331,7 @@ def test_retained_map_fallback_receipt_uses_actual_original_and_lineage(correcte
     assert result.basis == 'map_reduce' and audit['verified_digest']['basis'] == 'full_text'
     assert len(audit['lineage']) == (2 if corrected else 1)
     assert generator.verifier_calls == len(audit['lineage'])
-    assert mapper.calls == 2 * len(audit['lineage'])
+    assert mapper.calls == 2 * len(audit['lineage']) + int(corrected)  # + first repair attempt
     assert all(row['verifier_route'] == 'generator_fallback' and row['unavailable_routes'] == ['primary']
                for row in audit['lineage'])
     if corrected:
@@ -343,7 +349,7 @@ def test_failed_verifier_cannot_leave_a_previous_accepted_receipt():
     class Unavailable(_Verifier):
         def pydantic_prompt(self, *, pydantic_model, **kwargs):
             from zotero_summarizer.models import PaperDigest
-            return _digest() if pydantic_model is PaperDigest else {'checks': []}
+            return _digest() if generates(pydantic_model) else {'checks': []}
 
     audit = {'previous': 'must not survive'}
     with pytest.raises(DigestVerifierUnavailable):

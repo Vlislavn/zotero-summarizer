@@ -31,7 +31,7 @@ def report():
 
 
 def test_default_disabled_and_off_main_refuse_without_output(tmp_path):
-    settings = project(tmp_path)
+    settings = replace(project(tmp_path), feedback_schedule_enabled=False)  # #218: the default is now on
     assert due(settings)["status"] == "disabled"
     assert not settings.feedback_analysis_dir.exists()
     with ThreadPoolExecutor(max_workers=1) as pool:

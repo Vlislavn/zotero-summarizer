@@ -75,6 +75,26 @@ def test_built_find_partial_stale_and_real_ordinary_search(application_browser, 
         assert max(review["x"] - refresh["x"] - refresh["width"],
                    review["y"] - refresh["y"] - refresh["height"]) >= 8
         page.screenshot(path=str(settings.data_dir / f"discovery-current-{width}.png"), full_page=True, animations="disabled")
+        session_url = "http://127.0.0.1/api/search/" + page.url.split("session=", 1)[1]
+        restored = client.get(session_url).json()
+        provider_requests_before_reload = len(public_requests)
+        held = []
+        page.route(session_url, lambda route: held.append(route))
+        page.reload(wait_until="domcontentloaded")
+        waiting = page.get_by_role("status").filter(has_text="Waiting for the current request…")
+        expect(waiting).to_be_visible()
+        expect(page.get_by_role("region", name="Discovery status")).to_have_count(0)
+        page.get_by_role("textbox", name="Search query", exact=True).fill("replacement topic")
+        expect(page.get_by_role("button", name="Search", exact=True)).to_be_enabled()
+        page.screenshot(path=str(settings.data_dir / f"discovery-restoring-{width}.png"), full_page=True, animations="disabled")
+        assert len(held) == 1
+        held[0].fulfill(status=200, content_type="application/json", body=json.dumps(restored))
+        page.unroute(session_url)
+        expect(waiting).to_have_count(0)
+        expect(page.get_by_role("region", name="Discovery status")).to_contain_text("Freshness: current")
+        _open(page, page.get_by_text('1 retained candidates ▾', exact=True))
+        expect(page.get_by_role("article", name="External browser candidate")).to_be_visible()
+        assert len(public_requests) == provider_requests_before_reload
         repositories.upsert_review_note(settings.triage_db_path, key, "Edited private context")
         page.get_by_role("button", name="Refresh session status", exact=True).click()
         expect(page.get_by_role("region", name="Discovery status")).to_contain_text("Freshness: stale")

@@ -27,10 +27,12 @@ from zotero_summarizer.services.golden import (
     hybrid_gt,
     label_provenance,
     label_verdicts,
+    proposal_snapshot,
     verdict_effects,
 )
 from zotero_summarizer.services.library import review_detail as review_detail_svc
 from zotero_summarizer.services.sync.service import questions_for_paper
+from zotero_summarizer.services.triage import today_exposure
 from zotero_summarizer.storage import repositories
 from zotero_summarizer.api.routes._golden_border import router as _border_router
 from zotero_summarizer.api.routes._golden_helpers import (
@@ -287,6 +289,13 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
 
         await asyncio.to_thread(require_feed_review, _db_path(), req.item_key)
 
+    feed_row = await asyncio.to_thread(proposal_snapshot.load_feed_row, _db_path(), req.item_key)
+    if original is None and feed_row is not None:
+        original = (feed_row.get("reading_priority") or "").strip() or None
+    proposal_json = await asyncio.to_thread(
+        proposal_snapshot.build_proposal, surface="annotate_verdict", row=feed_row,
+        item_key=req.item_key, priority=original,
+    )
     row_id = label_verdicts.set_label_verdict(
         _db_path(),
         item_key=req.item_key,
@@ -294,6 +303,7 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
         user_priority=req.user_priority,
         surface="annotate_verdict",
         comment=req.comment,
+        proposal_json=proposal_json,
     )
     stored = repositories.get_label_verdict(_db_path(), req.item_key)
     if stored is None:
@@ -330,6 +340,7 @@ async def save_review_note(req: ReviewNoteRequest) -> dict[str, Any]:
         safe_item_key,
         req.note,
     )
+    await asyncio.to_thread(today_exposure.record_note_saved, safe_item_key, req.note)
     mirror = await asyncio.to_thread(
         verdict_effects.mirror_review_note,
         _db_path(),

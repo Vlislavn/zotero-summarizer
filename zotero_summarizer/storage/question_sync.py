@@ -50,15 +50,15 @@ def list_for_paper(db_path, item_key):
         return review_questions.list_for_paper(conn, item_key)
 
 
-def snapshots(conn):
+def snapshots(conn, resolve):
     """Project separate question arrays onto every resolved alias, once per family."""
     seeds = conn.execute("SELECT DISTINCT item_key FROM review_questions ORDER BY item_key").fetchall()
     fields = {}
     for (seed,) in seeds:
         if (seed, "review_question") in fields:
             continue
-        keys = review_notes.resolve_item_key_aliases(conn, seed)
-        questions = review_questions.list_for_paper(conn, seed)
+        keys = resolve(seed)
+        questions = review_questions._list_for_keys(conn, keys)
         placeholders = ",".join("?" for _ in keys)
         revision = conn.execute(
             "SELECT COALESCE(MAX(revision), 0) FROM sync_changes "

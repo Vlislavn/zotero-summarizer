@@ -26,6 +26,52 @@ def offline_requested() -> bool:
     return explicit in {"1", "true", "yes", "on"} or os.getenv("HF_HUB_OFFLINE") == "1"
 
 
+def automatic_gate_updates_enabled() -> bool:
+    """Process-level permission for automatic classifier training/rescoring."""
+    raw = os.getenv("ZS_AUTOMATIC_GATE_UPDATES", "1").strip().lower()
+    if raw not in {"true", "false", "1", "0"}:
+        raise ValueError("ZS_AUTOMATIC_GATE_UPDATES must be true/false or 1/0")
+    return raw in {"true", "1"}
+
+
+def today_exposure_log_enabled() -> bool:
+    """Owner-approved local logging of what Today shows and does (default on)."""
+    raw = os.getenv("ZS_TODAY_EXPOSURE_LOG", "1").strip().lower()
+    if raw not in {"true", "false", "1", "0"}:
+        raise ValueError("ZS_TODAY_EXPOSURE_LOG must be true/false or 1/0")
+    return raw in {"true", "1"}
+
+
+def today_exploration_slots() -> int:
+    """Random below-the-bar Today cards per local day: 0..2 (default 2); 0 when logging is off."""
+    raw = os.getenv("ZS_TODAY_EXPLORATION_SLOTS", "2").strip()
+    if raw not in {"0", "1", "2"}:
+        raise ValueError("ZS_TODAY_EXPLORATION_SLOTS must be 0, 1 or 2")
+    return int(raw) if today_exposure_log_enabled() else 0
+
+
+def today_ranker() -> str:
+    """Today order id, logged on every exposure row: ``goal_cos_v1`` (default) or ``composite_v1``.
+
+    Operational setting; it is not part of review identity."""
+    raw = os.getenv("ZS_TODAY_RANKER", "goal_cos_v1").strip()
+    if raw not in {"goal_cos_v1", "composite_v1"}:
+        raise ValueError("ZS_TODAY_RANKER must be goal_cos_v1 or composite_v1")
+    return raw
+
+
+def paper_auto_review_enabled() -> bool:
+    """Opt-in: auto-start a deep review when a paper page opens (default OFF).
+
+    Strict gate — the paper page only auto-generates when this is explicitly on;
+    otherwise the owner presses *Generate deep review*. Operational setting; it is
+    not part of review identity."""
+    raw = os.getenv("ZS_PAPER_AUTO_REVIEW", "0").strip().lower()
+    if raw not in {"true", "false", "1", "0", "yes", "no", "on", "off"}:
+        raise ValueError("ZS_PAPER_AUTO_REVIEW must be true/false or 1/0")
+    return raw in {"true", "1", "yes", "on"}
+
+
 def _env_int(name: str, default: int) -> int:
     try:
         return int(os.getenv(name, str(default)))
@@ -34,7 +80,7 @@ def _env_int(name: str, default: int) -> int:
 
 
 def _feedback_schedule_env():
-    raw = os.getenv("ZS_FEEDBACK_SCHEDULE_ENABLED", "false").strip().lower()
+    raw = os.getenv("ZS_FEEDBACK_SCHEDULE_ENABLED", "true").strip().lower()
     if raw not in {"true", "false", "1", "0"}:
         raise ValueError("ZS_FEEDBACK_SCHEDULE_ENABLED must be true/false or 1/0")
     return {"feedback_schedule_enabled": raw in {"true", "1"},
@@ -79,7 +125,7 @@ class Settings:
     browser_profile_dir: Path
     setup_load_approval_policy_path: Path | None = None
     setup_load_approved_policy_sha256: str | None = None
-    feedback_schedule_enabled: bool = False
+    feedback_schedule_enabled: bool = True
     feedback_schedule_max_windows: int = 2
     feedback_schedule_wall_cap_seconds: float = 240.0
 
@@ -93,12 +139,33 @@ class Settings:
             raise ValueError("feedback schedule safety wall must be positive and <=600")
 
     @property
+    def today_exposure_log_dir(self) -> Path:
+        """Append-only Today exposure JSONL, one ``YYYY-MM-DD.jsonl`` per local day."""
+        return self.data_dir / "today-exposure"
+
+    @property
+    def card_facts_dir(self) -> Path:
+        """On-demand Today card facts cache, one JSON per stable paper key."""
+        return self.data_dir / "card_facts"
+
+    @property
+    def card_dir(self) -> Path:
+        """Today AI card store (cards/, consent, token ledger, breaker) — operational,
+        not part of the review identity."""
+        return self.data_dir / "card"
+
+    @property
     def feedback_schedule_dir(self) -> Path:
         return self.feedback_analysis_dir / "schedule"
 
     @property
     def feedback_analysis_dir(self) -> Path:
         return self.data_dir / "feedback-analysis"
+
+    @property
+    def nli_model_dir(self) -> Path:
+        """Local NLI model (mDeBERTa-v3 XNLI) that checks Telegram gist lines against their cited comments."""
+        return self.data_dir / "models" / "nli-mdeberta"
 
     @property
     def classifier_runs_log_path(self) -> Path:

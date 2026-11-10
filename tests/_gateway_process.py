@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 root = Path(sys.argv[1]).resolve()
 sys.path.insert(0, str(root))
-import json, types, os
+import json, types, os, socket
 from argparse import Namespace
 import uvicorn
 from starlette.applications import Starlette
@@ -63,12 +63,18 @@ class ReadyServer(original):
                 'fixture': 'real Uvicorn + actual middleware, synthetic identity headers; no product lifespan/TLS'}))
             pending.replace(ready)
 uvicorn.Server = ReadyServer
-if mode == 'mobile':
+if mode in {'mobile', 'mobile-loopback'}:
+    port = None
+    if mode == 'mobile-loopback':
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reservation:
+            reservation.bind(('127.0.0.1', 0))
+            port = reservation.getsockname()[1]
     app = types.ModuleType('zotero_summarizer.api.app')
     app.create_app = lambda settings, *, mobile_access: MobileAccessMiddleware(fixture, mobile_access)
     sys.modules[app.__name__] = app
     raise SystemExit(mobile._serve_mobile(Namespace(project_root=state,
-        origin='https://reader.example-tailnet.ts.net', owner_login='owner@example.net')))
+        origin='https://reader.example-tailnet.ts.net', owner_login='owner@example.net',
+        trusted_loopback_port=port)))
 shutdown_seconds = int(os.environ.get('ZS_GATEWAY_TEST_SHUTDOWN_SECONDS', '3'))
 assert 1 <= shutdown_seconds <= 15
 config = uvicorn.Config(LocalAccessMiddleware(fixture), host='127.0.0.1', port=0,
@@ -107,9 +113,11 @@ def owned_server(tmp_path, mode):
 
 
 def wire(path, request, *, stop_at=None):
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+    address = path if isinstance(path, str) else tuple(path)
+    family = socket.AF_UNIX if isinstance(address, str) else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as client:
         client.settimeout(SAFETY_SECONDS)
-        client.connect(path)
+        client.connect(address)
         client.sendall(request)
         parts = []
         for _step in range(READY_STEPS):

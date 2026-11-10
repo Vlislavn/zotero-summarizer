@@ -193,7 +193,7 @@ def test_app_rss_reader_refresh_stores_items_without_scoring(
     )
 
     reader = AppRssReader(db_path)
-    result = reader.refresh_feeds(max_feeds=1, max_new_items_per_feed=5)
+    result = reader.refresh_feeds(max_feeds=1)
 
     assert result["inserted"] == 1
     assert result["errors"] == []

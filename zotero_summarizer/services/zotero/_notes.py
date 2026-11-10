@@ -161,67 +161,9 @@ def build_user_note_html(note: str) -> str:
             f"<p><em>{USER_NOTE_MARKER};version=1</em></p>")
 
 
-# Marker for the single "deep digest" note on an item (upsert, no duplicates).
-DIGEST_NOTE_MARKER = f"{NOTE_PROVENANCE_NAMESPACE}:note_type=digest"
+# The digest-note builder lives in ``_digest_note``; re-exported for callers.
+from zotero_summarizer.services.zotero._digest_note import (  # noqa: E402
+    DIGEST_NOTE_MARKER, build_digest_note_html,
+)
 
-
-def build_digest_note_html(digest: Any, *, interpretation: dict[str, Any] | None = None) -> str:
-    """Render a digest and optional shared qualified projection before the final
-    ownership footer. Default HTML is unchanged; this builder performs no writes."""
-    e = html.escape
-    decision = (getattr(digest, "read_decision", "") or "—")
-    minutes = getattr(digest, "estimated_read_minutes", None)
-    timing = f" · {minutes} min" if minutes is not None else ""
-    grade = getattr(digest, "grade", "") or "—"
-    parts: list[str] = [
-        f"<!-- {DIGEST_NOTE_MARKER};version=1 -->",
-        f"<h2>Digest — {e(decision)}{timing} · Quality {e(grade)}</h2>",
-    ]
-    if getattr(digest, "tldr", ""):
-        parts.append(f"<p>{e(digest.tldr)}</p>")
-    if getattr(digest, "read_why", ""):
-        parts.append(f"<p><strong>Read?</strong> {e(decision)} — {e(digest.read_why)}</p>")
-    if getattr(digest, "original_value", ""):
-        parts.append(f"<p><strong>What the original adds:</strong> {e(digest.original_value)}</p>")
-    writing_reasons = list(getattr(digest, "writing_reasons", []) or [])
-    if writing_reasons:
-        parts.append(f"<p><strong>Writing · {e(digest.writing_friction)}:</strong> {e('; '.join(writing_reasons))}</p>")
-    parameters = getattr(digest, "parameters", None)
-    if parameters:
-        values = [parameters.dataset, parameters.sample_size, parameters.architecture,
-                  *parameters.baselines, *parameters.metrics]
-        parts.append(f"<p><strong>Technical parameters:</strong> {e('; '.join(x for x in values if x))}</p>")
-    read_parts = list(getattr(digest, "read_parts", []) or [])
-    if read_parts:
-        parts.append("<p><strong>Read parts</strong></p><ul>"
-                     + "".join(f"<li>{e(str(x))}</li>" for x in read_parts) + "</ul>")
-    skip_parts = list(getattr(digest, "skip_parts", []) or [])
-    if skip_parts:
-        parts.append("<p><strong>Skip parts</strong></p><ul>"
-                     + "".join(f"<li>{e(str(x))}</li>" for x in skip_parts) + "</ul>")
-    for label, val in (
-        ("Relevance", getattr(digest, "relevance", "")),
-        ("Controversies", getattr(digest, "controversies", "")),
-        ("Impact", getattr(digest, "impact", "")),
-        ("Unknown unknowns", getattr(digest, "unknown_unknowns", "")),
-    ):
-        if val:
-            parts.append(f"<p><strong>{label}:</strong> {e(val)}</p>")
-    impl = list(getattr(digest, "implementation", []) or [])[:3]
-    if impl:
-        parts.append("<p><strong>Implementation</strong></p><ul>"
-                     + "".join(f"<li>{e(str(x))}</li>" for x in impl) + "</ul>")
-    qline = (
-        f"quality {e(grade)} · "
-        f"sound {digest.soundness} · nov {digest.novelty} · sig {digest.significance} · "
-        f"repro {digest.reproducibility} · clarity {digest.clarity}"
-    )
-    if getattr(digest, "key_strength", ""):
-        parts.append(f"<p><em>+ {e(digest.key_strength)}</em></p>")
-    if getattr(digest, "key_weakness", ""):
-        parts.append(f"<p><em>− {e(digest.key_weakness)}</em></p>")
-    if interpretation is not None:
-        from zotero_summarizer.services.library._interpretation_html import section
-        parts.append(section(interpretation, digest))
-    parts.append(f"<p><em>{qline} · {DIGEST_NOTE_MARKER};version=1</em></p>")
-    return "".join(parts)
+__all__ = ["DIGEST_NOTE_MARKER", "build_digest_note_html"]

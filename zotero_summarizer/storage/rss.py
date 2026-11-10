@@ -34,6 +34,11 @@ def list_rss_feeds(
     return [dict(row) for row in rows]
 
 
+def count_rss_items_by_feed(conn: sqlite3.Connection) -> dict[int, int]:
+    rows = conn.execute("SELECT rss_feed_id, COUNT(*) AS n FROM rss_items GROUP BY rss_feed_id").fetchall()
+    return {int(row["rss_feed_id"]): int(row["n"]) for row in rows}
+
+
 def upsert_rss_feed(
     conn: sqlite3.Connection,
     *,
@@ -131,18 +136,27 @@ def record_rss_fetch_result(
     error: str | None,
     etag: str | None = None,
     modified: str | None = None,
+    watermark: str | None = None,
+    incomplete: bool | None = None,
 ) -> None:
+    """Stamp a fetch. ``watermark`` only moves forward and only when the caller
+    confirmed the interval complete; ``incomplete=None`` leaves the flag as is
+    (a hard failure must not clear an earlier incomplete state)."""
     conn.execute(
         """
         UPDATE rss_feeds
         SET last_fetched_at = datetime('now'),
-            last_error = ?,
-            etag = COALESCE(?, etag),
-            modified = COALESCE(?, modified),
+            last_error = :error,
+            etag = COALESCE(:etag, etag),
+            modified = COALESCE(:modified, modified),
+            fetch_watermark = CASE WHEN :wm IS NOT NULL AND (fetch_watermark IS NULL OR :wm > fetch_watermark)
+                                   THEN :wm ELSE fetch_watermark END,
+            fetch_incomplete = COALESCE(:incomplete, fetch_incomplete),
             updated_at = datetime('now')
-        WHERE id = ?
+        WHERE id = :id
         """,
-        (error, etag, modified, int(feed_id)),
+        {"error": error, "etag": etag, "modified": modified, "wm": watermark,
+         "incomplete": None if incomplete is None else int(incomplete), "id": int(feed_id)},
     )
 
 

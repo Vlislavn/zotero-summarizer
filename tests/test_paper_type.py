@@ -1,6 +1,9 @@
 """Tests for paper-type detection (offline — the LLM is a stub)."""
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from zotero_summarizer.services.library import paper_type as pt
 from zotero_summarizer.services.library._paper_type_checklists import PaperType
 
@@ -11,6 +14,27 @@ class _FakeLLM:
 
     def pydantic_prompt(self, *, prompt, pydantic_model):
         return pydantic_model(**self.payload)
+
+
+@pytest.mark.parametrize('missing', ['paper_type', 'confidence'])
+def test_classifier_omissions_do_not_manufacture_type_or_confidence(missing):
+    payload = {'paper_type': 'dataset_benchmark', 'confidence': 0.9}
+    del payload[missing]
+    with pytest.raises(ValidationError):
+        pt.detect(title='A benchmark', abstract='A benchmark dataset', headings=[],
+                  full_text='We introduce a benchmark suite', llm=_FakeLLM(payload))
+
+
+def test_classifier_decoder_requires_type_and_confidence():
+    assert {'paper_type', 'confidence'} <= set(pt._TypeVerdict.model_json_schema().get('required', []))
+
+
+def test_explicit_half_confidence_remains_uncertain():
+    out = pt.detect(title='A benchmark', abstract='A benchmark dataset', headings=[],
+                    full_text='We introduce a benchmark suite',
+                    llm=_FakeLLM({'paper_type': 'dataset_benchmark', 'confidence': 0.5}))
+    assert out['confidence'] == 0.5 and out['uncertain'] is True
+    assert out['source'] == 'fallback'
 
 
 def test_structural_signals_detect_review_vs_empirical():

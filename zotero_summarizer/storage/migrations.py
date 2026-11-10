@@ -143,6 +143,43 @@ def _migration_telegram_conversations(conn: sqlite3.Connection) -> None:
     apply_schema(conn)
 
 
+def _migration_verdict_reason_chips(conn: sqlite3.Connection) -> None:
+    """One-tap Today reason chips (#37): a nullable column on the verdict row.
+
+    Same shape as v7's ``training_sample_json``. NULL = no reason given; a fresh
+    verdict without chips re-writes it to NULL (the decision owns its reasons)."""
+    if "reasons_json" not in repositories.table_columns(conn, "label_verdicts"):
+        conn.execute("ALTER TABLE label_verdicts ADD COLUMN reasons_json TEXT")
+
+
+def _migration_verdict_proposal(conn: sqlite3.Connection) -> None:
+    """App proposal at decision time (#224): a nullable JSON column on the verdict row.
+
+    NULL = no snapshot (old rows, machine writes). Additive; old builds ignore it."""
+    if "proposal_json" not in repositories.table_columns(conn, "label_verdicts"):
+        conn.execute("ALTER TABLE label_verdicts ADD COLUMN proposal_json TEXT")
+
+
+def _migration_telegram_post_reasons(conn: sqlite3.Connection) -> None:
+    """One-tap 'не подошло' reasons on a Telegram post (#112): a nullable JSON column.
+
+    NULL = not rejected; ``{"chips": [...], "v": 1}`` = rejected (chips may be empty)."""
+    if "reasons_json" not in repositories.table_columns(conn, "research_feed_telegram_posts"):
+        conn.execute("ALTER TABLE research_feed_telegram_posts ADD COLUMN reasons_json TEXT")
+
+
+def _migration_rss_fetch_watermark(conn: sqlite3.Connection) -> None:
+    """Per-feed fetch progress (#161): newest confirmed-complete item time + an
+    'incomplete fetch' flag. Nullable/defaulted, so old rows keep working."""
+    cols = repositories.table_columns(conn, "rss_feeds")
+    if not cols:  # table not created yet (partial legacy DB): baseline creates it with the columns
+        return
+    if "fetch_watermark" not in cols:
+        conn.execute("ALTER TABLE rss_feeds ADD COLUMN fetch_watermark TEXT")
+    if "fetch_incomplete" not in cols:
+        conn.execute("ALTER TABLE rss_feeds ADD COLUMN fetch_incomplete INTEGER NOT NULL DEFAULT 0")
+
+
 # Append-only, version-ordered. To change the schema, add a new Migration with
 # the next version number — never edit a shipped one or add inline ALTERs.
 TRIAGE_MIGRATIONS: list[Migration] = [
@@ -160,6 +197,10 @@ TRIAGE_MIGRATIONS: list[Migration] = [
     Migration(12, "generated_write_review", _migration_generated_write_review),
     Migration(13, "combined_live_telegram_review", _migration_combined_live_review),
     Migration(14, "telegram_conversation_snapshots", _migration_telegram_conversations),
+    Migration(15, "verdict_reason_chips", _migration_verdict_reason_chips),
+    Migration(16, "telegram_post_reasons", _migration_telegram_post_reasons),
+    Migration(17, "rss_fetch_watermark", _migration_rss_fetch_watermark),
+    Migration(18, "verdict_proposal_snapshot", _migration_verdict_proposal),
 ]
 CORPUS_MIGRATIONS: list[Migration] = [
     Migration(1, "baseline_embedding_cache", _migration_baseline_corpus),
@@ -176,6 +217,10 @@ CORPUS_MIGRATIONS: list[Migration] = [
     Migration(12, "generated_write_review_alignment", _migration_baseline_corpus),
     Migration(13, "combined_live_telegram_review_alignment", _migration_baseline_corpus),
     Migration(14, "telegram_conversation_snapshots_alignment", _migration_baseline_corpus),
+    Migration(15, "verdict_reason_chips_alignment", _migration_baseline_corpus),
+    Migration(16, "telegram_post_reasons_alignment", _migration_baseline_corpus),
+    Migration(17, "rss_fetch_watermark_alignment", _migration_baseline_corpus),
+    Migration(18, "verdict_proposal_snapshot_alignment", _migration_baseline_corpus),
 ]
 
 # Both namespaces advance in lockstep so one reported target stays meaningful;
@@ -256,6 +301,8 @@ def migrate_existing(settings: Settings | None = None) -> MigrationResult:
     Existing ``triage_history.db`` and ``corpus_cache.db`` files are reused.
     Migrations are additive and version-gated via the ``schema_migrations``
     table, so re-running is a no-op once the DB is at ``SCHEMA_VERSION``.
+    A DB already above this build's ``SCHEMA_VERSION`` (e.g. after rolling
+    code back) is left untouched; older code ignores the extra nullable columns.
     """
     from zotero_summarizer.storage.corpus import EmbeddingCache
 

@@ -13,7 +13,7 @@ from typing import Any, Callable
 import yaml
 
 from zotero_summarizer.models import GoalsConfig, SummarizeRequest
-from zotero_summarizer.models.config import USER_OWNED_KEYS
+from zotero_summarizer.models.config import USER_KNOBS, USER_OWNED_KEYS
 from zotero_summarizer.models.providers import ProviderConfig
 from zotero_summarizer.runtime import get_context
 from zotero_summarizer.services.config_overrides import apply_calibration, apply_env_overrides
@@ -102,6 +102,14 @@ def effective_llm_concurrency(provider: ProviderConfig | None, item_count: int) 
     return max(1, min(settings().triage_job_concurrency, n))
 
 
+def _quality_knob(name: str) -> int:
+    """``quality_review.<name>`` from the config (0 = unset → provider cap)."""
+    try:
+        return int(getattr(read_config(settings().config_path, settings().calibration_path).quality_review, name, 0) or 0)
+    except FileNotFoundError:  # no goals.yaml yet → provider caps
+        return 0
+
+
 def deep_review_fleet_concurrency(provider: ProviderConfig | None, item_count: int) -> int:
     """Worker count for the MULTI-paper deep-review fan-out (the N "Read next" picks the
     fleet / prewarm review at once).
@@ -114,12 +122,13 @@ def deep_review_fleet_concurrency(provider: ProviderConfig | None, item_count: i
     serialises LOCAL triage for RAM safety, so it must never throttle a genuinely remote,
     RAM-free batch (the bug: with ``TRIAGE_JOB_CONCURRENCY=1`` a 5-pick remote batch ran
     serially). ``provider=None`` falls to the remote branch (never silently serialises a
-    real remote run). Peak concurrent calls is this × ``deep_review_sub_concurrency`` (the
-    within-paper sub-calls), both bounded by ``max_sub_concurrency`` for a capped provider."""
+    real remote run). Peak concurrent calls is this × ``deep_review_sub_concurrency``: that
+    many calls in flight PER REVIEW, enforced in ``_review_attempt`` however the branches
+    and inner pools fan out; both are bounded by ``max_sub_concurrency`` when capped."""
     n = max(1, int(item_count))
     if provider is not None and provider.is_local:
         return 1
-    cap = getattr(provider, "max_sub_concurrency", None) if provider else None
+    cap = _quality_knob("fleet_papers") or (getattr(provider, "max_sub_concurrency", None) if provider else None)
     return min(n, cap) if cap else n
 
 
@@ -135,7 +144,7 @@ def deep_review_sub_concurrency(provider: ProviderConfig | None) -> int:
     so the two never drift."""
     if provider is not None and provider.is_local:
         return 1
-    configured = getattr(provider, "max_sub_concurrency", None) if provider else None
+    configured = _quality_knob("calls_per_paper") or (getattr(provider, "max_sub_concurrency", None) if provider else None)
     if configured is not None:
         return max(1, int(configured))
     return max(1, settings().triage_job_concurrency)
@@ -266,7 +275,7 @@ def write_config_atomic(config_path: Path, payload: dict[str, Any]) -> None:
 
 def write_user_config(config_path: Path, config: GoalsConfig) -> None:
     """Persist ONLY the user-owned keys (intent + LLM connection + university access)
-    to goals.yaml. System-owned sections (corpus, prestige, quality_review, gate, …)
+    to goals.yaml, plus the few ``USER_KNOBS`` fields when non-default. System-owned sections (corpus, prestige, quality_review, gate, …)
     are NEVER written — they stay validated code defaults, refined by calibration and
     ``ZS_*`` env. ``university_access`` is written only when non-default (off → omitted)
     so an unused section never clutters the file. See ``models.config.USER_OWNED_KEYS``."""
@@ -277,6 +286,10 @@ def write_user_config(config_path: Path, config: GoalsConfig) -> None:
         for key, value in full.items()
         if key in USER_OWNED_KEYS and (key != "university_access" or key in lean)
     }
+    for section, names in USER_KNOBS.items():
+        knobs = {name: lean[section][name] for name in names if name in lean.get(section, {})}
+        if knobs:
+            payload[section] = knobs
     write_config_atomic(config_path, payload)
 
 

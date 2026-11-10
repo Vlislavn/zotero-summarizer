@@ -152,6 +152,11 @@ def periods(events, cutoff, tables, sources, guard):
             else:
                 status = "available_current_snapshot_only"
             output[channel] = channel_metrics([e for e in selected if e["channel"] == channel], status, channel)
+        output["verdict_snapshots"] = channel_metrics(
+            [{**e, "kind": "label_state", "eligibility": "eligible"} for e in events
+             if e["channel"] == "label_verdicts" and e["prediction"] and e["time"] is not None
+             and within({**e, "eligibility": "eligible"}, cutoff, days)],
+            "available_stored_proposal_at_decision", "label_verdicts")
         outcomes = [e for e in selected if e["kind"] == "outcome"]
         output["outcomes"] = {"counts": dict(Counter(e["value"] for e in outcomes)),
                               "unique_papers": len({e["paper_key"] for e in outcomes}),

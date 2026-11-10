@@ -111,7 +111,7 @@ def _xml_to_text(xml: str) -> str:
     return _WS_RE.sub(" ", text).strip()
 
 
-def fetch_fulltext_xml(pmcid: str, *, http_client: httpx.Client | None = None) -> str:
+def fetch_fulltext_xml(pmcid: str, *, http_client: httpx.Client | None = None, outcome: dict | None = None) -> str:
     """Fetch + plain-text the JATS full text of a PMC open-access article via the
     Europe PMC REST full-text endpoint (keyless, machine-readable — the reliable
     OA path where the ``?pdf=render`` link 404s and NCBI's mirror bot-blocks).
@@ -119,6 +119,8 @@ def fetch_fulltext_xml(pmcid: str, *, http_client: httpx.Client | None = None) -
     Returns ``""`` when no OA full text exists (many hits are abstract-only — an
     expected state, spec §9) or on any transport/parse error — the same
     never-raises leaf contract as ``search_europepmc`` (see module docstring)."""
+    if outcome is not None:
+        outcome.clear()
     pmcid = (pmcid or "").strip().upper()
     if not pmcid:
         return ""
@@ -126,9 +128,10 @@ def fetch_fulltext_xml(pmcid: str, *, http_client: httpx.Client | None = None) -
         pmcid = "PMC" + pmcid
     _RATE_LIMITER.acquire()
     client = http_client or httpx.Client(timeout=_TIMEOUT_SECS)
+    url = f"{_REST}/{pmcid}/fullTextXML"
     try:
         resp = client.get(
-            f"{_REST}/{pmcid}/fullTextXML",
+            url,
             headers={"User-Agent": "zotero-summarizer/1.0"},
         )
         if resp.status_code != 200:
@@ -139,7 +142,10 @@ def fetch_fulltext_xml(pmcid: str, *, http_client: httpx.Client | None = None) -
     finally:
         if http_client is None:
             client.close()
-    return _xml_to_text(xml)
+    text = _xml_to_text(xml)
+    if text and outcome is not None:
+        outcome['source_uri'] = url
+    return text
 
 
 __all__ = ["EuropePmcHit", "search_europepmc", "fetch_fulltext_xml"]

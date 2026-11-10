@@ -64,6 +64,7 @@ def isolate(monkeypatch, tmp_path):
         lambda: SimpleNamespace(corpus_db_path=tmp_path / "c.db", triage_db_path=tmp_path / "t.db"),
     )
     monkeypatch.setattr(repositories, "list_label_verdict_priorities", lambda db_path: {})
+    monkeypatch.setattr(repositories, "list_user_verdict_keys", lambda db_path: set())
     monkeypatch.setattr(verdict_store, "read_all", lambda: {})
 
 

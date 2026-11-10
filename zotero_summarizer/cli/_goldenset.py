@@ -288,8 +288,8 @@ def register_goldenset(subparsers) -> None:
     gs_export.add_argument(
         "--abstract-chars",
         type=int,
-        default=1000,
-        help="Truncate abstract to this many characters (0 = full).",
+        default=0,
+        help="Optional abstract character cap (default 0 = full source text).",
     )
     gs_export.add_argument("--project-root", default=None)
     gs_export.set_defaults(func=_goldenset_export)

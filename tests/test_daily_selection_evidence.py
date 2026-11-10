@@ -88,14 +88,14 @@ class _Reviews(dict):
 def _join_snapshot(monkeypatch, cohort, reviews):
     reads = []
 
-    def current_reviews():
-        reads.append("current_reviews")
+    def usable_reviews():
+        reads.append("usable_reviews")
         return reviews
 
-    monkeypatch.setattr(library, "deep_review", SimpleNamespace(current_reviews=current_reviews),
+    monkeypatch.setattr(library, "deep_review", SimpleNamespace(usable_reviews=usable_reviews),
                         raising=False)
     matched = candidate.attach_quality_from_reviews(cohort)
-    assert reads == ["current_reviews"]
+    assert reads == ["usable_reviews"]
     return matched
 
 
@@ -112,6 +112,7 @@ def test_dto_defaults_and_api_projection_are_additive_and_independent():
         "papers": [asdict(second)], "pool_size": 1, "lookback_hours": 168,
         "empty_role_events": [], "fellback_to_recent": False,
         "low_relevance_hidden": 0, "weak_slate": False, "selection_policy": "not_observed",
+        "unreviewed": [],
     }
     payload["papers"][0]["selection_evidence"]["fixture"] = True
     payload["empty_role_events"].append("fixture")
@@ -213,7 +214,7 @@ def test_source_and_review_projection_do_not_parse_read_or_score(source_row, mon
     monkeypatch.setattr(json, "loads", forbidden)
     monkeypatch.setattr("builtins.open", forbidden)
     monkeypatch.setattr(sqlite3, "connect", forbidden)
-    monkeypatch.setattr(library, "deep_review", SimpleNamespace(current_reviews=forbidden),
+    monkeypatch.setattr(library, "deep_review", SimpleNamespace(usable_reviews=forbidden),
                         raising=False)
     for module, name in [
         (daily_select, "rank_quality_first_enabled"), (daily_select, "rank_interleave_enabled"),
@@ -360,7 +361,7 @@ def test_cohort_evidence_captures_the_one_actual_key_vector(source_row, monkeypa
     assert args[0] == ([0.75, 0.4, 1.0] if quality_first else [4.8, 4.1, 0.0])
     assert args[1] == [0.8, None, 0.2]
     assert args[2] == ([1.0, 5.0, None] if quality_first else [0.1, None, 0.9])
-    for cand, old, key in zip(cohort, before, keys):
+    for cand, old, key, goal in zip(cohort, before, keys, ["g2", None, "g1"]):
         old["rank_score"] = key
         assert _old_candidate(cand) == old
         evidence = cand["selection_evidence"]
@@ -368,6 +369,7 @@ def test_cohort_evidence_captures_the_one_actual_key_vector(source_row, monkeypa
         assert evidence["mode"] == ("quality_first" if quality_first else "control")
         assert evidence["rank"] == {
             "basis": "quality_first" if quality_first else "relevance_goal_citation", "key": key,
+            **({"goal": goal} if goal else {}),
         }
         assert evidence["selection"]["basis"] == "not_observed"
 
@@ -420,7 +422,7 @@ def test_assembly_and_api_use_the_same_post_review_mode_and_preserve_old_payload
         events.append(("allocate", kwargs["quality_first"]))
         return allocate(**kwargs)
 
-    monkeypatch.setattr(library, "deep_review", SimpleNamespace(current_reviews=current_reviews),
+    monkeypatch.setattr(library, "deep_review", SimpleNamespace(usable_reviews=current_reviews),
                         raising=False)
     monkeypatch.setattr(daily_select, "rank_interleave_enabled", lambda: False)
     monkeypatch.setattr(daily_select, "rank_quality_first_enabled", policy)
@@ -443,6 +445,7 @@ def test_assembly_and_api_use_the_same_post_review_mode_and_preserve_old_payload
         assert payload["papers"][0]["selection_evidence"]["mode"] == mode
     legacy = deepcopy(payload)
     legacy.pop("selection_policy")
+    legacy.pop("unreviewed")
     for paper in legacy["papers"]:
         paper.pop("selection_evidence")
     expected_paper = asdict(_paper(why=["fixture why"]))

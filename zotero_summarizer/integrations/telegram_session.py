@@ -15,8 +15,8 @@ from typing import NoReturn
 from zotero_summarizer.models.research_feed import TelegramTransportError
 
 
-DEFAULT_WALL_SECONDS = 90.0  # Unmeasured operational safety heuristic, not a throughput budget.
-MAX_WALL_SECONDS = 300.0
+DEFAULT_WALL_SECONDS = 480.0  # Ceiling, not a throughput budget: full-discussion reads + chunked local-LLM summaries (Todo #121).
+MAX_WALL_SECONDS = 600.0
 DEFAULT_CLEANUP_RESERVE_SECONDS = 10.0
 _local_owner = threading.Lock()
 _lease_fd = None

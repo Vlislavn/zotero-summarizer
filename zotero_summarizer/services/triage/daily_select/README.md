@@ -1,13 +1,81 @@
 # services/triage/daily_select — the Today slate
 
-Assembles the daily "Today" slate: a small, role-mixed set of feed papers
-(`GET /api/daily`). Reads scored rows, normalizes them to candidates, then
+Assembles the daily "Today" slate. `GET /api/daily` uses the analyzed policy
+below; the legacy policy reads scored rows, normalizes them to candidates, then
 greedily allocates K slots across roles (model / surprise / diversity) so the
 slate isn't all one flavor. The slate never reads `gate_rejected` rows: the
 former `audit` role (random gate-rejected spot-check, day-stable RNG) was
 removed entirely — it degenerated into an endless one-at-a-time stream when
-the primary pool emptied, and the spot-check now lives in the Review page +
-Today's SpotCheck section (`services/library/review.list_by_state`).
+the primary pool emptied. Rejected-paper inspection remains an explicit Feed
+Review task (`services/library/review.list_by_state`), not automatic Today work.
+
+**Analyzed policy (`policy="analyzed"`, used by `/api/daily`).** `_analyzed`
+takes `ranked_unhandled_candidates` (the same trash/handled/dedup pool, ranked by
+the control blend, no old-row fallback) and keeps only candidates whose review
+(current **or** outdated-but-valid, via `deep_review.usable_reviews`; an outdated
+review is badged, not dropped; only outdated reasons that keep the PDF bytes count — `pdf_changed`/`source_unresolved` stay out, via `review_eligibility.same_pdf_entry`) passes `_recommendation.recommendation`: usable digest, not `needs_pdf`,
+quality assessed (`full_text`/`non_paper`), no D/`flag` (`quality_gate.should_auto_hide`
+defaults). The standing-goal board is **not** a check (badge only: AUC 0.50 against owner verdicts, `data/perf-20261107/speed/goal-gate.md`). The first failing
+check is the `reason`. Order: `propose_verdict` priority, `quality_bonus` of the
+independent grade (not under `goal_cos_v1`), rank key (goal cosine, see **Today ranker**), newest, row id; up to `K`; empty is valid. No roles,
+quotas or interleave. `consumption` maps the effective read decision to
+original / selected_parts / brief. Eligibility is not Add eligibility. Today
+preparation (`services/triage/today_preparation`) uses the same pool and function.
+Library policy imports are deferred until a review is evaluated; importing feed
+selection does not initialize the review fleet and its own feed consumers.
+
+**Not-reviewed shelf (`DailySlate.unreviewed`).** Same pass as the analyzed policy: a candidate
+with no review a reader can use — no entry at all (`review_entry is None`) or a decision reason `no_current_review` / `source_unavailable` (`needs_pdf`); papers whose review is `pdf_changed`/`source_unresolved` (neither list), unusable or ineligible for quality are not "unreviewed") is collected, ordered by the same key (`rank_score`, newest, id) and the top `K`
+are returned as `role="unreviewed"` `SlatePaper`s. Cards and shelf keep one entry per normalized title (best-ranked wins; same-title papers under different feed keys, e.g. a JAMA series, never repeat); shelf also skips titles already shown as cards. Each analyzed `SlatePaper` carries `review_freshness` (`{status, reason}`; the Today card shows an *Outdated review · Regenerate* line for `outdated`, Regenerate = the paper page's deep-review run). It adds no ranking, model call or setting and does
+not touch `require_review`: Add stays gated by a current review, shelf rows carry no verdict. `/api/daily`
+slims each row to `item_id, stable_feed_key, title, feed_name, why` plus cached card `bullets` (cache-only
+`card.cached_bullets`); `today_exposure` logs them as members with `role="unreviewed"`; the card prewarm
+(`services/card/background.top_keys`, which reuses the one ranked pool) also covers them so the TL;DR is usually ready.
+
+**Today ranker (`_goal_rank`, ranker id `goal_cos_v1`, default).** Evidence
+(`data/perf-20261107/signal-lab/signal-lab.md`): within-day AUC on the owner's Today
+decisions is 0.635 for goal cosine vs 0.574 for the composite; pilot Spearman 0.83 vs
+0.72; metadata/quality terms added nothing. So the analyzed slate's rank key is the
+EXISTING `rank_blend.blend_scores` with `goal_weight=1.0`, no prestige term: the
+min-max of the stored `goal_sim` (max of `aux_context.goal_sims`). No new model. A row
+without `goal_sim` ranks below every evidenced row; a pool with none falls back to
+composite order. Final Today order = `(propose_verdict band, goal_cos key, newest, id)`:
+
+| layer | on Today | why |
+|---|---|---|
+| band (must/should/could from `propose_verdict`) | **kept**, primary | the visible card verdict from the full-text review; ordering against it would contradict the label |
+| `quality_bonus` (grade nudge) | **dropped** under `goal_cos_v1` | hand-set magnitudes never measured; quality already shapes the band; no measured lift |
+| `promote_band` | not on Today | Library queue only |
+| composite / prestige | not in the key | no signal beyond goal cosine |
+
+`ZS_TODAY_RANKER=composite_v1` restores the previous order (relevance×goal×prestige
+blend + quality bonus). Operational setting, strict parser (`settings.today_ranker`),
+outside review identity; its id is stamped on every `today_exposure` line (schema 2).
+**Team-draft interleaving vs composite: OFF.** `_assemble_interleaved` merges two
+*legacy* role slates and `interleave_log`/`tools/eval_interleave.py` hard-code the arms
+`a0`=control / `a2`=quality-first; the analyzed policy has no arms, so a goal-cos-vs-composite
+test needs a new arm name and log schema. Until then compare via the exposure log's ranker id.
+`selection_evidence.rank.basis` is `goal_cos` for this ranker.
+`selection_evidence.rank.goal` (both rankers, when `goal_sims` exists) is the goal text with the
+highest cosine (`_goal_match.row_goal_text`, candidate key `goal_text`): display only for the card's
+“Close to your goal “…”” line, never a ranking input; absent when the signal is unavailable.
+
+**Exploration (`_exploration`, analyzed policy only).** Up to `ZS_TODAY_EXPLORATION_SLOTS`
+(0–2, default 2) analyzed papers per local day are added from just below the bar and
+shown as `role="exploration"` ("Random check"), giving unbiased calibration data. Pool:
+`quality_excluded` with quality band `flag` only (grade D stays hidden; the former
+`no_goal_match` pool is gone with the goal check); picks up to the day limit. Pick order is the
+rendezvous hash of `(day, stable key)`; position is seeded by `(day, item id)`. Guards:
+items already shown today (`today_exposure.explored_today`) count toward the day limit
+and stay while unhandled; cards fill free slots, or displace only the lowest-ranked
+eligible card when it is not `must_read`, else the slot is dropped; the slate never
+exceeds `K`. Eligible `pool_size` is unchanged. Selection and results are logged by
+`services/triage/today_exposure`.
+
+The legacy allocator (default `policy="legacy"`) still serves the render tick; the
+browser separately retains its bounded shortlist until explicit renewal.
+`_review_status` owns the private legacy-quality parser and current-review join
+shared with fixed-member status reads. Neither primitive ranks or changes labels.
 
 Quality joins consume only deep reviews whose source and generation identity is
 still current. A join miss preserves any legacy `quality_review_json` on the
@@ -57,7 +125,9 @@ processed_feed_items ─_querying.open_ro→ rows ─drop handled ─drop trashe
 GUID) only catches the *same* RSS item. A paper re-arriving under a different
 GUID — or one the user already trashed/added, or already in the library — would
 otherwise reappear. `_fetch_primary_unhandled` (the single source consumed by
-the slate, `awaiting` counter and rescoring) drops, by **DOI/arXiv only**, any
+the slate, `awaiting` counter and rescoring) reads the filtered pool once per
+`runtime.request_memo` scope and returns private row copies (scoring mutates rows);
+the lookback window and fallback are applied per call. The pool drops, by **DOI/arXiv only**, any
 awaiting card that matches a paper in a "blocking" decision
 (`fetch_decided_content_keys`: selected / black_swan / user_approved /
 user_rejected / dedup_library / dedup_processed, or a `materialized_zotero_key`)
@@ -113,7 +183,7 @@ never surface a `dont_read`-band paper (composite < `PRIORITY_COULD_READ_THRESHO
 off-library papers and own their predicates). `DailySlate` carries two honest
 banner signals: `low_relevance_hidden` (count of dont-band candidates no role
 surfaced) and `weak_slate` (no candidate reached the `should_read` band) — the
-Today UI shows a "light week — trigger a fresh triage" note.
+API exposes these observations for the selected cohort, not a demand to fill slots.
 
 **Quality-first mode (`ZS_RANK_QUALITY_FIRST` / `quality_review.rank_quality_first`,
 default OFF).** The user's directive — *"a high-quality paper a little bit
@@ -146,10 +216,10 @@ competitive `pair_id`) is persisted to the `interleave_log` sidecar
 one recorded, so a later drifted-pool re-assembly can't mix two merges' pair_ids)
 for the SPRT scorer `tools/eval_interleave.py`. BLIND by design: `SlatePaper`
 carries no team field. Slate metadata (pool_size / hidden / weak banners) comes
-from the A0 control arm. Only the user-facing dispatch interleaves: daemon-internal
-assemblies (`feeds/_tick._auto_review_slate` / `_auto_render_slate`) pass an
-explicit `quality_first`, so a background K=10 ghost merge can never claim the
-day's log nor widen the auto-review candidate set beyond the shipped arm.
+from the A0 control arm. Only a legacy-policy call with `quality_first=None` interleaves; `/api/daily` now
+uses the analyzed policy, so the experiment no longer collects. The daemon's
+`feeds/_tick._auto_render_slate` passes an explicit `quality_first`, so a
+background merge can never claim the day's log.
 
 | file | responsibility |
 |---|---|
@@ -159,4 +229,5 @@ day's log nor widen the auto-review candidate set beyond the shipped arm.
 | `_relevance.py` | heuristic, no-LLM reason chips. `attach_why` labels a whole cohort: goal chips key on the REAL `goal_sim` with pool-relative tercile bands (self-calibrating — mirrors the frontend `goalHighKeys` idiom; no absolute cosine constant). `goal_bands` requires ≥ 3 present positive goal_sims (a tercile needs 3 points) — with fewer the bands degenerate and a lone weak value (e.g. 0.2) would read "Strong goal match" right under the `weak_slate` "Light week" banner; below 3 it returns `(None, None)`, which suppresses goal chips entirely. Library chips key on `corpus_affinity` (engagement, labeled honestly: "Like papers you've saved" / "Off your usual track"); other thresholds reuse `domain`/`surprise` constants |
 | `_allocation.py` | greedy role allocator (model / surprise / diversity slots); model + diversity picks order by `rank_score`; the model role + its fallback apply `MODEL_RELEVANCE_FLOOR` (no dont_read-band picks), surprise/diversity are un-floored. The capped deep-review QUALITY lift (`rank_blend.quality_bonus`) is added ONLY in the floored model role's sort key (`_pick_model`), never in the un-floored discovery roles — so quality permutes only within the raw-composite category slots of the base `rank_score` order, via `order_within_bands`; it cannot change that category sequence, win an un-floored slot or lift a below-bar paper. `quality_first=True` mode (`allocate`/`_pick_model` param): `_pick_model` uses the bare quality-led `rank_score`, without additive quality or category-slot restriction and `_passes_model_floor` swaps the composite floor for `relevance_score > QF_RELEVANCE_FLOOR` (2.0; `None` passes) |
 | `_selection_evidence.py` | pure JSON-safe projections of already-observed source, review, cohort and picker operations; isolates nested evidence until final DTO projection |
+| `_goal_rank.py` | Today ranker `goal_cos_v1`: `blend_scores(goal_weight=1.0)` over `goal_sim`, sets `rank_score` + `selection_evidence.rank` for the analyzed policy (`_analyzed`) |
 | `_dataclasses.py` | frozen result types (`DailySlate` — incl. `low_relevance_hidden`/`weak_slate` weak-week banner signals; `SlatePaper` — includes `abstract`, `pub_year`, `goal_sim`, and `why` chips for the Today card) |

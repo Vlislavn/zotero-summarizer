@@ -177,7 +177,7 @@ def test_base_only_scores_code_and_implementation_cannot_invent_impact_or_reprod
     class BaseOnlyClient(fixtures.ScriptedClient):
         def pydantic_prompt(self, *, pydantic_model, **kwargs):
             result = super().pydantic_prompt(pydantic_model=pydantic_model, **kwargs)
-            if pydantic_model is PaperDigest:
+            if issubclass(pydantic_model, PaperDigest):
                 return result.model_copy(update={'implementation': ['Add the benchmark'], 'novelty': 4, 'significance': 4})
             return result
 
@@ -338,7 +338,7 @@ def test_feed_loader_keeps_raw_qualified_publication_before_card_projection(
     projected = card.build_card(candidate, triage, loaded, context.profile)
     assert projected.project_assessment_status == 'assessed'
     assert projected.project_uses == ['use_as_benchmark']
-    assert projected.worth_reading == 'unknown'
+    assert projected.worth_reading == 'skip'  # the goal board no longer withholds it
     view = _review_cache.get_current_review('paper')
     assert view['digest']['grade'] == ''
     assert view['model_digest']['grade'] == grade

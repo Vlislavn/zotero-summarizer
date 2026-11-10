@@ -1,4 +1,4 @@
-"""Explicit single-owner Tailscale Serve gateway over a private Unix socket."""
+"""Explicit single-owner gateway over private Unix or consciously trusted localhost."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -38,7 +38,8 @@ def _https_origin(value: str) -> str | None:
 class MobileAccessPolicy:
     origin: str
     owner_login: str
-    socket_path: Path
+    socket_path: Path | None = None
+    trusted_loopback_port: int | None = None
 
     def __post_init__(self) -> None:
         canonical = _https_origin(self.origin)
@@ -48,17 +49,30 @@ class MobileAccessPolicy:
             ord(char) <= 32 or ord(char) == 127 for char in self.owner_login
         ):
             raise ValueError("An exact ASCII Tailscale owner login is required")
-        if not self.socket_path.is_absolute():
+        if (self.socket_path is None) == (self.trusted_loopback_port is None):
+            raise ValueError("Select exactly one private Unix socket or explicitly trusted localhost port")
+        if self.socket_path is not None and not self.socket_path.is_absolute():
             raise ValueError("Mobile gateway requires an absolute private Unix socket path")
+        if self.trusted_loopback_port is not None and (
+            type(self.trusted_loopback_port) is not int or not 1024 <= self.trusted_loopback_port <= 65535
+        ):
+            raise ValueError("Trusted localhost port must be an integer in 1024..65535")
         object.__setattr__(self, "origin", canonical)
 
     def allows(self, scope: Scope) -> bool:
-        if scope.get("client") is not None or scope.get("server") != (str(self.socket_path), None):
+        peer = scope.get("client")
+        if self.socket_path is not None:
+            if peer is not None or scope.get("server") != (str(self.socket_path), None):
+                return False
+        elif not peer or peer[0] != "127.0.0.1" or scope.get("server") != ("127.0.0.1", self.trusted_loopback_port):
             return False
         if scope.get("scheme") not in {"http", "ws"}:
             return False
         headers = Headers(scope=scope)
-        if headers.getlist("host") != ["localhost"] or "tailscale-funnel-request" in headers:
+        hosts = headers.getlist("host")
+        host_matches = (hosts == ["localhost"] if self.socket_path is not None else
+                        len(hosts) == 1 and _https_origin("https://" + hosts[0]) == self.origin)
+        if not host_matches or "tailscale-funnel-request" in headers:
             return False
         logins = headers.getlist("tailscale-user-login")
         if len(logins) != 1 or not logins[0].isascii() or not compare_digest(logins[0], self.owner_login):

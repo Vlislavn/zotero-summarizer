@@ -13,11 +13,14 @@ from __future__ import annotations
 from typing import Any
 
 from zotero_summarizer.models import GoalsConfig, PaperDigest
+from zotero_summarizer.models.digest_generation import (
+    PaperDigestGeneration, FeedDigestGeneration, _ASSESSMENT_FIELDS, _GENERATION_FIELDS,
+)
 from zotero_summarizer.integrations.llm import build_response_format
 from zotero_summarizer.services._common import extract_json_blob, to_text
-from zotero_summarizer.services.library._digest_verification import DigestVerifierUnavailable
+from zotero_summarizer.services.library._digest_verification import DigestSourceRejected, DigestVerifierUnavailable
 from zotero_summarizer.services.library import _digest_audit
-from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
+from zotero_summarizer.services.library._prompt_security import paper_block, untrusted_input
 from zotero_summarizer.services.library._review_text import select_review_text
 
 # Reinforced-retry suffix: a reasoning model (e.g. a remote endpoint) occasionally
@@ -36,6 +39,25 @@ _STRICT_RETRY_SUFFIX = (
 class DigestGenerationFailed(ValueError):
     """A returned digest cannot satisfy the publication schema."""
 
+    def __init__(self, message):
+        reasons = {
+            "digest omitted required reading or writing assessment": "digest_fields_missing",
+            "digest omitted required review content": "digest_fields_missing",
+            "new digest requires an explicit writing assessment": "digest_writing_assessment_missing",
+            "digest reading action must be read, skim or skip": "digest_reading_action_invalid",
+            "read/skim requires a reason and exact target": "digest_reading_target_missing",
+            "read/skim requires original-only value and positive minutes": "digest_original_value_missing",
+        }
+        self.reason_code = reasons.get(message, "digest_schema_invalid")
+        super().__init__(message)
+
+
+def _decoder_kwargs(response_model, response_format):
+    if not response_format:
+        return {}
+    selected = build_response_format(response_model) if response_format.get('type') == 'json_schema' else response_format
+    return {'response_format': selected}
+
 
 def _coerce_digest(raw: Any) -> PaperDigest:
     """Build a ``PaperDigest`` from an LLM reply, salvaging prose-embedded/fenced JSON.
@@ -44,12 +66,10 @@ def _coerce_digest(raw: Any) -> PaperDigest:
         digest = raw if isinstance(raw, PaperDigest) else PaperDigest.model_validate(extract_json_blob(to_text(raw)))
     except ValueError as exc:
         raise DigestGenerationFailed(str(exc)) from exc
-    required = {
-        "read_decision", "read_why", "read_parts", "skip_parts",
-        "estimated_read_minutes", "original_value", "writing_friction", "writing_reasons",
-    }
-    if not required <= digest.model_fields_set:
+    if not set(_ASSESSMENT_FIELDS) <= digest.model_fields_set:
         raise DigestGenerationFailed("digest omitted required reading or writing assessment")
+    if not set(_GENERATION_FIELDS) <= digest.model_fields_set:
+        raise DigestGenerationFailed("digest omitted required review content")
     if digest.writing_friction is None:
         raise DigestGenerationFailed("new digest requires an explicit writing assessment")
     if digest.read_decision not in {"read", "skim", "skip"}:
@@ -64,19 +84,21 @@ def _coerce_digest(raw: Any) -> PaperDigest:
 
 def _verify_generated_digest(
     digest: PaperDigest, text: str, verifier: Any, generator: Any, goals: str, *, attempt: dict,
+    claims: list[str] | None = None,
 ) -> Any:
     from zotero_summarizer.services.library._digest_verification import verify_digest
     from zotero_summarizer.services.library._review_attempt import record
 
+    only = {} if claims is None else {'only_claims': claims}
     try:
-        checks = verify_digest(digest, text, verifier, research_goals=goals)
+        checks = verify_digest(digest, text, verifier, research_goals=goals, **only)
     except DigestVerifierUnavailable:
         attempt['unavailable_routes'] = ['primary']
         if verifier is generator:
             raise
         record('verifier_fallback', {'availability': 'generator_fallback'}, kind='identity')
         attempt['verifier_route'] = 'generator_fallback'
-        checks = verify_digest(digest, text, generator, research_goals=goals)
+        checks = verify_digest(digest, text, generator, research_goals=goals, **only)
     attempt['verifier_repairs'] = getattr(checks, '_repair_attempts', 0)
     return checks
 
@@ -90,7 +112,7 @@ _DEFAULT_DIGEST_PROMPT = (
     "from now.\n\n"
     "### ANTI-FABRICATION — the single most important rule\n"
     "Write ONLY numbers, percentages, metrics, dataset names, URLs and named entities that "
-    "appear VERBATIM in the paper text below. Before you write ANY number or percentage, "
+    "appear VERBATIM in the paper text above. Before you write ANY number or percentage, "
     "confirm it is literally present in the text; if it is not there, DO NOT write it. "
     "If the paper reports no quantitative results (e.g. a perspective/position paper), then "
     "`key_findings` MUST be qualitative or empty — NEVER invent statistics like '45%' or "
@@ -101,7 +123,7 @@ _DEFAULT_DIGEST_PROMPT = (
     "field, leave it empty (\"\") or neutral. Be terse: each text field is ONE short sentence "
     "(<=25 words); lists hold at most 3 brief bullets. No fluff, do not restate the title.\n\n"
     "The reader's research goals: {research_goals}\n\n"
-    "Title: {title}\n\nFull text (may be truncated):\n{full_text}\n\n"
+    "Title: {title}\n\nFull text: {full_text}\n\n"
     "Review like a referee: pin down the main CONTRIBUTION, weigh the EVIDENCE behind "
     "the central claim, compare NOVELTY against prior work, and judge whether the "
     "experiments actually support the conclusions. Then return a single strict JSON "
@@ -132,7 +154,9 @@ _DEFAULT_DIGEST_PROMPT = (
     '- "relevance": how it connects to the reader\'s research goals above (one sentence; "" if none).\n'
     '- "controversies": the most debatable claim and why it is contestable (one sentence; "" if none).\n'
     '- "impact": likely effect on the field if the claims hold (one sentence).\n'
-    '- "unknown_unknowns": a useful implication the reader likely did not consider (one sentence).\n'
+    '- "unknown_unknowns": a non-obvious consequence of stated paper facts (one sentence). '
+    'When uncertainty matters, state what the reported evidence does not establish, rather than '
+    'hypothesizing a new failure or risk. Do not imply that described safeguards are absent.\n'
     '- "implementation": concrete reusable steps/artifacts only (<=3 bullets; [] if unsupported).\n'
     '- "executive_summary": 3-5 sentence neutral overview — what the paper is, its contribution, the headline result.\n'
     '- "key_findings": up to 5 concrete findings, each with its metric/number when stated (list of short strings).\n'
@@ -167,8 +191,8 @@ def _digest_prompt(template: str, title: str, text: str, goals: str, focus_promp
         "Review the supplied evidence; do not claim it was never retrieved. "
         "Source-stated limitations of external resources may still be reported faithfully.\n\n"
     )
-    prompt = UNTRUSTED_INPUT_RULE + "\n\n" + supplied_source_rule + template.format(
-        title=untrusted_input(title or "Untitled"), full_text=untrusted_input(text),
+    prompt = paper_block(text) + supplied_source_rule + template.format(
+        title=untrusted_input(title or "Untitled"), full_text="(the paper text is given at the start of this message)",
         research_goals=untrusted_input(goals),
     )
     if focus_prompt:
@@ -183,6 +207,42 @@ def _verification_attempt(digest: PaperDigest, correction: bool) -> dict:
     payload = _digest_audit.digest_contract_payload(digest)
     return {'digest_sha256': _digest_audit.canonical_hash(payload),
             'correction': correction, 'verifier_route': 'primary'}
+
+
+def _verification_tools(source_text: str, verifier: Any, llm: Any, goals: str, response_format: Any) -> tuple[Any, Any]:
+    """``(verify(digest, attempt, claims=None), call(prompt, model))`` bound to one review's source and clients."""
+    from zotero_summarizer.services.library._review_attempt import observed_client
+
+    def verify(digest, attempt, claims=None):
+        return _verify_generated_digest(digest, source_text, verifier, llm, goals, attempt=attempt, claims=claims)
+
+    def call(prompt, model, *, reasoning=True):
+        # first repair attempt: the no-reasoning verifier-class client; the escalation uses the digest client
+        return observed_client(llm if reasoning else verifier, 'correction').pydantic_prompt(
+            prompt=prompt, pydantic_model=model, **_decoder_kwargs(model, response_format))
+
+    return verify, call
+
+
+def _verified_or_repaired(digest: PaperDigest, lineage: list[dict], prompt: str, verify: Any, call: Any) -> tuple[PaperDigest, Any]:
+    """Verify ``digest``; on a source rejection repair only the rejected fields (#130).
+    ``lineage`` is extended with the correction attempt when a repair ran."""
+    from zotero_summarizer.services.library._field_repair import repair_digest
+
+    try:
+        return digest, verify(digest, lineage[-1])
+    except DigestSourceRejected as exc:
+        lineage[-1].update(outcome='support_not_established', failure_kind=exc.failure_kind)
+        lineage.append(_verification_attempt(digest, True))
+        before, repair_log = digest, {}
+        digest, checks, not_established = repair_digest(
+            digest, exc, prompt=prompt, call=call, verify=lambda d, claims: verify(d, lineage[-1], claims), log=repair_log)
+        lineage[-1].setdefault('verifier_repairs', 0)  # no verify call may have succeeded on this row
+        adjusted = {f: [getattr(before, f), getattr(digest, f)] for f in ('read_decision', 'writing_friction')
+                    if getattr(before, f) != getattr(digest, f)}
+        lineage[-1].update(digest_sha256=_verification_attempt(digest, True)['digest_sha256'],
+                           not_established_fields=not_established, **repair_log, **({'adjusted_fields': adjusted} if adjusted else {}))
+        return digest, checks
 
 
 def assess_digest(
@@ -244,19 +304,21 @@ def assess_digest(
     # also fails, the error RAISES, caught at deep_review's per-item boundary and surfaced
     # (never a fabricated review). ``response_format`` (decoder-level constraint) makes a
     # parse failure rare on a supporting endpoint, but the retry still re-asks with it.
-    response_model = PaperDigest
-    extra = {"response_format": response_format} if response_format else {}
+    response_model = PaperDigestGeneration
+    extra = _decoder_kwargs(response_model, response_format)
     if feed_context is not None:
-        from zotero_summarizer.models.research_feed import FeedDigestResponse
         from zotero_summarizer.services.library import _feed_assessment
-        response_model = FeedDigestResponse
+        response_model = FeedDigestGeneration
         prompt, extra = _feed_assessment.response_contract(prompt, response_format, feed_context)
 
     def coerce(raw):
-        if feed_context is not None and not isinstance(raw, response_model):
-            raw = response_model.model_validate(raw.model_dump(exclude_unset=True) if isinstance(raw, PaperDigest)
-                                                else extract_json_blob(to_text(raw)))
-        return _coerce_digest(raw)
+        digest = _coerce_digest(raw)
+        if feed_context is not None:
+            if not isinstance(raw, response_model):
+                raw = response_model.model_validate(raw.model_dump(exclude_unset=True) if isinstance(raw, PaperDigest)
+                                                    else extract_json_blob(to_text(raw)))
+            return raw
+        return digest
 
     parse_retry = False
     try:
@@ -272,20 +334,8 @@ def assess_digest(
     verifier = verifier_llm or llm
     lineage = [_verification_attempt(digest, False)]
     lineage[0]['generation_parse_retry'] = parse_retry
-    try:
-        checks = _verify_generated_digest(digest, source_text, verifier, llm, goals, attempt=lineage[-1])
-    except DigestVerifierUnavailable:
-        raise
-    except ValueError as exc:
-        lineage[-1].update(outcome='support_not_established',
-                           failure_kind=getattr(exc, 'failure_kind', 'verification_rejection'))
-        prompt += "\n\nThe previous digest failed source verification: " + str(exc) + "\nReturn a corrected, fully source-grounded JSON digest only."
-        correction = observed_client(llm, 'correction').pydantic_prompt(
-            prompt=prompt, pydantic_model=response_model, **extra,
-        )
-        digest = coerce(correction).model_copy(update={"basis": "full_text"})
-        lineage.append(_verification_attempt(digest, True))
-        checks = _verify_generated_digest(digest, source_text, verifier, llm, goals, attempt=lineage[-1])
+    verify, call = _verification_tools(source_text, verifier, llm, goals, response_format)
+    digest, checks = _verified_or_repaired(digest, lineage, prompt, verify, call)
     lineage[-1]['outcome'] = 'accepted'
     if verification_audit is not None:
         verification_audit.update(_digest_audit.build_verification_audit(digest, checks, source, lineage))

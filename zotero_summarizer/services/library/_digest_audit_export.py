@@ -159,7 +159,11 @@ def _validate_audit(entry: dict, audit: dict) -> None:
     _validate_lineage(audit)
 
 
-def retained_audit_status(entry: dict, *, current_identity: dict | None = None) -> tuple[str, str]:
+def retained_audit_status(entry: dict, *, current_identity: dict | None = None,
+                          older_rules_ok: bool = False) -> tuple[str, str]:
+    """``older_rules_ok``: skip ONLY the extraction/verifier-contract hash match (every
+    other binding, incl. source bytes, must still hold) — for showing quotes as 'checked
+    under older rules'."""
     if entry.get('digest') is not None and not isinstance(entry['digest'], dict):
         raise ValueError('Invalid cached digest')
     audit = entry.get('verification_audit')
@@ -176,7 +180,7 @@ def retained_audit_status(entry: dict, *, current_identity: dict | None = None) 
         if not intact or not bound:
             return 'stale', 'cached_artifact_changed'
         current = all(identity[key] == value for key, value in contract_hashes().items())
-        if not current:
+        if not current and not older_rules_ok:
             return 'stale', 'audit_contract_changed'
         if reading_policy_inputs_hash(entry) != identity['reading_policy_inputs_sha256']:
             return 'stale', 'reading_policy_inputs_changed'

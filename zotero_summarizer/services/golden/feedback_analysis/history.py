@@ -31,6 +31,9 @@ TABLE_COLUMNS = {
     "feed_key_aliases": {"old_key", "stable_feed_key"},
     "feed_key_alias_ambiguities": {"old_key", "stable_feed_keys_json"},
 }
+# Bulk text columns the analysis never reads; selecting them blew the decoded-byte budget on a real DB.
+UNUSED_COLUMNS = {"processed_feed_items": {"abstract", "shap_contribs_json", "quality_review_json",
+                                           "matched_collections_json"}}
 REQUIRED_TABLES = {"triage_results", "user_feedback", "label_verdicts"}
 EVENT_KINDS = {"human_feedback", "label_transition", "outcome_resolved"}
 
@@ -101,7 +104,8 @@ def _read_tables(destination, manifest, guard, state):
                 raise ValueError(f"incompatible optional or required retained table: {table}")
             identity = "revision" if table == "sync_changes" else "id" if "id" in columns else sorted(required)[0]
             count = 0
-            for row in conn.execute(f'SELECT * FROM "{table}" ORDER BY "{identity}"'):
+            selected = ", ".join(f'"{c}"' for c in sorted(columns - UNUSED_COLUMNS.get(table, set())))
+            for row in conn.execute(f'SELECT {selected} FROM "{table}" ORDER BY "{identity}"'):
                 data = dict(row)
                 locator = {"path": manifest["sources"]["triage_db"]["path"], "table": table,
                            "row": data[identity]}

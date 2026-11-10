@@ -116,6 +116,10 @@ class AppLibraryReader:
             "date_modified": str(processed.get("updated_at") or ""),
         }
 
+    def get_pdf_paths(self, item_keys: list[str]) -> dict[str, str | None]:
+        """Feed papers have no local Zotero attachment (see ``get_item_detail``)."""
+        return dict.fromkeys(item_keys)
+
     @staticmethod
     def _row_to_item(row: dict[str, Any], *, include_abstract: bool) -> dict[str, Any]:
         item = {

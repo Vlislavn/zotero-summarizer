@@ -373,7 +373,7 @@ def test_model_floor_boundaries_do_not_become_discovery_gates(
 def test_empty_interleave_still_reports_common_root_policy_and_old_empty_state(tmp_path, monkeypatch):
     db = tmp_path / "empty.db"
     _create_db(db)
-    monkeypatch.setattr(deep_review, "current_reviews", lambda: {})
+    monkeypatch.setattr(deep_review, "usable_reviews", lambda: {})
     monkeypatch.setattr(daily, "rank_interleave_enabled", lambda: True)
     monkeypatch.setattr(allocator, "band_primary_enabled", lambda: False)
     slate = daily.assemble_daily_slate(db_path=db, K=5, now=_DEFAULT_NOW)

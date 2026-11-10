@@ -31,8 +31,25 @@ queues suggested Zotero changes for you to approve.
 | `domain.py` | Pure constants/helpers — the single source for priority thresholds, `score_to_priority`/`PRIORITY_TO_RELEVANCE` (derivation == prediction), `apply_prestige_floor` (demote-one-band quality floor on the top bands; unknown prestige → keep; raw score untouched), the `label:<priority>` ground-truth tag helpers (`LABEL_TAG_PREFIX`, `label_tag_for_priority`, `priority_from_label_tag` — shared by the golden read path and the zotero write path), `normalize_doi`/`normalize_arxiv_id` (bare, version-stripped, lower-cased ids — the single source of truth for DOI/arXiv dedup comparison), and the `label_verdicts` provenance tags `VERDICT_SOURCE_USER`/`VERDICT_SOURCE_MACHINE_ADD` (single source shared by the triage write path and the golden/storage read path — only `machine_add` PROVISIONAL verdicts may be superseded by an observed materialization outcome at training time; explicit user verdicts always win) |
 | `contracts.py` | Small shared dataclasses (e.g. `PendingChange`) |
 | `settings.py` | `Settings.load()` — every path (incl. `data_dir`) derives from here; blank `ZOTERO_DATA_DIR` falls back to `~/Zotero` rather than resolving to the checkout, e.g. `browser_profile_dir` (`data/browser_profile`) for the review fleet's university-access browser session, `interaction_log_path` (`data/interaction-events.jsonl`) for the append-only agentic interaction log (`services.interaction_log`), and `search_dir` (`data/search`) for Targeted Search research sessions (`services.search`) |
-| `runtime.py` | `AppContext` + typed `RuntimeState` — how services reach runtime deps without FastAPI globals. Client resolution and disabled-AI 409 errors belong to `services.llm.factory`; ML-only services remain available. `RuntimeState.classifier_gate_error` mirrors `zotero_error` so readiness reports why the gate is unavailable. Optional metadata clients: `openalex_client` / `unpaywall_client` / `openreview_client` |
+| `runtime.py` | `AppContext` + typed `RuntimeState` — how services reach runtime deps without FastAPI globals. Client resolution and disabled-AI 409 errors belong to `services.llm.factory`; ML-only services remain available. `RuntimeState.classifier_gate_error` mirrors `zotero_error` so readiness reports why the gate is unavailable. Optional metadata clients: `openalex_client` / `unpaywall_client` / `openreview_client`; `request_memo()`/`memoized(key, compute)` scope per-request computations (never a cross-request cache) |
 | `models/config.py` | `QualityReviewConfig` carries tier-aware deep-review cost knobs: `self_consistency_runs`/`lean_self_consistency_runs`/`lean_max_text_chars`/`batch_goal_summaries` — a provider flagged `lean_deep_review` (ollama) uses the cheaper caps + a batched goal-summary call; every other provider (incl. MLX) uses the full settings. Keyed on the provider flag, not `is_local` |
+
+`RuntimeState.config_disk_revision` holds only the hash of loaded/published config
+bytes. Lifecycle/config owners stamp it; connection/full-config edits refuse when
+another process changed disk behind the runtime. It is not a secret revision,
+external-writer lock or permission to reload model resources automatically.
+
+## Retaining a classifier during deployment
+
+Set `ZS_AUTOMATIC_GATE_UPDATES=0` for a server/daemon process to retain its cached
+classifier without startup/per-tick retraining or startup slate rescoring. The
+setting is read after the selected project's `.env` loads; accepted values are
+`0`/`false` and `1`/`true` (default: enabled, preserving ordinary launches).
+An enabled gate requires a compatible cached artifact in this mode; missing or
+incompatible artifacts fail instead of silently starting training. Loading the
+cached artifact does not require a golden CSV when automatic updates are off.
+Explicit training, rescore and goal-change commands retain their existing effects.
+This is not an inference-disable switch or proof of model/input quality.
 
 ## Model-client cache ownership
 
