@@ -18,6 +18,7 @@ vi.mock('../components/setup/StepDescribeResearch.jsx', () => ({ default: ({ dra
 vi.mock('../components/setup/StepDone.jsx', () => ({ default: () => <h3>Setup saved</h3> }));
 
 import SetupFlow from './SetupFlow.jsx';
+import { configToFormState } from '../utils/configForm.js';
 
 const config = {
   llm_enabled: true,
@@ -32,13 +33,64 @@ const config = {
 };
 
 beforeEach(() => {
+  const storage = new Map();
+  vi.stubGlobal('localStorage', { getItem: key => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, String(value)), clear: () => storage.clear() });
   Object.values(api).forEach((mock) => mock.mockReset());
   api.fetchConfig.mockResolvedValue(config);
   api.fetchAiPresets.mockResolvedValue({ local_profiles: { profiles: [{ id: 'existing', compatible: true }] } });
   api.validateSetup.mockResolvedValue({ valid: true, field_errors: [] });
   api.updateConfig.mockImplementation(async (payload) => ({ config: payload }));
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+it.each(['invalid existing configuration', 'missing configuration'])('makes %s terminal, repairable and skippable without inventing a model', async message => {
+  api.fetchConfig.mockRejectedValue(new Error(message));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><MemoryRouter><SetupFlow /></MemoryRouter></QueryClientProvider>);
+  expect(await screen.findByText(new RegExp(message))).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Open connection and configuration recovery' }).getAttribute('href')).toBe('/settings#ai-models');
+  expect(screen.getByRole('button', { name: 'Skip for now' }).disabled).toBe(false);
+  expect(screen.queryByText('Preparing setup…')).toBeNull();
+  expect(api.updateConfig).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }));
+  expect(screen.queryByText('Preparing setup…')).toBeNull();
+  client.clear();
+});
+
+it('resumed setup retains its original revision rather than overwriting newer connection choices', async () => {
+  const original = { ...config, _revision: 'r1', llm_enabled: false, research_goals: ['Local setup draft'] };
+  const latest = { ...config, _revision: 'r2', research_goals: ['New saved research'] };
+  window.localStorage.clear();
+  window.localStorage.setItem('zs_setup_progress_v1', JSON.stringify({ mode: 'none', step: 3, revision: 'r1', draft: configToFormState(original) }));
+  api.fetchConfig.mockResolvedValue(latest);
+  api.updateConfig.mockRejectedValue(new Error('HTTP 409: stale configuration'));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  render(<QueryClientProvider client={client}><MemoryRouter><SetupFlow /></MemoryRouter></QueryClientProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Finish' }));
+  // The existing humanizeError owner removes the transport prefix for display.
+  expect(await screen.findByText('stale configuration')).toBeTruthy();
+  expect(api.updateConfig.mock.calls[0][0]._revision).toBe('r1');
+  expect(screen.getByLabelText('Research goal').value).toBe('Local setup draft');
+  fireEvent.click(screen.getByRole('button', { name: 'Discard setup draft and load saved settings' }));
+  await waitFor(() => expect(screen.getByLabelText('Research goal').value).toBe('New saved research'));
+  client.clear(); window.localStorage.clear();
+});
+
+it('cannot publish an old resumed provider DTO through Finish', async () => {
+  const saved = { ...config, _revision: 'r1', research_goals: ['Saved research'] };
+  const draft = configToFormState(saved);
+  draft.llm_routing.providers[0].base_url = 'https://example.invalid/changed';
+  window.localStorage.setItem('zs_setup_progress_v1', JSON.stringify({ mode: 'hosted', step: 3, revision: 'r1', draft }));
+  api.fetchConfig.mockResolvedValue(saved);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><MemoryRouter><SetupFlow /></MemoryRouter></QueryClientProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Finish' }));
+  expect(await screen.findByText('Connection changes must be saved through Connect, impact and Use as default before finishing Setup.')).toBeTruthy();
+  expect(api.updateConfig).not.toHaveBeenCalled();
+  expect(saved.llm_routing.providers[0].base_url).toBe(config.llm_routing.providers[0].base_url);
+  client.clear();
+});
 
 it('completes ML-only setup after validation and saves the personalized goal', async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });

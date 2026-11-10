@@ -63,6 +63,29 @@ it.each([false, true])('URL wins an old stored pointer, including blocked storag
   expect(requests.every(r => !r.init.method)).toBe(true);
 });
 
+it('shows pending restored session reads without blocking a replacement search', async () => {
+  const restored = deferred(), retried = deferred();
+  let reads = 0;
+  const { requests } = mount(() => ++reads === 1 ? restored.promise : retried.promise);
+  await waitFor(() => expect(requests).toHaveLength(1));
+
+  expect(screen.getByRole('status').textContent).toBe('Waiting for the current request…');
+  fireEvent.change(screen.getByLabelText('Search query'), { target: { value: 'replacement topic' } });
+  expect(screen.getByRole('button', { name: 'Search', exact: true }).disabled).toBe(false);
+  await act(async () => restored.resolve(reply({ error: 'fixture_restore_failed' }, 503)));
+  expect(screen.queryByRole('status')).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Retry session status' }));
+  await waitFor(() => expect(requests).toHaveLength(2));
+  expect(screen.getByRole('status').textContent).toBe('Waiting for the current request…');
+  expect(requests.every(request => !request.init.method)).toBe(true);
+  await act(async () => retried.resolve(reply(session())));
+
+  expect(screen.getByRole('heading', { name: 'Find new relevant · Fixture seed' })).toBeTruthy();
+  expect(screen.getByRole('status').textContent).toBe('Session: discovery_ready · Freshness: current');
+  expect(screen.queryByText('Waiting for the current request…')).toBeNull();
+});
+
 it('shows three ordered recommendations, retains the pool, and separates review/unknown membership/evidence', async () => {
   const { requests } = mount(async () => reply(session()));
   await screen.findByRole('heading', { name: 'Find new relevant · Fixture seed' });

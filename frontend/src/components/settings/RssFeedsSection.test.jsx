@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import RssFeedsSection from './RssFeedsSection.jsx';
 
 const SOURCES = [
@@ -21,7 +22,9 @@ function mount() {
   client = new QueryClient({ defaultOptions: {
     queries: { retry: false, refetchOnWindowFocus: false }, mutations: { retry: false },
   } });
-  return render(<QueryClientProvider client={client}><RssFeedsSection /></QueryClientProvider>);
+  const view = render(<QueryClientProvider client={client}><MemoryRouter><RssFeedsSection /></MemoryRouter></QueryClientProvider>);
+  fireEvent.click(screen.getByText('Suggested engineering feeds (optional)'));
+  return view;
 }
 
 beforeEach(() => {
@@ -51,6 +54,7 @@ it('explicitly adds both exact sources via the common RSS API, preserving a cust
   mount();
   await screen.findByText('No RSS feeds saved.');
   expect(fetch.mock.calls.every(([, options]) => !options.method)).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Add subscription' }));
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'My custom source' } });
   fireEvent.change(screen.getByLabelText('URL'), { target: { value: 'https://example.org/feed' } });
 
@@ -66,6 +70,15 @@ it('explicitly adds both exact sources via the common RSS API, preserving a cust
   expect(screen.getAllByText('Not refreshed yet')).toHaveLength(2);
   expect(screen.getByRole('link', { name: 'Today → Triage backlog' }).getAttribute('href')).toBe('/today');
   expect(fetch.mock.calls.some(([path]) => path === '/api/rss/refresh')).toBe(false);
+});
+
+it('keeps row actions short while retaining their source identity as accessible names', async () => {
+  feeds = [{ id: 1, ...SOURCES[0], enabled: true }];
+  mount();
+  const edit = await screen.findByRole('button', { name: `Edit ${SOURCES[0].name}` });
+  expect(edit.textContent).toBe('Edit');
+  expect(screen.getByRole('button', { name: `Delete ${SOURCES[0].name}` }).textContent).toBe('Delete');
+  expect(fetch.mock.calls.some(([, options]) => options.method)).toBe(false);
 });
 
 it('does not duplicate or re-enable an existing disabled source', async () => {
@@ -91,7 +104,7 @@ it('blocks additional subscriptions while an add is pending', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Add HackerNoon AI Agents' }));
 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Add HackerNoon Agentic AI' }).disabled).toBe(true));
-  expect(screen.getByRole('button', { name: 'Add feed' }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: 'Add subscription' }).disabled).toBe(true);
   expect(screen.getByRole('button', { name: 'Adding HackerNoon AI Agents…' }).disabled).toBe(true);
   finish();
   await screen.findByText(/Feed saved/);
@@ -124,7 +137,7 @@ it('reports zero returned items without claiming a triage or a successful story'
 
   await screen.findByText('Checked 2 feeds: 0 new, 0 updated. No items stored in this pass.');
   const call = fetch.mock.calls.find(([path]) => path === '/api/rss/refresh');
-  expect(JSON.parse(call[1].body)).toEqual({ max_feeds: 10, max_new_items_per_feed: 25 });
+  expect(JSON.parse(call[1].body)).toEqual({ max_feeds: 10 });
   expect(fetch.mock.calls.some(([path]) => path.includes('triage-backlog'))).toBe(false);
 });
 
@@ -147,7 +160,8 @@ it('reloads persisted feed errors even when every refresh fails, and clears the 
   await screen.findByText('Not refreshed yet');
   fireEvent.click(screen.getByRole('button', { name: 'Refresh RSS now' }));
 
-  await screen.findByText('Last error: HTTPStatusError: 403 Forbidden');
+  const issue = await screen.findByText('Last source issue: HTTPStatusError: 403 Forbidden');
+  expect(issue.classList.contains('text-rose-700')).toBe(true);
   expect(screen.getByText('Last checked: 2026-10-08T12:00:00Z')).toBeTruthy();
   refresh = () => {
     feeds = [{ ...feeds[0], last_error: null }];
@@ -155,18 +169,40 @@ it('reloads persisted feed errors even when every refresh fails, and clears the 
   };
   fireEvent.click(screen.getByRole('button', { name: 'Refresh RSS now' }));
   await screen.findByText(/Checked 1 feed: 0 new, 0 updated/);
-  await waitFor(() => expect(screen.queryByText(/Last error:/)).toBeNull());
+  await waitFor(() => expect(screen.queryByText(/Last source issue:/)).toBeNull());
   expect(screen.queryByText(/RSS refresh failed/)).toBeNull();
+});
+
+it.each([0, 1])('retains the typed nonfatal source warning separately from %s committed items', async inserted => {
+  const warning = 'RssNamespaceWarning: Parsed feed has 1 undeclared XML namespace prefixes; repair the source XML.';
+  feeds = [{ id: 1, ...SOURCES[0], enabled: true }];
+  refresh = () => {
+    feeds = [{ ...feeds[0], last_error: warning, last_fetched_at: '2026-10-31T00:00:00Z' }];
+    return response({ feeds: 1, inserted, updated: 0, errors: [] });
+  };
+  const view = mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Refresh RSS now' }));
+  const notice = `Checked 1 feed: ${inserted} new, 0 updated.${inserted ? '' : ' No items stored in this pass.'}`;
+  await screen.findByText(notice);
+  const issue = await screen.findByText(`Last source issue: ${warning}`);
+  expect(issue.classList.contains('text-amber-800')).toBe(true);
+  expect(issue.classList.contains('text-rose-700')).toBe(false);
+  view.unmount();
+  client.clear();
+  mount();
+  expect((await screen.findByText(`Last source issue: ${warning}`)).classList.contains('text-amber-800')).toBe(true);
 });
 
 it('retains the ordinary custom-feed save flow', async () => {
   mount();
   await screen.findByText('No RSS feeds saved.');
+  fireEvent.click(screen.getByRole('button', { name: 'Add subscription' }));
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Custom source' } });
   fireEvent.change(screen.getByLabelText('URL'), { target: { value: 'https://example.org/feed' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Add feed' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save subscription' }));
 
-  await waitFor(() => expect(screen.getAllByLabelText('Name')[0].value).toBe(''));
+  await screen.findByText('Custom source');
+  expect(screen.queryByLabelText('Name')).toBeNull();
   expect(feeds).toEqual([{ id: 1, source: 'app', name: 'Custom source', url: 'https://example.org/feed', enabled: true }]);
 });
 
@@ -215,7 +251,7 @@ it('keeps partial failure distinct from a clean refresh and reloads its persiste
   fireEvent.click(screen.getByRole('button', { name: 'Refresh RSS now' }));
 
   await screen.findByText('Checked 2 feeds: 1 new, 1 updated. 1 feed(s) failed — see their errors below.');
-  await screen.findByText('Last error: 403 Forbidden');
+  await screen.findByText('Last source issue: 403 Forbidden');
   expect(screen.getByText('Last checked: 2026-10-22T12:00:00Z')).toBeTruthy();
 });
 
@@ -256,15 +292,15 @@ it('serializes preset subscriptions with custom save, delete and import controls
     return original(path, options);
   });
   mount();
-  await screen.findByRole('button', { name: 'Save' });
-  fireEvent.change(screen.getAllByLabelText('Name')[0], { target: { value: 'Draft' } });
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Custom feed' }));
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Draft' } });
   fireEvent.change(screen.getAllByLabelText('URL')[0], { target: { value: 'https://example.org/draft' } });
   fireEvent.click(screen.getByRole('button', { name: 'Add HackerNoon AI Agents' }));
 
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Save' }).disabled).toBe(true));
-  expect(screen.getByRole('button', { name: 'Delete' }).disabled).toBe(true);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save subscription' }).disabled).toBe(true));
+  expect(screen.getByRole('button', { name: 'Delete Custom feed' }).disabled).toBe(true);
   expect(screen.getByRole('button', { name: 'Import feeds from Zotero' }).disabled).toBe(true);
-  expect(screen.getByRole('button', { name: 'Add feed' }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: 'Add subscription' }).disabled).toBe(true);
   finish();
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Save' }).disabled).toBe(false));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save subscription' }).disabled).toBe(false));
 });

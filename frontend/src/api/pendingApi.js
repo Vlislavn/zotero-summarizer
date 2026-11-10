@@ -8,6 +8,12 @@ export async function fetchPending({ status = 'pending', limit = 500 } = {}) {
   return request(`/api/pending?${qs.toString()}`);
 }
 
+/** GET /api/pending/count -> number of changes still queued for Zotero (header status). */
+export async function fetchPendingCount({ status = 'pending' } = {}) {
+  const data = await request(`/api/pending/count?status=${encodeURIComponent(status)}`);
+  return Number.isInteger(data?.count) ? data.count : null;
+}
+
 /** POST /api/pending/apply with explicit displayed approval hashes. */
 export async function applyPending(changeIds, { previews, force = false, retry = false }) {
   if (!previews || typeof previews !== 'object' || Array.isArray(previews) || !Object.keys(previews).length) {

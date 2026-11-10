@@ -68,7 +68,7 @@ describe('orthogonal reviewed signals', () => {
     expect(html).toContain('Argument quality (Wachsmuth)');
     expect(html).toContain('2/4 applicable items met');
     expect(html).not.toContain('Quality A');
-    expect(html).toContain(props.compact ? '>C</span>' : 'Quality C');
+    expect(html).toContain(props.compact ? '>C · 2 of 4 checks</span>' : 'Quality C · 2 of 4 checks');
     expect(html).not.toContain('Ablations isolate');
     expect(html).not.toContain('Validated on independent');
     expect(html).not.toContain('≥6 grounded');
@@ -137,7 +137,8 @@ describe('orthogonal reviewed signals', () => {
     const deep = { digest, quality, zotero_note_written: true, zotero_note_error: 'Historical note error.' };
     const before = JSON.stringify(deep);
     const html = renderToStaticMarkup(<PaperReview deep={deep} flat />);
-    expect(html).toContain('note not written: Historical note error.');
+    expect(html).toContain('Zotero note not written');
+    expect(html).toContain('Historical note error.');
     expect(html).not.toContain('saved to Zotero');
     expect(JSON.stringify(deep)).toBe(before);
   });

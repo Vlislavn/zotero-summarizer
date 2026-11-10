@@ -2,15 +2,16 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { focusManager, onlineManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { fetchConfig, getJob, refreshLabels, retrain } from '../api/settingsApi.js';
+import { fetchConfig, fetchModelCard, getJob, refreshLabels, retrain } from '../api/settingsApi.js';
 import AdminSection from './AdminSection.jsx';
 
-vi.mock('../api/settingsApi.js', () => ({ fetchConfig: vi.fn(), getJob: vi.fn(), refreshLabels: vi.fn(), retrain: vi.fn() }));
+vi.mock('../api/settingsApi.js', () => ({ fetchConfig: vi.fn(), fetchModelCard: vi.fn(), getJob: vi.fn(), refreshLabels: vi.fn(), retrain: vi.fn() }));
 let client;
 beforeEach(() => {
   vi.useFakeTimers();
   vi.resetAllMocks();
   fetchConfig.mockResolvedValue({ classifier_gate: { model_name: 'logreg' } });
+  fetchModelCard.mockResolvedValue({ model: null });
   refreshLabels.mockResolvedValue({ ok: true });
   retrain.mockResolvedValue({ job_id: 'job-current', status: 'running' });
 });
@@ -39,6 +40,8 @@ async function start() {
   render(<QueryClientProvider client={client}><AdminSection /></QueryClientProvider>);
   await tick();
   fireEvent.click(screen.getByRole('button', { name: 'Retrain model' }));
+  await tick();
+  fireEvent.click(screen.getByRole('button', { name: 'Replace model and retrain' }));
   await tick();
 }
 

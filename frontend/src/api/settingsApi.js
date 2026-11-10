@@ -47,12 +47,19 @@ export async function request(path, options = {}) {
   return res.json();
 }
 
-/**
- * GET /api/config
- * Returns the current GoalsConfig as a plain object.
- */
+function savedSnapshot(config) {
+  const textList = value => Array.isArray(value) && value.every(item => typeof item === 'string');
+  if (typeof config?._revision !== 'string' || !config._revision || typeof config.llm_enabled !== 'boolean'
+    || typeof config.output_language !== 'string' || !textList(config.research_goals) || !textList(config.triage_criteria)
+    || !config.llm_routing || typeof config.llm_routing !== 'object' || Array.isArray(config.llm_routing)
+    || !Array.isArray(config.llm_routing.providers)) {
+    throw new Error('Saved configuration response is incomplete. No defaults or new revision were inferred; read the saved settings again.');
+  }
+  return config;
+}
+
 export async function fetchConfig() {
-  return request(CONFIG_BASE);
+  return savedSnapshot(await request(CONFIG_BASE));
 }
 
 /**
@@ -64,10 +71,10 @@ export async function updateConfig(payload) {
   if (!payload || typeof payload !== 'object') {
     throw new Error('updateConfig: payload must be an object');
   }
-  return request(CONFIG_BASE, {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  });
+  const response = await request(CONFIG_BASE, { method: 'PUT', body: JSON.stringify(payload) });
+  if (response?.status !== 'ok') throw new Error('Save not confirmed. Read saved settings before another write.');
+  savedSnapshot(response.config);
+  return response;
 }
 
 /**

@@ -1,16 +1,24 @@
-// University access — the review fleet's browser-based full-text fetch.
+// Library access — the review fleet's browser-based full-text fetch.
 //
 // For non-arXiv / paywalled papers a headless download can't pass Cloudflare/SSO,
 // so the fleet drives a real browser using a profile the user logs into ONCE here.
-// The CONFIG fields (enabled / login URL / EZproxy / cookie-browser) are folded
-// into the one Settings form (configForm.js maps `university_access`), so the
-// single sticky Save commits them — this panel is a CONTROLLED component that keeps
-// ONLY the readiness status and the one-time login action.
+// ConfigTask owns the revision-bound library-access draft and scoped save;
+// this controlled panel keeps only status and the separate one-time login.
 
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { fetchUniversityAccessStatus, runUniversityLogin } from '../../api/libraryApi.js';
+import { CheckboxField, Field } from '../form/Fields.jsx';
 import Button from '../ui/Button.jsx';
+
+const COOKIE_BROWSERS = [
+  { value: '', label: "Don't reuse — use the in-app login" },
+  { value: 'chrome', label: 'Chrome' },
+  { value: 'firefox', label: 'Firefox' },
+  { value: 'edge', label: 'Edge' },
+  { value: 'brave', label: 'Brave' },
+  { value: 'safari', label: 'Safari (blocked on macOS 15+/26)' },
+];
 
 export default function UniversityAccessPanel({ form, savedForm, saving = false, onUpdate }) {
   const statusQuery = useQuery({
@@ -44,95 +52,41 @@ export default function UniversityAccessPanel({ form, savedForm, saving = false,
   const canLogin = !browserMissing && !accessDirty && !saving && Boolean(savedForm?.ua_login_url?.trim());
 
   return (
-    <div className="glass rounded-2xl border border-slate-200 p-4 space-y-3">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">University access</h3>
-        <span
-          className={`text-[11px] px-2 py-0.5 rounded-full border ${
-            loggedIn
-              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-              : 'bg-slate-100 text-slate-600 border-slate-200'
-          }`}
-        >
-          {loggedIn ? 'Logged in' : 'Not logged in'}
-        </span>
-      </div>
-      <p className="text-xs text-slate-500">
+    <div className="space-y-4">
+      <p className="text-sm text-slate-600">
         For non-arXiv / paywalled papers, the review fleet drives a real browser with your
-        institutional session to fetch the PDF. Edit the fields, <strong>Save changes</strong>,
+        institutional session to fetch the PDF. Edit the fields, <strong>Save library access</strong>,
         then log in once; the session persists.
       </p>
 
       {browserMissing && (
-        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
           Browser support not installed — run{' '}
           <span className="font-mono">uv pip install -e '.[browser]' && patchright install chromium</span>.
         </p>
       )}
 
-      <label className="flex items-center gap-2 text-sm text-slate-700">
-        <input
-          type="checkbox"
-          checked={Boolean(form.ua_enabled)}
-          onChange={(e) => onUpdate('ua_enabled', e.target.checked)}
-        />
-        Enable browser PDF fetch for the review fleet
-      </label>
+      <CheckboxField label="Enable browser PDF fetch for the review fleet" checked={form.ua_enabled} onChange={(value) => onUpdate('ua_enabled', value)} />
+      <Field kind="select" label="Reuse an existing browser login (skip the in-app sign-in)" value={form.ua_cookie_browser}
+        onChange={(value) => onUpdate('ua_cookie_browser', value)} options={COOKIE_BROWSERS}
+        hint="Reads that browser's session cookies so a paper you can already open there fetches without a second login. Safari is unreadable on recent macOS (Apple's hardened container) — use Chrome/Firefox. Falls back to the in-app login." />
+      <Field label="Library login URL" value={form.ua_login_url} onChange={(value) => onUpdate('ua_login_url', value)}
+        placeholder="https://your-library.edu/login" />
+      <Field label="EZproxy prefix" value={form.ua_ezproxy_prefix} onChange={(value) => onUpdate('ua_ezproxy_prefix', value)}
+        placeholder="https://login.ezproxy.myuni.edu/login?url=" hint="Optional — blank for SSO/OpenAthens." />
 
-      <label className="block text-xs text-slate-600">
-        Reuse an existing browser login (skip the in-app sign-in)
-        <select
-          value={form.ua_cookie_browser}
-          onChange={(e) => onUpdate('ua_cookie_browser', e.target.value)}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm bg-white"
-        >
-          <option value="">Don't reuse — use the in-app login</option>
-          <option value="chrome">Chrome</option>
-          <option value="firefox">Firefox</option>
-          <option value="edge">Edge</option>
-          <option value="brave">Brave</option>
-          <option value="safari">Safari (blocked on macOS 15+/26)</option>
-        </select>
-        <span className="block text-[11px] text-slate-400 mt-1">
-          Reads that browser's session cookies so a paper you can already open there fetches without a second login.
-          Safari is unreadable on recent macOS (Apple's hardened container) — use Chrome/Firefox. Falls back to the in-app login.
-        </span>
-      </label>
-
-      <label className="block text-xs text-slate-600">
-        Library login URL
-        <input
-          type="text"
-          value={form.ua_login_url}
-          onChange={(e) => onUpdate('ua_login_url', e.target.value)}
-          placeholder="https://your-library.edu/login"
-          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
-        />
-      </label>
-
-      <label className="block text-xs text-slate-600">
-        EZproxy prefix <span className="text-slate-400">(optional — blank for SSO/OpenAthens)</span>
-        <input
-          type="text"
-          value={form.ua_ezproxy_prefix}
-          onChange={(e) => onUpdate('ua_ezproxy_prefix', e.target.value)}
-          placeholder="https://login.ezproxy.myuni.edu/login?url="
-          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm font-mono"
-        />
-      </label>
-
-      <div className="flex items-center gap-3 flex-wrap pt-1">
+      <div className="flex items-center gap-3 flex-wrap">
         <Button
           variant="secondary"
-          size="sm"
           onClick={() => { if (canLogin) loginMutation.mutate(); }}
           disabled={!canLogin || loginMutation.isPending}
           title={canLogin ? 'Open a browser window to log into your library' : 'Set a login URL (and install the browser extra), Save, then log in'}
         >
           {loginMutation.isPending ? 'Opening…' : 'Log in to library'}
         </Button>
-        {(saving || accessDirty) && <span className="text-xs text-slate-600">{saving ? 'Wait for Save to finish before logging in.' : 'Save university access changes before logging in.'}</span>}
-        {loginNote && <span className="text-xs text-slate-500">{loginNote}</span>}
+        <span className={`text-sm ${loggedIn ? 'text-emerald-700' : 'text-slate-600'}`}>{loggedIn ? 'Logged in' : 'Not logged in'}</span>
+        {(saving || accessDirty) && <span className="text-xs text-slate-600">{saving ? 'Wait for Save to finish before logging in.' : 'Save library access before logging in.'}</span>}
+        {loginNote && <span className="text-xs text-slate-600">{loginNote}</span>}
       </div>
     </div>
   );

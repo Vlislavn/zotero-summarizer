@@ -81,7 +81,8 @@ export const PAPER_TYPE_LABEL = {
   rct_ai: 'RCT of an AI intervention', dataset_benchmark: 'Dataset / benchmark',
   systematic_review: 'Systematic review / meta-analysis', narrative_review: 'Narrative review',
   survey: 'Survey', position: 'Position / perspective', policy: 'Policy / framework / guideline',
-  theory: 'Theory / analysis', case_report: 'Case report', editorial: 'Editorial / commentary',
+  theory: 'Theory / analysis', case_report: 'Clinical case report',
+  experience_report: 'Experience report', editorial: 'Editorial / commentary',
   generic_empirical: 'Empirical (type uncertain)', generic_review: 'Review (type uncertain)',
 };
 export const paperTypeLabel = (t) => PAPER_TYPE_LABEL[t] || String(t || '').replace(/_/g, ' ');

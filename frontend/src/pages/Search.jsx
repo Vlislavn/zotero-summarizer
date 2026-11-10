@@ -15,6 +15,7 @@ import { reviewPaperUrl } from './reviewHelpers.js';
 import { readStoredJson, writeStorage } from '../utils/safeStorage.js';
 import { Comments } from '../components/paper/RelatedPapers.jsx';
 import { pollSessionUntilDone } from '../searchPolling.js';
+import PageTitle from '../components/ui/PageTitle.jsx';
 
 // Targeted Search — the query-driven pull surface (services/search). Give a
 // research topic, get a per-source query plan, a federated + deduped + relevance-
@@ -392,6 +393,7 @@ function SearchSession({ urlSearch = '', onPointer }) {
         ...(evidenceEnabled && qs.length ? { evidence_policy: 'question_evidence' } : {}),
         ...(Object.values(confirmed).some((values) => values.length) ? { constraints: confirmed } : {}) });
       if (!current(owner)) return;
+      setEvidenceEnabled(false);
       owner.id = sess.id;
       savedIdRef.current = sess.id;
       setSession(sess);
@@ -415,11 +417,12 @@ function SearchSession({ urlSearch = '', onPointer }) {
   const refining = !discovery && reviewing && (session?.refinements || []).length > 0 && !anyReviewed;
   return (
     <div className="max-w-3xl mx-auto">
-      <h1 className="text-lg font-semibold text-slate-900 mb-1">Targeted Search</h1>
-      <p className="text-[12px] text-slate-500 mb-3">
-        {discovery ? 'Discovery uses public metadata, not full-text quality. Review and Add require explicit actions.'
-          : 'Describe a research topic. We plan a query per source, federate the open literature, dedupe version families, rank by real relevance, then deep-read the best few.'}
-      </p>
+      <PageTitle title="Targeted Search" page="search" />
+      {discovery && (
+        <p className="text-[12px] text-slate-500 mb-3">
+          Discovery uses public metadata, not full-text quality. Review and Add require explicit actions.
+        </p>
+      )}
       <form onSubmit={runScreen} className="mb-4 grid gap-2">
         <label htmlFor="search-query" className="text-sm font-medium">Search query</label>
         <textarea id="search-query"
@@ -436,8 +439,8 @@ function SearchSession({ urlSearch = '', onPointer }) {
         <label className="text-[12px] text-slate-600">
           <input type="checkbox" checked={evidenceEnabled} onChange={(e) => setEvidenceEnabled(e.target.checked)} />
           {' '}Experimental original-source question evidence (opt-in for this search)
-          <span className="block">Uses configured Feed and Deep review routes; requires different model routes.
-            Sends questions and public original passages to those routes. Extra bounded work; quality/latency unmeasured.</span>
+          <span className="block">Needs two different AI models set up in Settings. Sends your questions and
+            public passages from the papers to them. Slower, and its quality is not yet measured.</span>
         </label>
         <details className="text-[12px]">
           <summary>Explicit constraints (optional)</summary>
@@ -457,9 +460,10 @@ function SearchSession({ urlSearch = '', onPointer }) {
         >
           {loading ? 'Searching…' : 'Search'}
         </button>
+        {!loading && !query.trim() && <p className="text-[12px] text-slate-500">Type a topic above to enable Search.</p>}
       </form>
 
-      {loading && <p role="status">Waiting for the current request…</p>}
+      {(loading || (!session && savedIdRef.current && !error)) && <p role="status">Waiting for the current request…</p>}
       {error && <><ErrorBanner error={humanizeError(error)} />
         <p>Status unavailable; the server may still be working. This is not a cancellation or successful completion.</p>
         {savedIdRef.current && <button type="button" onClick={() => {

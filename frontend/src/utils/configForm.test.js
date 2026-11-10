@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { configToFormState, formStateToConfig, resolveStage } from './configForm.js';
+import { configToFormState, formStateToConfig, rebaseConnectionForm, resolveStage } from './configForm.js';
 
 describe('configForm transforms', () => {
   const baseConfig = {
@@ -21,6 +21,17 @@ describe('configForm transforms', () => {
     // An unknown nested branch the form never surfaces — must survive a round-trip.
     prestige: { weight: 0.15 },
   };
+
+  it('rebases only connection-owned or locally clean fields onto a fresh snapshot', () => {
+    const form = { ...configToFormState(baseConfig), research_goals_text: 'Local draft' };
+    const latest = { ...baseConfig, research_goals: ['Remote saved research'], output_language: 'French',
+      llm_routing: { ...baseConfig.llm_routing, default: { provider: 'p', model: 'new-model' } } };
+    const rebased = rebaseConnectionForm(form, baseConfig, latest);
+    expect(rebased.research_goals_text).toBe('Local draft');
+    expect(rebased.output_language).toBe('French');
+    expect(rebased.llm_routing.default.model).toBe('new-model');
+    expect(form.llm_routing.default.model).toBe('m');
+  });
 
   it('configToFormState drops the legacy llm_* keys', () => {
     const form = configToFormState(baseConfig);

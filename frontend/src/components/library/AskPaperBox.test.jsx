@@ -93,17 +93,17 @@ describe('AskPaperBox durable question submission', () => {
 
   it('uses a stable preset id and a fresh UUID for each deliberate repeat', async () => {
     render(<AskPaperBox itemKey="P1" variant="rail" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Is there external validation?' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Is the code released?' }));
     await waitFor(() => expect(mocks.askPaper).toHaveBeenCalledOnce());
 
-    submit('Is there external validation?');
+    submit('Is the code released?');
     await waitFor(() => expect(mocks.askPaper).toHaveBeenCalledTimes(2));
 
     expect(mocks.queueQuestionSubmission.mock.calls.map(([row]) => row)).toEqual([
       { submission_id: '00000000-0000-4000-8000-000000000001', item_key: 'P1',
-        question: 'Is there external validation?', origin: 'preset', preset_id: 'external_validation' },
+        question: 'Is the code released?', origin: 'preset', preset_id: 'code_released' },
       { submission_id: '00000000-0000-4000-8000-000000000002', item_key: 'P1',
-        question: 'Is there external validation?', origin: 'typed', preset_id: null },
+        question: 'Is the code released?', origin: 'typed', preset_id: null },
     ]);
   });
 
@@ -120,13 +120,34 @@ describe('AskPaperBox durable question submission', () => {
       target: { value: 'A different draft' },
     });
     fireEvent.change(screen.getByRole('combobox', { name: 'Answer mode' }), { target: { value: 'retrieval' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Retry answer' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
 
     await waitFor(() => expect(mocks.askPaper).toHaveBeenCalledTimes(2));
     expect(mocks.queueQuestionSubmission.mock.calls[0][0].submission_id)
       .toBe(mocks.queueQuestionSubmission.mock.calls[1][0].submission_id);
     expect(mocks.askPaper.mock.calls[0]).toEqual(mocks.askPaper.mock.calls[1]);
     expect(await screen.findByText('Recovered')).toBeTruthy();
+  });
+
+  it.each(['offline', 'server-save'])('retries the durable submission before any answer stage (%s)', async (stage) => {
+    if (stage === 'offline') Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+    else mocks.saveReviewQuestion.mockRejectedValueOnce(new Error('server unavailable'));
+    render(<AskPaperBox itemKey="P1" variant="rail" />);
+    submit('Keep the original question');
+
+    await screen.findByText('Saved on this device — server comment pending.');
+    if (stage === 'server-save') await screen.findByRole('alert');
+    expect(mocks.askPaper).not.toHaveBeenCalled();
+    const submission = mocks.queueQuestionSubmission.mock.calls[0][0];
+    const retry = screen.getByRole('button', { name: 'Retry', exact: true });
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(mocks.askPaper).toHaveBeenCalledOnce());
+    expect(mocks.queueQuestionSubmission.mock.calls[1][0]).toEqual(submission);
+    expect(mocks.saveReviewQuestion.mock.lastCall[0]).toEqual(submission);
+    expect(mocks.askPaper.mock.calls[0][2]).toMatchObject({ submissionId: submission.submission_id });
+    expect(uuid).toBe(1);
   });
 
   it('does not start QA when the server comment cannot be confirmed', async () => {

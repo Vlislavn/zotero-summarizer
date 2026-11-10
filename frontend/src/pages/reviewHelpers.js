@@ -24,6 +24,7 @@ export function reviewPaperUrl(item) {
   if (!item) return '';
   // Search Candidate owns DOI/arXiv normalization; provider-only IDs use fixed hosts.
   const openalexId = String(item.openalex_id || '').replace(/^https?:\/\/openalex\.org\//i, '');
+  const pmcid = String(item.pmcid || '').replace(/^PMC/i, '');
   const urls = [
     item.link,
     item.url,
@@ -31,6 +32,7 @@ export function reviewPaperUrl(item) {
     item.arxiv_id ? `https://arxiv.org/abs/${item.arxiv_id}` : '',
     /^\d+$/.test(item.pmid || '') ? `https://pubmed.ncbi.nlm.nih.gov/${item.pmid}/` : '',
     /^W\d+$/i.test(openalexId) ? `https://openalex.org/${openalexId.toUpperCase()}` : '',
+    /^\d+$/.test(pmcid) ? `https://pmc.ncbi.nlm.nih.gov/articles/PMC${pmcid}/` : '',
   ];
   return urls.find((url) => /^https?:\/\//i.test(url || '')) || '';
 }

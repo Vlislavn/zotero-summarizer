@@ -19,12 +19,13 @@ it('keeps source saves, status reads and explicit consented runs separate', asyn
   const fetch = vi.fn().mockResolvedValue({ ok: true, text: async () => '{}' });
   vi.stubGlobal('fetch', fetch);
   await telegramFeedApi.sources(); await telegramFeedApi.status();
-  await telegramFeedApi.save({ sources: [] }); await telegramFeedApi.run({ consent: true });
+  await telegramFeedApi.save({ sources: [] }); await telegramFeedApi.collectConsent(true); await telegramFeedApi.run();
   expect(fetch.mock.calls.map(([path, options]) => [path, options.method || 'GET'])).toEqual([
     ['/api/research-feed/telegram/sources', 'GET'], ['/api/research-feed/telegram/status', 'GET'],
-    ['/api/research-feed/telegram/sources', 'PUT'], ['/api/research-feed/telegram/runs', 'POST'],
+    ['/api/research-feed/telegram/sources', 'PUT'], ['/api/research-feed/telegram/collect-consent', 'POST'],
+    ['/api/research-feed/telegram/runs', 'POST'],
   ]);
-  expect(JSON.parse(fetch.mock.calls[3][1].body)).toEqual({ consent: true });
+  expect(JSON.parse(fetch.mock.calls[3][1].body)).toEqual({ allow: true });
 });
 
 it('keeps report failures as errors instead of an empty report', async () => {

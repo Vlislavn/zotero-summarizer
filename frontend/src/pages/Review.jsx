@@ -11,6 +11,7 @@ import { pretty } from '../utils/priorityLabels.js';
 import VerdictPicker from '../components/VerdictPicker.jsx';
 import { humanizeError } from '../utils/humanizeError.js';
 import { StatusBanner } from '../components/library/shared.jsx';
+import FeedReviewEmpty from '../components/FeedReviewEmpty.jsx';
 
 // Tabs the Today funnel can deep-link into (?state=gate_rejected etc.).
 const VALID_STATES = new Set(['awaiting_review', 'gate_rejected']);
@@ -26,6 +27,9 @@ function AuxContext({ aux }) {
     <div className="mt-2 text-[11px] text-slate-600 flex flex-wrap gap-3">
       {aux.max_author_h_index && (
         <span>Max author h-index: <span className="mono font-semibold">{aux.max_author_h_index}</span></span>
+      )}
+      {aux.last_author_h_index != null && (
+        <span>Last author h-index: <span className="mono font-medium">{aux.last_author_h_index}</span></span>
       )}
       {aux.venue_works_count && (
         <span>Venue works: <span className="mono font-semibold">{aux.venue_works_count}</span></span>
@@ -312,10 +316,7 @@ export default function Review() {
       <StatusBanner message={message} isError={isError} />
 
       {!loading && items.length === 0 && (
-        <div className="text-sm text-slate-500">
-          No items awaiting review. Run{' '}
-          <span className="mono">zotero-summarizer feeds run --feeds &lt;name&gt;</span> first.
-        </div>
+        <FeedReviewEmpty onDone={() => load(state, sort)} />
       )}
 
       <div className="space-y-3">

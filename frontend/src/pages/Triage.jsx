@@ -95,8 +95,18 @@ function ResultCard({ result, current, submitting, onFeedback }) {
   );
 }
 
+const STALE_JOB_MS = 7 * 24 * 3600 * 1000;
+// A finished job from over a week ago (e.g. an old test run) is history, not current state.
+function isStaleJob(job) {
+  const started = Date.parse(job.started_at || '');
+  return Number.isFinite(started) && Date.now() - started > STALE_JOB_MS && !['running', 'cancelling'].includes(job.status);
+}
+
 export default function Triage() {
-  const [jobs, setJobs] = useState([]);
+  const [allJobs, setJobs] = useState([]);
+  const [showOldJobs, setShowOldJobs] = useState(false);
+  const jobs = useMemo(() => (showOldJobs ? allJobs : allJobs.filter((job) => !isStaleJob(job))), [allJobs, showOldJobs]);
+  const hiddenJobs = allJobs.length - jobs.length;
   const [activeJobId, setActiveJobId] = useState('');
   const [activeJob, setActiveJob] = useState(null);
   const [cancelingId, setCancelingId] = useState('');
@@ -128,7 +138,7 @@ export default function Triage() {
       const data = await fetchJobs();
       const list = data?.items || [];
       setJobs(list);
-      setActiveJobId((prev) => prev || (list.length ? list[0].job_id : ''));
+      setActiveJobId((prev) => prev || list.find((job) => !isStaleJob(job))?.job_id || '');
     } catch (err) {
       setMessage(`Failed to load jobs: ${humanizeError(err)}`);
       setIsError(true);
@@ -478,13 +488,21 @@ export default function Triage() {
                   <JobStatusPill status={job.status} />
                 </div>
                 <div className="text-xs text-slate-600">
-                  {(job.completed || 0)}/{(job.total || 0)}
+                  {(job.completed || 0)}/{(job.total || 0)}{job.started_at && ` · ${job.started_at.slice(0, 10)}${isStaleJob(job) ? ' (old)' : ''}`}
                 </div>
+                {job.status === 'failed' && job.errors?.length > 0 && (
+                  <div className="text-xs text-rose-700">{job.errors.length} item error{job.errors.length === 1 ? '' : 's'} — open for the cause</div>
+                )}
               </button>
             );
           })}
           {jobs.length === 0 && (
-            <div className="text-xs text-slate-500">No triage jobs recorded yet.</div>
+            <div className="text-xs text-slate-500">{allJobs.length ? 'No recent triage jobs.' : 'No triage jobs recorded yet.'}</div>
+          )}
+          {allJobs.some(isStaleJob) && (
+            <button type="button" onClick={() => setShowOldJobs((v) => !v)} className="text-xs text-teal-700 underline">
+              {showOldJobs ? 'Hide jobs older than 7 days' : `Show ${hiddenJobs} older job${hiddenJobs === 1 ? '' : 's'} (over 7 days, finished)`}
+            </button>
           )}
         </div>
       </div>

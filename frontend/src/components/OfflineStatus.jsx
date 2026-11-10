@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { publishStatus, resolveConflict, syncStatusEvent } from '../offlineStore.js';
 import { syncNow } from '../syncClient.js';
 import { pretty } from '../utils/priorityLabels.js';
+import usePendingCount from '../hooks/usePendingCount.js';
+import ConnectionGuide from './ConnectionGuide.jsx';
 import Button from './ui/Button.jsx';
 
 function conflictValue(field, value, operation, comment) {
@@ -12,37 +14,10 @@ function conflictValue(field, value, operation, comment) {
   return `${text}${comment ? `\n\nComment:\n${comment}` : ''}`;
 }
 
-function ConnectionGuide() {
-  const [shellReady, setShellReady] = useState(Boolean(navigator.serviceWorker?.controller));
-  useEffect(() => {
-    const update = () => setShellReady(Boolean(navigator.serviceWorker?.controller));
-    navigator.serviceWorker?.addEventListener('controllerchange', update);
-    return () => navigator.serviceWorker?.removeEventListener('controllerchange', update);
-  }, []);
-  return (
-    <details className="mt-2">
-      <summary className="cursor-pointer text-slate-600">Offline use &amp; installation</summary>
-      <div className="mt-2 space-y-2 text-slate-600 max-w-prose">
-        <p>{!window.isSecureContext
-          ? 'This connection cannot install an offline app. Use a trusted secure connection; do not bypass certificate warnings.'
-          : shellReady ? 'Offline shell is active. Test a reload with the server off before relying on it.'
-            : 'Offline shell is not active yet. Open the app online and reload after the shell is installed.'}</p>
-        <ol className="list-decimal pl-5 space-y-1">
-          <li>While connected, sync the papers you need. Available compact review context is retained without opening each paper.</li>
-          <li>On iPhone/iPad Safari, use Share → Add to Home Screen. On desktop, use the browser’s Install app action if offered.</li>
-          <li>With the Mac off, reopen Library and explicitly save verdicts and notes. Clearing this browser’s site data removes unsynced changes.</li>
-          <li>When the Mac is back, return to this same app address and choose Sync now. Compare any Changed elsewhere notices.</li>
-        </ol>
-        <p>The local app is loopback-only by default. Another device needs a separately supported authenticated HTTPS gateway; exposing a LAN port or bypassing origin/TLS guards is not a setup step.</p>
-        <p>PDFs, figures, AI answers, acquisition and rescoring are not synced. An app acknowledgement does not prove Zotero or another device received your changes.</p>
-      </div>
-    </details>
-  );
-}
-
 export default function OfflineStatus() {
   const [sync, setSync] = useState({ online: navigator.onLine, connection: 'unchecked', pending: null, conflicts: [], rejected: [] });
   const [resolving, setResolving] = useState(null);
+  const [open, setOpen] = useState(false);
   const [resolutionError, setResolutionError] = useState('');
   useEffect(() => {
     const update = (event) => setSync(event.detail);
@@ -62,24 +37,42 @@ export default function OfflineStatus() {
       setResolving(null);
     }
   }
+  const { pathname } = useLocation();
+  const down = !sync.online || sync.connection === 'unavailable';
+  const queued = usePendingCount(!down, sync.connection, sync.last_synced_at, pathname);
+  const attention = down || Boolean(sync.sync_error || sync.local_error || sync.conflicts?.length || sync.rejected?.length);
   const headline = !sync.online ? 'Offline'
-    : sync.connection === 'syncing' ? 'Syncing with the app…'
-      : sync.connection === 'connected' ? 'Connected to the app' : 'Connection not confirmed';
+    : sync.connection === 'unavailable' ? 'Server unreachable'
+      : sync.connection === 'syncing' ? 'Syncing…'
+        : sync.connection === 'connected' ? 'Connected' : 'Connection not confirmed';
+  const unsent = sync.pending == null ? 'device storage unavailable' : sync.pending > 0 ? `${sync.pending} unsent on this device` : null;
+  const line = [headline, queued == null ? null : `${queued} pending change${queued === 1 ? '' : 's'}`, unsent].filter(Boolean).join(' · ');
+  const dot = down || sync.local_error ? 'bg-rose-600' : attention ? 'bg-amber-500' : sync.connection === 'connected' ? 'bg-emerald-600' : 'bg-slate-400';
   return (
-    <section aria-label="Offline sync" className="mt-2 min-w-0 text-xs text-slate-600">
-      <div className="flex flex-wrap items-center gap-2">
-        <p role="status" aria-live="polite">
-          {headline} · {sync.pending == null ? 'pending count unavailable' : `${sync.pending} pending`}
-          {sync.paper_count != null && ` · ${sync.paper_count} cached papers`}
-        </p>
-        <Button size="sm" variant="secondary" className="min-h-11" disabled={!sync.online || sync.connection === 'syncing'} onClick={() => syncNow()}>
-          {sync.connection === 'syncing' ? 'Syncing…' : 'Sync now'}
-        </Button>
+    <section aria-label="Offline sync" className="min-w-0 text-xs text-slate-600">
+      <div className="flex items-center gap-2 min-h-11">
+        <span aria-hidden="true" className={`h-2.5 w-2.5 shrink-0 rounded-full ${dot}`} />
+        <p role="status" aria-live="polite" className="min-w-0 flex-1 truncate">{line}</p>
+        {!attention && (
+          <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="min-h-11 px-2 -mr-2 text-forest-800 font-medium">
+            {open ? 'Hide details' : 'Details'}
+          </button>
+        )}
       </div>
-      {sync.last_synced_at && <p className="mt-1">Last app sync: {new Date(sync.last_synced_at).toLocaleString()}</p>}
-      {sync.sync_error && <p role="status" className="mt-1 text-amber-800">{sync.sync_error}. Device changes are retained. Check the app at this same address, then retry Sync now.</p>}
-      {(!sync.online || sync.connection === 'unavailable') && <p className="mt-1">Cached papers, verdicts, and notes work; PDFs, AI, and rescore are unavailable. Open Library for the cached working set.</p>}
-      {sync.local_error && <p role="alert" className="mt-1 text-rose-700">Device storage unavailable: {sync.local_error}. Offline saves cannot be confirmed. Do not clear site data; keep unsaved text until storage works.</p>}
+      {(open || attention) && <div className="pb-3 space-y-1">
+        <div className="flex flex-wrap items-center gap-x-3">
+          <Button size="sm" variant="secondary" className="min-h-11" disabled={!sync.online || sync.connection === 'syncing'} onClick={() => syncNow()}>
+            {sync.connection === 'syncing' ? 'Syncing…' : 'Sync now'}
+          </Button>
+          {!down && <NavLink className="min-h-11 inline-flex items-center underline" to="/ops?tab=pending">Pending changes</NavLink>}
+        </div>
+        {sync.last_synced_at && <p>Last synced {new Date(sync.last_synced_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}{sync.paper_count != null && ` · ${sync.paper_count} papers on this device`}</p>}
+        {down && <p className="text-amber-800">
+          Server unreachable — reading only. Works: papers already synced to this device (open from Library; verdicts and notes are kept here and sent later).
+          Not available: Today decisions, PDFs, AI, rescoring. Check that the Mac is running <code>make iphone</code> and Tailscale is on, then tap Sync now.
+        </p>}
+        {!down && sync.sync_error && <p role="status" className="text-amber-800">{sync.sync_error}. Changes made here stay on this device; retry Sync now.</p>}
+        {sync.local_error && <p role="alert" className="text-rose-700">Device storage unavailable: {sync.local_error}. Offline saves cannot be confirmed. Do not clear site data; keep unsaved text until storage works.</p>}
       {resolutionError && <p role="alert" className="mt-1 text-rose-700">{resolutionError}</p>}
       {(sync.conflicts || []).map((conflict) => {
         const intent = conflict.operation === 'keep_server' ? conflict.original_intent : conflict;
@@ -123,6 +116,7 @@ export default function OfflineStatus() {
         </details>
       )}
       <ConnectionGuide />
+      </div>}
     </section>
   );
 }

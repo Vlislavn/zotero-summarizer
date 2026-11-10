@@ -1,18 +1,71 @@
-import { Section, SectionLabel, Disclosure, Chip, KeyVal, Bullets } from './primitives.jsx';
-import {
-  gradeTone, bandTone, BAND_LABEL, VERDICT_ACCENT,
-} from './tones.js';
+import { Section, SectionLabel, Disclosure, Chip, KeyVal, Bullets, Fold } from './primitives.jsx';
+import { gradeTone, qualityBasis, BAND_LABEL } from './tones.js';
 import {
   bandGloss, METHOD_CLAUSE, LEGEND, rubricLabel, paperTypeLabel,
   decisiveRows, fullChecklist, shortGoal, isSupportedGoal,
 } from './briefModel.js';
 import { formatShortDate, timeAgo } from '../../library/shared.jsx';
-import ReadingPlan from './ReadingPlan.jsx';
-import OrthogonalSignals from './OrthogonalSignals.jsx';
+import CodeLink from './CodeLink.jsx';
+import Recommendation from './Recommendation.jsx';
 
 const STATE_LABEL = {
   hit: '● addressed', miss: '○ not addressed', not_retrieved: '⚠ not retrieved',
 };
+
+// Why a stored review is outdated, in plain language (the identity/audit reason
+// codes come from the server's review_freshness). A stale review is SHOWN with
+// this badge — never silently hidden — so you can read it and refresh when ready.
+const FRESHNESS_REASON = {
+  generation_updated: 'model or prompts changed',
+  pdf_changed: 'the PDF changed',
+  source_changed: 'the source changed',
+  source_unresolved: 'source could not be re-checked',
+  focus_changed: 'review focus changed',
+  unverified: 'written before the current checks',
+  verification_outdated: 'checks need refreshing',
+  metadata_changed: 'inputs changed',
+};
+
+// One quiet line + the action: a stale review stays readable, refresh is one tap.
+function FreshnessBadge({ freshness, onRegenerate }) {
+  if (!freshness || freshness.status !== 'outdated') return null;
+  const why = FRESHNESS_REASON[freshness.reason] || FRESHNESS_REASON.metadata_changed;
+  return (
+    <p
+      role="status"
+      className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-0.5 border-l-2 border-amber-300 pl-3 !text-[13px] !leading-snug text-amber-800"
+    >
+      <span><span className="font-medium">Outdated review</span>: {why}.</span>
+      {onRegenerate && (
+        <button type="button" onClick={onRegenerate} className="-my-3 inline-flex min-h-11 items-center font-medium text-forest-800 underline underline-offset-2 hover:text-forest-700">
+          Regenerate
+        </button>
+      )}
+    </p>
+  );
+}
+
+function clip(text, max) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max).replace(/\s+\S*$/, '')}…` : t;
+}
+
+// The closed "Caveats and coverage" row: red flags first (clay), then coverage and gaps.
+function caveatsSummary(quality, band, isNonPaper, redFlags) {
+  if (!quality || isNonPaper) return 'Source basis and coverage';
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const applicable = Number(quality.coverage_applicable) || 0;
+  const gaps = (quality.missing_critical || []).filter(Boolean).length;
+  const rest = [
+    applicable > 0 && `${Number(quality.coverage_met) || 0}/${applicable} checklist items met`,
+    gaps > 0 && plural(gaps, 'critical gap'),
+  ].filter(Boolean);
+  if (!redFlags.length && !rest.length) return bandGloss(band, false).lead || 'Source basis and coverage';
+  return <>
+    {redFlags.length > 0 && <span className="text-rose-700">{plural(redFlags.length, 'red flag')} to verify</span>}
+    {redFlags.length > 0 && rest.length > 0 && ' · '}{rest.join(' · ')}
+  </>;
+}
 
 // Critique (red flags / overstatements) is the highest-value but most-BRITTLE
 // signal — research on shipped tools shows the sentence/citation classifiers that
@@ -40,18 +93,19 @@ function critiqueIsTentative(q = {}) {
 // language, reading-grade type, flat hierarchy (Common Region / Uniform
 // Connectedness: hairline dividers + whitespace, not nested boxes). Reads the
 // SAME as the standalone presentation.html (briefModel mirrors the server).
-export default function PaperReview({ deep, compact = false, flat: requestedFlat = false, sectionOverlay = null }) {
+export default function PaperReview({ deep, compact = false, flat: requestedFlat = false, sectionOverlay = null, onRegenerate = null, evidence = null, facts = null }) {
   if (!deep) return null;
   const flat = requestedFlat && !compact;
   const digest = deep.digest && Object.keys(deep.digest).length ? deep.digest : null;
   const quality = deep.quality || null;
   const goals = deep.goal_summaries || [];
+  const lost = deep.not_established_fields || [];
 
   // Legacy cache (pre-digest): show the old grade, nudge a re-run.
   if (!digest && quality && quality.grade && quality.basis !== 'non_paper' && !goals.length) {
     return (
       <div className={`text-[13px] text-slate-600 ${flat ? 'review-reading' : ''}`}>
-        <Chip tone={gradeTone(quality.grade)}>Quality {quality.grade}</Chip>
+        <Chip tone={gradeTone(quality.grade)}>{['Quality ' + quality.grade, qualityBasis(quality)].filter(Boolean).join(' · ')}</Chip>
         {quality.verdict ? <span className="ml-2">{quality.verdict}</span> : null}
         <div className="mt-1 text-[11px] text-slate-400">Older review — re-run for the new digest.</div>
       </div>
@@ -66,6 +120,8 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
   const band = isNonPaper ? '' : String(quality?.quality_band || '');
   const redFlags = isNonPaper ? [] : (quality?.red_flags || []).map((x) => String(x || '').trim()).filter(Boolean);
   const nHitGoals = goals.filter(isSupportedGoal).length;
+  const overstated = quality && !isNonPaper ? (quality.overstatements || []).filter(Boolean) : [];
+  const findings = (digest?.key_findings || []).filter(text => !overstated.includes(text));
 
   // The API projects cached decisions through the current policy; absence stays unknown.
   let verdict;
@@ -100,7 +156,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
     <div className="space-y-4">
       {isNonPaper && (
         <p className="text-[12px] text-slate-500 border border-slate-200 rounded-md px-2 py-1 bg-slate-50">
-          Not a research paper — reviewed for <span className="font-semibold">relevance</span> only;
+          Not a research paper — reviewed for <span className="font-medium">relevance</span> only;
           scientific quality criteria (grade, rigor) don't apply.
         </p>
       )}
@@ -112,7 +168,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
       {digest && (
         <div>
           <SectionLabel>Full digest</SectionLabel>
-          <div className="mt-1.5"><DigestRows digest={digest} /></div>
+          <div className="mt-1.5"><DigestRows digest={digest} lost={lost} onRegenerate={onRegenerate} /></div>
         </div>
       )}
       {compact && deep.reviewed_at && (
@@ -124,42 +180,23 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
   );
 
   const recommendation = (
-    <div className={`rounded-lg border-l-[3px] px-3.5 py-3 ${VERDICT_ACCENT[verdict.key] || VERDICT_ACCENT.skip}`}>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-display text-[22px] font-light tracking-tight text-slate-900">{verdict.label}</span>
-          {hasReadingDecision && (
-            digest.estimated_read_minutes != null
-              ? <Chip tone="slate" title="Saved reading-time estimate">{digest.estimated_read_minutes} min</Chip>
-              : <span className="text-[12px] text-slate-500">Time not estimated</span>
-          )}
-          {grade && (
-            <Chip tone={gradeTone(grade)} title="Saved quality grade">
-              {compact ? grade : `Quality ${grade}`}
-            </Chip>
-          )}
-          {/* Non-paper (blog/news/web): no scientific grade applies — say so loudly
-              (amber) so a non-peer-reviewed source is never mistaken for a graded
-              paper. The full "reviewed for relevance only" note stays in Details. */}
-          {isNonPaper && (
-            <Chip tone="amber" title="Web article / blog / news — not peer-reviewed. Reviewed for relevance only; no scientific quality grade applies.">
-              Not peer-reviewed
-            </Chip>
-          )}
-          {compact && band && <Chip tone={bandTone(band)}>{BAND_LABEL[band] || '—'}</Chip>}
-          {compact && redFlags.length > 0 && (
-            <Chip tone="rose" title={redFlags.slice(0, 3).join('; ')}>⚠ {redFlags.length}</Chip>
-          )}
-        </div>
-        {verdict.reason && (
-          <p className="mt-1.5 text-[13px] leading-relaxed text-slate-700 max-w-[66ch]">{verdict.reason}</p>
-        )}
-        {hasReadingDecision && <ReadingPlan digest={digest} decision={digestDecision} />}
-        {digest && <OrthogonalSignals deep={deep} />}
-      </div>
+    <Recommendation verdict={verdict} digest={digest} deep={deep} grade={grade} band={band} redFlags={redFlags}
+      digestDecision={digestDecision} hasReadingDecision={hasReadingDecision} isNonPaper={isNonPaper}
+      compact={compact} flat={flat && !compact} />
   );
 
+  // Reading-size type applies to the review itself; the `facts` slot between the
+  // verdict card and the folds keeps its own compact scale, so it sits outside it.
+  const reading = flat ? 'review-reading' : undefined;
+  // Only a basis other than the full text is a caveat; the literal record is in the reference fold.
+  const partialBasis = [['quality check', quality?.basis], ['digest', digest?.basis]]
+    .filter(([, basis]) => basis && basis !== 'full_text')
+    .map(([what, basis]) => `${what}: ${String(basis).replace(/_/g, ' ')}`);
+
   return (
-    <div className={`review-prose text-slate-800 ${flat && !compact ? 'review-reading' : ''}`}>
+    <div className="review-prose text-slate-800">
+      <div className={reading}>
+      <FreshnessBadge freshness={deep.review_freshness} onRegenerate={onRegenerate} />
       {/* Code repository, pulled to the very top (the first thing you want when
           deciding to reproduce). Full surfaces only — the compact Library card
           stays clean. Older cached reviews have no code_link → renders nothing. */}
@@ -175,37 +212,51 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
       {/* (The Rigor·Relevance summary spine was removed — it restated the two
           sections immediately below it, "Relevance to your goals" + "Quality —
           {band}", which carry the same numbers with their own labels.) */}
-      <div className="mt-2 divide-y divide-slate-200/60">
-        {flat && !compact ? <>
-          <Section label="Contribution">
+      {flat && (
+        <div className="mb-5">{recommendation}</div>
+      )}
+      </div>
+      {flat && facts && <div className="mb-5 max-w-[66ch]">{facts}</div>}
+      <div className={reading}>
+      <div className={flat ? '' : 'mt-2 divide-y divide-slate-200/60'}>
+        {flat ? <>
+          <Fold label="Contribution" defaultOpen>
             {tldr ? <p>{tldr}</p> : <p>Contribution not recorded in this saved review.</p>}
             {isNonPaper && <p>Not a research paper — reviewed for relevance only; scientific quality criteria don't apply.</p>}
-          </Section>
-          {recommendation}
-          <Section label="Caveats and coverage">
-            <p>Saved source basis — quality: {quality?.basis || 'not recorded'}; digest: {digest?.basis || 'not recorded'}. Reviewed extent not recorded.</p>
-            {deep.code_link && <CodeLink codeLink={deep.code_link} />}
-            {quality && !isNonPaper && <QualityHeadline quality={quality} band={band} flagLoc={flagLoc} missLoc={missLoc} critiqueViews />}
-            <dl><KeyVal label="Weakness" tone="neg">{digest?.key_weakness}</KeyVal></dl>
-            {quality && !isNonPaper && <MaterialClaims quality={quality} />}
-            {!quality && <p>Assessment and source coverage not recorded in this saved review.</p>}
-          </Section>
-          <Section label="Findings and applicability">
-            <Bullets items={digest?.key_findings?.filter(text => !(quality && !isNonPaper && (quality.overstatements || []).filter(Boolean).includes(text)))} />
-            {goals.length > 0 && <><SectionLabel level={3}>{`Relevance — ${nHitGoals} of ${goals.length} goals addressed`}</SectionLabel>
-              <GoalBoard goals={goals} goalLoc={goalLoc} foldReasons /></>}
-          </Section>
-          <Section label="Methods and limitations">
-            <dl><KeyVal label="Methods">{digest?.methods}</KeyVal>
-              <KeyVal label="Limitations">{digest?.limitations}</KeyVal></dl>
-            {!digest?.methods && !digest?.limitations && <p>Methods and limitations not recorded in this saved review.</p>}
-          </Section>
-          <Section label="Assessment and reference">
-            <Disclosure summary="Full digest and assessment">
-              {digest && <DigestRows digest={digest} exclude={['key_findings', 'read_why', 'methods', 'limitations', 'key_weakness']} />}
+          </Fold>
+          <Fold label="Findings and applicability" defaultOpen>
+            {findings.length > 0 ? <Bullets items={findings} /> : <p>Key findings not recorded in this saved review.</p>}
+          </Fold>
+          <Fold label="Caveats and coverage" defaultOpen summary={caveatsSummary(quality, band, isNonPaper, redFlags)}>
+            <div className="space-y-4">
+              {partialBasis.length > 0 && <p className="!text-[14px] text-slate-600">Not based on the full text — {partialBasis.join('; ')}.</p>}
+              {quality && !isNonPaper && <QualityHeadline quality={quality} band={band} flagLoc={flagLoc} missLoc={missLoc} critiqueViews />}
+              <dl><DigestRow field="key_weakness" label="Weakness" tone="neg" lost={lost} onRegenerate={onRegenerate}>{digest?.key_weakness}</DigestRow></dl>
+              {quality && !isNonPaper && <MaterialClaims quality={quality} />}
+              {!quality && <p>Assessment and source coverage not recorded in this saved review.</p>}
+            </div>
+          </Fold>
+          {goals.length > 0 && (
+            <Fold label={`Relevance — ${nHitGoals} of ${goals.length} goals addressed`}
+              summary={goals.filter(isSupportedGoal).map(g => shortGoal(g.goal)).join(' · ') || 'No supported goal match recorded'}>
+              <GoalBoard goals={goals} goalLoc={goalLoc} foldReasons />
+            </Fold>
+          )}
+          <Fold label="Methods and limitations" summary={clip(digest?.methods || digest?.limitations, 110)}>
+            <dl className="space-y-3">
+              <DigestRow field="methods" label="Methods" lost={lost} onRegenerate={onRegenerate}>{digest?.methods}</DigestRow>
+              <DigestRow field="limitations" label="Limitations" lost={lost} onRegenerate={onRegenerate}>{digest?.limitations}</DigestRow></dl>
+            {!digest?.methods && !digest?.limitations && !lost.some(f => f === 'methods' || f === 'limitations') && <p>Methods and limitations not recorded in this saved review.</p>}
+          </Fold>
+          <Fold label="Assessment and reference" summary="Full digest, rubric and checklist">
+            <div className="space-y-4">
+              {digest && <DigestRows digest={digest} lost={lost} onRegenerate={onRegenerate} exclude={['key_findings', 'read_why', 'methods', 'limitations', 'key_weakness']} />}
+              {quality && !isNonPaper && <ChecklistBasis quality={quality} />}
               {quality && !isNonPaper && <QualityDetails quality={quality} band={band} hideMaterial />}
-            </Disclosure>
-          </Section>
+              <p className="!text-[13px] text-slate-500">Saved source basis — quality: {quality?.basis || 'not recorded'}; digest: {digest?.basis || 'not recorded'}. Reviewed extent not recorded.</p>
+            </div>
+          </Fold>
+          {evidence}
         </> : <>
 
         {/* compact (Library row card): the per-goal board is the biggest block and
@@ -237,53 +288,13 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
         </>}
       </div>
 
-      {!compact && (deep.reviewed_at || deep.zotero_note_error) && (
+      {!compact && ((deep.reviewed_at && !flat) || deep.zotero_note_error) && (
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
-          {deep.reviewed_at && <span title={formatShortDate(deep.reviewed_at)}>reviewed {timeAgo(deep.reviewed_at)}</span>}
-          {deep.zotero_note_error && <span className="text-amber-600">note not written: {deep.zotero_note_error}</span>}
+          {deep.reviewed_at && !flat && <span title={formatShortDate(deep.reviewed_at)}>reviewed {timeAgo(deep.reviewed_at)}</span>}
+          {deep.zotero_note_error && <Disclosure summary="Zotero note not written"><span className="text-amber-800">{deep.zotero_note_error}</span></Disclosure>}
         </div>
       )}
-    </div>
-  );
-}
-
-// The paper's code repository, extracted + validated during deep review
-// (services.library._code_link). Shows liveness (✓ live / not reachable) and
-// whether the repo plausibly belongs to THIS paper vs a cited dependency. One
-// code → one meaning: emerald = live & matches, amber = dead link, slate =
-// live-but-verify / could-not-check / none.
-function CodeLink({ codeLink }) {
-  const cl = codeLink || {};
-  if (!cl.found) {
-    return (
-      <div className="mb-2 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2 text-[12px] text-slate-500">
-        No code repository linked in the paper.
       </div>
-    );
-  }
-  const label = String(cl.url || '').replace(/^https?:\/\//, '');
-  const live = cl.exists === true;
-  const dead = cl.exists === false;
-  const matched = cl.relevance === 'matched';
-  let tone, note;
-  if (dead) {
-    tone = 'border-amber-200 bg-amber-50 text-amber-800';
-    note = `not reachable${cl.status ? ` (${cl.status})` : ''} — may be renamed or private`;
-  } else if (live && matched) {
-    tone = 'border-emerald-200 bg-emerald-50 text-emerald-800';
-    note = '✓ live · matches the paper';
-  } else if (live) {
-    tone = 'border-slate-200 bg-slate-50 text-slate-700';
-    note = '✓ live · confirm it’s this paper’s repo';
-  } else {
-    tone = 'border-slate-200 bg-slate-50 text-slate-700';
-    note = cl.checked === false ? 'not validated (offline)' : 'could not validate';
-  }
-  return (
-    <div className={`mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-lg border px-3.5 py-2 text-[12px] ${tone}`}>
-      <span className="text-[11px] font-semibold uppercase tracking-[0.06em]">Code</span>
-      <a href={cl.url} target="_blank" rel="noopener noreferrer" className="font-mono font-medium break-all hover:underline">{label}</a>
-      <span className="opacity-80">· {note}</span>
     </div>
   );
 }
@@ -314,7 +325,7 @@ function SectionAnchor({ section }) {
     <a
       href={`#secmap-${section.id}`}
       title={`${approx ? 'approximate location — ' : ''}${section.title}${pg} — jump to the paper map`}
-      className={`inline-flex max-w-[12rem] items-center rounded px-1.5 py-0.5 align-middle text-[10px] font-semibold sm:max-w-[18rem] ${
+      className={`inline-flex max-w-[12rem] items-center rounded px-1.5 py-0.5 align-middle text-[10px] font-medium sm:max-w-[18rem] ${
         approx
           ? 'bg-slate-50 text-slate-400 hover:bg-slate-100'
           : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
@@ -339,8 +350,8 @@ function GoalTile({ g, sections, foldReason }) {
   else why = 'retrieval degraded — not assessed';
   const tone = state === 'hit' && !supported ? TILE_STATE.miss : TILE_STATE[state] || TILE_STATE.not_retrieved;
   return (
-    <div className={`rounded-md border border-slate-200/70 border-l-[3px] bg-white/50 p-2.5 ${tone}`}>
-      <div className="text-[12px] font-semibold text-slate-800 leading-snug">{g?.goal}</div>
+    <div className={`border-l-2 py-0.5 pl-3 ${tone}`}>
+      <div className="text-[12px] font-medium text-slate-800 leading-snug">{g?.goal}</div>
       <div className="mt-0.5 text-[11px] text-slate-400">{state === 'hit' && g?.abstained ? '○ abstained' : state === 'hit' && !supported ? '○ not supported' : STATE_LABEL[state] || state}</div>
       <div className="my-1.5 h-1 rounded-full bg-slate-200/80 overflow-hidden" role="meter"
         aria-label={`${shortGoal(g?.goal)} relevance`} aria-valuemin={0} aria-valuemax={3}
@@ -358,7 +369,7 @@ function GoalTile({ g, sections, foldReason }) {
       ) : null)}
       {(foldReason || (state === 'hit' && quotes.length > 0)) && (
         <details className="mt-1 group">
-          <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden rounded text-[11px] font-semibold text-teal-600 hover:text-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 focus-visible:ring-offset-1">
+          <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden rounded text-[11px] font-medium text-teal-600 hover:text-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 focus-visible:ring-offset-1">
             evidence
           </summary>
           {foldReason && <div className="text-[12px] leading-relaxed text-slate-600">{why}</div>}
@@ -402,7 +413,7 @@ function GoalFindings({ goals }) {
       groups.get(key).findings.push(finding);
     }
     return [...groups.entries()].map(([key, group]) => <div key={key} className="mb-2 break-words">
-      <strong className="text-slate-700">For: {group.goals.join('; ')}</strong>
+      <strong className="font-medium text-slate-700">For: {group.goals.join('; ')}</strong>
       <ul className="list-disc pl-5">{group.findings.map(finding => {
         const words = finding.text.split(/\s+/);
         return <li key={finding.text} className="mb-2">
@@ -430,7 +441,7 @@ function GoalBoard({ goals, goalLoc, foldReasons = false }) {
   const originals = [...new Set(goals.map(g => String(g.summary || '').trim()))]
     .filter(text => text && !findingTexts.has(text));
   const grid = (items) => (
-    <div className="goal-board-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+    <div className="goal-board-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-4">
       {items.map((g, i) => <GoalTile key={i} g={g} sections={goalLoc?.get(g?.goal)} foldReason={foldReasons} />)}
     </div>
   );
@@ -444,7 +455,7 @@ function GoalBoard({ goals, goalLoc, foldReasons = false }) {
       </Disclosure>}
       {addressed.length > 0 && rest.length > 0 && (
         <details className="group">
-          <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden text-[11px] font-semibold text-slate-400 hover:text-slate-600">
+          <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden text-[11px] font-medium text-slate-400 hover:text-slate-600">
             {rest.length} other goal{rest.length > 1 ? 's' : ''} ▾
           </summary>
           <div className="mt-2 opacity-75">{grid(rest)}</div>
@@ -465,15 +476,13 @@ function QualityHeadline({ quality, band, flagLoc, missLoc, critiqueViews = fals
   const met = Number(quality.coverage_met) || 0;
   const applicable = Number(quality.coverage_applicable) || 0;
   const missing = (quality.missing_critical || []).map((x) => String(x || '').trim()).filter(Boolean);
-  const ptype = String(quality.paper_type || '');
-  const uncertainType = ptype.startsWith('generic_');
   const tentative = critiqueIsTentative(quality);
 
   return (
     <div className="space-y-2.5">
       {gloss && (
         <p className="text-[13px] leading-relaxed text-slate-700 max-w-[66ch]">
-          <span className="font-semibold text-slate-900">{gloss.lead}</span> {gloss.body}
+          <span className="font-medium text-slate-900">{gloss.lead}</span> {gloss.body}
         </p>
       )}
       {/* Coverage panel — the honest replacement for the unvalidated 1-5 scores: which
@@ -483,18 +492,10 @@ function QualityHeadline({ quality, band, flagLoc, missLoc, critiqueViews = fals
       {(applicable > 0 || missing.length > 0) && (
         <div>
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[13px]">
-            {standard && <span className="font-semibold text-slate-900">{standard}</span>}
+            {/* The reading page names the checklist and paper type once, beside the full checklist. */}
+            {!critiqueViews && standard && <span className="font-medium text-slate-900">{standard}</span>}
             <span className="text-slate-700">{applicable > 0 ? `${met}/${applicable} applicable items met` : 'Checklist coverage unavailable'}</span>
-            {ptype && (
-              <Chip
-                tone={uncertainType ? 'amber' : 'slate'}
-                title={uncertainType
-                  ? 'Paper type was uncertain — judged against a safe generic checklist. Open the paper to verify.'
-                  : 'Detected paper type — the checklist is chosen for this type'}
-              >
-                {paperTypeLabel(ptype)}{uncertainType ? ' ⚠' : ''}
-              </Chip>
-            )}
+            {!critiqueViews && <PaperTypeChip quality={quality} />}
           </div>
           {missing.length > 0 && (
             <div className="mt-1 text-[12px] leading-relaxed text-rose-700">
@@ -514,15 +515,15 @@ function QualityHeadline({ quality, band, flagLoc, missLoc, critiqueViews = fals
         </div>
       )}
       {redFlags.length > 0 && (
-        <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2">
-          <div className="mb-1 flex flex-wrap items-baseline gap-x-2">
-            <span className="text-[11px] uppercase tracking-[0.06em] font-semibold text-rose-600">⚠ Red flags</span>
-            <span className="text-[10px] text-rose-400" title="Model-generated critique — verify against the paper">· model judgment</span>
+        <div className="border-l-2 border-rose-300 pl-4">
+          <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-rose-700">Red flags</span>
+            <span className="text-[11px] text-rose-700" title="Model-generated critique — verify against the paper">· AI-generated, verify</span>
             {tentative && (
-              <span className="text-[10px] font-semibold text-amber-600" title="Self-consistency runs disagreed or confidence was low — treat as a prompt to check, not a finding">· low confidence, verify</span>
+              <span className="text-[11px] text-amber-700" title="Self-consistency runs disagreed or confidence was low — treat as a prompt to check, not a finding">low confidence</span>
             )}
           </div>
-          {critiqueViews ? <CritiqueViews flags={redFlags} locations={flagLoc} rubric={quality.rubric} /> : <ul className="list-disc pl-5 text-[13px] leading-relaxed text-rose-800 space-y-0.5">
+          {critiqueViews ? <CritiqueViews flags={redFlags} locations={flagLoc} rubric={quality.rubric} /> : <ul className="space-y-2.5 text-[13px] leading-relaxed text-slate-800">
             {redFlags.map((x, i) => {
               const loc = flagLoc?.get(String(x).trim());
               return (
@@ -535,6 +536,34 @@ function QualityHeadline({ quality, band, flagLoc, missLoc, critiqueViews = fals
           </ul>}
         </div>
       )}
+    </div>
+  );
+}
+
+function PaperTypeChip({ quality }) {
+  const ptype = String(quality.paper_type || '');
+  if (!ptype) return null;
+  const uncertain = ptype.startsWith('generic_');
+  return (
+    <Chip
+      tone={uncertain ? 'amber' : 'slate'}
+      title={uncertain
+        ? 'Paper type was uncertain — judged against a safe generic checklist. Open the paper to verify.'
+        : 'Detected paper type — the checklist is chosen for this type'}
+    >
+      {paperTypeLabel(ptype)}{uncertain ? ' ⚠' : ''}
+    </Chip>
+  );
+}
+
+// Which checklist judged the paper, and as what type — the reference line above the full checklist.
+function ChecklistBasis({ quality }) {
+  const standard = String(quality.coverage_standard || '');
+  if (!standard && !quality.paper_type) return null;
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[13px]">
+      {standard && <span className="font-medium text-slate-900">{standard}</span>}
+      <PaperTypeChip quality={quality} />
     </div>
   );
 }
@@ -576,14 +605,14 @@ function CritiqueViews({ flags, locations, rubric }) {
     const section = locations?.get(text);
     return section && <span className="ml-1.5 align-middle"><SectionAnchor section={section} /></span>;
   };
-  return <ul className="list-disc pl-5 text-[13px] leading-relaxed text-rose-800 space-y-2">
+  return <ul className="space-y-3 text-[13px] leading-relaxed text-slate-800">
     {groups.map(({ prefix, texts }, index) => {
       const frame = texts.length > 1 && sharedWordFrame(prefix, texts, rubric);
       return <li key={index}>
       {prefix}{frame && ` … ${frame.term}`}{texts.length === 1 && link(texts[0])}
       {texts.length > 1 && <>
         <div className="mt-1 space-y-2 pl-2 border-l border-rose-200">
-          {frame && <p className="text-[12px] font-medium">Scope / context · original wording</p>}
+          {frame && <p className="text-[12px] font-medium text-slate-500">Scope / context · original wording</p>}
           {texts.map((text, i) => <p key={i}>
             {frame ? <><span data-frame-modifier>{frame.rows[i].modifier}</span>{frame.rows[i].modifier && ' '}
               <span aria-label={`shared term: ${frame.term}`}>…</span>{' '}<span data-frame-suffix>{frame.rows[i].suffix}</span></>
@@ -604,7 +633,7 @@ function MaterialClaims({ quality }) {
   const items = (quality.overstatements || []).filter(Boolean);
   if (!items.length) return null;
   return <div className="mt-2">
-    <SectionLabel level={3}>Overstated claims · model judgment{critiqueIsTentative(quality) ? ' · low confidence, verify' : ''}</SectionLabel>
+    <SectionLabel level={3}>Possible overstatement (low reliability)</SectionLabel>
     <Bullets items={items} />
   </div>;
 }
@@ -619,16 +648,16 @@ function QualityDetails({ quality, band, hideMaterial = false }) {
   return (
     <div className="space-y-2.5">
       <p className="text-[11px] leading-relaxed text-slate-400 max-w-[66ch]">
-        {METHOD_CLAUSE}{total ? ` · ${agreed}/${total} passes agree` : ''}
+        {METHOD_CLAUSE}{total > 1 ? ` · ${agreed}/${total} passes agree` : total === 1 ? ' · 1 pass (no agreement check)' : ''}
       </p>
 
       {rows.length > 0 && (
         <div>
-          <div className="text-[11px] uppercase tracking-[0.06em] font-semibold text-slate-400 mb-1">{heading}</div>
+          <div className="text-[11px] uppercase tracking-[0.06em] font-medium text-slate-400 mb-1">{heading}</div>
           <ul className="space-y-0.5 text-[13px] leading-relaxed">
             {rows.map((r, i) => (
               <li key={i} className="flex items-baseline gap-1.5">
-                <span className={`font-bold ${r.ok ? 'text-emerald-600' : 'text-rose-600'}`}>{r.ok ? '✓' : '✗'}</span>
+                <span className={`font-medium ${r.ok ? 'text-emerald-600' : 'text-rose-600'}`}>{r.ok ? '✓' : '✗'}</span>
                 <span className="text-slate-700">{r.label}</span>
               </li>
             ))}
@@ -639,8 +668,8 @@ function QualityDetails({ quality, band, hideMaterial = false }) {
 
       {!hideMaterial && overs.length > 0 && (
         <div>
-          <div className="mb-1 text-[11px] uppercase tracking-[0.06em] font-semibold text-amber-600">
-            Overstated claims <span className="font-normal normal-case tracking-normal text-amber-500">· model judgment</span>
+          <div className="mb-1 text-[11px] uppercase tracking-[0.06em] font-medium text-amber-600">
+            Possible overstatement (low reliability)
           </div>
           <ul className="list-disc pl-5 text-[13px] leading-relaxed text-slate-700 space-y-0.5">
             {overs.map((x, i) => <li key={i}>{x}</li>)}
@@ -650,7 +679,7 @@ function QualityDetails({ quality, band, hideMaterial = false }) {
 
       {checklist.length > 0 && (
         <div>
-          <div className="text-[11px] uppercase tracking-[0.06em] font-semibold text-slate-400 mb-1">
+          <div className="text-[11px] uppercase tracking-[0.06em] font-medium text-slate-400 mb-1">
             Full {checklist.length}-point checklist
           </div>
           <div className="space-y-1">
@@ -671,7 +700,7 @@ function QualityDetails({ quality, band, hideMaterial = false }) {
         {LEGEND.map((l, i) => (
           <span key={l.term}>
             {i > 0 && ' · '}
-            <b className="text-slate-500">{l.term}</b> {l.gloss}
+            <b className="font-medium text-slate-500">{l.term}</b> {l.gloss}
           </span>
         ))}
       </div>
@@ -686,40 +715,60 @@ const RB_TONE = {
 };
 function RubricMark({ value }) {
   return (
-    <span className={`shrink-0 inline-block min-w-[2.2rem] text-center rounded text-[10px] font-bold uppercase px-1 py-0.5 ${RB_TONE[value] || RB_TONE.na}`}>
+    <span className={`shrink-0 inline-block min-w-[2.2rem] text-center rounded text-[10px] font-medium uppercase px-1 py-0.5 ${RB_TONE[value] || RB_TONE.na}`}>
       {value}
     </span>
   );
 }
 
+// A field whose text could not be grounded is stored empty (never shown as
+// verified); one quiet line + the existing Regenerate action stands in its place.
+function DigestRow({ field, lost, onRegenerate, children, ...rest }) {
+  if (!lost.includes(field)) return <KeyVal {...rest}>{children}</KeyVal>;
+  return (
+    <KeyVal {...rest} tone="default">
+      <span className="text-slate-500">Could not be grounded this time</span>
+      {onRegenerate && <>
+        {' · '}
+        <button type="button" onClick={onRegenerate} className="font-medium text-forest-800 underline underline-offset-2 hover:text-forest-700">Regenerate</button>
+      </>}
+    </KeyVal>
+  );
+}
+
+const LOST_ONLY = { relevance: 'Relevance', skip_parts: 'Skip', writing_reasons: 'Writing', read_parts: 'Read parts', verdict: 'Verdict' };
+
 // The structured digest, behind the "Full digest" disclosure. Rendered ONCE
 // (the old DigestBlock + iframe both showed it). Reading-scale KeyVal rows.
-function DigestRows({ digest, exclude = [] }) {
+function DigestRows({ digest, exclude = [], lost = [], onRegenerate = null }) {
   const d = Object.fromEntries(Object.entries(digest).filter(([key]) => !exclude.includes(key)));
   const p = d.parameters || {};
+  const r = { lost: lost.filter((field) => !exclude.includes(field)), onRegenerate };
   return (
     <dl className="space-y-2">
-      <KeyVal label="Summary">{d.executive_summary}</KeyVal>
+      <DigestRow {...r} field="executive_summary" label="Summary">{d.executive_summary}</DigestRow>
       {(d.key_findings || []).filter(Boolean).length > 0 && (
         <KeyVal label="Key findings"><Bullets items={d.key_findings} /></KeyVal>
       )}
-      <KeyVal label="Methods">{d.methods}</KeyVal>
-      <KeyVal label="Dataset / sample">{[p.dataset, p.sample_size].filter(Boolean).join(' · ')}</KeyVal>
+      <DigestRow {...r} field="methods" label="Methods">{d.methods}</DigestRow>
+      <DigestRow {...r} field="parameters" label="Dataset / sample">{[p.dataset, p.sample_size].filter(Boolean).join(' · ')}</DigestRow>
       <KeyVal label="Architecture">{p.architecture}</KeyVal>
       {(p.baselines || []).filter(Boolean).length > 0 && <KeyVal label="Baselines"><Bullets items={p.baselines} /></KeyVal>}
       {(p.metrics || []).filter(Boolean).length > 0 && <KeyVal label="Metrics"><Bullets items={p.metrics} /></KeyVal>}
       {p.external_validation != null && <KeyVal label="External validation">{p.external_validation ? 'Yes' : 'No'}</KeyVal>}
-      <KeyVal label="Limitations">{d.limitations}</KeyVal>
-      <KeyVal label="Controversies">{d.controversies}</KeyVal>
-      <KeyVal label="Impact">{d.impact}</KeyVal>
-      <KeyVal label="Industry">{d.industry_impact}</KeyVal>
-      <KeyVal label="Academia">{d.academy_impact}</KeyVal>
-      <KeyVal label="Unknowns">{d.unknown_unknowns}</KeyVal>
+      <DigestRow {...r} field="limitations" label="Limitations">{d.limitations}</DigestRow>
+      <DigestRow {...r} field="controversies" label="Controversies">{d.controversies}</DigestRow>
+      <DigestRow {...r} field="impact" label="Impact">{d.impact}</DigestRow>
+      <DigestRow {...r} field="industry_impact" label="Industry">{d.industry_impact}</DigestRow>
+      <DigestRow {...r} field="academy_impact" label="Academia">{d.academy_impact}</DigestRow>
+      <DigestRow {...r} field="unknown_unknowns" label="Unknowns">{d.unknown_unknowns}</DigestRow>
       {(d.implementation || []).filter(Boolean).length > 0 && (
         <KeyVal label="Implementation"><Bullets items={d.implementation} /></KeyVal>
       )}
-      <KeyVal label="Strength" tone="pos">{d.key_strength}</KeyVal>
-      <KeyVal label="Weakness" tone="neg">{d.key_weakness}</KeyVal>
+      <DigestRow {...r} field="implementation" label="Implementation" />
+      <DigestRow {...r} field="key_strength" label="Strength" tone="pos">{d.key_strength}</DigestRow>
+      <DigestRow {...r} field="key_weakness" label="Weakness" tone="neg">{d.key_weakness}</DigestRow>
+      {Object.entries(LOST_ONLY).map(([field, label]) => <DigestRow key={field} {...r} field={field} label={label} />)}
       {/* The reviewer-LLM's self-reported 1-5 scores were removed: unvalidated
           opinion (the grade/band come from grounded checklist coverage, not these). */}
     </dl>

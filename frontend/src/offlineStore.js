@@ -608,8 +608,8 @@ export async function publishStatus(message = '', phase) {
   } }));
 }
 
-export function isServerAvailable() {
-  return navigator.onLine && connection === 'connected';
+export function isServerAvailable({ allowSyncFailure = false } = {}) {
+  return navigator.onLine && (connection === 'connected' || (allowSyncFailure && connection === 'blocked'));
 }
 
 export function transportUnavailable() {

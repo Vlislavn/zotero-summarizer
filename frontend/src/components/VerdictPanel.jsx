@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { PRIORITY_LABELS, pretty } from '../utils/priorityLabels.js';
+import { PRIORITY_LABELS, pretty, isAutoVerdict } from '../utils/priorityLabels.js';
 import { formatShortDate } from './library/shared.jsx';
+import { DECISION_BTN, DECISION_HOVER, DECISION_TINT, DECISION_WORD } from './decisionVocab.js';
+import Icon from './ui/Icon.jsx';
 
 // Verdict editor for a single paper.
 // Props:
@@ -24,7 +26,7 @@ export const PRIORITIES = [
 ].map((p) => ({ ...p, label: PRIORITY_LABELS[p.key] }));
 
 // Text-colour per priority so the saved-verdict word reads its own tone — fixes
-// the bug where every "Previously" value was hardcoded emerald (a saved Remove ❌
+// the bug where every "Previously" value was hardcoded emerald (a saved Remove
 // rendered green). Pretty label + correct colour, not the raw enum.
 const PRIORITY_TEXT = {
   must_read: 'text-emerald-700',
@@ -97,7 +99,7 @@ export default function VerdictPanel({
         <h3 className="text-sm font-medium text-slate-900 mb-3">Your verdict</h3>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-slate-600">
           <span>
-            Previously:{' '}
+            {isAutoVerdict(existingVerdict) ? 'Auto:' : 'Yours:'}{' '}
             <span className={`font-semibold ${PRIORITY_TEXT[existingVerdict.user_priority] || 'text-slate-700'}`}>
               {pretty(existingVerdict.user_priority)}
             </span>
@@ -160,11 +162,11 @@ export default function VerdictPanel({
               key={p.key}
               type="button"
               onClick={() => setDraft((previous) => ({ ...previous, priority: p.key }))}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
-                active ? `${p.cls} border-transparent` : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-              }`}
+              aria-pressed={active}
+              aria-label={p.label}
+              className={`${DECISION_BTN} ${DECISION_TINT[p.key]} ${DECISION_HOVER[p.key]} ${active ? 'border-forest-800 ring-1 ring-forest-800' : ''}`}
             >
-              {p.label}
+              {active && <Icon name="check" size={14} strokeWidth={2} />}{DECISION_WORD[p.key]}
             </button>
           );
         })}

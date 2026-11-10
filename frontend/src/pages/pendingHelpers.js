@@ -129,6 +129,29 @@ export function previewChange(change) {
   }
 }
 
+// One readable line for the change target (the badge already names the action).
+export function changeSummary(change) {
+  const payload = readPayload(change);
+  const collection = String(payload.collection_path || payload.collection_name || payload.collection_key || '').trim();
+  switch (change.change_type) {
+    case 'tag_changes': {
+      const added = (payload.add_tags || []).map((t) => `+${t}`);
+      const removed = (payload.remove_tags || []).map((t) => `−${t}`);
+      return [...added, ...removed].join('  ') || 'No tag changes';
+    }
+    case 'add_to_collection':
+    case 'remove_from_collection':
+      return collection || 'No collection chosen';
+    case 'add_note':
+    case 'upsert_note': {
+      const excerpt = stripHtml(payload.note_html).slice(0, 90);
+      return `“${payload.note_title || 'Triage note'}”${excerpt ? ` — ${excerpt}` : ''}`;
+    }
+    default:
+      return previewChange(change);
+  }
+}
+
 export function changeBadgeClass(type) {
   switch (type) {
     case 'tag_changes':

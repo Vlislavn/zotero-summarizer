@@ -1,6 +1,6 @@
 import {
   buildDraft,
-  previewChange,
+  changeSummary,
   changeBadgeTone,
   changeTypeLabel,
   collectionOptionLabel,
@@ -180,38 +180,37 @@ export function ChangeGroup({
     <div
       ref={isActive ? groupRef : null}
       tabIndex={-1}
-      className={`mb-3 border rounded-xl bg-white overflow-hidden outline-none ${
+      className={`mb-2 border rounded-xl bg-white overflow-hidden outline-none ${
         isActive
           ? 'border-teal-400 ring-2 ring-teal-200'
           : 'border-slate-200'
       }`}
     >
-      <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
-        <div className="font-semibold">{group.item_title || group.item_key}</div>
-        <div className="text-xs text-slate-500 mono">{group.item_key}</div>
+      <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-200">
+        <div className="text-sm font-semibold line-clamp-2">{group.item_title || group.item_key}</div>
       </div>
-      <div className="p-3 space-y-2">
+      <div className="p-2 space-y-1.5">
         {group.changes.map((change) => (
-          <div key={change.id} className="border border-slate-100 rounded-lg p-2">
+          <div key={change.id} className="rounded-lg px-1">
             <label className="flex items-start gap-2 text-sm rounded-lg hover:bg-slate-50 transition-colors cursor-pointer">
               <input
                 type="checkbox"
-                className="mt-0.5"
+                className="mt-1 h-4 w-4"
                 disabled={!isPending || change.status !== 'pending' || busy}
                 checked={selected.has(change.id)}
                 onChange={() => toggleOne(change.id)}
               />
               <div className="flex-1 min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <ActionBadge tone={changeBadgeTone(change.change_type)}>
                     {changeTypeLabel(change.change_type)}
                   </ActionBadge>
-                  <ActionBadge tone="slate">
-                    status: {change.status || 'pending'}
-                  </ActionBadge>
-                </div>
-                <div className="text-xs text-slate-600 mt-1 break-words">
-                  {change.generated_preview ? 'Generated note — immutable preview below' : previewChange(change)}
+                  {change.status && change.status !== 'pending' && (
+                    <ActionBadge tone="slate">status: {change.status}</ActionBadge>
+                  )}
+                  <span className="text-xs text-slate-700 break-words min-w-0">
+                    {changeSummary(change)}{change.generated_preview && ' · generated, immutable'}
+                  </span>
                 </div>
                 {change.applied_at && (
                   <div className="text-[11px] text-slate-500 mt-1">
@@ -235,46 +234,53 @@ export function ChangeGroup({
                 )}
               </div>
             </label>
-
-            {change.generated_preview && (
-              <div className="mt-2 text-xs text-slate-700">
-                <p>{hasUnboundGeneratedTarget(change)
-                  ? UNBOUND_GENERATED_TARGET_MESSAGE
-                  : 'Apply selected approves this exact generated payload and target. Recovery is backup-only, not undo.'}</p>
-                <pre aria-label="Generated mutation preview" className="whitespace-pre-wrap break-words">
-                  {JSON.stringify(change.generated_preview, null, 2)}
+            {['pending', 'failed'].includes(change.status) && !hasApprovalPreview(change) && !hasUnboundGeneratedTarget(change) && (
+              <p className="mt-1 text-xs text-slate-700">{MISSING_APPROVAL_MESSAGE}</p>
+            )}
+            {change.generated_preview && hasUnboundGeneratedTarget(change) && (
+              <p className="mt-1 text-xs text-slate-700">{UNBOUND_GENERATED_TARGET_MESSAGE}</p>
+            )}
+            {change.status === 'applying' && (
+              <p role="alert" className="mt-1 text-xs text-slate-700">Delivery outcome is uncertain. Reconcile Zotero against the backup before any new action; retry is blocked.</p>
+            )}
+            <details className="mt-1 ml-6 text-xs text-slate-700">
+              <summary className="cursor-pointer text-slate-500 min-h-6">Details</summary>
+              <div className="mt-1 space-y-1">
+                <div className="font-mono text-[11px] text-slate-500">{group.item_key}</div>
+                {(!change.status || change.status === 'pending') && <div>status: pending</div>}
+                {change.generated_preview && (
+                  <>
+                    {!hasUnboundGeneratedTarget(change) && (
+                      <p>Apply selected approves this exact generated payload and target. Recovery is backup-only, not undo.</p>
+                    )}
+                    <pre aria-label="Generated mutation preview" className="whitespace-pre-wrap break-words">
+                      {JSON.stringify(change.generated_preview, null, 2)}
+                    </pre>
+                  </>
+                )}
+                {hasApprovalPreview(change) && (
+                  <p>Apply or Retry approves this saved payload and Zotero target, not unsaved edits. Save edits and reselect before applying. Recovery is backup-only, not undo.</p>
+                )}
+                <pre aria-label="Approval mutation preview" className="whitespace-pre-wrap break-words">
+                  {JSON.stringify(change.approval_preview || { payload: change.payload_json, target: null }, null, 2)}
                 </pre>
+                {change.backup_path && <p>Backup: {change.backup_path}</p>}
+                <details><summary>Mutation audit</summary>
+                  <pre className="whitespace-pre-wrap break-words">{JSON.stringify(change.audit || [], null, 2)}</pre>
+                </details>
+                {isPending && change.status === 'pending' && (
+                  <ChangeEditor
+                    change={change}
+                    drafts={drafts}
+                    setDrafts={setDrafts}
+                    flatCollections={flatCollections}
+                    saving={saving}
+                    onSave={() => onSaveEdit(change)}
+                    busy={busy}
+                  />
+                )}
               </div>
-            )}
-            <div className="mt-2 text-xs text-slate-700">
-              {hasApprovalPreview(change) && (
-                <p>Apply or Retry approves this saved payload and Zotero target, not unsaved edits. Save edits and reselect before applying. Recovery is backup-only, not undo.</p>
-              )}
-              {['pending', 'failed'].includes(change.status) && !hasApprovalPreview(change) && !hasUnboundGeneratedTarget(change) && (
-                <p>{MISSING_APPROVAL_MESSAGE}</p>
-              )}
-              <pre aria-label="Approval mutation preview" className="whitespace-pre-wrap break-words">
-                {JSON.stringify(change.approval_preview || { payload: change.payload_json, target: null }, null, 2)}
-              </pre>
-              {change.status === 'applying' && (
-                <p role="alert">Delivery outcome is uncertain. Reconcile Zotero against the backup before any new action; retry is blocked.</p>
-              )}
-              {change.backup_path && <p>Backup: {change.backup_path}</p>}
-              <details><summary>Mutation audit</summary>
-                <pre className="whitespace-pre-wrap break-words">{JSON.stringify(change.audit || [], null, 2)}</pre>
-              </details>
-            </div>
-            {isPending && change.status === 'pending' && (
-              <ChangeEditor
-                change={change}
-                drafts={drafts}
-                setDrafts={setDrafts}
-                flatCollections={flatCollections}
-                saving={saving}
-                onSave={() => onSaveEdit(change)}
-                busy={busy}
-              />
-            )}
+            </details>
           </div>
         ))}
       </div>

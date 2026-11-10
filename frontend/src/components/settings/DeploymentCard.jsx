@@ -4,17 +4,19 @@ import { doctorQueryOptions, doctorVerificationOptions } from '../../utils/setup
 import { humanizeError } from '../../utils/humanizeError.js';
 import { Banner, SectionCard } from '../form/Fields.jsx';
 import Button from '../ui/Button.jsx';
+import SettingsTaskLink from './SettingsTaskLink.jsx';
+import { Link } from 'react-router-dom';
 
 const STATUS = {
-  not_started: ['○', 'Not started', 'text-slate-500'],
+  not_started: ['○', 'Not started', 'text-slate-600'],
   running: ['◌', 'Running', 'text-sky-700'],
   ready: ['✓', 'Ready', 'text-emerald-700'],
   needs_action: ['!', 'Needs action', 'text-amber-800'],
-  unavailable: ['—', 'Unavailable', 'text-slate-500'],
+  unavailable: ['—', 'Unavailable', 'text-slate-600'],
 };
 const RECOVERY_DESTINATIONS = {
-  open_ai_settings: '/settings#ai-models',
-  open_sources_settings: '/settings#rss-feeds',
+  open_ai_settings: '/settings?task=connection',
+  open_sources_settings: '/today?task=rss',
 };
 
 function DoctorCheck({ check, running, onRetry }) {
@@ -23,20 +25,20 @@ function DoctorCheck({ check, running, onRetry }) {
   return <li className="py-2 flex items-start gap-2">
     <span className={`${meta[2]} font-medium w-4`} aria-hidden>{meta[0]}</span>
     <div className="min-w-0 flex-1">
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-slate-600">
         <span className={meta[2]}>{meta[1]}</span>{' · '}{check.id.replaceAll('_', ' ')}
       </p>
       <p className="text-sm text-slate-800">{check.message}</p>
       {check.load_receipts?.some((receipt) => receipt.admission?.status === 'unknown') &&
         <p className="text-sm text-amber-800">Local load safety is not established.</p>}
-      {check.detail && <details className="text-xs text-slate-500 mt-1">
+      {check.detail && <details className="text-xs text-slate-600 mt-1">
         <summary className="cursor-pointer">Technical details</summary>
         <p className="break-words mt-1">{check.detail}</p>
       </details>}
       {check.status === 'needs_action' && <div className="mt-1 flex flex-wrap gap-2 items-center">
-        {destination && <a href={destination} className="text-teal-700 underline text-sm">
-          {check.recovery?.label || 'Review settings'}
-        </a>}
+        {destination && (check.recovery.action === 'open_ai_settings'
+          ? <SettingsTaskLink task="connection" className="text-teal-700 underline text-sm">{check.recovery?.label || 'Review AI connection'}</SettingsTaskLink>
+          : <Link to={destination} className="text-teal-700 underline text-sm">{check.recovery?.label || 'Review RSS sources'}</Link>)}
         {(!destination || check.recovery?.action === 'open_ai_settings') &&
           <Button type="button" variant="secondary" disabled={running} onClick={onRetry}>
             {destination ? 'Retry' : check.recovery?.label || 'Retry'}
@@ -55,7 +57,7 @@ export function DoctorChecklist() {
   const cancellation = useMutation({ mutationFn: cancelDoctor,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['setup-doctor'] }) });
 
-  if (query.isLoading) return <p className="text-sm text-slate-500">Loading local health…</p>;
+  if (query.isLoading) return <p className="text-sm text-slate-600">Loading local health…</p>;
   if (query.isError) return <Banner kind="error">{humanizeError(query.error)} Verification status is unknown;
     server work may still be running. Reload to retry the status check.</Banner>;
   const data = query.data;
@@ -87,8 +89,8 @@ export function DoctorChecklist() {
           const meta = STATUS[value] || STATUS.not_started;
           return <div key={key} className="rounded-lg border border-slate-200 p-2 text-xs">
             <span className={meta[2]} aria-hidden>{meta[0]} </span>
-            <span className="font-semibold">{label}</span>
-            <span className="block text-slate-500">{meta[1]}</span>
+            <span className="font-medium">{label}</span>
+            <span className="block text-slate-600">{meta[1]}</span>
           </div>;
         })}
       </div>}
@@ -100,19 +102,19 @@ export function DoctorChecklist() {
         ✓ Setup verified
       </p>}
       {!mutation.isPending && !data?.ready && checks.length === 0 && (
-        <p className="text-sm text-slate-500">Verification has not run yet.</p>
+        <p className="text-sm text-slate-600">Verification has not run yet.</p>
       )}
 
       {checks.length > 0 && <ul className="divide-y divide-slate-100" aria-label="Setup checks" aria-live="polite">
         {visible.map(row)}
         {pending.length > 1 && <li className="py-2">
-          <details className="text-xs text-slate-500">
+          <details className="text-xs text-slate-600">
             <summary className="cursor-pointer">{pending.length} checks not started</summary>
             <ul className="mt-1 divide-y divide-slate-100">{pending.map(row)}</ul>
           </details>
         </li>}
         {otherChecks.length > 0 && <li className="py-2">
-          <details className="text-xs text-slate-500">
+          <details className="text-xs text-slate-600">
             <summary className="cursor-pointer">{otherLabel}</summary>
             <ul className="mt-1 divide-y divide-slate-100">{otherChecks.map(row)}</ul>
           </details>
@@ -129,7 +131,7 @@ export function DoctorChecklist() {
         </Button>
         {running && data?.run_id && <Button type="button" variant="secondary" disabled={cancellation.isPending}
           onClick={() => cancellation.mutate(data.run_id)}>Stop verification</Button>}
-        {data?.last_successful_at && <span className="text-xs text-slate-500">
+        {data?.last_successful_at && <span className="text-xs text-slate-600">
           Last successful check: {new Date(data.last_successful_at).toLocaleString()}
         </span>}
       </div>

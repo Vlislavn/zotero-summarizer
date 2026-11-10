@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { Link, MemoryRouter } from 'react-router-dom';
 import Search from './Search.jsx';
 
 const question = 'Did the treatment improve the outcome?';
@@ -72,10 +73,61 @@ it('submits evidence policy only after explicit selection and with questions', a
   fireEvent.click(screen.getByRole('button', { name: 'Search' }));
   await waitFor(() => expect(bodies).toHaveLength(2));
   expect(bodies[1].evidence_policy).toBe('question_evidence');
-  fireEvent.change(screen.getByPlaceholderText(/one specific question per line/), { target: { value: '' } });
+  expect(screen.getByRole('checkbox', { name: /Experimental original-source question evidence/ }).checked).toBe(false);
+  fireEvent.change(screen.getByPlaceholderText(/one specific question per line/), { target: { value: 'Did the control group improve?' } });
   fireEvent.click(screen.getByRole('button', { name: 'Search' }));
   await waitFor(() => expect(bodies).toHaveLength(3));
   expect(bodies[2].evidence_policy).toBeUndefined();
+  fireEvent.change(screen.getByPlaceholderText(/one specific question per line/), { target: { value: '' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+  await waitFor(() => expect(bodies).toHaveLength(4));
+  expect(bodies[3].evidence_policy).toBeUndefined();
+});
+
+it.each(['failed', 'stale'])('preserves current evidence consent and draft after %s creation', async outcome => {
+  const bodies = [];
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {
+    if (path === '/api/search/screen') {
+      bodies.push(JSON.parse(options.body));
+      return bodies.length === 1 ? pending : new Response(JSON.stringify({ id: 'retry', status: 'reviewed', candidates: [] }));
+    }
+    return new Response(JSON.stringify(path === '/api/search/kept'
+      ? { id: 'kept', status: 'reviewed', candidates: [{ candidate_id: 'kept', title: 'Retained current result' }] }
+      : { items: [] }));
+  }));
+  render(<MemoryRouter initialEntries={['/search']}>
+    <Link to="/search?session=kept">Open retained session</Link><Search />
+  </MemoryRouter>);
+  fireEvent.change(screen.getByLabelText('Search query'), { target: { value: 'treatment studies' } });
+  fireEvent.change(screen.getByLabelText('Questions (optional)'), { target: { value: question } });
+  fireEvent.click(screen.getByRole('checkbox', { name: /Experimental original-source question evidence/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Search', exact: true }));
+  await waitFor(() => expect(bodies).toHaveLength(1));
+  expect(bodies[0].evidence_policy).toBe('question_evidence');
+  const draft = 'Did the control group improve?';
+  fireEvent.change(screen.getByLabelText('Questions (optional)'), { target: { value: draft } });
+  if (outcome === 'stale') {
+    fireEvent.click(screen.getByRole('link', { name: 'Open retained session' }));
+    await screen.findByText('Retained current result');
+  }
+  await act(async () => finish(new Response(JSON.stringify(outcome === 'failed'
+    ? { error: 'creation_failed' } : { id: 'obsolete', status: 'reviewed', candidates: [] }),
+  { status: outcome === 'failed' ? 503 : 200 })));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Search', exact: true }).disabled).toBe(false));
+  expect(screen.getByRole('checkbox', { name: /Experimental original-source question evidence/ }).checked).toBe(true);
+  expect(screen.getByLabelText('Questions (optional)').value).toBe(draft);
+  expect(screen.getByLabelText('Search query').value).toBe('treatment studies');
+  if (outcome === 'stale') {
+    expect(screen.getByText('Retained current result')).toBeTruthy();
+    expect(JSON.parse(sessionStorage.getItem('zs.searchSession')).id).toBe('kept');
+  }
+  fireEvent.click(screen.getByRole('button', { name: 'Search', exact: true }));
+  await waitFor(() => expect(bodies).toHaveLength(2));
+  expect(bodies[1].questions).toEqual([draft]);
+  expect(bodies[1].evidence_policy).toBe('question_evidence');
+  await waitFor(() => expect(screen.getByRole('checkbox', { name: /Experimental original-source question evidence/ }).checked).toBe(false));
 });
 
 it('distinguishes unavailable routing, partial evidence and retrieval misses from absence', async () => {

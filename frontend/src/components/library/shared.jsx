@@ -1,6 +1,7 @@
 // Shared helpers for the Library "Read next" surface. (Quality-grade colours now
 // live in paper/review/tones.js — the single source for the review vocabulary.)
 import { humanizeError } from '../../utils/humanizeError.js';
+import SettingsTaskLink from '../settings/SettingsTaskLink.jsx';
 
 export function formatShortDate(value) {
   if (!value) return '';
@@ -74,7 +75,7 @@ export function FullTextAccessNotice({ deep }) {
     return (
       <div className={cls} role="status">
         <span className="font-semibold">Library access is unavailable in this installation.</span>{' '}
-        <a href="/settings" className="font-medium text-indigo-700 hover:underline">Open Settings</a>{' '}
+        <SettingsTaskLink task="university" className="font-medium text-indigo-700 hover:underline">Open access settings</SettingsTaskLink>{' '}
         to install browser support, then generate again.
       </div>
     );
@@ -83,9 +84,9 @@ export function FullTextAccessNotice({ deep }) {
     return (
       <div className={cls} role="status">
         <span className="font-semibold">Your library session could not access this paper.</span>{' '}
-        <a href="/settings#university-access" className="font-medium text-indigo-700 hover:underline">
+        <SettingsTaskLink task="university" className="font-medium text-indigo-700 hover:underline">
           Open University access
-        </a>{' '}
+        </SettingsTaskLink>{' '}
         and sign in through the app&apos;s saved browser profile, then generate again.
       </div>
     );

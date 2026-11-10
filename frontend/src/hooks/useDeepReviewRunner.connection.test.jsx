@@ -12,6 +12,8 @@ vi.mock('../api/libraryApi.js', () => ({
 vi.mock('../api/settingsApi.js', () => ({ fetchLlmReachability: async () => ({
   stages: [{ stage: 'deep_review', enabled: true, reachable: true }],
 }) }));
+// Auto-run also requires the server opt-in (ZS_PAPER_AUTO_REVIEW).
+vi.mock('../api/paperPrefs.js', () => ({ fetchPaperPrefs: async () => ({ auto_review: true }) }));
 const clients = [];
 beforeEach(() => {
   vi.resetModules();

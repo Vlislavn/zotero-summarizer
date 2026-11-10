@@ -542,10 +542,10 @@ export default function AnnotationVerdict() {
             Papers
           </h2>
           <span className="text-[11px] text-slate-500">
-            Showing {filteredItems.length} of {totalMatched}
+            Showing {filteredItems.length} of {totalMatched} · {activeFilterLabel === 'All' ? 'all papers' : activeFilterLabel}
           </span>
         </div>
-        <TriageProgress labeled={labeledCount} total={filteredItems.length} />
+        <TriageProgress labeled={labeledCount} total={filteredItems.length} scope={activeFilterLabel === 'All' ? '' : activeFilterLabel} />
 
         <div className="space-y-2 mb-2">
           <div className="flex flex-wrap gap-1.5">
@@ -678,7 +678,7 @@ export default function AnnotationVerdict() {
             && borderStatus !== 'computing'
             && filteredItems.length === 0 && (
             <li className="text-xs text-slate-500 p-3">
-              No <span className="font-semibold">{activeFilterLabel}</span> papers
+              No <span className="font-semibold">{activeFilterLabel === 'All' ? 'matching' : activeFilterLabel}</span> papers
               {(search || selectedCollection || selectedTag || flagFilter) ? ' for this search/filter' : ''}.
               {' '}Try another filter above.
             </li>

@@ -25,17 +25,17 @@ function RedirectTo({ to, extra }) {
 }
 
 export default function App() {
+  const settingUp = useLocation().pathname === '/setup';  // first-run wizard owns the screen: no app nav
   return (
-    <div className="min-h-screen px-4 py-5 max-w-[1400px] mx-auto">
-      <NavBar />
+    <div className="min-h-screen px-2 sm:px-4 py-2 sm:py-5 max-w-[1400px] mx-auto">
+      {!settingUp && <NavBar />}
       <main>
         {/* SetupGate redirects an unconfigured first-run user from the default
             landing (/ or /library) to /setup — never traps a returning user. */}
         <SetupGate>
           <Routes>
-            {/* Land on Read next (the Library reading queue) — the user's most
-                frequent entry; saves a Today→Library click every session. */}
-            <Route path="/" element={<Navigate to="/library" replace />} />
+            {/* Land on Today — the daily decisions; Library is one tap away. */}
+            <Route path="/" element={<Navigate to="/today" replace />} />
             <Route path="/setup" element={<SetupFlow />} />
             <Route path="/today" element={<Today />} />
             <Route path="/settings" element={<Settings />} />

@@ -16,7 +16,7 @@ it('does not claim Synced before the first acknowledged pull', async () => {
   const { default: NavBar } = await import('./NavBar.jsx');
   await act(async () => { render(<MemoryRouter><NavBar /></MemoryRouter>); });
   expect(screen.queryByText('Synced', { exact: true })).toBeNull();
-  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Connection not confirmed · 0 pending · 0 cached papers'));
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Connection not confirmed'));
 });
 
 it('shows actual server and device intent before either conflict choice', async () => {

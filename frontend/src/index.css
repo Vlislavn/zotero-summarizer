@@ -21,6 +21,13 @@ body {
   min-height: 100vh;
 }
 
+/* DESIGN.md: no weight ≥600 — bare <b>/<strong> emphasise at medium. */
+@layer base {
+  b, strong { font-weight: 500; }
+  /* One saturated colour: native checks and radios use Forest Ink, not the browser blue. */
+  input[type="checkbox"], input[type="radio"] { accent-color: var(--brand-teal); }
+}
+
 /* Display face for headings / the loud line (light weight only — no bold). */
 .font-display {
   font-family: "Fraunces", "Newsreader", Georgia, serif;

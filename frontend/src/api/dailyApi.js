@@ -67,6 +67,13 @@ export async function fetchDailySlate({ K = 5, lookback_hours = 168 } = {}) {
   return request(`/daily?${qs.toString()}`);
 }
 
+/** Read every retained row, including handled/missing members; never rerank. */
+export async function fetchDailyMembers(itemIds, signal) {
+  const qs = new URLSearchParams();
+  itemIds.forEach(id => qs.append('item_id', String(id)));
+  return request(`/daily/members?${qs}`, { signal });
+}
+
 /**
  * GET /api/daily/pipeline
  * Funnel overview for Today. Response shape:
@@ -112,6 +119,43 @@ export async function trashPapers(itemIds) {
     method: 'POST',
     body: JSON.stringify({ item_ids: itemIds }),
   });
+}
+
+/**
+ * POST /api/daily/events — batch of local exposure events (card_shown, card_dwell,
+ * open_review, open_link) for one slate. `keepalive` lets the last batch survive
+ * a page unload. Returns { logged }.
+ */
+export async function postTodayEvents(slateId, events) {
+  return request('/daily/events', {
+    method: 'POST', keepalive: true, body: JSON.stringify({ slate_id: slateId, events }),
+  });
+}
+
+/**
+ * POST /api/daily/verdict
+ * Record ONE card's decision (must_read | should_read | could_read | dont_read)
+ * plus optional canonical reason-chip ids. Omit/empty `chips` → reasons_json NULL
+ * (a decision with no reason). Reasons are per item — never sent in batch.
+ * Returns { id, item_key, reasons_saved }.
+ */
+export async function submitDailyVerdict({ itemId, priority, chips = [] }) {
+  if (!Number.isInteger(itemId)) throw new Error('submitDailyVerdict: itemId must be an integer');
+  if (!priority) throw new Error('submitDailyVerdict: priority is required');
+  return request('/daily/verdict', {
+    method: 'POST',
+    body: JSON.stringify({ item_id: itemId, user_priority: priority, reasons: chips.length ? chips : null }),
+  });
+}
+
+/**
+ * POST /api/daily/verdict/undo
+ * Retract one card's decision (and its reasons), restoring the undecided card.
+ * Returns { deleted, item_key }.
+ */
+export async function undoDailyVerdict(itemId) {
+  if (!Number.isInteger(itemId)) throw new Error('undoDailyVerdict: itemId must be an integer');
+  return request('/daily/verdict/undo', { method: 'POST', body: JSON.stringify({ item_id: itemId }) });
 }
 
 /**

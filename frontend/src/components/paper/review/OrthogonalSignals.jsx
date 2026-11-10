@@ -7,11 +7,11 @@ const POLICY_REASONS = {
   full_text_not_confirmed: 'Digest source basis is unknown or unconfirmed; full-paper reading is not supported.',
   writing_friction: 'High writing friction: preserve the idea without a full-paper read.',
   writing_not_assessed: 'Writing friction was not assessed.',
-  active_goal_not_confirmed: 'A direct active-goal match was not confirmed.',
+  // Legacy: stored by older reviews (4 in the 11-09 copy); no longer emitted — the goal board is a badge.
+  active_goal_not_confirmed: 'A direct active-goal match was not confirmed (legacy flag; not used for the decision).',
   idea_value_not_high: 'High idea value was not confirmed.',
   strong_evidence_not_confirmed: 'Strong scientific support was not confirmed.',
   weak_evidence: 'Scientific support has material concerns.',
-  goals_not_assessed: 'Goal assessment is unavailable; the reading decision is withheld.',
   original_value_not_assessed: 'Original-only value was not assessed; the reading decision is withheld.',
   reading_targets_not_assessed: 'Specific reading targets were not recorded; the reading decision is withheld.',
 };
@@ -31,7 +31,9 @@ function goalLabel(goals) {
 }
 
 // Presentation only: preserve the separate cached signals and explain server policy, never score or rank.
-export default function OrthogonalSignals({ deep }) {
+// `folded` (the reading page's verdict card): the explanatory notes open with the
+// disclosure instead of repeating the why line above it.
+export default function OrthogonalSignals({ deep, folded = false }) {
   const digest = deep.digest || {};
   const quality = deep.quality || {};
   const nonPaper = quality.basis === 'non_paper';
@@ -45,22 +47,27 @@ export default function OrthogonalSignals({ deep }) {
   const writingReasons = (digest.writing_reasons || []).filter(Boolean);
   const scoreText = (value) => Number.isInteger(value) && value >= 1 && value <= 5 ? `${value}/5` : 'not assessed';
 
+  const notes = <>
+    {weakEvidence && <p>Concept/hypothesis source — claims are not established convincingly; inspect the evidence gap before relying on them.</p>}
+    {friction === 'high' && ['read', 'skim'].includes(digest.read_decision) && (
+      <p>Idea preserved — high writing friction limits automatic advice to a targeted skim, not a judgment of bad science.</p>
+    )}
+    {digest.read_decision === 'skim' && (capped || policyReasons.length > 0) && (
+      <dl>
+        <KeyVal label="Why SKIM">
+          {capped && <p>Automatic policy capped the model&apos;s read recommendation to skim.</p>}
+          {policyReasons.length ? <Bullets items={policyReasons} />
+            : <p>Specific policy reasons are unavailable in this saved review.</p>}
+        </KeyVal>
+      </dl>
+    )}
+  </>;
+
   return (
-    <div role="group" aria-label="Idea, evidence and writing" className="mt-2 space-y-1.5 break-words text-[13px] leading-relaxed text-slate-700 max-w-[66ch] [&_summary]:text-slate-600 [&_dt]:text-slate-600">
-      {weakEvidence && <p>Concept/hypothesis source — claims are not established convincingly; inspect the evidence gap before relying on them.</p>}
-      {friction === 'high' && ['read', 'skim'].includes(digest.read_decision) && (
-        <p>Idea preserved — high writing friction limits automatic advice to a targeted skim, not a judgment of bad science.</p>
-      )}
-      {digest.read_decision === 'skim' && (capped || policyReasons.length > 0) && (
-        <dl>
-          <KeyVal label="Why SKIM">
-            {capped && <p>Automatic policy capped the model&apos;s read recommendation to skim.</p>}
-            {policyReasons.length ? <Bullets items={policyReasons} />
-              : <p>Specific policy reasons are unavailable in this saved review.</p>}
-          </KeyVal>
-        </dl>
-      )}
+    <div role="group" aria-label="Idea, evidence and writing" className="mt-3 max-w-[66ch] space-y-2 break-words border-t border-slate-200/70 pt-3 text-[14px] leading-relaxed text-slate-600 [&_dd]:!text-[14px] [&_dt]:text-slate-600 [&_li]:!text-[14px] [&_p]:!text-[14px] [&_summary]:text-slate-600 [&_summary]:!text-[13px] [&_summary]:normal-case [&_summary]:tracking-normal">
+      {!folded && notes}
       <Disclosure summary={`Idea: ${ideaLabel(digest)} · Evidence: ${evidence} · Writing: ${friction ? `${friction} friction` : 'not assessed'}`}>
+        {folded && <div className="mb-2 space-y-2">{notes}</div>}
         <dl className="space-y-2">
           <KeyVal label="Idea value">
             <p>Model assessments: Novelty {scoreText(digest.novelty)} · Significance {scoreText(digest.significance)}.</p>

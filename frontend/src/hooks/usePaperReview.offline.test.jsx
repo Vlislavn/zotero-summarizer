@@ -15,7 +15,7 @@ function mount(key, initial) {
     queries: { retry: false }, mutations: { retry: false },
   } });
   clients.push(client);
-  if (initial) client.setQueryData(['review-detail', key], initial);
+  if (initial) client.setQueryData(['paper-detail', key], initial);
   const wrapper = ({ children }) => createElement(QueryClientProvider, { client }, children);
   return { ...renderHook(() => usePaperReview(key), { wrapper }), client };
 }

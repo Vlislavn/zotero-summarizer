@@ -12,7 +12,7 @@ import Search from '../../pages/Search.jsx';
 const fp = 'a'.repeat(64), token = 'b'.repeat(64);
 const boundary = { enabled: true, token, provider: 'fixture-provider', model: 'fixture-model', endpoint: 'https://example.test/v1' };
 const metadata = (state = 'saved') => ({ seed_key: 'SEED0001', seed_title: 'Seed', admission: { state, basis: state === 'saved' ? 'native' : null },
-  context_fingerprint: state === 'saved' ? fp : null, boundary, private_context: { status: 'observed', record_count: 1 }, reason: null });
+  context_fingerprint: state === 'unknown' ? null : fp, boundary, private_context: { status: 'observed', record_count: 1 }, reason: null });
 const reply = (dto, status = 200) => new Response(JSON.stringify(dto), { status });
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 const clients = [];
@@ -52,12 +52,13 @@ it('loads metadata independently of saved-related disclosure and never retries o
   expect(screen.getByRole('button', { name: 'Show related saved papers' })).toBeTruthy();
 });
 
-it.each(['not_saved', 'unknown'])('requires positive server saved admission, not key shape: %s', async state => {
+it.each(['not_saved', 'unknown'])('feed-only seeds can search; an unreadable context is a visible disabled reason: %s', async state => {
   const { requests } = mount(async () => reply(metadata(state)));
 
-  await screen.findByText(state === 'unknown' ? 'Saved membership unknown; discovery is unavailable.' : 'Save this paper before discovery.');
+  await screen.findByText(state === 'unknown' ? /Similar-paper search is unavailable: this paper's library context could not be read/
+    : 'Not in your library yet. Searches open sources for papers like this one.');
 
-  expect(screen.queryByRole('button', { name: 'Find new relevant' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Find new relevant' }).disabled).toBe(state === 'unknown');
   expect(requests).toHaveLength(1);
   expect(requests[0].init.method).toBeUndefined();
 });
@@ -78,13 +79,12 @@ it.each([{}, { ...metadata(), seed_key: 'OTHER000' }, { ...metadata(), admission
 it.each(['saved', 'not_saved'])('a failed saved-library read cannot decide independent discovery admission: %s', async state => {
   const { requests } = mount(async path => path.endsWith('/discover') ? reply(metadata(state))
     : reply({ message: 'fixture local corpus unavailable' }, 503));
-  await screen.findByText(state === 'saved' ? 'Find new relevant' : 'Save this paper before discovery.');
+  await screen.findByRole('button', { name: 'Find new relevant' });
   fireEvent.click(screen.getByRole('button', { name: 'Show related saved papers' }));
   const alert = await screen.findByRole('alert');
   expect(alert.textContent).toContain('fixture local corpus unavailable');
   expect(alert.textContent).toContain('Review remains usable; previous comments stay hidden until a fresh read succeeds.');
-  expect(Boolean(screen.queryByRole('button', { name: 'Find new relevant' }))).toBe(state === 'saved');
-  expect(requests.map(row => row.path)).toEqual(['/api/library/related/SEED0001/discover', '/api/library/related/SEED0001']);
+    expect(requests.map(row => row.path)).toEqual(['/api/library/related/SEED0001/discover', '/api/library/related/SEED0001']);
   expect(requests.every(row => !row.init.method)).toBe(true);
 });
 
@@ -94,7 +94,7 @@ it('saved admission with unavailable context is disabled and explicitly refresha
   const find = await screen.findByRole('button', { name: 'Find new relevant' });
 
   expect(find.disabled).toBe(true);
-  expect(screen.getByText('Discovery context unavailable: source_unavailable.')).toBeTruthy();
+  expect(screen.getByText(/Similar-paper search is unavailable: this paper's library context could not be read \(source_unavailable\)/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Refresh discovery eligibility' }));
   await waitFor(() => expect(requests).toHaveLength(2));
   expect(requests.every(r => !r.init.method)).toBe(true);
@@ -126,7 +126,7 @@ it.each(['default', 'declined', 'confirmed'])('captures actual public/comment co
     fireEvent.click(screen.getByText('Discovery processing and optional comments'));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Use private seed comments — experimental' }));
     expect(confirm).toHaveBeenCalledTimes(1);
-    expect(confirm.mock.calls[0][0]).toBe('Send complete private seed comments and your reading verdict/rationale only to fixture-provider / fixture-model (https://example.test/v1)? Providers still receive public metadata only. Full context and results stay locally. Experimental usefulness is unqualified.');
+    expect(confirm.mock.calls[0][0]).toBe('Send complete private seed comments and your reading verdict/rationale only to fixture-provider / fixture-model (https://example.test/v1)? Search providers still receive public metadata only. Full context and results stay locally. Experimental usefulness is unqualified.');
   }
   expect(requests.filter(r => r.init.method === 'POST')).toEqual([]);
 
@@ -176,12 +176,12 @@ it.each(['GET', 'POST'])('navigation aborts and fences late discovery %s', async
   const old = requests.find(r => (r.init.method || 'GET') === method);
 
   fireEvent.click(screen.getByRole('link', { name: 'Next fixture seed' }));
-  await screen.findByText('Saved membership unknown; discovery is unavailable.');
+  await screen.findByText(/Similar-paper search is unavailable/);
   await act(async () => held.resolve(reply(method === 'GET' ? metadata() : { id: 'obsolete' })));
 
   expect(old.init.signal.aborted).toBe(true);
   expect(screen.getByLabelText('Location').textContent).toBe('/paper/NEXT0001');
-  expect(screen.queryByRole('button', { name: 'Find new relevant' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Find new relevant' }).disabled).toBe(true);
 });
 
 it('real Search retry link returns to fresh seed admission/consent and requires a new click', async () => {
@@ -243,7 +243,7 @@ it.each(['GET', 'POST'])('real primary verdict ACK aborts late discovery %s befo
 
   expect(obsolete.init.signal.aborted).toBe(true);
   expect(screen.getByLabelText('Location').textContent).toBe('/paper/P1');
-  expect(screen.queryByRole('button', { name: 'Find new relevant' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Find new relevant' }).disabled).toBe(true);
   expect(detailReads).toBe(1);
   await act(async () => tag.resolve(reply({ queued: true })));
   await waitFor(() => expect(detailReads).toBe(2));

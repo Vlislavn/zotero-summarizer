@@ -1,176 +1,151 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import StepConnectLlm from './StepConnectLlm.jsx';
 
-const api = vi.hoisted(() => ({ fetchAiPresets: vi.fn(), saveAiCredential: vi.fn(), listModels: vi.fn() }));
-vi.mock('../../api/setupApi.js', () => ({ fetchAiPresets: api.fetchAiPresets, saveAiCredential: api.saveAiCredential }));
-vi.mock('../../api/settingsApi.js', () => ({ listModels: api.listModels }));
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
-
-function show(mode, routing, onPatchRouting, extra = {}) {
+const api = vi.hoisted(() => ({ fetchAiPresets: vi.fn(), fetchConnections: vi.fn(), registerConnection: vi.fn(),
+  listConnectionModels: vi.fn(), previewConnection: vi.fn(), applyConnection: vi.fn(), readConnection: vi.fn(),
+  testConnection: vi.fn(), replaceConnectionCredential: vi.fn(), readConnectionCredential: vi.fn() }));
+vi.mock('../../api/setupApi.js', () => ({ fetchAiPresets: api.fetchAiPresets }));
+vi.mock('../../api/connectionsApi.js', () => api);
+const local = { name: 'local', type: 'openai', base_url: 'http://[::1]:9988/exact/proxy', auth_mode: 'none', api_key_env: 'UNUSED' };
+const config = { llm_routing: { providers: [local], default: { provider: 'local', model: 'manual' }, feed: { model: 'exception' } } };
+function show(mode, saved = vi.fn()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  render(<QueryClientProvider client={client}>
-    <StepConnectLlm mode={mode} routing={routing} onPatchRouting={onPatchRouting} {...extra} />
-  </QueryClientProvider>);
+  render(<QueryClientProvider client={client}><StepConnectLlm mode={mode} onSaved={saved} /></QueryClientProvider>);
   return client;
 }
-
-const local = { name: 'local', type: 'openai', base_url: 'http://localhost:11434/v1', api_key_env: 'OLLAMA_API_KEY' };
-const hosted = { name: 'hosted', type: 'openai', base_url: 'https://example.test/v1', api_key_env: 'HOSTED_KEY' };
-const routing = { providers: [local], default: { provider: 'local', model: 'qwen3:8b' },
-  feed: { provider: 'local', model: 'qwen3:8b' }, backlog: { provider: 'local', model: 'qwen3:8b' },
-  deep_review: { provider: 'local', model: 'qwen3:8b' } };
-
-it('Settings offers local and hosted recovery when no wizard mode is supplied', async () => {
-  api.fetchAiPresets.mockResolvedValue({ presets: [
-    { id: 'local', label: 'Local', provider: local },
-    { id: 'hosted', label: 'Hosted', provider: hosted },
-  ] });
-  show(undefined, { ...routing, providers: [hosted], default: { provider: 'hosted', model: 'remote' } }, vi.fn());
-  expect(await screen.findByRole('button', { name: 'Local' })).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Hosted' })).toBeTruthy();
+beforeEach(() => {
+  vi.resetAllMocks();
+  api.fetchConnections.mockResolvedValue({ revision: 'r1', config, providers: [local] });
+  api.fetchAiPresets.mockResolvedValue({ local_profiles: { profiles: [
+    { id: 'light', label: 'Light', provider: local, model: 'qwen3:8b', compatible: true, size_gb: 5.2, compatibility_detail: 'Meets static floors' },
+    { id: 'balanced', label: 'Balanced', provider: local, model: 'qwen3:30b', compatible: false, compatibility_detail: 'needs 32 GB memory' },
+  ] } });
+  api.registerConnection.mockImplementation(async command => {
+    const candidate = { ...local, name: 'candidate', base_url: command.base_url };
+    const next = { ...config, llm_routing: { ...config.llm_routing, providers: [local, candidate] } };
+    api.fetchConnections.mockResolvedValue({ revision: 'r2', config: next, providers: next.llm_routing.providers });
+    return { ...command, provider: candidate, state: 'registered_inactive', revision: 'r2' };
+  });
+  api.listConnectionModels.mockResolvedValue({ catalog: 'returned', models: ['served'], revision: 'r2' });
+  api.previewConnection.mockResolvedValue({ revision: 'r2', preview: 'p', ready_to_apply: true, impact: { stages: [] } });
 });
+afterEach(cleanup);
 
-it('replacing a hosted key clears cached Doctor Ready in Settings', async () => {
-  api.fetchAiPresets.mockResolvedValue({ presets: [{ id: 'hosted', label: 'Hosted', provider: hosted }] });
-  api.saveAiCredential.mockResolvedValue({ name: 'HOSTED_KEY', present: true });
-  api.listModels.mockResolvedValue({ models: ['remote'] });
-  const client = show('hosted', { providers: [hosted], default: { provider: 'hosted', model: 'remote' } }, vi.fn());
-  client.setQueryData(['setup-doctor'], { ready: true });
-  await screen.findByRole('button', { name: 'Hosted' });
-  fireEvent.change(screen.getByPlaceholderText('Paste API key'), { target: { value: 'new-secret' } });
-  fireEvent.click(screen.getByRole('button', { name: 'List available models' }));
-  await waitFor(() => expect(api.saveAiCredential).toHaveBeenCalledTimes(1));
-  await waitFor(() => expect(client.getQueryData(['setup-doctor'])?.ready).toBe(false));
+it.each([undefined, 'local', 'hosted'])('keyless exact IPv6 path remains mode-independent (%s), with explicit consent', async mode => {
+  const client = show(mode);
+  fireEvent.click(await screen.findByRole('button', { name: 'Change All steps', exact: true }));
+  expect(screen.getByLabelText('API address').value).toBe(local.base_url);
+  expect(document.querySelector('input[type="password"]')).toBeNull();
+  expect(api.registerConnection).not.toHaveBeenCalled();
+  expect(screen.queryByLabelText(/I approve/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Load models' }));
+  await screen.findByRole('combobox', { name: 'Model' });
+  expect(api.registerConnection.mock.calls[0][0]).toMatchObject({ source: 'local', auth: 'none', base_url: local.base_url });
+  expect(api.testConnection).not.toHaveBeenCalled();
   client.clear();
 });
 
-it('switching to hosted replaces local overrides at every inference stage', async () => {
-  api.fetchAiPresets.mockResolvedValue({ presets: [{ id: 'hosted', label: 'Hosted', provider: hosted }] });
-  const patch = vi.fn();
-  show('hosted', routing, patch);
-  fireEvent.click(await screen.findByRole('button', { name: 'Hosted' }));
-  const next = patch.mock.calls.at(-1)[0];
-  expect(next.default.provider).toBe('hosted');
-  for (const stage of ['feed', 'backlog', 'deep_review']) {
-    expect(next[stage]).toEqual({ provider: 'hosted', model: null });
-  }
-});
-
-it('does not mistake a hosted model name for a selected local profile', async () => {
-  api.fetchAiPresets.mockResolvedValue({ presets: [{ id: 'local', label: 'Local', provider: local }],
-    local_profiles: { hardware: { memory_gb: 32, disk_free_gb: 100 }, profiles: [
-      { id: 'light', label: 'Light', compatible: true, provider: local,
-        model: 'qwen3:8b', features: ['local'], tradeoff: 'Fast' },
-    ] } });
-  show('local', { ...routing, providers: [hosted], default: { provider: 'hosted', model: 'qwen3:8b' } }, vi.fn());
-  expect((await screen.findByRole('button', { name: /Light/ })).getAttribute('aria-pressed')).toBe('false');
-  expect(screen.getByRole('button', { name: 'List available models' }).disabled).toBe(true);
-  expect(screen.queryByLabelText('API key')).toBeNull();
-});
-
-it('binds a remembered profile to the current routed model after an external configuration change', async () => {
-  api.fetchAiPresets.mockResolvedValue({ presets: [{ id: 'local', label: 'Local', provider: local }],
-    local_profiles: { hardware: { memory_gb: 16, disk_free_gb: 100 }, profiles: [
-      { id: 'light', label: 'Light', compatible: true, provider: local, model: 'qwen3:8b', features: [], tradeoff: 'Light' },
-      { id: 'balanced', label: 'Balanced', compatible: false, provider: local, model: 'qwen3:30b', features: [], tradeoff: 'Large' },
-    ] } });
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const tree = (value) => <QueryClientProvider client={client}>
-    <StepConnectLlm mode="local" routing={value} onPatchRouting={vi.fn()} />
-  </QueryClientProvider>;
-  const view = render(tree(routing));
-  fireEvent.click(await screen.findByRole('button', { name: /^Light/ }));
-  view.rerender(tree({ ...routing, default: { provider: 'local', model: 'qwen3:30b' } }));
-  expect(screen.getByRole('button', { name: /^Balanced/ }).getAttribute('aria-pressed')).toBe('true');
-  expect(screen.getByRole('button', { name: /^Light/ }).getAttribute('aria-pressed')).toBe('false');
-  expect(api.listModels).not.toHaveBeenCalled();
-  expect(api.saveAiCredential).not.toHaveBeenCalled();
+it('profile suggestions only prepare a draft; incompatible suggestions cannot change any saved route', async () => {
+  const saved = vi.fn(), client = show('local', saved);
+  const light = await screen.findByRole('button', { name: 'Light' });
+  expect(screen.getByRole('button', { name: 'Balanced' }).disabled).toBe(true);
+  fireEvent.click(light);
+  expect(screen.getByLabelText('API address').value).toBe(local.base_url);
+  expect(screen.getByRole('button', { name: 'Connect provider' }).disabled).toBe(false);
+  expect(api.registerConnection).not.toHaveBeenCalled();
+  expect(api.applyConnection).not.toHaveBeenCalled();
+  expect(saved).not.toHaveBeenCalled();
+  expect(config.llm_routing.feed).toEqual({ model: 'exception' });
   client.clear();
 });
 
-it('withholds local progression for an incompatible saved profile and names the resource floors', async () => {
-  api.fetchAiPresets.mockResolvedValue({ presets: [{ id: 'local', label: 'Local', provider: local }],
-    local_profiles: { hardware: { memory_gb: 8, disk_free_gb: 100 }, profiles: [
-      { id: 'light', label: 'Light', compatible: false, provider: local, model: 'qwen3:8b',
-        size_gb: 5.2, min_memory_gb: 12, min_disk_gb: 8, compatibility_detail: 'needs 12 GB memory',
-        features: ['summaries'], tradeoff: 'Fast' },
-    ] } });
-  show('local', routing, vi.fn());
-  expect((await screen.findByRole('button', { name: /Light/ })).disabled).toBe(true);
-  expect(screen.getByText(/12 GB memory.*8 GB free disk/)).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'List available models' }).disabled).toBe(true);
-  expect(api.listModels).not.toHaveBeenCalled();
-  expect(api.saveAiCredential).not.toHaveBeenCalled();
+it('manual model editing survives catalog failure without activation or an inference claim', async () => {
+  api.listConnectionModels.mockResolvedValue({ catalog: 'unavailable', models: [], revision: 'r2', reason_code: 'catalog_http_error',
+    http_status: 404, detail: 'Server returned HTTP 404. Review the exact base and protocol.' });
+  const client = show('local');
+  fireEvent.click(await screen.findByRole('button', { name: 'Change All steps', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load models' }));
+  expect(await screen.findByText(/Server returned HTTP 404/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'manual-model' } });
+  expect(screen.getByLabelText('Model').value).toBe('manual-model');
+  await screen.findByRole('button', { name: 'Use as default' });
+  expect(api.applyConnection).not.toHaveBeenCalled();
+  expect(api.testConnection).not.toHaveBeenCalled();
+  client.clear();
 });
 
-it('keeps a manually configured existing local model editable before the runtime is reachable', async () => {
-  api.fetchAiPresets.mockResolvedValue({ presets: [{ id: 'local', label: 'Local', provider: local }],
-    local_profiles: { hardware: { memory_gb: 32, disk_free_gb: 100 }, profiles: [
-      { id: 'existing', label: 'Use existing endpoint', compatible: true, provider: local,
-        model: null, features: ['local'], tradeoff: 'Use yours' },
-    ] } });
-  const patch = vi.fn();
-  show('local', { ...routing, default: { provider: 'local', model: 'my-local-model' } }, patch);
-  fireEvent.change(await screen.findByLabelText(/^Local model name/), { target: { value: 'served-model' } });
-  expect(patch.mock.calls.at(-1)[0].default.model).toBe('served-model');
-  expect(screen.queryByLabelText('API key')).toBeNull();
-  expect(api.listModels).not.toHaveBeenCalled();
-});
-
-it('full local existing endpoint permits a loopback non-Ollama URL without an API key field', async () => {
-  api.fetchAiPresets.mockResolvedValue({ presets: [{ id: 'local', label: 'Local', provider: local }],
-    local_profiles: { hardware: { memory_gb: 32, disk_free_gb: 100 }, profiles: [
-      { id: 'existing', label: 'Use existing endpoint', compatible: true, provider: local,
-        model: null, features: ['local'], tradeoff: 'Use yours' },
-    ] } });
-  const patch = vi.fn();
-  show('local', routing, patch);
-  fireEvent.click(await screen.findByRole('button', { name: /Use existing endpoint/ }));
-  fireEvent.change(screen.getByLabelText('Local endpoint URL'), { target: { value: 'http://127.0.0.1:1234/v1' } });
-  expect(patch.mock.calls.at(-1)[0].providers.find((p) => p.name === 'local').base_url)
-    .toBe('http://127.0.0.1:1234/v1');
-  expect(screen.queryByLabelText('API key')).toBeNull();
-});
-
-it.each([422, 403, 503, undefined])('retires health on credential-save failure %s, including validation after server invalidation', async (status) => {
-  api.fetchAiPresets.mockResolvedValue({ presets: [{ id: 'hosted', label: 'Hosted', provider: hosted }] });
-  api.saveAiCredential.mockRejectedValueOnce(Object.assign(new Error('Credential save failed'), { status }));
-  const onTested = vi.fn();
-  const client = show('hosted', { providers: [hosted], default: { provider: 'hosted', model: 'remote' } }, vi.fn(), { onTested });
+it.each([422, 403, 503, undefined])('separate credential failure %s invalidates health and cannot be blindly retried', async status => {
+  const hosted = { ...local, name: 'hosted', base_url: 'https://example.invalid/exact', auth_mode: 'legacy' };
+  api.fetchConnections.mockResolvedValue({ revision: 'r1', providers: [hosted], config: { llm_routing: { providers: [hosted], default: { provider: 'hosted', model: 'served' } } } });
+  api.replaceConnectionCredential.mockResolvedValueOnce({ operation_id: 'op', revision: 'r1', preview: 'preview', impact: { consumers: ['default'] } });
+  api.replaceConnectionCredential.mockRejectedValueOnce(Object.assign(new Error('Credential save failed'), { status }));
+  const client = show('hosted');
   client.setQueryData(['setup-doctor'], { ready: true });
-  const invalidate = vi.spyOn(client, 'invalidateQueries');
-  await screen.findByRole('button', { name: 'Hosted' });
-  fireEvent.change(screen.getByPlaceholderText('Paste API key'), { target: { value: 'new-secret' } });
-  fireEvent.click(screen.getByRole('button', { name: 'List available models' }));
-  await screen.findByText('Credential save failed');
+  fireEvent.click(await screen.findByText('Manage saved API keys'));
+  fireEvent.change(screen.getByLabelText('Connection to update'), { target: { value: 'hosted' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Review authorization impact' }));
+  fireEvent.change(await screen.findByLabelText('New API key'), { target: { value: 'synthetic' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Replace saved API key' }));
+  expect(await screen.findByText(/Credential save failed/)).toBeTruthy();
   expect(client.getQueryData(['setup-doctor'])?.ready).toBe(false);
-  expect(invalidate.mock.calls.map(([options]) => options.queryKey)).toEqual([['setup-status'], ['setup-doctor']]);
-  expect(api.saveAiCredential).toHaveBeenCalledTimes(1);
-  expect(api.saveAiCredential).toHaveBeenCalledWith('HOSTED_KEY', 'new-secret');
-  expect(api.listModels).not.toHaveBeenCalled();
-  expect(onTested).toHaveBeenLastCalledWith(false);
+  expect(api.replaceConnectionCredential).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole('button', { name: 'Review authorization impact' }).disabled).toBe(true);
+  expect(api.listConnectionModels).not.toHaveBeenCalled();
   client.clear();
 });
 
-it.each([false, true])('a model-list error does not add a write invalidation; credential replacement %s', async (replace) => {
-  api.fetchAiPresets.mockResolvedValue({ presets: [{ id: 'hosted', label: 'Hosted', provider: hosted,
-    credential: { present: true } }] });
-  api.saveAiCredential.mockResolvedValue({ name: 'HOSTED_KEY', present: true });
-  api.listModels.mockRejectedValueOnce(Object.assign(new Error('Model list unavailable'), { status: 503 }));
-  const client = show('hosted', { providers: [hosted], default: { provider: 'hosted', model: 'remote' } }, vi.fn());
-  client.setQueryData(['setup-doctor'], { ready: true });
-  const invalidate = vi.spyOn(client, 'invalidateQueries');
-  await screen.findByRole('button', { name: 'Hosted' });
-  if (replace) fireEvent.change(screen.getByPlaceholderText('Stored securely — paste to replace'), { target: { value: 'replacement' } });
-  fireEvent.click(screen.getByRole('button', { name: 'List available models' }));
-  await screen.findByText('Model list unavailable');
-  expect(api.listModels).toHaveBeenCalledTimes(1);
-  expect(api.saveAiCredential).toHaveBeenCalledTimes(replace ? 1 : 0);
-  expect(invalidate.mock.calls.map(([options]) => options.queryKey))
-    .toEqual(replace ? [['setup-status'], ['setup-doctor']] : []);
-  expect(client.getQueryData(['setup-doctor'])?.ready).toBe(!replace);
+it('credential readback owns model editing until its exact new revision is adopted', async () => {
+  const provider = { name: 'candidate', type: 'anthropic', base_url: null };
+  let operation, finishRead;
+  api.fetchConnections.mockResolvedValue({ revision: 'r1', providers: [], config: null });
+  api.registerConnection.mockImplementation(async command => {
+    operation = command.operation_id;
+    return { operation_id: operation, revision: 'r1', state: 'draft', bootstrap: true, authorization_new: true, provider };
+  });
+  api.listConnectionModels.mockResolvedValue({ revision: 'r1', catalog: 'unavailable', models: [] });
+  api.replaceConnectionCredential.mockResolvedValueOnce({ operation_id: 'credential', revision: 'r1', preview: 'auth-preview', impact: { consumers: [] } });
+  api.replaceConnectionCredential.mockResolvedValueOnce({ state: 'auth_stored', provider: 'candidate', credential: { present: true }, revision: 'r2' });
+  api.readConnection.mockImplementation(() => new Promise(resolve => { finishRead = resolve; }));
+  api.previewConnection.mockResolvedValue({ revision: 'r2', preview: 'preview-r2', ready_to_apply: true,
+    impact: { stages: [], shared_authorization: {}, telegram: { selection: null } } });
+  const client = show('hosted');
+  fireEvent.click(await screen.findByRole('button', { name: 'Add provider' }));
+  fireEvent.click(screen.getByText('Server address, API type and access'));
+  fireEvent.change(screen.getByLabelText('Authorization'), { target: { value: 'new' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Connect provider' }));
+  fireEvent.click(await screen.findByText('Add an API key for this connection'));
+  fireEvent.click(screen.getByRole('button', { name: 'Review authorization impact' }));
+  fireEvent.change(await screen.findByLabelText('API key'), { target: { value: 'synthetic' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Store API key' }));
+  await waitFor(() => expect(api.readConnection).toHaveBeenCalledTimes(1));
+  expect(screen.getByLabelText('Model').disabled).toBe(true);
+  api.fetchConnections.mockResolvedValue({ revision: 'r2', providers: [], config: null });
+  await act(async () => finishRead({ operation_id: operation, provider, revision: 'r2', current_revision: 'r2',
+    provider_matches: false, selection_matches: false, bootstrap: true, auth: 'stored' }));
+  await waitFor(() => expect(screen.getByLabelText('Model').disabled).toBe(false));
+  fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'synthetic' } });
+  await waitFor(() => expect(api.previewConnection).toHaveBeenCalledWith(expect.objectContaining({ revision: 'r2' })));
+  await screen.findByRole('button', { name: 'Use as default' });
+  client.clear();
+});
+
+it('empty-registry external entry offers new authorization, not a no-auth-only apparent flow', async () => {
+  api.fetchConnections.mockResolvedValue({ revision: 'r1', providers: [], config: null });
+  api.registerConnection.mockImplementation(async command => ({ operation_id: command.operation_id, revision: 'r1', state: 'draft', bootstrap: true,
+    authorization_new: true, provider: { name: 'candidate', type: command.type, base_url: command.base_url, auth_mode: 'legacy' } }));
+  const client = show('hosted');
+  fireEvent.click(await screen.findByRole('button', { name: 'Add provider' }));
+  fireEvent.change(screen.getByLabelText('API address'), { target: { value: 'https://example.invalid/native' } });
+  fireEvent.click(screen.getByText('Server address, API type and access'));
+  fireEvent.change(screen.getByLabelText('Authorization'), { target: { value: 'new' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Connect provider' }));
+  await waitFor(() => expect(api.registerConnection).toHaveBeenCalledTimes(1));
+  expect(api.registerConnection.mock.calls[0][0]).toMatchObject({ auth: 'new', approved: true });
+  expect(await screen.findByText('Add an API key for this connection')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Review authorization impact' }).disabled).toBe(false);
+  expect(api.applyConnection).not.toHaveBeenCalled();
   client.clear();
 });

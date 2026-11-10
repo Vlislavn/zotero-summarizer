@@ -114,7 +114,7 @@ it('keeps offline capture without automatic server replay and retains source eli
   expect(screen.getByRole('textbox', { name: 'Question about this paper' })).toBe(input);
   expect(mocks.saveReviewQuestion).not.toHaveBeenCalled();
   expect(mocks.askPaper).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Retry answer' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
   await screen.findByText('Controlled answer');
   expect(mocks.saveReviewQuestion).toHaveBeenCalledOnce();
   expect(mocks.saveReviewQuestion).toHaveBeenCalledWith(submission);

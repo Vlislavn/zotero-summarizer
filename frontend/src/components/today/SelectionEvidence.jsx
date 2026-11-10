@@ -1,10 +1,15 @@
-import { Chip, Disclosure } from '../paper/review/primitives.jsx';
-import { gradeTone } from '../paper/review/tones.js';
+import { Disclosure } from '../paper/review/primitives.jsx';
+import { CHIP_TONE, gradeTone, qualityBasis } from '../paper/review/tones.js';
 
-const POLICY = { control: 'Relevance-led (control)', quality_first: 'Quality-first' };
+const ANALYZED = 'analyzed-today-v1';
+const POLICY = {
+  control: 'Relevance-led (control)', quality_first: 'Quality-first',
+  [ANALYZED]: 'Analyzed (usable full-text review required)',
+};
 const RANK_BASIS = {
   relevance_goal_citation: 'Relevance, goals and known citations',
   quality_first: 'Quality-led cohort key',
+  goal_cos: 'Similarity to your goal text',
 };
 const PICKER_BASIS = {
   model_adjusted: 'Model-role key with the recorded quality adjustment',
@@ -16,6 +21,41 @@ const ROLE_REASON = {
   diversity: 'Exploration: outside your usual saved-paper mix, not a stronger quality endorsement.',
 };
 
+// Plain one-line answer to "why is this here?" (English, lower-case clauses). Honest
+// details live behind “more” in the disclosure below.
+const WHY_WORD = {
+  'Strong goal match': 'very close to your goals', 'On-topic for you': 'on topic for your goals',
+  "Like papers you've saved": 'like papers you saved', 'Off your usual track': 'off your usual track',
+  'High model relevance': 'high model score', 'Highly cited': 'highly cited', Surprising: 'surprising',
+};
+const ROLE_LINE = {
+  surprise: 'Surprise pick', diversity: 'Outside your usual mix', model: 'Top recommendation',
+};
+const GOAL_WHY = new Set(['Strong goal match', 'On-topic for you']);
+
+function whyWord(reason) {
+  const senior = /^Senior authors \(h=(\d+)\)$/.exec(reason);
+  return senior ? `senior authors (h-index ${senior[1]})` : WHY_WORD[reason];
+}
+
+function selectionLine(paper, selectionPolicy, blinded) {
+  if (blinded) return 'Reasons hidden to keep the selection blind.';
+  // goals.yaml entries may carry stray quotes/commas; display-trim only.
+  const goal = paper.selection_evidence?.rank?.goal?.replace(/^[\s"'“”«»]+|[\s"'“”«»,;]+$/g, '');
+  if (selectionPolicy === ANALYZED) {
+    return goal ? `Close to your goal “${goal}”` : 'Selected from your reviewed papers';
+  }
+  const selection = paper.selection_evidence?.selection;
+  if (!PICKER_BASIS[selection?.basis]) return 'Selection reasons not recorded';
+  const goalLed = paper.selection_evidence?.rank?.basis === 'goal_cos'
+    && !['surprise', 'diversity'].includes(selection.requested_role);
+  const goalHead = goal ? `Close to your goal “${goal}”` : 'Close to your goals';
+  const head = goalLed ? goalHead : ROLE_LINE[selection.requested_role] || 'Picked for you';
+  const tail = (Array.isArray(paper.why) ? paper.why : [])
+    .filter((reason) => !(goalLed && GOAL_WHY.has(reason))).map(whyWord).filter(Boolean).slice(0, 2);
+  return [head, ...tail].join(' · ');
+}
+
 function reviewPresentation(paper) {
   const review = paper.selection_evidence?.review;
   const grade = ['A', 'B', 'C', 'D'].includes(paper.quality?.grade) ? paper.quality.grade : null;
@@ -26,7 +66,7 @@ function reviewPresentation(paper) {
     };
     if (review.digest_usable === true) return {
       text: grade && review.quality_origin === 'current_entry'
-        ? `Evidence: grade ${grade} (AI review)` : 'Review available · evidence grade unknown',
+        ? `Quality ${[grade, qualityBasis(paper.quality)].filter(Boolean).join(' · ')}` : null,
       tone: review.quality_origin === 'current_entry' ? gradeTone(grade) : 'slate',
       detail: 'A current usable review matched. Its AI assessment is not independent scientific validation.',
     };
@@ -36,20 +76,25 @@ function reviewPresentation(paper) {
     };
   }
   if (review?.quality_origin === 'legacy_row' && grade) return {
-    text: `Evidence: legacy grade ${grade} · current review unconfirmed`, tone: 'slate',
+    text: `Legacy quality ${[grade, qualityBasis(paper.quality)].filter(Boolean).join(' · ')} · current review unconfirmed`, tone: 'slate',
     detail: 'This grade comes from the saved triage row. A current join miss does not establish whether a review is absent, stale or failed.',
   };
   if (paper.review_ready === true && review?.join !== 'unavailable') return {
-    text: 'Review available · evidence origin unrecorded', tone: 'slate',
+    text: null, tone: 'slate',
     detail: 'This older payload reports an available review but does not record its quality origin.',
   };
   return {
-    text: 'Review evidence: unknown', tone: 'slate',
+    text: null, tone: 'slate',
     detail: 'No usable current review is established here. A join miss does not establish whether a review is absent, stale or failed; missing evidence is not a neutral or negative grade.',
   };
 }
 
-function roleReason(paper) {
+function roleReason(paper, selectionPolicy) {
+  if (selectionPolicy === ANALYZED) {
+    return paper.role === 'exploration'
+      ? 'Random check from just below the bar; flagged quality.'
+      : 'Has a usable full-text review and passes the quality screen. Ordered by reading priority, then goal similarity.';
+  }
   const selection = paper.selection_evidence?.selection;
   if (!PICKER_BASIS[selection?.basis]) return 'Selection details were not recorded for this card.';
   const requested = selection.requested_role;
@@ -73,7 +118,7 @@ function Observations({ paper, selectionPolicy }) {
   const score = stored?.composite_recorded === false ? 'Composite not recorded'
     : Number.isFinite(paper.composite_score) ? `${paper.composite_score.toFixed(2)}/5` : 'Unknown';
   const rows = [
-    ['Active policy', POLICY[selectionPolicy] || 'Not recorded'],
+    ['Policy at selection', POLICY[selectionPolicy] || 'Not recorded'],
     ['Displayed composite', score],
     ['Stored priority (separate)', priority],
     ['Cohort ranking', RANK_BASIS[evidence.rank?.basis] || 'Not recorded'],
@@ -93,27 +138,56 @@ function Observations({ paper, selectionPolicy }) {
       The quality adjustment reorders only within the existing relevance-category slots.
     </p>}
     <p className="mt-2">These are selection observations, not raw model predictions or calibrated probabilities.
-      {' '}Stored priority is separate from the displayed composite band. Cards keep the server&apos;s role-grouped order, not composite-score order.</p>
+      {' '}Stored priority is separate from the displayed composite band.
+      {selectionPolicy !== ANALYZED && ' Cards keep the server’s role-grouped order, not composite-score order.'}</p>
   </>;
 }
 
-export default function SelectionEvidence({ paper, selectionPolicy }) {
+function evidenceView({ paper, selectionPolicy, currentStatus, statusFresh, retained = false }) {
   const evidence = paper.selection_evidence;
   const blinded = selectionPolicy === 'interleave' || evidence?.mode === 'interleave'
     || evidence?.basis === 'unavailable_blinded';
+  const observed = retained ? { ...paper, quality: currentStatus?.quality, review_ready: currentStatus?.review_ready,
+    selection_evidence: { review: currentStatus?.review_evidence } } : paper;
   const review = blinded ? { text: 'Review evidence: unavailable (blinded selection)', tone: 'slate' }
-    : reviewPresentation(paper);
-  return <div className="mt-2 space-y-2 [&_summary]:text-slate-600">
-    <Chip tone={review.tone} className="max-w-full">{review.text}</Chip>
-    <Disclosure summary="Why selected">
+    : retained && (!statusFresh || !currentStatus?.available)
+      ? { text: 'Review status: not current', tone: 'slate', detail: 'Refresh status to check this retained member. Selection reasons below are historical.' }
+      : reviewPresentation(observed);
+  return { blinded, review };
+}
+
+// The ONE plain line answering "why is this here?": [grade chip] [caveat ·] [reason].
+export function SelectionWhy({ note = null, ...props }) {
+  const { paper, selectionPolicy } = props;
+  const { blinded, review } = evidenceView(props);
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1">
+      {review.text && <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${CHIP_TONE[review.tone] || CHIP_TONE.slate}`}>{review.text}</span>}
+      <p className="text-xs text-slate-700">
+        {note && <span className={note.warn ? 'text-amber-800' : 'text-slate-500'}>{note.text} </span>}
+        {selectionLine(paper, selectionPolicy, blinded)}
+      </p>
+    </div>
+  );
+}
+
+// The card's single disclosure: the owner's secondary reading (children: authors,
+// abstract, icon legend) above the honest selection details.
+export function SelectionDetails({ children, ...props }) {
+  const { paper, selectionPolicy } = props;
+  const { blinded, review } = evidenceView(props);
+  return <div className="[&_summary]:text-slate-600">
+    <Disclosure summary="more">
       <div className="text-xs text-slate-600 leading-relaxed break-words">
+        {children}
         {blinded ? <p>Review and selection details are withheld to keep this selection blinded.</p> : <>
-          <p>{roleReason(paper)}</p>
-          {Array.isArray(paper.why) && paper.why.length > 0 && <ul className="mt-1 list-disc pl-4">
+          {props.retained && <p>Reasons recorded when this paper was selected; not a new ranking.</p>}
+          <p>{roleReason(paper, selectionPolicy)}</p>
+          {selectionPolicy !== ANALYZED && Array.isArray(paper.why) && paper.why.length > 0 && <ul className="mt-1 list-disc pl-4">
             {paper.why.map((reason) => <li key={reason}>{reason}</li>)}
           </ul>}
           <p className="mt-2">{review.detail}</p>
-          <Observations paper={paper} selectionPolicy={selectionPolicy} />
+          {selectionPolicy !== ANALYZED && <Observations paper={paper} selectionPolicy={selectionPolicy} />}
         </>}
       </div>
     </Disclosure>

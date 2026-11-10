@@ -32,7 +32,7 @@ it('keeps Generate disabled and does not claim a review failed on an offline rel
   ], { initialEntries: ['/paper/P1'] })} /></QueryClientProvider>);
 
   expect((await screen.findByRole('button', { name: 'Generate review' })).disabled).toBe(true);
-  expect(document.querySelector('main').parentElement.className).toContain('xl:grid-cols-[minmax(0,1fr)_20rem]');
+  expect(document.querySelector('main').parentElement.className).toContain('xl:grid-cols-[11rem_minmax(0,1fr)_20rem]');
   await screen.findByText(/Offline — cached reviews remain readable/);
   expect(screen.queryByText(/Review failed/)).toBeNull();
   client.clear();
@@ -176,6 +176,8 @@ it.each([['?autoRun=false', false], ['', true]])('paper navigation %s preserves 
       data = { stages: [{ stage: 'deep_review', enabled: true, reachable: true }] };
     } else if (path === '/api/zotero/collections' || path === '/api/zotero/tags?limit=300') {
       data = { items: [] };
+    } else if (path === '/api/paper/prefs') {
+      data = { auto_review: true };  // ZS_PAPER_AUTO_REVIEW on → '' URL auto-generates, ?autoRun=false does not.
     } else if (options.method === 'POST') {
       writes.push([path, JSON.parse(options.body)]);
       data = { status: 'running' };
@@ -253,6 +255,8 @@ it.each(['page', 'compact'])('%s keeps verdict comments until an explicit edit i
       writes.push(payload);
       detail.verdict = { ...detail.verdict, ...payload };
       data = detail.verdict;
+    } else if (path.startsWith('/api/card/')) {
+      data = { facts: {}, ai: null, ai_reason: 'offline', boundary: {} };
     } else {
       unexpected.push(path);
       return new Response('{}', { status: 500 });
@@ -269,13 +273,7 @@ it.each(['page', 'compact'])('%s keeps verdict comments until an explicit edit i
 
   await screen.findByRole('heading', { name: 'Your verdict' });
   expect(screen.queryByRole('button', { name: 'Must read' })).toBeNull();
-  if (surface === 'page') {
-    const jump = screen.getByRole('link', { name: 'Your verdict' });
-    expect(document.querySelector(jump.getAttribute('href')).contains(
-      screen.getByRole('heading', { name: 'Your verdict' }),
-    )).toBe(true);
-    fireEvent.click(jump);
-  }
+  // The rail editor is reachable directly (the mobile sticky bar replaced the jump link).
   fireEvent.click(screen.getByRole('button', { name: 'Edit', exact: true }));
   const comment = screen.getByPlaceholderText(/^Why\?/);
   expect(comment.value).toBe('critical rationale');
@@ -329,6 +327,7 @@ it.each([
     else if (path === '/api/admin/llm-reachability') data = { stages: [{ stage: 'deep_review', enabled: false }] };
     else if (path === '/api/zotero/collections' || path === '/api/zotero/tags?limit=300') data = { items: [] };
     else if (path === '/api/library/render/GUARD001' || path === '/api/library/deep-review/status?item_key=GUARD001') data = { status: 'idle' };
+    else if (path.startsWith('/api/card/')) data = { facts: {}, ai: null, ai_reason: 'offline', boundary: {} };
     else { unexpected.push(path); return new Response('{}', { status: 500 }); }
     return new Response(JSON.stringify(data));
   }));
@@ -403,6 +402,7 @@ it.each(['failed', 'abstained'])('captures a question without PDF/render through
     else if (path === `/api/library/render/${itemKey}`
       || path === `/api/library/deep-review/status?item_key=${itemKey}`) data = { status: 'idle' };
     else if (path === '/api/admin/llm-reachability') data = { stages: [{ stage: 'deep_review', enabled: false }] };
+    else if (path.startsWith('/api/card/')) data = { facts: {}, ai: null, ai_reason: 'offline', boundary: {} };
     else { unexpected.push(path); return new Response('{}', { status: 500 }); }
     return new Response(JSON.stringify(data));
   }));

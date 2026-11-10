@@ -51,7 +51,7 @@ function utilityColor(node, prefix) {
 
 it('uses a readable contrast token on the selection disclosure', () => {
   show(card());
-  const summary = screen.getByText('Why selected').closest('summary');
+  const summary = screen.getByText('more').closest('summary');
   expect(summary.closest('details').parentElement.className).toContain('[&_summary]:text-slate-600');
   const colors = palette.theme.extend.colors;
   expect(paletteContrast(colors.white, colors.slate[600])).toBeGreaterThanOrEqual(4.5);
@@ -104,8 +104,8 @@ it('distinguishes same-relevance current evidence grades without implying scient
   show(card());
   show(card({ item_id: 2, title: 'Second paper', quality: { grade: 'D' } }));
   expect(screen.getAllByText('Relevance: moderate')).toHaveLength(2);
-  expect(screen.getByText('Evidence: grade A (AI review)')).toBeTruthy();
-  expect(screen.getByText('Evidence: grade D (AI review)')).toBeTruthy();
+  expect(screen.getByText('Quality A')).toBeTruthy();
+  expect(screen.getByText('Quality D')).toBeTruthy();
   expect(screen.getAllByText(/not independent scientific validation/)).toHaveLength(2);
 });
 
@@ -113,8 +113,9 @@ it.each([
   [{ grade: '' }], [{}], [{ grade: 'private-unknown-grade' }],
 ])('keeps missing/unknown current quality distinct from a neutral grade: %s', (quality) => {
   show(card({ quality }));
-  expect(screen.getByText('Review available · evidence grade unknown')).toBeTruthy();
-  expect(screen.queryByText(/Evidence: grade/)).toBeNull();
+  expect(screen.queryByText(/evidence grade unknown/)).toBeNull();
+  expect(screen.getByText(/A current usable review matched/)).toBeTruthy();
+  expect(screen.queryByText(/^Quality [A-D]/)).toBeNull();
 });
 
 it('labels a legacy grade as unconfirmed when the current review join misses', () => {
@@ -122,8 +123,8 @@ it('labels a legacy grade as unconfirmed when the current review join misses', (
     join: 'unavailable', join_basis: null, quality_origin: 'legacy_row',
     needs_pdf: null, digest_usable: null,
   } }) }));
-  expect(screen.getByText('Evidence: legacy grade A · current review unconfirmed')).toBeTruthy();
-  expect(screen.queryByText('Evidence: grade A (AI review)')).toBeNull();
+  expect(screen.getByText('Legacy quality A · current review unconfirmed')).toBeTruthy();
+  expect(screen.queryByText('Quality A')).toBeNull();
   expect(screen.getByText(/does not establish whether a review is absent, stale or failed/)).toBeTruthy();
 });
 
@@ -132,7 +133,8 @@ it('leaves failed, stale and never-reviewed indistinguishable when only a curren
     join: 'unavailable', join_basis: null, quality_origin: 'none',
     needs_pdf: null, digest_usable: null,
   } }) }));
-  expect(screen.getByText('Review evidence: unknown')).toBeTruthy();
+  expect(screen.queryByText('Review evidence: unknown')).toBeNull();
+  expect(screen.getByText(/No usable current review is established here/)).toBeTruthy();
   expect(screen.queryByText(/^Review: (failed|stale|not reviewed)$/)).toBeNull();
 });
 
@@ -142,7 +144,7 @@ it('shows missing full text separately, never as poor science', () => {
     needs_pdf: true, digest_usable: false,
   } }) }));
   expect(screen.getByText('Review: full text unavailable')).toBeTruthy();
-  expect(screen.queryByText('Evidence: grade A (AI review)')).toBeNull();
+  expect(screen.queryByText('Quality A')).toBeNull();
 });
 
 it('does not call an unusable joined digest a failed scientific review', () => {
@@ -158,8 +160,8 @@ it('does not call an unusable joined digest a failed scientific review', () => {
 
 it('does not upgrade old payload quality to a current review', () => {
   show(card({ selection_evidence: undefined }));
-  expect(screen.getByText('Review available · evidence origin unrecorded')).toBeTruthy();
-  expect(screen.queryByText('Evidence: grade A (AI review)')).toBeNull();
+  expect(screen.queryByText(/evidence origin unrecorded/)).toBeNull();
+  expect(screen.queryByText('Quality A')).toBeNull();
   expect(screen.getByText('Selection details were not recorded for this card.')).toBeTruthy();
 });
 
@@ -167,9 +169,9 @@ it('keeps a nonidentity stored priority separate from the composite without inve
   show(card({ selection_evidence: evidence({ stored: {
     composite_recorded: true, reading_priority: 'must_read',
   } }), why: ['On-topic for you'] }), 'quality_first');
-  const details = screen.getByText('Why selected').closest('details');
+  const details = screen.getByText('more').closest('details');
   expect(details.open).toBe(false);
-  fireEvent.click(screen.getByText('Why selected'));
+  fireEvent.click(screen.getByText('more'));
   expect(within(details).getByText('Quality-first')).toBeTruthy();
   expect(within(details).getByText('On-topic for you')).toBeTruthy();
   expect(within(details).getByText('0.62')).toBeTruthy();
@@ -196,12 +198,12 @@ it('retains observed zero keys and leaves missing keys unknown without rebuildin
     selection: { requested_role: 'model', basis: 'model_adjusted', key: 0,
       quality_bonus: 0, bonus_policy: 'grade', band_restricted: true },
   }) }));
-  const details = screen.getByText('Why selected').closest('details');
+  const details = screen.getByText('more').closest('details');
   const valueFor = (label) => within(details).getByText(`${label}:`).nextElementSibling.textContent;
   expect(valueFor('Cohort key')).toBe('Unknown');
   expect(valueFor('Picker key')).toBe('0');
   expect(valueFor('Quality adjustment')).toBe('0');
-  expect(screen.getByText('Evidence: grade A (AI review)')).toBeTruthy();
+  expect(screen.getByText('Quality A')).toBeTruthy();
 });
 
 it.each([
@@ -213,9 +215,9 @@ it.each([
     why: ['Private arm hint'], selection_evidence: { ...observed, private_c: 'PRIVATE-SENTINEL' },
   }), policy);
   expect(screen.getByText('Review evidence: unavailable (blinded selection)')).toBeTruthy();
-  const details = screen.getByText('Why selected').closest('details');
+  const details = screen.getByText('more').closest('details');
   expect(within(details).getByText(/withheld to keep this selection blinded/)).toBeTruthy();
-  for (const secret of ['PRIVATE-SENTINEL', 'Private arm hint', 'grade D', '0.62', '0.67', 'model_fallback']) {
+  for (const secret of ['PRIVATE-SENTINEL', 'Private arm hint', 'Quality D', '0.62', '0.67', 'model_fallback']) {
     expect(container.textContent).not.toContain(secret);
   }
 });
@@ -225,7 +227,7 @@ it('rendering and disclosure leave scores, stored labels and selection intents u
   const before = JSON.stringify(paper);
   const onToggle = vi.fn();
   show(paper, 'control', onToggle);
-  fireEvent.click(screen.getByText('Why selected'));
+  fireEvent.click(screen.getByText('more'));
   expect(onToggle).not.toHaveBeenCalled();
   expect(JSON.stringify(paper)).toBe(before);
   fireEvent.click(screen.getByRole('checkbox'));

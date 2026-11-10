@@ -49,12 +49,35 @@ it.each(['editable', 'readonly'])('wires shared %s notes to detail questions and
   expect(onDeepReviewDone.mock.calls.length).toBeGreaterThan(1);
 });
 
-it('keeps My notes available without PDF, review or Add while preserving the Ask/PDF gate', () => {
-  render(<PaperDetailView mode="editable" itemKey="feed:group:paper" detail={{ has_pdf: false, user_note: '',
-    questions: [{ submission_id: 'q1', question: 'A question saved before a failed review' }] }} />);
+it.each(['editable', 'readonly'])('keeps %s question capture available without PDF, review or Add', async (mode) => {
+  mocks.askPaper.mockRejectedValueOnce(new Error('model unavailable'));
+  const detail = { has_pdf: false, user_note: '',
+    questions: [{ submission_id: 'q1', question: 'A question saved before a failed review' }] };
+  render(<PaperDetailView mode={mode} compact itemKey="feed:group:paper" detail={detail} />);
   expect(screen.getByText('My notes')).toBeTruthy();
   expect(screen.getByText('A question saved before a failed review')).toBeTruthy();
+  fireEvent.change(screen.getByRole('textbox', { name: 'Question about this paper' }),
+    { target: { value: 'A question without a PDF' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
+  await screen.findByText('Ask failed: model unavailable');
+  expect(mocks.saveReviewQuestion).toHaveBeenCalledOnce();
+  expect(mocks.saveReviewQuestion.mock.calls[0][0]).toMatchObject({
+    item_key: 'feed:group:paper', question: 'A question without a PDF', origin: 'typed',
+  });
+  expect(mocks.saveReviewQuestion.mock.invocationCallOrder[0]).toBeLessThan(mocks.askPaper.mock.invocationCallOrder[0]);
+  expect(screen.queryByRole('combobox', { name: 'Answer mode' })).toBeNull();
+  expect(screen.getByText('Question saved in the app — see My notes for Zotero delivery.')).toBeTruthy();
+});
+
+it('preserves the explicit Ask visibility override without a PDF', () => {
+  render(<PaperDetailView itemKey="P1" detail={{ has_pdf: false }} show={{ ask: false }} />);
   expect(screen.queryByRole('button', { name: 'Ask' })).toBeNull();
+});
+
+it.each([true, false, undefined])('requires a known PDF for raw answer modes: %s', (hasPdf) => {
+  render(<PaperDetailView mode="editable" compact itemKey="P1" detail={{ has_pdf: hasPdf }} />);
+  expect(screen.getByRole('textbox', { name: 'Question about this paper' })).toBeTruthy();
+  expect(Boolean(screen.queryByRole('combobox', { name: 'Answer mode' }))).toBe(hasPdf === true);
 });
 
 it('exposes compact Ask in one disclosure and refreshes questions without replacing manual text', async () => {

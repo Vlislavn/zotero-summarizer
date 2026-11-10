@@ -25,9 +25,8 @@ it('does not claim a confirmed sync before evidence and offers an explicit retry
     online: true, connection: 'unavailable', pending: 2, conflicts: [], rejected: [],
     sync_error: 'Server unavailable', paper_count: 3,
   } })));
-  expect(screen.getByText(/2 pending/)).toBeTruthy();
-  expect(screen.getByText(/Server unavailable/)).toBeTruthy();
-  expect(screen.getByText('Server unavailable. Device changes are retained. Check the app at this same address, then retry Sync now.')).toBeTruthy();
+  expect(screen.getByRole('status').textContent).toBe('Server unreachable · 2 unsent on this device');
+  expect(screen.getByText(/Not available: Today decisions, PDFs, AI, rescoring/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Sync now' }));
   expect(syncNow).toHaveBeenCalledOnce();
 });
@@ -42,7 +41,7 @@ it('shows both conflict values and comments, and persists the explicit chosen re
     }],
   } })));
   expect(screen.getByLabelText('Server').value).toBe('Must read\n\nComment:\nStrong method');
-  expect(screen.getByLabelText('This device').value).toBe('Remove ❌\n\nComment:\nWeak validation');
+  expect(screen.getByLabelText('This device').value).toBe('Remove\n\nComment:\nWeak validation');
   expect(screen.getByLabelText('Server').rows).toBe(4);
   expect(screen.getByLabelText('This device').rows).toBe(4);
   expect(screen.getByRole('button', { name: 'Sync now' }).disabled).toBe(true);
@@ -68,10 +67,11 @@ it('surfaces a failed conflict save without claiming resolution', async () => {
 
 it('makes deployment limits and installation prerequisites visible without exposing a LAN setup', () => {
   render(<MemoryRouter><NavBar /></MemoryRouter>);
-  fireEvent.click(screen.getByText('Offline use & installation'));
-  expect(screen.getByText(/iPhone\/iPad Safari/)).toBeTruthy();
-  expect(screen.getByText('The local app is loopback-only by default. Another device needs a separately supported authenticated HTTPS gateway; exposing a LAN port or bypassing origin/TLS guards is not a setup step.')).toBeTruthy();
-  expect(screen.getByText('PDFs, figures, AI answers, acquisition and rescoring are not synced. An app acknowledgement does not prove Zotero or another device received your changes.')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+  fireEvent.click(screen.getByText('Install & offline use'));
+  expect(screen.getByText(/Share → Add to Home Screen/)).toBeTruthy();
+  expect(screen.getByText(/PDFs, figures, AI and rescoring need the Mac/)).toBeTruthy();
+  expect(screen.queryByText(/loopback|gateway/)).toBeNull();
 });
 
 it('wraps long stable keys in both rejected drafts and conflicts on mobile', () => {

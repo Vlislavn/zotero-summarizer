@@ -337,6 +337,14 @@ export async function fetchPaperRender(itemKey) {
   return request(`/api/library/render/${encodeURIComponent(itemKey)}`);
 }
 
+/**
+ * POST /api/library/section-summaries/{itemKey} — the Paper-map one-liners, built on first
+ * open (idempotent): { status: 'running' | 'ready' | 'unavailable', summaries: { sectionId: sentence } }.
+ */
+export async function fetchSectionSummaries(itemKey) {
+  return request(`/api/library/section-summaries/${encodeURIComponent(itemKey)}`, { method: 'POST' });
+}
+
 /** POST /api/library/render/{itemKey}/build { force, allow_arxiv_source, allow_acquire_missing }. */
 export async function buildPaperRender(
   itemKey,
@@ -391,6 +399,11 @@ export async function askPaper(itemKey, question, {
     body: JSON.stringify({ item_key: itemKey, question, submission_id: submissionId,
       origin, preset_id: presetId, mode, history }),
   });
+}
+
+/** GET /api/library/review-audit/{key} → read-only verified-quote export of the stored review. */
+export async function fetchReviewAudit(itemKey) {
+  return request(`/api/library/review-audit/${encodeURIComponent(itemKey)}`);
 }
 
 export async function fetchReviewQuestions(itemKey) {

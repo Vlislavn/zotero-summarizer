@@ -9,6 +9,7 @@ import {
 import SpinnerBase from './ui/Spinner.jsx';
 import Button from './ui/Button.jsx';
 import { Banner } from './form/Fields.jsx';
+import RetrainConfirm from './RetrainConfirm.jsx';
 
 // Admin section for the Settings page. ONE long-running model-lifecycle action:
 //
@@ -42,6 +43,7 @@ export default function AdminSection() {
   const [jobId, setJobId] = useState(null);
   const [lastFinishedAt, setLastFinishedAt] = useState(null);
   const [startError, setStartError] = useState(null);
+  const [confirming, setConfirming] = useState(false);
   // 'refreshing' (labels export from Zotero, 2-30s) → 'starting' (POST retrain).
   const [startPhase, setStartPhase] = useState(null);
 
@@ -161,13 +163,15 @@ export default function AdminSection() {
         click, nothing to refresh first. Takes 1-5 minutes.
       </p>
       <div className="space-y-2">
-        <Button onClick={() => startMutation.mutate()} disabled={buttonDisabled}>
+        <Button onClick={() => setConfirming(true)} disabled={buttonDisabled}>
           {starting
             ? (startPhase === 'refreshing' ? 'Refreshing labels…' : 'Starting…')
             : running && !jobErr ? 'Training…' : 'Retrain model'}
         </Button>
         {statusNode}
       </div>
+      {confirming && <RetrainConfirm classifierName={classifierName} onCancel={() => setConfirming(false)}
+        onConfirm={() => { setConfirming(false); startMutation.mutate(); }} />}
     </div>
   );
 }

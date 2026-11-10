@@ -1,143 +1,37 @@
-// Settings → Triage region. Research goals, triage criteria, output language,
-// and the optional Zotero paths with a live status row + a [Save paths] action
-// (restart-required). The LLM-provider editor moved to the AI Models region
-// (AiModelsSection) — config is edited in exactly one place now.
-//
-// Anchors (essentials-goals / essentials-zotero-paths) are scroll targets for
-// settings links.
+import { useEffect, useRef } from 'react';
+import { Field } from '../form/Fields.jsx';
+import Button from '../ui/Button.jsx';
 
-import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { updatePaths } from '../../api/setupApi.js';
-import { useSetupStatus } from '../../hooks/useSetupStatus.js';
-import { humanizeError } from '../../utils/humanizeError.js';
-import { invalidateSetupDoctor } from '../../utils/setupDoctorState.js';
-import { Banner, Field, SectionCard } from '../form/Fields.jsx';
-
-function PathStatus({ label, info }) {
-  const set = Boolean(info?.set);
-  const exists = Boolean(info?.exists);
-  const tone = exists
-    ? 'text-emerald-700'
-    : set
-      ? 'text-rose-700'
-      : 'text-slate-400';
-  const mark = exists ? '✓' : set ? '✗' : '○';
-  return (
-    <span className={`inline-flex items-center gap-1 ${tone}`}>
-      <span aria-hidden>{mark}</span>
-      {label}: {exists ? 'exists' : set ? 'missing' : 'unset'}
-    </span>
-  );
+// One goal per row over the same newline-joined draft text the single Save already writes
+// (splitLines drops blank rows, so goals.yaml and its validation are untouched).
+function GoalRows({ text, onChange, hint }) {
+  const rows = text === '' ? [''] : text.split('\n');
+  const last = useRef(null);
+  const added = useRef(false);
+  useEffect(() => { if (added.current) { added.current = false; last.current?.focus(); } });
+  const emit = next => onChange(next.join('\n'));
+  return <fieldset className="space-y-3 min-w-0">
+    <legend className="text-sm font-medium text-slate-900">Goals</legend>
+    <p className="text-xs text-slate-600">One research goal per row. Blank rows are dropped when you save.</p>
+    {hint && <p className="text-xs text-slate-600">{hint}</p>}
+    <ol className="space-y-2">{rows.map((goal, index) => <li key={index} className="flex items-start gap-2">
+      <textarea ref={index === rows.length - 1 ? last : undefined} aria-label={`Goal ${index + 1}`} rows={2} value={goal}
+        onKeyDown={event => { if (event.key === 'Enter') event.preventDefault(); }}
+        onChange={event => emit(rows.flatMap((row, at) => at === index ? event.target.value.split('\n') : [row]))}
+        className="min-w-0 flex-1 p-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" />
+      <Button variant="secondary" aria-label={`Remove goal ${index + 1}`} disabled={rows.length === 1 && !goal}
+        onClick={() => emit(rows.filter((_, at) => at !== index))}>Remove</Button>
+    </li>)}</ol>
+    <Button variant="secondary" disabled={!rows[rows.length - 1].trim()} onClick={() => { added.current = true; emit([...rows, '']); }}>Add goal</Button>
+  </fieldset>;
 }
 
-function ZoteroPaths({ form, onUpdate }) {
-  const queryClient = useQueryClient();
-  const { status } = useSetupStatus();
-  const [restartBanner, setRestartBanner] = useState('');
-
-  const saveMutation = useMutation({
-    mutationFn: updatePaths,
-    onSettled: (_response, error) => invalidateSetupDoctor(queryClient, error),
-    onSuccess: () => {
-      setRestartBanner('Restart required to apply new paths.');
-      queryClient.invalidateQueries({ queryKey: ['setup-status'] });
-    },
-  });
-
-  const paths = status?.paths || {};
-
-  function handleSavePaths() {
-    setRestartBanner('');
-    const body = {};
-    if (form.zotero_data_dir) body.zotero_data_dir = form.zotero_data_dir;
-    if (form.pdf_root) body.pdf_root = form.pdf_root;
-    saveMutation.mutate(body);
-  }
-
-  return (
-    <div id="essentials-zotero-paths" className="space-y-3 scroll-mt-20">
-      <div className="grid md:grid-cols-2 gap-4">
-        <Field
-          label="Zotero data directory"
-          value={form.zotero_data_dir || ''}
-          onChange={(v) => onUpdate('zotero_data_dir', v)}
-          placeholder={paths.zotero_data_dir?.value || '/Users/you/Zotero'}
-          hint="Folder containing zotero.sqlite and storage/."
-        />
-        <Field
-          label="PDF root (optional)"
-          value={form.pdf_root || ''}
-          onChange={(v) => onUpdate('pdf_root', v)}
-          placeholder={paths.pdf_root?.value || 'Defaults to the Zotero storage/ folder'}
-          hint="Where generated paper-read artifacts are written next to the PDF."
-        />
-      </div>
-
-      {/* PDF-root status only — Zotero itself is an optional sync target. */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-        <PathStatus label="PDF root" info={paths.pdf_root} />
-      </div>
-
-      <div className="flex items-center gap-3 flex-wrap">
-        <button
-          type="button"
-          onClick={handleSavePaths}
-          disabled={saveMutation.isPending || (!form.zotero_data_dir && !form.pdf_root)}
-          className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm font-medium hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {saveMutation.isPending ? 'Saving…' : 'Save paths'}
-        </button>
-        <span className="text-xs text-slate-500">
-          Paths are written separately from the config and need a restart.
-        </span>
-      </div>
-
-      {saveMutation.error && (
-        <Banner kind="error">{humanizeError(saveMutation.error)}</Banner>
-      )}
-      {restartBanner && <Banner kind="success">{restartBanner}</Banner>}
-    </div>
-  );
-}
-
-export default function EssentialsSection({ form, onUpdate, pathForm, onUpdatePath }) {
-  return (
-    <div className="space-y-4">
-      <SectionCard
-        title="Research profile"
-        description="What you research, what makes a paper useful, and the language AI should use."
-      >
-        <div id="essentials-goals" className="scroll-mt-20 space-y-4">
-          <Field
-            kind="textarea"
-            label="Goals (one per line)"
-            value={form.research_goals_text}
-            onChange={(v) => onUpdate('research_goals_text', v)}
-            rows={6}
-          />
-          <Field
-            kind="textarea"
-            label="Triage criteria (one per line)"
-            value={form.triage_criteria_text}
-            onChange={(v) => onUpdate('triage_criteria_text', v)}
-            rows={5}
-            hint="Each line is a hard or soft criterion the LLM weighs when assigning the relevance score."
-          />
-          <Field
-            label="Output language"
-            value={form.output_language}
-            onChange={(v) => onUpdate('output_language', v)}
-          />
-        </div>
-      </SectionCard>
-
-      <SectionCard
-        title="Zotero"
-        description="Optional sync target. The app can read kept RSS papers without Zotero; connect Zotero to mirror tags, collections, and attachments."
-      >
-        <ZoteroPaths form={pathForm} onUpdate={onUpdatePath} />
-      </SectionCard>
-    </div>
-  );
+export default function EssentialsSection({ form, onUpdate, tidied = 0 }) {
+  return <div id="essentials-goals" className="space-y-5">
+    <GoalRows text={form.research_goals_text} onChange={value => onUpdate('research_goals_text', value)}
+      hint={tidied ? `Stray quotes and commas were hidden on ${tidied} line${tidied === 1 ? '' : 's'}. The saved file keeps them until you save this page.` : undefined} />
+    <Field kind="textarea" label="Triage criteria (one per line)" value={form.triage_criteria_text}
+      onChange={value => onUpdate('triage_criteria_text', value)} rows={5}
+      hint="Criteria used when assigning article relevance. Also used to pick Telegram posts." />
+  </div>;
 }

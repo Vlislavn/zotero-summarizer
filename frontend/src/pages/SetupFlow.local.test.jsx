@@ -6,11 +6,15 @@ import { MemoryRouter } from 'react-router-dom';
 
 const api = vi.hoisted(() => ({ fetchConfig: vi.fn(), updateConfig: vi.fn(), listModels: vi.fn(),
   fetchAiPresets: vi.fn(), saveAiCredential: vi.fn(), validateSetup: vi.fn(), detectZotero: vi.fn(),
-  updatePaths: vi.fn(), fetchDoctorStatus: vi.fn(), runDoctor: vi.fn(), cancelDoctor: vi.fn() }));
+  updatePaths: vi.fn(), fetchDoctorStatus: vi.fn(), runDoctor: vi.fn(), cancelDoctor: vi.fn(),
+  fetchConnections: vi.fn(), registerConnection: vi.fn(), listConnectionModels: vi.fn(), previewConnection: vi.fn(),
+  applyConnection: vi.fn(), readConnection: vi.fn(), testConnection: vi.fn() }));
 vi.mock('../api/settingsApi.js', () => api);
 vi.mock('../api/setupApi.js', () => api);
+vi.mock('../api/connectionsApi.js', () => api);
 vi.mock('../hooks/useSetupStatus.js', () => ({ useSetupStatus: () => ({ status: null }) }));
 import SetupFlow from './SetupFlow.jsx';
+import { configToFormState } from '../utils/configForm.js';
 
 const provider = { name: 'local', type: 'openai', base_url: 'http://localhost:11434/v1', api_key_env: 'OLLAMA_API_KEY' };
 const catalog = { presets: [{ id: 'local', label: 'Local', provider }], local_profiles: {
@@ -24,7 +28,7 @@ const catalog = { presets: [{ id: 'local', label: 'Local', provider }], local_pr
       compatible: false, compatibility_detail: 'needs 32 GB memory', provider },
   ],
 } };
-const initialConfig = { llm_enabled: true, research_goals: ['Replace with your research focus'],
+const initialConfig = { _revision: 'r1', llm_enabled: true, research_goals: ['Replace with your research focus'],
   triage_criteria: [], output_language: 'English', llm_routing: { providers: [], default: {} } };
 const unknown = { ready: false, status: 'needs_action', checks: [
   { id: 'runtime_model', status: 'ready', message: 'Runtime serves every configured model' },
@@ -48,6 +52,20 @@ beforeEach(() => {
   vi.stubGlobal('localStorage', { getItem: (key) => storage.get(key) ?? null,
     setItem: (key, value) => storage.set(key, value) });
   api.fetchConfig.mockResolvedValue(initialConfig);
+  let connection = { revision: 'r1', providers: [], config: initialConfig };
+  api.fetchConnections.mockImplementation(async () => connection);
+  api.registerConnection.mockImplementation(async command => {
+    const candidate = { ...provider, name: 'candidate', auth_mode: 'none', base_url: command.base_url };
+    connection = { revision: 'r2', providers: [candidate], config: { ...initialConfig, _revision: 'r2', llm_routing: { ...initialConfig.llm_routing, providers: [candidate] } } };
+    return { operation_id: command.operation_id, provider: candidate, revision: 'r2', state: 'registered_inactive' };
+  });
+  api.listConnectionModels.mockResolvedValue({ revision: 'r2', catalog: 'returned', models: ['qwen3:8b', 'qwen3:30b'] });
+  api.previewConnection.mockImplementation(async command => ({ revision: 'r2', preview: 'preview', ready_to_apply: true,
+    impact: { stages: ['feed', 'backlog', 'deep_review'].map(stage => ({ stage, before: {}, after: { provider: 'candidate', model: command.model }, after_explicit: {} })), telegram: { selection: null }, shared_authorization: {} } }));
+  api.applyConnection.mockImplementation(async command => {
+    connection = { ...connection, revision: 'r3', config: { ...connection.config, _revision: 'r3', llm_routing: { ...connection.config.llm_routing, default: { provider: 'candidate', model: command.model } } } };
+    return { provider: connection.providers[0], revision: 'r3', state: 'selection_saved', selection_matches: true, config: connection.config };
+  });
   api.fetchAiPresets.mockResolvedValue(catalog);
   api.detectZotero.mockResolvedValue({ candidates: [] });
   api.validateSetup.mockResolvedValue({ valid: true, field_errors: [] });
@@ -63,6 +81,63 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+it.each(['registration', 'selection'])('a fresh foreign %s publication cannot advance a dirty Setup draft or overwrite its writer', async phase => {
+  const original = { ...initialConfig, research_goals: ['Original research'],
+    llm_routing: { providers: [provider], default: { provider: 'local', model: 'qwen3:8b' } } };
+  let server = original;
+  let scene;
+  const candidate = { ...provider, name: 'candidate', auth_mode: 'none', base_url: 'http://localhost:11435/v1' };
+  function foreignWrite() {
+    server = { ...server, _revision: 'r9', research_goals: ['Concurrent research'] };
+    scene.client.setQueryData(['runtime-config'], server);
+    scene.client.setQueryData(['llm-connections'], { revision: 'r9', config: server, providers: server.llm_routing.providers });
+  }
+  api.fetchConfig.mockImplementation(async () => server);
+  api.fetchConnections.mockImplementation(async () => ({ revision: server._revision, config: server, providers: server.llm_routing.providers }));
+  api.registerConnection.mockImplementation(async command => {
+    server = { ...server, _revision: 'r2', llm_routing: { ...server.llm_routing, providers: [provider, candidate] } };
+    if (phase === 'registration') foreignWrite();
+    return { operation_id: command.operation_id, provider: candidate, revision: 'r2', state: 'registered_inactive' };
+  });
+  api.applyConnection.mockImplementation(async () => {
+    server = { ...server, _revision: 'r3', llm_routing: { ...server.llm_routing, default: { provider: 'candidate', model: 'qwen3:8b' } } };
+    const own = server;
+    foreignWrite();
+    return { provider: candidate, revision: 'r3', state: 'selection_saved', selection_matches: true, config: own };
+  });
+  api.updateConfig.mockImplementation(async payload => {
+    if (payload._revision !== server._revision) throw Object.assign(new Error('Revision changed'), { status: 409 });
+    server = { ...payload, _revision: 'r10' };
+    return { config: server };
+  });
+  localStorage.setItem('zs_setup_progress_v1', JSON.stringify({ mode: 'local', step: 2, maxStepReached: 3,
+    revision: 'r1', baseConfig: original, draft: { ...configToFormState(original), research_goals_text: 'My retained draft' } }));
+  scene = show();
+  try {
+    fireEvent.click(await screen.findByRole('button', { name: 'Add provider' }));
+    fireEvent.change(screen.getByLabelText('API address'), { target: { value: candidate.base_url } });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect provider' }));
+    if (phase === 'selection') {
+      await waitFor(() => expect(screen.getByLabelText('Model').disabled).toBe(false));
+      fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'qwen3:8b' } });
+      fireEvent.click(await screen.findByRole('button', { name: 'Use as default' }));
+    }
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Test saved model' }).disabled).toBe(false));
+    expect(scene.client.getQueryData(['llm-connections']).revision).toBe('r9');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByLabelText(/^Research goals/).value).toBe('My retained draft');
+    fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
+    await waitFor(() => expect(api.updateConfig).toHaveBeenCalledTimes(1));
+    expect(server.research_goals).toEqual(['Concurrent research']);
+    expect(api.updateConfig.mock.calls[0][0]._revision).toBe(phase === 'registration' ? 'r1' : 'r2');
+    expect(api.runDoctor).not.toHaveBeenCalled();
+    expect(api.testConnection).not.toHaveBeenCalled();
+    expect(api.registerConnection).toHaveBeenCalledTimes(1);
+    expect(api.applyConnection).toHaveBeenCalledTimes(phase === 'registration' ? 0 : 1);
+    if (phase === 'registration') expect(api.listConnectionModels).not.toHaveBeenCalled();
+  } finally { scene.unmount(); scene.client.clear(); }
+});
+
 it('rechecks hardware compatibility when the model picker replaces the selected profile model', async () => {
   api.listModels.mockResolvedValue({ models: ['qwen3:8b', 'qwen3:30b'] });
   const view = show();
@@ -72,10 +147,12 @@ it('rechecks hardware compatibility when the model picker replaces the selected 
     await screen.findByRole('heading', { name: 'Zotero sync' });
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     fireEvent.click(await screen.findByRole('button', { name: /^Light/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'List available models' }));
-    fireEvent.change(await screen.findByRole('combobox'), { target: { value: 'qwen3:30b' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect provider' }));
+    fireEvent.change(await screen.findByLabelText('Model'), { target: { value: 'qwen3:30b' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Use as default' }));
+    await screen.findByText(/Selection saved/);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Next' }).disabled).toBe(true));
-    expect(screen.getByRole('button', { name: /^Balanced/ }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: /^Balanced/ }).disabled).toBe(true);
     expect(api.runDoctor).not.toHaveBeenCalled();
     expect(api.updateConfig).not.toHaveBeenCalled();
   } finally {
@@ -96,6 +173,11 @@ it('wires Full local through safe profile, save, real-check request, honest UNKN
     expect(screen.queryByLabelText('API key')).toBeNull();
     expect(screen.getByRole('button', { name: 'Next' }).disabled).toBe(true);
     fireEvent.click(light);
+    expect(screen.getByRole('button', { name: 'Next' }).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Connect provider' }));
+    await screen.findByLabelText('Model');
+    fireEvent.click(await screen.findByRole('button', { name: 'Use as default' }));
+    await screen.findByText(/Selection saved/);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Next' }).disabled).toBe(false));
     expect(screen.getByRole('link', { name: 'Official model source' }).href).toBe('https://ollama.com/library/qwen3:8b');
     expect(screen.getByText(/approximately 5.2 GB/)).toBeTruthy();
@@ -109,8 +191,9 @@ it('wires Full local through safe profile, save, real-check request, honest UNKN
     fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
     await screen.findByRole('heading', { name: 'Setup saved' });
     const saved = api.updateConfig.mock.calls[0][0];
-    for (const stage of ['default', 'feed', 'backlog', 'deep_review']) {
-      expect(saved.llm_routing[stage]).toMatchObject({ provider: 'local', model: 'qwen3:8b' });
+    expect(saved.llm_routing.default).toEqual({ provider: 'candidate', model: 'qwen3:8b' });
+    for (const stage of ['feed', 'backlog', 'deep_review']) {
+      expect(saved.llm_routing[stage]).toBeUndefined(); // Inherit, never homogenize explicit exceptions.
     }
     expect(api.runDoctor).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Open Today' }).disabled).toBe(true);
@@ -125,7 +208,7 @@ it('wires Full local through safe profile, save, real-check request, honest UNKN
     expect(screen.getByText(/Local load safety is not established/)).toBeTruthy();
     expect(api.runDoctor).toHaveBeenCalledWith(null);
     expect(screen.getByRole('button', { name: 'Open Today' }).disabled).toBe(true);
-    expect(screen.getByRole('link', { name: 'Review endpoint settings' }).getAttribute('href')).toBe('/settings#ai-models');
+    expect(screen.getByRole('link', { name: 'Review endpoint settings' }).getAttribute('href')).toBe('/settings?task=connection');
     expect(api.runDoctor).toHaveBeenCalledTimes(1);
   } finally {
     view.unmount();

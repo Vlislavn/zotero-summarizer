@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchConfig, updateConfig } from '../api/settingsApi.js';
-import { configToFormState, formStateToConfig, isLocalProvider, localProfileForStage, resolveStage } from '../utils/configForm.js';
+import { configToFormState, formStateToConfig, rebaseConnectionForm, isLocalProvider, localProfileForStage, resolveStage } from '../utils/configForm.js';
 import { useFocusOnChange } from '../hooks/useFocusOnChange.js';
 import { humanizeError } from '../utils/humanizeError.js';
 import { invalidateSetupDoctor } from '../utils/setupDoctorState.js';
@@ -57,7 +57,8 @@ export default function SetupFlow() {
   const [step, setStep] = useState(saved.mode ? (saved.step || 0) : 0);
   const [maxStepReached, setMaxStepReached] = useState(saved.mode ? (saved.maxStepReached || 0) : 0);
   const [draft, setDraft] = useState(saved.draft || null);
-  const [llmTestedOk, setLlmTestedOk] = useState(false);
+  const [draftRevision, setDraftRevision] = useState(saved.revision);
+  const [baseConfig, setBaseConfig] = useState(saved.baseConfig || null);
   const [fieldErrors, setFieldErrors] = useState([]);
   const [finishError, setFinishError] = useState('');
   const [pathsChanged, setPathsChanged] = useState(Boolean(saved.pathsChanged));
@@ -75,6 +76,8 @@ export default function SetupFlow() {
         seeded.triage_criteria_text = DEFAULT_TRIAGE_CRITERIA;
       }
       setDraft(seeded);
+      setDraftRevision(configQuery.data._revision);
+      setBaseConfig(configQuery.data);
     }
   }, [configQuery.data, draft]);
 
@@ -107,12 +110,16 @@ export default function SetupFlow() {
 
   useEffect(() => {
     if (draft) writeStorage(PROGRESS_KEY, JSON.stringify({
-      step, maxStepReached, draft, draftPaths, pathsChanged, mode,
+      step, maxStepReached, draft, revision: draftRevision, baseConfig, draftPaths, pathsChanged, mode,
     }));
-  }, [step, maxStepReached, draft, draftPaths, pathsChanged, mode]);
+  }, [step, maxStepReached, draft, draftRevision, baseConfig, draftPaths, pathsChanged, mode]);
 
   const finishMutation = useMutation({
-    mutationFn: (payload) => updateConfig(payload),
+    mutationFn: async (payload) => {
+      const response = await updateConfig(payload);
+      if (!response?.config?.llm_routing) throw new Error('Configuration save unconfirmed. Read saved settings before retrying.');
+      return response;
+    },
     onSettled: (_response, error) => invalidateSetupDoctor(queryClient, error),
     onSuccess: (resp) => {
       if (resp?.config) {
@@ -134,14 +141,27 @@ export default function SetupFlow() {
     setDraft((prev) => (prev ? { ...prev, ...fields } : prev));
   }
 
-  function patchRouting(nextRouting) {
-    setDraft((prev) => (prev ? { ...prev, llm_routing: nextRouting } : prev));
+  function connectionSaved(next, metadata) {
+    queryClient.setQueryData(['runtime-config'], next);
+    if (draft && draftRevision !== metadata?.previousRevision) {
+      setFinishError('Setup draft belongs to an older configuration. Discard/load saved settings before finishing; the connection was saved separately.');
+      return;
+    }
+    setDraft(prev => prev ? rebaseConnectionForm(prev, baseConfig || configQuery.data, next) : configToFormState(next));
+    setBaseConfig(next); setDraftRevision(next._revision);
   }
 
   async function handleFinish() {
     if (!draft || !configQuery.data) return;
     setFinishError('');
-    const payload = formStateToConfig(draft, configQuery.data);
+    const baseline = baseConfig || configQuery.data;
+    if (mode !== 'none' && JSON.stringify(draft.llm_routing) !== JSON.stringify(baseline.llm_routing)) {
+      setFinishError('Connection changes must be saved through Connect, impact and Use as default before finishing Setup.');
+      setStep(2);
+      return;
+    }
+    // Finish owns research/AI preference, never an old browser DTO's connection edits.
+    const payload = { ...formStateToConfig(draft, baseline), llm_routing: baseline.llm_routing, _revision: draftRevision };
     // Field-level validation first; show inline errors and stop if invalid.
     const res = await validateMutation.mutateAsync(payload).catch(() => null);
     if (res && res.valid === false) {
@@ -156,6 +176,17 @@ export default function SetupFlow() {
   function handleSkip() {
     dismissSetup();
     navigate('/library');
+  }
+
+  if (configQuery.isError && !draft) {
+    return <div className="glass rounded-2xl border border-slate-200 p-5 space-y-3">
+      <h2 className="font-medium">Setup needs configuration recovery</h2>
+      <Banner kind="error">{humanizeError(configQuery.error)}</Banner>
+      <p>Missing configuration can be created only with an explicit real model. Existing invalid configuration is never overwritten; repair the complete configuration and reload.</p>
+      <a className="underline" href="/settings#ai-models">Open connection and configuration recovery</a>
+      <Button type="button" variant="secondary" onClick={() => configQuery.refetch()}>Retry saved configuration</Button>
+      <Button type="button" variant="secondary" onClick={handleSkip}>Skip for now</Button>
+    </div>;
   }
 
   if (configQuery.isLoading || !draft) {
@@ -175,16 +206,10 @@ export default function SetupFlow() {
     <div className="max-w-2xl mx-auto pb-10">
       <div className="glass rounded-2xl border border-slate-200 p-5 space-y-5">
         <header className="space-y-3">
-          <div className="flex items-baseline justify-between gap-3">
+          <div className="flex items-center justify-between gap-3">
             <h2 ref={headingRef} tabIndex={-1} className="text-lg font-medium text-slate-900">Set up Zotero Summarizer</h2>
             {step < 4 && (
-              <button
-                type="button"
-                onClick={handleSkip}
-                className="text-xs text-slate-500 hover:text-slate-800 underline"
-              >
-                Skip for now
-              </button>
+              <Button variant="secondary" onClick={handleSkip} className="shrink-0">Skip for now</Button>
             )}
           </div>
           {step < 4 && (
@@ -192,8 +217,8 @@ export default function SetupFlow() {
               maxReached={mode === 'none' && maxStepReached >= 3 ? 2 : maxStepReached} labels={labels} />
           )}
           {step < 4 && (
-            <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-              Step {progressStep + 1} of {labels.length}: {STEP_LABELS[step]}
+            <p className="text-sm font-medium text-slate-700 sm:sr-only" role="status" aria-live="polite" aria-atomic="true">
+              Step {progressStep + 1} of {labels.length}: {labels[progressStep]}
             </p>
           )}
         </header>
@@ -225,8 +250,7 @@ export default function SetupFlow() {
           />
         )}
         {step === 2 && mode !== 'none' && (
-          <StepConnectLlm status={status} routing={draft.llm_routing} mode={mode}
-            onPatchRouting={patchRouting} testedOk={llmTestedOk} onTested={setLlmTestedOk} />
+          <StepConnectLlm mode={mode} onSaved={connectionSaved} />
         )}
         {step === 3 && (
           <StepDescribeResearch
@@ -243,7 +267,15 @@ export default function SetupFlow() {
             Retry loading profiles
           </Button>
         </Banner>}
-        {finishError && <Banner kind="error">{finishError}</Banner>}
+        {finishError && <Banner kind="error">{finishError}
+          <Button type="button" variant="secondary" onClick={async () => {
+            const result = await configQuery.refetch();
+            if (result.data) {
+              setDraft(configToFormState(result.data)); setDraftRevision(result.data._revision);
+              setBaseConfig(result.data); setFinishError('');
+            }
+          }}>Discard setup draft and load saved settings</Button>
+        </Banner>}
 
         {step < 4 && (
           <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">

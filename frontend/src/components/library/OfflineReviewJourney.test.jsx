@@ -100,7 +100,7 @@ it('confirms offline Remove after an earlier verdict as one ordered durable inte
   const onSaved = vi.fn();
   queue({ ...paper, proposed_verdict: { proposed: 'dont_read', confidence: 0.85, flags: [] } }, onSaved);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Confirm — Remove ❌' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm — Remove' }));
 
   expect(await screen.findByText('Saved on this device — waiting to sync.')).toBeTruthy();
   await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
@@ -115,7 +115,7 @@ it('confirms offline Remove after an earlier verdict as one ordered durable inte
     verdict: { user_priority: 'dont_read' }, user_note: 'Preserved manual note',
   });
   expect(fetch.mock.calls.some(([url]) => url === '/api/library/reject-tag')).toBe(false);
-  const confirmed = screen.getByRole('button', { name: 'Confirmed — Remove ❌' });
+  const confirmed = screen.getByRole('button', { name: 'Confirmed — Remove' });
   expect(confirmed.disabled).toBe(true);
   fireEvent.click(confirmed);
   expect(await outbox(key)).toEqual(rows);
@@ -133,12 +133,12 @@ it('reports an online tag failure as a warning after verdict success without off
   const onSaved = vi.fn();
   queue({ ...paper, proposed_verdict: { proposed: 'dont_read', confidence: 0.85, flags: [] } }, onSaved);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Confirm — Remove ❌' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm — Remove' }));
 
   expect(await screen.findByText(/Verdict saved, but reject tag was not queued: Synthetic tag unavailable/)).toBeTruthy();
   await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
   expect(screen.queryByText(/Couldn’t save/)).toBeNull();
-  const confirmed = screen.getByRole('button', { name: 'Confirmed — Remove ❌' });
+  const confirmed = screen.getByRole('button', { name: 'Confirmed — Remove' });
   expect(confirmed.disabled).toBe(true);
   fireEvent.click(confirmed);
   expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/golden/verdict', '/api/library/reject-tag']);
@@ -152,10 +152,10 @@ it('keeps a primary verdict rejection retryable without claiming a device save o
   const onSaved = vi.fn();
   queue({ ...paper, proposed_verdict: { proposed: 'dont_read', confidence: 0.85, flags: [] } }, onSaved);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Confirm — Remove ❌' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm — Remove' }));
 
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Couldn’t save: HTTP 403'));
-  expect(screen.getByRole('button', { name: 'Confirm — Remove ❌' }).disabled).toBe(false);
+  expect(screen.getByRole('button', { name: 'Confirm — Remove' }).disabled).toBe(false);
   expect(screen.queryByText('Saved on this device — waiting to sync.')).toBeNull();
   expect(onSaved).not.toHaveBeenCalled();
   expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/golden/verdict']);

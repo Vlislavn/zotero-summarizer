@@ -6,7 +6,7 @@ import Spinner from '../ui/Spinner.jsx';
 import { Disclosure } from '../paper/review/primitives.jsx';
 
 const MODE_HELP =
-  'Comprehensive: metadata + generated notes + paper body. ' +
+  'Full context: metadata + generated notes + paper body. ' +
   'Fast retrieval: only the top matching passages. ' +
   'Full text: the raw extracted paper body only.';
 
@@ -16,10 +16,10 @@ const MODE_HELP =
 // maps to a rubric concern the deep review already evaluates; they vanish after
 // the first question.
 const SUGGESTED_QUESTIONS = [
-  ['external_validation', 'Is there external validation?'],
-  ['cohort_sample_size', 'What was the cohort / sample size?'],
-  ['patient_level_split', 'Is the data split at the patient level?'],
-  ['main_result_figure', 'Which figure shows the main result?'],
+  ['code_released', 'Is the code released?'],
+  ['how_evaluated', 'How is it evaluated?'],
+  ['prompts_published', 'Are the prompts / protocol published?'],
+  ['trust_less', 'Where should I trust it less?'],
 ];
 
 // One metadata line per answer: latency (hidden for deterministic answers),
@@ -175,14 +175,14 @@ export default function AskPaperBox({ itemKey, variant = 'disclosure', allowRawP
                   className={`${rail ? 'min-w-0 flex-1' : ''} px-2 py-1.5 rounded-lg border border-slate-300 text-[13px] bg-white`}
                   title={MODE_HELP}
                 >
-                  <option value="comprehensive">Comprehensive</option>
+                  <option value="comprehensive">Full context</option>
                   <option value="retrieval">Fast retrieval</option>
                   <option value="full_text">Full text</option>
                 </select>
               </>
             ) : (
               <span className={`${rail ? 'min-w-0 flex-1' : ''} px-2 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-[13px] text-slate-500`}>
-                Comprehensive
+                Full context
               </span>
             )}
             <button
@@ -203,7 +203,7 @@ export default function AskPaperBox({ itemKey, variant = 'disclosure', allowRawP
         {error && <div role="alert" className="text-[12px] text-rose-700 break-words">{error}</div>}
         {retryIntent && !busy && (
           <button type="button" onClick={() => answerIntent(retryIntent)} className="text-[12px] font-semibold text-teal-700">
-            Retry answer
+            Retry
           </button>
         )}
         {/* Answers as hairline-separated reading rows — no slate card per answer. */}

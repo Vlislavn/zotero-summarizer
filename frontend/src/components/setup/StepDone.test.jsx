@@ -35,7 +35,19 @@ it('offers the real AI recovery destination without verification, save, consent 
   }] });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(<QueryClientProvider client={client}><MemoryRouter><StepDone /></MemoryRouter></QueryClientProvider>);
-  expect((await screen.findByRole('link', { name: 'Review endpoint settings' })).getAttribute('href')).toBe('/settings#ai-models');
+  expect((await screen.findByRole('link', { name: 'Review endpoint settings' })).getAttribute('href')).toBe('/settings?task=connection');
+  expect(navigate).not.toHaveBeenCalled();
+  expect(verify).not.toHaveBeenCalled();
+  expect(window.localStorage.getItem('zs:setupDismissed')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Open Today' }).disabled).toBe(true);
+  client.clear();
+});
+
+it('names the separate input repair destinations without starting work', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/setup']}><StepDone /></MemoryRouter></QueryClientProvider>);
+  expect((await screen.findByRole('link', { name: 'Zotero paths' })).getAttribute('href')).toBe('/settings?task=zotero');
+  expect(screen.getByRole('link', { name: 'RSS sources' }).getAttribute('href')).toBe('/today?task=rss');
   expect(navigate).not.toHaveBeenCalled();
   expect(verify).not.toHaveBeenCalled();
   expect(window.localStorage.getItem('zs:setupDismissed')).toBeNull();

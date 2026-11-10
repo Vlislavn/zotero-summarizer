@@ -9,7 +9,7 @@ export default function StoryToc({ items = [] }) {
   if (items.length < 2) return null;
   return (
     <nav className="hidden lg:block sticky top-4 self-start text-[12px] leading-6" aria-label="On this page">
-      <div className="mb-1.5 text-[11px] uppercase tracking-[0.08em] font-semibold text-slate-400">On this page</div>
+      <div className="mb-1.5 text-[11px] uppercase tracking-[0.08em] font-medium text-slate-500">On this page</div>
       <ul className="border-l border-slate-200">
         {items.map((it) => {
           const on = it.id === active;

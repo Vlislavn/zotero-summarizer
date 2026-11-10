@@ -8,6 +8,7 @@ vi.mock('./Triage.jsx', () => ({ default: () => <p>Triage job tools</p> }));
 vi.mock('./Pending.jsx', () => ({ default: () => <p>Pending change tools</p> }));
 vi.mock('../components/AdminSection.jsx', () => ({ default: () => <p>Admin controls</p> }));
 vi.mock('../components/ModelCard.jsx', () => ({ default: () => <p>Model status</p> }));
+vi.mock('../components/FeedbackAnalysisCard.jsx', () => ({ default: () => <p>Your decisions</p> }));
 
 import Ops from './Ops.jsx';
 

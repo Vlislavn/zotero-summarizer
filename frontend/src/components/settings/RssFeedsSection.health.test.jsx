@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 
 const api = vi.hoisted(() => ({ addRssFeed: vi.fn(), deleteRssFeed: vi.fn(), fetchRssFeeds: vi.fn(),
   importRssFeedsFromZotero: vi.fn(), refreshRssFeeds: vi.fn(), updateRssFeed: vi.fn(),
@@ -28,13 +29,14 @@ function mount() {
   client = new QueryClient({ defaultOptions: {
     queries: { retry: false, refetchOnWindowFocus: false }, mutations: { retry: false },
   } });
-  return render(<QueryClientProvider client={client}>
+  return render(<QueryClientProvider client={client}><MemoryRouter>
     <DoctorChecklist /><RssFeedsSection />
-  </QueryClientProvider>);
+  </MemoryRouter></QueryClientProvider>);
 }
 
 beforeEach(() => {
   Object.values(api).forEach((mock) => mock.mockReset());
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
   feeds = [{ ...feed }];
   health = ready;
   api.fetchRssFeeds.mockImplementation(async () => ({ feeds: [...feeds] }));
@@ -61,7 +63,7 @@ beforeEach(() => {
     return { imported: 1 };
   });
 });
-afterEach(() => { cleanup(); client?.clear(); });
+afterEach(() => { cleanup(); client?.clear(); vi.restoreAllMocks(); });
 
 it.each(['add', 'update', 'disable', 'delete', 'import'])('%s refreshes the shared Doctor status without running checks', async (action) => {
   if (action === 'add' || action === 'import') { feeds = []; health = missing; }
@@ -69,20 +71,8 @@ it.each(['add', 'update', 'disable', 'delete', 'import'])('%s refreshes the shar
   await waitFor(() => expect(api.fetchDoctorStatus).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(api.fetchRssFeeds).toHaveBeenCalledTimes(1));
   if (action === 'add' || action === 'import') await screen.findByText('No RSS feeds saved.');
-  else await screen.findByRole('button', { name: 'Save', exact: true });
-  if (action === 'add') {
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New source' } });
-    fireEvent.change(screen.getByLabelText('URL'), { target: { value: 'https://example.test/new-rss' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add feed' }));
-  } else if (action === 'import') {
-    fireEvent.click(screen.getByRole('button', { name: 'Import feeds from Zotero' }));
-  } else if (action === 'delete') {
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete', exact: true }));
-  } else {
-    if (action === 'disable') fireEvent.click(await screen.findByLabelText('Enabled'));
-    else fireEvent.change(screen.getAllByLabelText('Name')[1], { target: { value: 'Renamed source' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save', exact: true }));
-  }
+  else await screen.findByRole('button', { name: 'Edit Synthetic source' });
+  await writeSource(action);
 
   await screen.findByText('Source settings changed; verification required');
   expect(api.fetchDoctorStatus).toHaveBeenCalledTimes(2);
@@ -106,7 +96,7 @@ it('retires verification of a removed last source and recovers only after an exp
   await screen.findByText('✓ Setup verified');
   fireEvent.click(screen.getByRole('button', { name: 'Verify setup' }));
   await waitFor(() => expect(api.runDoctor).toHaveBeenCalledTimes(1));
-  fireEvent.click(await screen.findByRole('button', { name: 'Delete', exact: true }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete Synthetic source' }));
   await screen.findByText('No RSS feeds saved.');
   await screen.findByText('Source settings changed; verification required');
 
@@ -117,9 +107,10 @@ it('retires verification of a removed last source and recovers only after an exp
   fireEvent.click(screen.getByRole('button', { name: 'Verify setup' }));
   await screen.findByText('No RSS source is enabled');
 
+  fireEvent.click(screen.getByRole('button', { name: 'Add subscription' }));
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Recovery source' } });
   fireEvent.change(screen.getByLabelText('URL'), { target: { value: 'https://example.test/recovery' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Add feed' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save subscription' }));
   await screen.findByText('Source settings changed; verification required');
   expect(api.runDoctor).toHaveBeenCalledTimes(2);
   expect(screen.queryByText('✓ Setup verified')).toBeNull();
@@ -133,7 +124,7 @@ it('does not discard valid health when a source save fails', async () => {
   api.deleteRssFeed.mockRejectedValueOnce(Object.assign(new Error('Synthetic delete failed'), { status: 403 }));
   mount();
   await screen.findByText('✓ Setup verified');
-  fireEvent.click(await screen.findByRole('button', { name: 'Delete', exact: true }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete Synthetic source' }));
   await screen.findByText('Synthetic delete failed');
   expect(client.getQueryData(['setup-doctor'])).toEqual(ready);
   expect(api.fetchDoctorStatus).toHaveBeenCalledTimes(1);
@@ -141,17 +132,19 @@ it('does not discard valid health when a source save fails', async () => {
 
 async function writeSource(action) {
   if (action === 'add') {
-    fireEvent.change(screen.getAllByLabelText('Name')[0], { target: { value: 'New source' } });
-    fireEvent.change(screen.getAllByLabelText('URL')[0], { target: { value: 'https://example.test/new-rss' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add feed' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add subscription' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New source' } });
+    fireEvent.change(screen.getByLabelText('URL'), { target: { value: 'https://example.test/new-rss' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save subscription' }));
   } else if (action === 'import') {
     fireEvent.click(screen.getByRole('button', { name: 'Import feeds from Zotero' }));
   } else if (action === 'delete') {
-    fireEvent.click(screen.getByRole('button', { name: 'Delete', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Synthetic source' }));
   } else {
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Synthetic source' }));
     if (action === 'disable') fireEvent.click(screen.getByLabelText('Enabled'));
-    else fireEvent.change(screen.getAllByLabelText('Name')[1], { target: { value: 'Renamed source' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save', exact: true }));
+    else fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Renamed source' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save subscription' }));
   }
 }
 
@@ -174,7 +167,7 @@ it.each(['add', 'update', 'disable', 'delete', 'import'].flatMap((action) =>
   mutation.mockImplementationOnce(async (...args) => { await commit(...args); throw error; });
   mount();
   await screen.findByText('✓ Setup verified');
-  await screen.findByRole('button', { name: 'Save', exact: true });
+  await screen.findByRole('button', { name: 'Edit Synthetic source' });
   await writeSource(action);
   await screen.findByText('Synthetic uncertain write');
   await screen.findByText('Source settings changed; verification required');

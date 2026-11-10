@@ -2,8 +2,31 @@
 import { afterEach, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import QuestionEvidence, { EvidencePolicyStatus } from './QuestionEvidence.jsx';
+import { reviewPaperUrl } from '../../pages/reviewHelpers.js';
 
 afterEach(cleanup);
+
+it.each(['PMC123456', '123456'])('links PMCID-only discovery results canonically: %s', (pmcid) => {
+  expect(reviewPaperUrl({ pmcid })).toBe('https://pmc.ncbi.nlm.nih.gov/articles/PMC123456/');
+  expect(reviewPaperUrl({ doi: '10.1234/doi', pmcid })).toBe('https://doi.org/10.1234/doi');
+  expect(reviewPaperUrl({ url: 'https://example.org/direct', pmcid })).toBe('https://example.org/direct');
+  expect(reviewPaperUrl({ pmcid: 'PMC123/../../private' })).toBe('');
+});
+
+it.each(['https://example.org/selected.pdf', 'http://example.org/selected.pdf', 'file:///private/cache.pdf', 'javascript:alert(1)', undefined])(
+  'only exposes recorded HTTP sources inside the existing provenance: %s', (sourceUri) => {
+    render(<QuestionEvidence questions={['Question']} candidate={{ candidate_id: 'paper', question_evidence: [{
+      candidate_id: 'paper', question_index: 0, question: 'Question', state: 'unknown', reason: 'not_assessed',
+      source_sha256: 'synthetic-extraction', source_uri: sourceUri,
+    }] }} />);
+    const link = screen.queryByRole('link', { name: 'Open acquired original source', hidden: true });
+    if (sourceUri?.startsWith('http')) {
+      expect(link?.getAttribute('href')).toBe(sourceUri);
+      expect(link?.getAttribute('rel')).toBe('noopener noreferrer');
+      expect(link?.closest('details')?.querySelector('summary')?.textContent).toBe('Source and evaluator provenance');
+    } else expect(link).toBeNull();
+  },
+);
 
 it('shows scoped partial evidence, original coordinates, capability breakdown and evaluator identity', () => {
   render(<QuestionEvidence questions={['Question A', 'Question B']} candidate={{ candidate_id: 'paper', question_evidence: [{

@@ -79,7 +79,7 @@ export default function PaperDetailView({
   const showLinks = show.links ?? true;
   const showDeepReview = show.deepReview ?? true;
   const showReader = (show.reader ?? true) && serverAvailable;
-  const showAsk = (show.ask ?? true) && hasPdf;
+  const showAsk = show.ask ?? true;
   const showAbstract = show.abstract ?? true;
   const showTags = show.tags ?? true; // both surfaces render the tag editor
   const showCollection = (show.collection ?? editable) && editable;
@@ -118,7 +118,7 @@ export default function PaperDetailView({
                 <PaperReaderPane itemKey={itemKey} open={readerOpen} onOpenChange={onReaderOpenChange} hasPdf={hasPdf} />
               )}
               {showAbstract && <AbstractBlock abstract={detail.abstract} variant="details" />}
-              {showAsk && <AskPaperBox itemKey={itemKey} onSaved={onDeepReviewDone} onMirrorStart={beginNoteDelivery} />}
+              {showAsk && <AskPaperBox itemKey={itemKey} allowRawPdfModes={Boolean(hasPdf)} onSaved={onDeepReviewDone} onMirrorStart={beginNoteDelivery} />}
             </div>
           </Section>
 
@@ -201,7 +201,7 @@ export default function PaperDetailView({
               {showReader && (
                 <PaperReaderPane itemKey={itemKey} open={readerOpen} onOpenChange={onReaderOpenChange} hasPdf={hasPdf} />
               )}
-              {showAsk && <AskPaperBox itemKey={itemKey} onSaved={onDeepReviewDone} onMirrorStart={beginNoteDelivery} />}
+              {showAsk && <AskPaperBox itemKey={itemKey} allowRawPdfModes={Boolean(hasPdf)} onSaved={onDeepReviewDone} onMirrorStart={beginNoteDelivery} />}
             </div>
           </Section>
         )}

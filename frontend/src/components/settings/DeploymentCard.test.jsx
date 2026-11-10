@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('../../api/setupApi.js', () => ({
   fetchDoctorStatus: vi.fn(),
@@ -26,7 +27,7 @@ const DATA = {
 
 function renderChecklist() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}><DoctorChecklist /></QueryClientProvider>);
+  return render(<QueryClientProvider client={client}><MemoryRouter><DoctorChecklist /></MemoryRouter></QueryClientProvider>);
 }
 
 beforeEach(() => {
@@ -84,7 +85,7 @@ it('offers real settings recovery separately from a scoped retry for unknown loc
   }] });
   renderChecklist();
 
-  expect((await screen.findByRole('link', { name: /Review AI settings/ })).getAttribute('href')).toBe('/settings#ai-models');
+  expect((await screen.findByRole('link', { name: /Review AI settings/ })).getAttribute('href')).toBe('/settings?task=connection');
   expect(runDoctor).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
   await waitFor(() => expect(runDoctor).toHaveBeenCalledWith(['llm_inference']));

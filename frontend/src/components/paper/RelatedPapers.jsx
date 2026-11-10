@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { fetchRelatedPapers, assessRelatedPapers, fetchDiscovery, findNewRelevant } from '../../api/libraryApi.js';
@@ -16,13 +16,14 @@ export function Comments({ comments, used = [], submitted = [] }) {
   </details>;
 }
 
-export default function RelatedPapers({ itemKey }) {
+export default function RelatedPapers({ itemKey, heading = true }) {
   const [opened, setOpened] = useState(false);
   const owner = useId();
   const navigate = useNavigate();
   const location = useLocation();
   const request = useRef(null);
   const [finding, setFinding] = useState(false);
+  const [waited, setWaited] = useState(0);
   const [findError, setFindError] = useState(null);
   const [consent, setConsent] = useState(null);
   useLayoutEffect(() => {
@@ -34,9 +35,14 @@ export default function RelatedPapers({ itemKey }) {
   const metadata = useQuery({ queryKey: ['discovery-metadata', itemKey, owner],
     queryFn: ({ signal }) => fetchDiscovery(itemKey, { signal }),
     retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false, refetchOnMount: false });
+  useEffect(() => {
+    if (!finding) { setWaited(0); return undefined; }
+    const timer = setInterval(() => setWaited(seconds => seconds + 1), 1000);
+    return () => clearInterval(timer);
+  }, [finding]);
   const discovery = !metadata.isFetching && !metadata.error ? metadata.data : null;
   const find = async () => {
-    if (discovery?.admission.state !== 'saved' || !discovery.context_fingerprint || finding) return;
+    if (!discovery?.context_fingerprint || finding) return;
     const controller = request.current;
     setFinding(true); setFindError(null);
     try {
@@ -64,35 +70,36 @@ export default function RelatedPapers({ itemKey }) {
     if (!window.confirm(`Experimental assessment: send complete private comments for this paper and up to 10 saved candidates to ${boundary.provider} / ${boundary.model} (${boundary.endpoint || 'native provider API'})? Results and full context are saved locally for reuse. No provider search, review or Add is started. Usefulness is unqualified.`)) return;
     assessment.mutate({ token: boundary.token, retry: ['failed', 'interrupted', 'stale'].includes(data?.assessment_status) });
   };
-  const used = (data?.items || []).flatMap(row => row.used_context_ids || []);
+  const used = (data?.assessment?.items || data?.items || []).flatMap(row => row.used_context_ids || []);
   const submitted = data?.submitted_context_ids || [];
-  return <section aria-label="Related in my library" className="py-6 text-sm text-slate-700 break-words">
-    <h2 className="font-display text-xl text-forest">Related in my library</h2>
+  return <section aria-label="Related in my library" className="text-sm text-slate-700 break-words">
+    {heading && <h2 className="font-display text-xl text-forest">Related in my library</h2>}
     {metadata.isFetching && <p role="status">Checking saved discovery eligibility…</p>}
     {metadata.error && <p role="alert">Discovery eligibility unavailable: {metadata.error.message}
       <button type="button" className="ml-2 underline" onClick={() => metadata.refetch()}>Retry discovery eligibility</button></p>}
-    {discovery?.admission.state !== 'saved' && discovery && <p role="status">
-      {discovery.admission.state === 'unknown' ? 'Saved membership unknown; discovery is unavailable.' : 'Save this paper before discovery.'}
-      {discovery.reason && ` (${discovery.reason})`}</p>}
-    {discovery?.admission.state === 'saved' && <>
+    {discovery && !discovery.context_fingerprint && <p role="status">
+      Similar-paper search is unavailable: this paper's library context could not be read{discovery.reason ? ` (${discovery.reason})` : ''}. Retry below.</p>}
+    {discovery && <>
+      <p>{discovery.admission.state === 'saved' ? 'Searches open sources for new papers like this one.'
+        : 'Not in your library yet. Searches open sources for papers like this one.'}</p>
       <button type="button" className="mt-2 text-forest underline disabled:opacity-50" onClick={find}
-        disabled={finding || !discovery.context_fingerprint}>Find new relevant</button>
-      <details className="mt-2"><summary className="cursor-pointer text-forest">Discovery processing and optional comments</summary>
-        <p>Providers receive public paper metadata only. No review or Add starts. Full context and results are retained locally.</p>
+        disabled={finding || !discovery.context_fingerprint}>{finding ? 'Searching…' : 'Find new relevant'}</button>
+      {discovery.context_fingerprint && <details className="mt-2"><summary className="cursor-pointer text-forest">Discovery processing and optional comments</summary>
+        <p>Search providers receive public paper metadata only. No review or Add starts. Full context and results are retained locally.</p>
         <p>Optional private context includes seed comments and your reading verdict/rationale.</p>
         <p>Private seed context: {discovery.private_context.status} · {discovery.private_context.record_count ?? 'unknown'} records.</p>
         <p>Processing boundary: {discovery.boundary?.provider} / {discovery.boundary?.model} · {discovery.boundary?.endpoint || 'native provider API'}.</p>
         <label><input type="checkbox" checked={Boolean(consent && consent === discovery.boundary?.token)}
           disabled={finding || !discovery.boundary?.enabled} onChange={event => setConsent(event.target.checked && window.confirm(
-            `Send complete private seed comments and your reading verdict/rationale only to ${discovery.boundary.provider} / ${discovery.boundary.model} (${discovery.boundary.endpoint || 'native provider API'})? Providers still receive public metadata only. Full context and results stay locally. Experimental usefulness is unqualified.`
+            `Send complete private seed comments and your reading verdict/rationale only to ${discovery.boundary.provider} / ${discovery.boundary.model} (${discovery.boundary.endpoint || 'native provider API'})? Search providers still receive public metadata only. Full context and results stay locally. Experimental usefulness is unqualified.`
           ) ? discovery.boundary.token : null)} /> Use private seed comments — experimental</label>
         <p>Unchecked means public metadata only. Up to 10 candidates / 30,000 input characters; over-budget contexts are not clipped.</p>
-      </details>
+      </details>}
     </>}
-    {discovery?.admission.state === 'saved' && !discovery.context_fingerprint && <p role="status">Discovery context unavailable: {discovery.reason || 'unverified'}.</p>}
     {(findError || (discovery && !discovery.context_fingerprint)) && <button type="button" disabled={finding}
       onClick={() => { setConsent(null); metadata.refetch(); }}>Refresh discovery eligibility</button>}
-    {finding && <p role="status">Finding public candidates and, only if consented, assessing seed comments…</p>}
+    {finding && <p role="status">Searching open sources… {waited}s (usually under a minute). Results open in Search.
+      {consent ? ' Assessing your comments afterwards.' : ''}</p>}
     {findError && <p role="alert">Discovery unavailable: {findError.message}. Retry the action explicitly; no automatic retry occurs.</p>}
     {!opened && <button type="button" className="mt-2 text-forest underline" onClick={() => setOpened(true)}>Show related saved papers</button>}
     {query.isFetching && <p role="status">Loading saved-library connections…</p>}

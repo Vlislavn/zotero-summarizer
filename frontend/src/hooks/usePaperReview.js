@@ -11,7 +11,8 @@ import { syncStatusEvent } from '../offlineStore.js';
 // the ❌ reject tag here, so there is ONE reject path wherever the verdict is set
 // (Occam's Razor). Returns the `verdict` prop object PaperDetailView expects plus
 // the tag/collection refetch handlers.
-export default function usePaperReview(itemKey, { onSaved, onVerdictAcknowledged, onQueueRefresh } = {}) {
+export default function usePaperReview(itemKey, { onSaved, onVerdictAcknowledged, onQueueRefresh,
+  onVerdictStarted, onVerdictSettled } = {}) {
   const queryClient = useQueryClient();
   const activeItem = useRef(itemKey);
   const callbacks = useRef({ onSaved, onQueueRefresh });
@@ -22,17 +23,27 @@ export default function usePaperReview(itemKey, { onSaved, onVerdictAcknowledged
     return () => { activeItem.current = null; };
   }, [itemKey]);
   const detailQuery = useQuery({
-    queryKey: ['review-detail', itemKey],
+    // Dedicated key (not the global ['review-detail'] prefix): the paper/inline
+    // detail is fetched ONCE per open and refreshed explicitly after the user's own
+    // verdict/note. The post-sync invalidate (syncClient) and window-focus/reconnect
+    // must not re-pull it — that was the second review-detail request on every open.
+    queryKey: ['paper-detail', itemKey],
     queryFn: () => fetchReviewDetail(itemKey),
     networkMode: 'always',
     enabled: Boolean(itemKey),
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
   const submitMutation = useMutation({
+    mutationKey: onVerdictStarted ? ['today-action'] : ['paper-verdict'],
     networkMode: 'always',
+    onMutate: variables => onVerdictStarted?.(variables.item_key, variables.user_priority),
+    onSettled: (result, error, _variables, context) => onVerdictSettled?.(context, result, error),
     mutationFn: async ({ item_key, user_priority, comment }) => {
       const result = await submitVerdict({ item_key, user_priority, comment });
       if (!result.saved_offline) onVerdictAcknowledged?.();
-      if (user_priority !== 'dont_read' || result.saved_offline) return result;
+      // A feed-only paper has no Zotero item to tag (same as a skip decided on Today).
+      if (user_priority !== 'dont_read' || result.saved_offline || item_key.startsWith('feed:')) return result;
       try {
         await queueRejectTag(item_key);
         return result;
@@ -41,12 +52,17 @@ export default function usePaperReview(itemKey, { onSaved, onVerdictAcknowledged
       }
     },
   });
-  const deleteMutation = useMutation({ networkMode: 'always', mutationFn: async (key) => {
+  const deleteMutation = useMutation({ networkMode: 'always',
+    mutationKey: onVerdictStarted ? ['today-action'] : ['paper-verdict'],
+    onMutate: key => onVerdictStarted?.(key, null),
+    onSettled: (result, error, _variables, context) => onVerdictSettled?.(context, result, error),
+    mutationFn: async (key) => {
     const result = await deleteVerdict(key);
     if (!result.saved_offline) onVerdictAcknowledged?.();
     return result;
   } });
   const detail = detailQuery.data;
+  const resetSubmit = submitMutation.reset;
 
   useEffect(() => {
     const reconciled = (event) => {
@@ -54,11 +70,11 @@ export default function usePaperReview(itemKey, { onSaved, onVerdictAcknowledged
       const rejected = event.detail.rejected?.some(
         (row) => row.item_key === itemKey && row.field === 'verdict',
       );
-      if (rejected || event.detail.pending === 0) submitMutation.reset();
+      if (rejected || event.detail.pending === 0) resetSubmit();
     };
     window.addEventListener(syncStatusEvent, reconciled);
     return () => window.removeEventListener(syncStatusEvent, reconciled);
-  }, [itemKey, submitMutation.variables?.item_key, submitMutation.data?.saved_offline, submitMutation.reset]);
+  }, [itemKey, submitMutation.variables?.item_key, submitMutation.data?.saved_offline, resetSubmit]);
 
   // POST /api/golden/verdict resolves HTTP 200 even when the best-effort Zotero
   // mirror (label tag / note) failed — it reports label_error/note_error instead
@@ -91,7 +107,7 @@ export default function usePaperReview(itemKey, { onSaved, onVerdictAcknowledged
     : null;
 
   function refreshDetail() {
-    queryClient.invalidateQueries({ queryKey: ['review-detail', itemKey] });
+    queryClient.invalidateQueries({ queryKey: ['paper-detail', itemKey] });
   }
 
   function afterVerdictChange() {

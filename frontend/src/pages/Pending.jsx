@@ -353,9 +353,13 @@ export default function Pending() {
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <div>
           <h2 className="text-lg font-medium">Pending Changes</h2>
-          <p className="text-xs text-slate-500">Review, edit, and apply queued updates to Zotero.</p>
+          <p className="text-xs text-slate-500">
+            {isPending && !loading && !loadError && pending.length > 0
+              ? `${pending.length} queued change${pending.length === 1 ? '' : 's'} on ${groupedPending.length} paper${groupedPending.length === 1 ? '' : 's'}. Apply writes to Zotero after a backup; recovery is backup-only, not undo.`
+              : 'Review, edit, and apply queued updates to Zotero.'}
+          </p>
           {isPending && (
-            <p className="text-[11px] text-slate-500 mt-0.5">
+            <p className="hidden md:block text-[11px] text-slate-500 mt-0.5">
               <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>space</kbd> select · <kbd>a</kbd> apply · <kbd>r</kbd> reject
             </p>
           )}

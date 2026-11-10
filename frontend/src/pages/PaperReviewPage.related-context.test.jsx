@@ -40,6 +40,7 @@ it.each(['note', 'verdict'])('an acknowledged %s save fences related context bef
     } else if (path === '/api/zotero/collections' || path === '/api/zotero/tags?limit=300') data = { items: [] };
     else if (path === '/api/library/render/P1' || path === '/api/library/deep-review/status?item_key=P1') data = { status: 'idle' };
     else if (path === '/api/admin/llm-reachability') data = { stages: [{ stage: 'deep_review', enabled: false }] };
+    else if (path.startsWith('/api/card/')) data = { facts: {}, ai: null, ai_reason: 'offline', boundary: {} };
     else { unexpected.push(path); return new Response('{}', { status: 500 }); }
     return new Response(JSON.stringify(data), { status: 200 });
   }));

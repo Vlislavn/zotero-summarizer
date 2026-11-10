@@ -76,5 +76,5 @@ it('keeps a saved verdict successful when the secondary reject tag fails', async
 
   await waitFor(() => expect(result.current.verdict.submitWarning).toContain('reject tag was not queued'));
   expect(result.current.verdict.submitError).toBeNull();
-  expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['review-detail', 'P1'] });
+  expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['paper-detail', 'P1'] });
 });

@@ -1,3 +1,5 @@
+import { reviewPaperUrl } from '../../pages/reviewHelpers.js';
+
 const STATES = {
   sufficient: 'Sufficient evidence (AI-verified)', partial: 'Partial evidence',
   not_found_in_checked_text: 'Not found in checked text', unknown: 'Unchecked',
@@ -40,6 +42,8 @@ export default function QuestionEvidence({ candidate, questions = [] }) {
           </blockquote>)}
           {row?.source_sha256 && <details className="mt-1 break-all">
             <summary>Source and evaluator provenance</summary>
+            {reviewPaperUrl({ url: row.source_uri }) && <a href={reviewPaperUrl({ url: row.source_uri })}
+              target="_blank" rel="noopener noreferrer">Open acquired original source</a>}
             <p>Source: {row.source_id} · Extraction SHA-256: {row.source_sha256}</p>
             <p>Question SHA-256: {row.question_id} · Input: {row.input_id}</p>
             <p>Generator: {row.generator_id} · Verifier: {row.verifier_id} · Protocol: {row.evaluator_id}</p>

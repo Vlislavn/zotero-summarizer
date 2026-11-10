@@ -14,6 +14,7 @@ import {
 } from '../api/libraryApi.js';
 import ReadNextView from '../components/library/ReadNextView.jsx';
 import LibraryFilterBar from '../components/library/LibraryFilterBar.jsx';
+import ExpandableList from '../components/library/ExpandableList.jsx';
 import PredictionsBar from '../components/library/PredictionsBar.jsx';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import { useReviewCoolLoop } from '../hooks/useReviewCoolLoop.js';
@@ -41,16 +42,27 @@ import { allPapers } from '../offlineStore.js';
 // truly unbounded, so a pathological library can't build a multi-MB response.
 const QUEUE_LIMIT = 5000;
 
-function flattenCollections(nodes, depth = 0) {
+function flattenCollections(nodes, depth = 0, parent = '') {
   const flat = [];
   for (const node of nodes || []) {
-    flat.push({ key: node.key, name: node.name, item_count: node.item_count || 0, depth });
+    flat.push({
+      key: node.key, name: node.name, item_count: node.item_count || 0, depth,
+      parent, hasChildren: Boolean(node.children?.length),
+    });
     if (node.children?.length) {
-      flat.push(...flattenCollections(node.children, depth + 1));
+      flat.push(...flattenCollections(node.children, depth + 1, node.name));
     }
   }
   return flat;
 }
+
+// arXiv subject tags ("Computer Science - Artificial Intelligence") drown the
+// tags the owner wrote — list them after the rest (order otherwise unchanged).
+const CATEGORY_TAG = /^(Computer Science|Mathematics|Physics|Statistics|Quantitative \w+|Electrical Engineering[\w ]*|Economics) - /;
+const sinkCategoryTags = (tags) => [
+  ...tags.filter((t) => !CATEGORY_TAG.test(t.tag)),
+  ...tags.filter((t) => CATEGORY_TAG.test(t.tag)),
+];
 
 export default function LibraryReadNext() {
   const navigate = useNavigate();
@@ -66,7 +78,7 @@ export default function LibraryReadNext() {
   const [sort, setSort] = useState(() => hydrateSort(searchParams));
   const [queue, setQueue] = useState([]);
   const [queueMeta, setQueueMeta] = useState({
-    read_hidden: 0, total_unread: 0, status: 'ready', model_ready: true,
+    read_hidden: 0, total_unread: 0, decided_count: 0, status: 'ready', model_ready: true,
     error: null, computed_at: null, scores_stale: false, distribution: null,
     semantic: false, reranker_loading: false, semantic_unavailable: false,
   });
@@ -118,6 +130,16 @@ export default function LibraryReadNext() {
   const [isError, setIsError] = useState(false);
 
   const flatCollections = useMemo(() => flattenCollections(collections), [collections]);
+  // Browse list: hide empty leaf collections; two collections with one name show
+  // their parent ("Writing › Inbox") so they can be told apart.
+  const browseCollections = useMemo(() => {
+    const seen = new Set();
+    const dup = new Set();
+    flatCollections.forEach((c) => (seen.has(c.name) ? dup : seen).add(c.name));
+    return flatCollections
+      .filter((c) => c.item_count > 0 || c.hasChildren || c.key === selectedCollection)
+      .map((c) => ({ ...c, label: dup.has(c.name) && c.parent ? `${c.parent} › ${c.name}` : c.name }));
+  }, [flatCollections, selectedCollection]);
 
   // ------ Client-side smart filters (over the already-loaded queue) ------
   // Mirror the active filters into the URL (compact keys, defaults omitted) so a
@@ -202,7 +224,7 @@ export default function LibraryReadNext() {
         // Drop the app's own machine tags from the human-facing "Top Tags"
         // browse filter (see utils/tags.js) — the biggest "tags" are internal
         // relevance/feed bookkeeping no one browses by.
-        setTags((tData?.items || []).filter((t) => !isMachineTag(t.tag)));
+        setTags(sinkCategoryTags((tData?.items || []).filter((t) => !isMachineTag(t.tag))));
       } catch (err) {
         if (!cancelled) {
           setMessage(`Failed to load sidebar: ${err.message || err}`);
@@ -228,6 +250,7 @@ export default function LibraryReadNext() {
     setQueueMeta({
       read_hidden: data?.read_hidden || 0,
       total_unread: data?.total_unread || 0,
+      decided_count: data?.decided_count || 0,
       status: data?.status || 'ready',
       model_ready: data?.model_ready !== false,
       error: data?.error || null,
@@ -383,6 +406,17 @@ export default function LibraryReadNext() {
     } finally {
       setAddingToCollection(false);
     }
+  }
+
+  // Bulk verdict / mark-read finished (BulkVerdictBar): show the outcome and, once
+  // anything landed, drop the selection and refetch the queue.
+  function handleBulkDone(msg, failed, partial = !failed) {
+    setMessage(msg);
+    setIsError(failed);
+    if (!partial) return;
+    setSelected(new Set());
+    if (!failed) setSelectMode(false);
+    loadQueue();
   }
 
   async function handleRunTriage() {
@@ -600,7 +634,7 @@ export default function LibraryReadNext() {
             <div className="px-3 pb-3 pt-1 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
               <div>
                 <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2">Collections</h2>
-                <div className="max-h-56 overflow-auto pr-1 slim-scroll">
+                <ExpandableList count={browseCollections.length + 1}>
                   <button
                     type="button"
                     onClick={() => selectCollection('')}
@@ -612,7 +646,7 @@ export default function LibraryReadNext() {
                   >
                     All items
                   </button>
-                  {flatCollections.map((entry) => (
+                  {browseCollections.map((entry) => (
                     <button
                       type="button"
                       key={entry.key}
@@ -624,16 +658,16 @@ export default function LibraryReadNext() {
                           : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                       }`}
                     >
-                      <span>{entry.name}</span>
+                      <span>{entry.label}</span>
                       <span className="mono opacity-70"> ({entry.item_count})</span>
                     </button>
                   ))}
-                </div>
+                </ExpandableList>
               </div>
 
               <div>
                 <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2">Top Tags</h2>
-                <div className="max-h-56 overflow-auto pr-1 slim-scroll">
+                <ExpandableList count={Math.min(tags.length, 100) + 1}>
                   <button
                     type="button"
                     onClick={() => selectTag('')}
@@ -660,7 +694,7 @@ export default function LibraryReadNext() {
                       <span className="mono opacity-70"> ({tagEntry.item_count})</span>
                     </button>
                   ))}
-                </div>
+                </ExpandableList>
               </div>
             </div>
 
@@ -721,6 +755,7 @@ export default function LibraryReadNext() {
           onToggleIncludeRead={() => setIncludeRead((v) => !v)}
           readHidden={queueMeta.read_hidden}
           totalUnread={queueMeta.total_unread}
+          decidedCount={queueMeta.decided_count}
           status={queueMeta.status}
           modelReady={queueMeta.model_ready}
           error={queueMeta.error}
@@ -735,6 +770,7 @@ export default function LibraryReadNext() {
           selected={visibleSelected}
           onToggleItem={toggleItem}
           onRunTriage={handleRunTriage}
+          onBulkDone={handleBulkDone}
           starting={starting}
           collections={flatCollections}
           onAddToCollection={handleAddToCollection}

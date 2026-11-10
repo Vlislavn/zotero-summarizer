@@ -5,6 +5,8 @@ import { afterEach, expect, it } from 'vitest';
 import PaperReview from './PaperReview.jsx';
 
 afterEach(cleanup);
+// Secondary sections are collapsible folds (content stays in the DOM): name the fold an element lives in.
+const foldOf = (el) => el.closest('details')?.querySelector(':scope > summary h2')?.textContent;
 const deep = {
   digest: { tldr: 'Synthetic contribution.', read_decision: 'skim', read_why: 'Synthetic rationale.',
     key_findings: ['Synthetic finding.'], methods: 'Synthetic method.', limitations: 'Synthetic limitation.',
@@ -20,14 +22,15 @@ it('preserves a legacy assessment when an empty digest object is cached', () => 
   expect(container.querySelectorAll('h2')).toHaveLength(0);
 });
 
-it('orders the full reading flow and keeps every material caveat outside disclosures', () => {
+it('orders the full reading flow and keeps every material caveat in its section fold', () => {
   const { container } = render(<PaperReview deep={deep} flat />);
   const headings = [...container.querySelectorAll('h2')].map(el => el.textContent);
-  expect(headings).toEqual(['Contribution', 'Caveats and coverage', 'Findings and applicability', 'Methods and limitations', 'Assessment and reference']);
+  expect(headings).toEqual(['Contribution', 'Findings and applicability', 'Caveats and coverage', 'Methods and limitations', 'Assessment and reference']);
   for (const text of ['Flag four.', 'Overstatement.', 'Synthetic weakness.', 'Synthetic method.', 'Synthetic limitation.', 'Validated on independent / held-out data']) {
     const node = [...container.querySelectorAll('*')].find(el => el.textContent === text);
     expect(node, text).toBeTruthy();
-    expect(node.closest('details'), text).toBeNull();
+    expect(foldOf(node), text).toBe(text.startsWith('Synthetic method') || text.startsWith('Synthetic limitation')
+      ? 'Methods and limitations' : 'Caveats and coverage');
   }
   for (const text of ['Synthetic rationale.', 'Synthetic finding.']) {
     expect(container.textContent.split(text).length - 1).toBe(1);
@@ -97,9 +100,9 @@ it('keeps compact content folded and non-paper scientific criteria suppressed', 
   expect(contribution.closest('details')).toBeTruthy();
 });
 
-it('puts contribution text before the recommendation only in flat full view', () => {
+it('leads with the verdict summary card before the contribution in flat full view', () => {
   const { container } = render(<PaperReview flat deep={deep} />);
-  expect(container.textContent.indexOf(deep.digest.tldr)).toBeLessThan(container.textContent.indexOf('SKIM'));
+  expect(container.textContent.indexOf('SKIM')).toBeLessThan(container.textContent.indexOf(deep.digest.tldr));
 });
 
 it('gives exactly repeated overstated findings one qualified home without guessing paraphrases', () => {
@@ -111,7 +114,7 @@ it('gives exactly repeated overstated findings one qualified home without guessi
   }} />);
   expect(container.textContent.split(claim).length - 1).toBe(1);
   expect(container.textContent).toContain(variant);
-  expect(container.textContent).toContain('Overstated claims · model judgment · low confidence, verify');
+  expect(container.textContent).toContain('Possible overstatement (low reliability)');
 });
 
 it('keeps goal states explicit while folding repeated reasons into native keyboard evidence', () => {
@@ -134,7 +137,7 @@ it('retains non-paper findings when scientific critique is suppressed', () => {
   }} />);
   expect(container.textContent).toContain('Claim');
   expect(container.textContent).not.toContain('Quality A');
-  expect(container.textContent).not.toContain('Overstated claims');
+  expect(container.textContent).not.toContain('Possible overstatement');
 });
 
 
@@ -144,15 +147,15 @@ it('factors only exact prefixes with complete readable suffixes and individual s
   const section = { id: 'abstract', title: 'Abstract', page: 2 };
   const { container } = render(<PaperReview flat deep={{ quality: { quality_band: 'flag', red_flags: flags } }}
     sectionOverlay={{ red_flags: flags.map(text => ({ text, section, match: 'approx' })) }} />);
-  const panel = container.querySelector('.border-rose-200');
+  const panel = container.querySelector('.border-rose-300');
   const group = panel.querySelector(':scope > ul > li');
   expect(group.firstChild.textContent).toBe(prefix);
   const suffixes = [...group.querySelectorAll(':scope > div > p')];
   expect(suffixes).toHaveLength(3);
   expect(suffixes.map(el => `${prefix} ${el.firstChild.textContent}`)).toEqual(flags);
-  expect(suffixes.every(el => !el.closest('details'))).toBe(true);
+  expect(suffixes.every(el => foldOf(el) === 'Caveats and coverage')).toBe(true);
   expect(panel.querySelectorAll('a')).toHaveLength(3);
-  expect([...panel.querySelectorAll('details li')].map(el => el.textContent)).toEqual(flags);
+  expect([...panel.querySelectorAll(':scope details li')].map(el => el.textContent)).toEqual(flags);
 });
 
 it('never removes negation, internal context or different scopes by word matching', () => {
@@ -160,9 +163,9 @@ it('never removes negation, internal context or different scopes by word matchin
     'Training excludes trials with missing outcomes.', 'Evaluation includes trials with missing outcomes.'];
   const { container } = render(<PaperReview flat deep={{ quality: { red_flags: flags,
     rubric: { validation: 'no' } } }} />);
-  const rows = [...container.querySelectorAll('.border-rose-200 > ul > li')];
+  const rows = [...container.querySelectorAll('.border-rose-300 > ul > li')];
   expect(rows.map(el => el.textContent)).toEqual(flags);
-  expect(rows.every(el => !el.closest('details'))).toBe(true);
+  expect(rows.every(el => foldOf(el) === 'Caveats and coverage')).toBe(true);
 });
 
 it('does not group warnings by criterion or source and leaves compact presentation unchanged', () => {
@@ -170,7 +173,7 @@ it('does not group warnings by criterion or source and leaves compact presentati
   const section = { id: 'same', title: 'Methods' };
   const { container, rerender } = render(<PaperReview flat deep={{ quality: { red_flags: flags,
     rubric: { artifacts: 'no' } } }} sectionOverlay={{ red_flags: flags.map(text => ({ text, section, match: 'exact' })) }} />);
-  expect(container.querySelectorAll('.border-rose-200 > ul > li')).toHaveLength(2);
+  expect(container.querySelectorAll('.border-rose-300 > ul > li')).toHaveLength(2);
   rerender(<PaperReview compact deep={deep} />);
   expect(container.textContent).not.toContain('Original wording');
 });
@@ -193,20 +196,20 @@ it.each(['validation', 'reliability', 'contamination'])('reconstructs literal %s
   const { container } = render(<PaperReview flat deep={{ quality: { red_flags: flags,
     rubric: { [term]: 'no' } } }}
     sectionOverlay={{ red_flags: flags.map(text => ({ text, section, match: 'exact' })) }} />);
-  const panel = container.querySelector('.border-rose-200');
+  const panel = container.querySelector('.border-rose-300');
   const rows = [...panel.querySelectorAll(':scope > ul > li > div > p')].filter(row => row.querySelector('[data-frame-suffix]'));
   expect(rows).toHaveLength(3);
   expect(rows.map(row => [intro, row.querySelector('[data-frame-modifier]').textContent,
     term, row.querySelector('[data-frame-suffix]').textContent].filter(Boolean).join(' '))).toEqual(flags);
-  expect(rows.every(row => !row.closest('details'))).toBe(true);
+  expect(rows.every(row => foldOf(row) === 'Caveats and coverage')).toBe(true);
   expect(rows.every(row => row.querySelector('a'))).toBe(true);
-  expect([...panel.querySelectorAll('details li')].map(row => row.textContent)).toEqual(flags);
+  expect([...panel.querySelectorAll(':scope details li')].map(row => row.textContent)).toEqual(flags);
 });
 
 it('does not factor a non-rubric term and never produces an empty prefix continuation', () => {
   const flags = ['No validation', 'No validation with independent data.', 'Validation is provided.'];
   const { container } = render(<PaperReview flat deep={{ quality: { red_flags: flags } }} />);
-  expect([...container.querySelectorAll('.border-rose-200 > ul > li')].map(row => row.textContent)).toEqual(flags);
+  expect([...container.querySelectorAll('.border-rose-300 > ul > li')].map(row => row.textContent)).toEqual(flags);
 });
 
 it.each([

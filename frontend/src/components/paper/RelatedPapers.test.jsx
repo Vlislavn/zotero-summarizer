@@ -114,6 +114,34 @@ it('distinguishes submitted related comments from model-cited comments only afte
   client.clear();
 });
 
+it('marks seed comments cited by rejected candidates without attributing other comments', async () => {
+  const seedComments = { ...comments, availability: 'available', records: [
+    { id: 'seed-note', text: 'Seed context', source: 'app_note', authorship: 'user' },
+    { id: 'unused-note', text: 'Unused context', source: 'app_note', authorship: 'user' },
+  ] };
+  fetchRelatedPapers.mockResolvedValue({ ...baseline, seed_comments: seedComments });
+  assessRelatedPapers.mockResolvedValue({ ...baseline, status: 'empty', items: [],
+    seed_comments: seedComments, assessment_status: 'assessed', comments_in_ranking: true,
+    submitted_context_ids: ['seed-note', 'unused-note'],
+    assessment: { items: [{ item_key: 'REJECTED', relevance: 'not_relevant', preference: 'conflict',
+      used_context_ids: ['seed-note'] }] },
+  });
+  vi.stubGlobal('confirm', () => true);
+  const { client } = mount();
+  fireEvent.click(screen.getByRole('button', { name: 'Show related saved papers' }));
+  await screen.findByText('Seed context');
+  expect(screen.queryByText(/cited by assessment/)).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Try with comments — experimental' }));
+
+  await screen.findByText(/Comment assessment: assessed/);
+  expect(screen.getByText('No related saved papers found in this scope with a supported, preference-compatible assessment.')).toBeTruthy();
+  expect(screen.getByText('app_note · user · seed-note · cited by assessment')).toBeTruthy();
+  expect(screen.getByText('app_note · user · unused-note · submitted, not model-cited')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: 'Saved read paper' })).toBeNull();
+  client.clear();
+});
+
 it('keeps observed empty and unavailable saved-library reads distinct from pending loading', async () => {
   let complete;
   fetchRelatedPapers.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));

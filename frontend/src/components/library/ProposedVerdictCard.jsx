@@ -7,10 +7,11 @@ import { Chip } from '../paper/review/primitives.jsx';
 // A cached suggestion never auto-writes: Confirm uses the verdict path; Override
 // opens the editor. Ambiguous suggestions expose only Override.
 
-// Below this the proposal is treated as uncertain → Confirm is withheld. A clean
-// `read`+A/B scores 0.85, a plain `read` 0.65, a goal-miss skip 0.75; the shaky
-// cases (no digest 0.35, ungraded skim 0.45, any uncertain/overstatement −0.2)
-// fall under it. Matches services/library/review_fleet/propose.py::_confidence.
+// Below this the proposal is treated as uncertain → Confirm is withheld. Scores:
+// read 0.85 (grade A/B) or 0.65; skim 0.7 graded / 0.55; skip 0.75 (grade D) or 0.5;
+// no digest decision 0.35. No grade with a decision −0.1; an `uncertain` quality
+// band −0.2 (overstatements are display-only and do not change it). Matches
+// services/library/review_fleet/propose.py::_confidence.
 const CONFIDENCE_FLOOR = 0.6;
 
 export default function ProposedVerdictCard({ itemKey, proposal, onSaved, onOverride }) {

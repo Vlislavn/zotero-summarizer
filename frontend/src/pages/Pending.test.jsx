@@ -296,7 +296,7 @@ it('keeps pending status until the response and never retries an uncertain deliv
   expect(await screen.findByText('Delivery outcome is uncertain. Reconcile Zotero against the backup before any new action; retry is blocked.')).toBeTruthy();
   expect(screen.getAllByRole('alert')).toHaveLength(2);
   expect(screen.getByText('Backup: /owned/backup.sqlite')).toBeTruthy();
-  expect(document.querySelector('details pre').textContent).toBe(JSON.stringify(row.audit, null, 2));
+  expect(document.querySelector('details details pre').textContent).toBe(JSON.stringify(row.audit, null, 2));
   expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   expect(screen.getByRole('checkbox').disabled).toBe(true);
   fireEvent.keyDown(window, { key: 'a' });
