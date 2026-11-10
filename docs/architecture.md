@@ -7,15 +7,19 @@ for observable behavior use the [feature map](features.md).
 ## Product loop
 
 ```text
-RSS → triage → ML gate → LLM review → daily slate → human decision
-                            │                           │
-                            └→ paper brief / Q&A        ├→ labels → retrain gate
-                                                       └→ approved Zotero changes
+RSS → triage / ML rank → bounded preparation → source-based review → ready pool
+                                                    │                  │
+                                                    └→ brief / Q&A     └→ retained Today
+                                                                            │
+                                              labels → retrain gate ← human decision
+                                                                            └→ approved Zotero changes
 ```
 
 The app fetches RSS into its own pool. The relevance gate scores candidates
-before optional LLM work; Today presents papers for culling, Library supports
-reading, and labels supply the training data. Search is the separate query-driven
+before optional LLM work. Enabled preparation reviews a bounded ranked slice,
+independent of the published shortlist; Today admits current assessed reviews that
+pass quality and verdict checks (the goal board is a badge only) and retains its members until explicit renewal. Library
+supports reading, and labels supply the training data. Search is the separate query-driven
 entry point. Weekly browses saved research-feed reports, not a second ingestion
 system.
 
@@ -40,10 +44,14 @@ those services rather than running a second triage engine.
 
 Triage can be requested by **Today → Triage backlog**, CLI `feeds run` /
 `feeds tick`, or the optional `feeds serve` daemon. The daemon can score feeds
-and review the slate; it does not automatically Add a pick to Zotero.
+and start bounded Today preparation; it does not automatically Add a pick to Zotero.
+Preparation is controlled by `quality_review.auto_on_tick_k` (0 disables it), not
+by opening Today. It runs in the ticking process; `feeds serve` must remain running
+for continuous preparation. The existing render tick retains its legacy allocator.
 
 Ordinary `serve` is loopback-only. Remote access requires explicit authenticated
-HTTPS/private-Unix configuration; see the
+HTTPS/private-Unix configuration, or consciously opt-in trusted localhost transport
+that trusts local host processes while retaining exact owner/HTTPS admission; see the
 [remote access](features.md#remote-access). Browser/device storage and
 server/native acknowledgements remain distinct; see
 [offline review](features.md#offline-review).
@@ -113,7 +121,7 @@ selected project root
 [`Settings`](../zotero_summarizer/settings.py) resolves paths from the selected
 project. App state defaults to `data/`, including `triage_history.db`,
 `corpus_cache.db`, golden CSV/JSONL, model artifacts, search sessions and the
-append-only interaction log. These files and private configuration are gitignored.
+append-only interaction log and Today exposure log. These files and private configuration are gitignored.
 Use Settings paths rather than inventing a second storage root.
 
 Paper-read HTML, its audit, figures and explicitly consented source artifacts
@@ -140,6 +148,14 @@ Retained literal-source checks are not proof of scientific truth or human
 usefulness. The [library README](../zotero_summarizer/services/library/README.md)
 owns the implementation contract, including the internal read-only verification
 audit helper; it has no public HTTP/CLI entry.
+
+Patterns taken from `llm-for-zotero` (independent code, no AGPL import): **adopted** —
+extraction-versioned evidence handles with history compaction and quote/location
+verification for paper Q&A (`services/library/qa_context.py`); **adapted** — declared
+provider capabilities, limited to text and native JSON schema (`models/providers.py`);
+**deferred** — typed Zotero mutations with undo, versioned workflow skills, per-session
+coverage state, wider first-run probes; **rejected** — a Zotero plugin port and autonomous
+Zotero writes.
 
 ## Further reading
 

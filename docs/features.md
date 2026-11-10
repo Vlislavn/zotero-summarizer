@@ -1,171 +1,312 @@
 # Features
 
-Find a task below, then follow the implementation and test links for details.
-Each feature has one paragraph: action, result and the essential boundary;
-AI output and passing contract tests are not scientific validation.
+Find what you want to do below: each paragraph says what you do, what you get and the
+limit to know, then links to the code and tests. AI output is never scientific validation.
 Configuration defaults live in the generated [override reference](overrides.md).
 
 ## Get started
 
 ### Setup and configuration
 
-Missing Ollama recovery uses Homebrew only on macOS and the official platform download page elsewhere; it never installs automatically. Single pending reasons stay visible; multiple unchecked rows fold with their identifiers intact. Typed AI/RSS recovery focuses the existing Settings controls without verification or refresh. Definite rejected config/source/path saves preserve unchanged health; uncertain writes still force a reread, never an automatic retry. Saved ML-only refuses calibration before paper reads or model work; CLI Doctor inventories saved custom hosted routes without full app startup. Run Setup to choose research goals, Zotero paths and AI or ML-only operation; missing project files are created without overwriting existing configuration. Local profile checks follow current model routes even after resuming Setup; existing endpoints remain editable before a nonloading model list. Static-floor eligibility never claims Existing-model capacity. Saving settings is separate from verification: local-model checks refuse when effective resources are unknown, and local mode needs both inference and no-write dry-run success. Status reads derive mode labels from the checklist, not stale saved labels. Optional load-policy files bind approved bytes to provider/model and observed envelope; absent runtime evidence remains unknown, with no automatic approval or hardware certificate. Native request evidence is separate from callback/text success; unresolved ownership survives configuration changes, and exact late completion never resumes a cancelled run. Initial wizard progress reflows at 320/390px while retaining textual current/completion states. [Code](../zotero_summarizer/services/setup/) · [Tests](../tests/test_setup_doctor_runtime_identity.py) · [Browser reflow](../tests/test_setup_surface_browser.py).
+Run Setup (it opens on first launch; `zotero-summarizer setup` works in a terminal) to
+choose research goals, Zotero paths and AI or ML-only mode (ML-only uses the local
+relevance model without an LLM). Missing `goals.yaml` and `.env` are created, existing
+configuration is never overwritten, and app state lives in the gitignored `data/` folder;
+keep `.env`, account sessions, library exports and model files out of Git. Zotero desktop
+is optional for RSS triage but required for library and PDF work, and the app never
+installs Ollama for you. Saving settings is not verification: **Ops → System → Check
+readiness** (or `zotero-summarizer doctor`) tests the setup, and local mode passes only
+after both a working model answer and a dry run that writes nothing. Local-model checks
+report **unknown** instead of guessing when memory or runtime safety evidence is missing;
+free RAM or a model list is not a safety certificate. [Code](../zotero_summarizer/services/setup/) · [Tests](../tests/test_setup_doctor_runtime_identity.py) · [Browser reflow](../tests/test_setup_surface_browser.py).
+
+### Task settings
+
+Settings shows a saved summary and opens one task at a time: AI mode and connection,
+Zotero paths, library access or language; **Today** owns **Article selection** and **RSS
+sources**, **Weekly** owns **Telegram sources**, and **Ops → System** owns readiness and
+calibration. Each task saves only its own fields (there is no Save-all), and leaving with
+unsaved or pending changes asks first; leaving never cancels or rolls back work already
+sent. An uncertain save reply leads to a reread, never an automatic retry, and saved Zotero
+paths apply only after you restart the app. **Calibrate reviews** measures how much input
+your model handles; it does not certify output length or provider availability, and an
+unfinished or unknown run blocks another start. Article goals and the terminal-managed
+Telegram interests are separate and not synchronized. [UI](../frontend/src/pages/Settings.jsx) · [Navigation controls](../frontend/src/pages/Settings.navigation.test.jsx).
 
 ### Model routing
 
-Choose provider profiles and model routes for each AI stage; credentials use the OS keyring or a named environment variable. Unavailable or incompatible execution reports failure rather than a successful answer. Resolved-stage snapshots refuse unsupported fields before credential or transport work, without restoring retired requirement APIs; declared capabilities, wire switches and observed operation remain separate. [Code](../zotero_summarizer/services/llm/) · [Tests](../tests/test_provider_routing.py).
+Use **Settings → AI connection** to choose the default model, its fallback and any
+per-task model (feed triage, backlog, deep review). Pick a saved connection or **Add
+server**; **Connect** explicitly approves that exact address and authorization and fetches
+its model list, then you choose a model (or type its ID), select tasks, review the
+before/after impact and **Use** it, leaving other tasks and Telegram untouched. Keys come
+from a named environment variable or the OS keyring and are never shown; servers without
+authentication need none, a saved custom server needs current approval before metadata or
+tests, and invalid existing configuration is never overwritten. **Test saved model** and
+**Test selected tasks** send one tiny prompt to the default or each selected task route and
+show the reply or a specific failure (HTTP status, timeout, empty answer, or **unknown**
+when local runtime safety evidence is missing) without provider error text; they do not
+prove structured output or real-paper processing and never retry, reroute or download a
+model. An uncertain save reply
+leads to a reread, never a replay, and **Cancel** does not undo already-saved connections
+or keys. [Code](../zotero_summarizer/services/llm/) · [Tests](../tests/test_provider_routing.py).
+
+### Review depth
+
+**Settings → Review depth** picks **Thorough** (default: the model reasons before writing, quality checks run 3 times) or **Fast** (no reasoning, one quality check). On 4 test papers Fast cut the writing step by 50–75% and quality calls by half, but wording changed on 3, one failed verification and one grade changed. It applies to the next review; reviews made under the other depth show as outdated. [UI](../frontend/src/components/settings/ReviewDepthChoice.jsx).
 
 ### Offline models
 
-Prefetch configured ML assets while online to reuse them without downloading again. Prefetch refuses offline before configuration/acquisition and preserves the flags; `prefetch-models --check` remains nonloading inventory. Strict offline mode refuses uncached acquisition; it does not make hosted inference or new public-source retrieval available offline. [Code](../zotero_summarizer/cli/_app.py) · [Tests](../tests/test_offline.py).
+Run `prefetch-models` while online to download the configured ML models once;
+`prefetch-models --check` lists what is cached without downloading. Strict offline mode
+refuses anything not cached. Local-first does not mean offline: hosted
+models and public-source lookups send their inputs over the network and stay unavailable
+offline. [Code](../zotero_summarizer/cli/_app.py) · [Tests](../tests/test_offline.py).
 
 ## Find papers
 
 ### RSS subscriptions
 
-Add feeds in Settings → Sources, or import existing Zotero subscriptions. Saving a subscription, refreshing entries and triaging papers are separate actions; empty results, offline skips and source failures stay distinguishable. [Code](../zotero_summarizer/services/triage/feeds/) · [Tests](../tests/test_rss_api_routes.py).
+Open **Today → RSS sources** to add feeds or import your Zotero feed subscriptions; Today
+needs at least one enabled source. Saving a source, refreshing its entries and triaging
+papers are separate actions, and results tell "nothing new", "skipped while offline" and
+"source failed" apart. A feed with only undeclared XML namespace prefixes still loads with a
+visible warning; other malformed feeds are rejected. Practitioner sources work through the same
+path: HackerNoon tag feeds (e.g. `https://hackernoon.com/tagged/ai-agents/feed`,
+`https://hackernoon.com/tagged/agentic-ai/feed`) get a practitioner triage prompt by host.
+[Code](../zotero_summarizer/services/triage/feeds/) · [Tests](../tests/test_rss_api_routes.py).
 
 ### Search
 
-Search by topic and confirmed constraints to get deduplicated candidates and selected reviews. Both Search modes use supported HTTP(S) or canonical identifier links, never title-derived addresses; unsupported inputs remain non-clickable. Adding a result to Zotero is explicit; recovery retains the planned item identity rather than silently creating a duplicate after uncertain delivery. Optional adapter diagnostics distinguish an observed empty result from HTTP, transport or parse failure without retaining response bodies; they do not establish relevance or all-provider coverage. Ordinary public sessions omit an empty Discovery marker without changing saved storage. [Code](../zotero_summarizer/services/search/) · [Tests](../tests/test_search_materialize_recovery.py).
+Search by topic and confirmed constraints to get deduplicated candidates and selected
+reviews. Result links are real web or identifier addresses, never guessed from titles.
+Adding a result to Zotero is always your explicit action; after an uncertain Add, recovery
+reuses the same planned item instead of creating a duplicate. Provider diagnostics tell an
+empty result apart from a failure but say nothing about relevance or complete coverage. [Code](../zotero_summarizer/services/search/) · [Tests](../tests/test_search_materialize_recovery.py).
 
 ### Related saved papers
 
-Open Related in my library to find similar saved papers, including already-read ones. Transitive identifier/app-alias families exclude seed versions and human rejections and occupy at most one recommendation slot, without title-based merging. Versions are ranked before family selection; detail identity closes within the existing100-result retrieval ceiling, before the10-family assessment cap. Optional note assessment sends complete seed/candidate context to the displayed review route, potentially hosted, only with explicit consent; edits invalidate old private context. After successful assessment, submitted seed/candidate comments distinguish model-cited from submitted-but-not-cited; without assessment, results remain explicitly metadata-only. Generic Search GET and default session serialization exclude stored Related private snapshots/results/history without rewriting them or starting new work; current consent-bound Related actions remain separate. [Code](../zotero_summarizer/services/library/) · [Tests](../tests/test_related_client_consent.py), [session privacy](../tests/test_related_session_projection.py).
+Open **Find similar papers** on a paper's review page and choose **Show related saved papers** to find similar saved papers, including
+ones you have read. Versions sharing an identifier count as one result (titles alone never
+merge papers), and versions of the seed and papers you rejected are excluded. Optional
+note assessment sends the full seed and candidate context, including your notes, to the
+displayed review model, possibly hosted, only with explicit consent, and editing those
+notes makes an earlier assessment stale; without consent, results are metadata-only. Citations show which
+comments the model used, not proof that they support its claims, and ordinary Search views
+never show this private context. [Code](../zotero_summarizer/services/library/) · [Tests](../tests/test_related_client_consent.py), [session privacy](../tests/test_related_session_projection.py).
 
 ### Saved-paper discovery
 
-Use Find new relevant on a saved paper to retrieve public OpenAlex candidates while excluding known saved families. Private seed comments require separate consent, stale results are rechecked, and discovery never supplies permission to Add a paper. [Code](../zotero_summarizer/services/search/) · [Tests](../tests/test_discovery_server.py).
+Open **Find similar papers** on a paper's review page (saved or feed-only) and use **Find new relevant** to get public OpenAlex candidates that are not
+already in your library. Search providers receive only public metadata; sending your
+private seed comments to the named model needs separate consent. Stale results are
+rechecked, and discovery never adds a paper: Add stays your explicit action. [Code](../zotero_summarizer/services/search/) · [Tests](../tests/test_discovery_server.py).
 
 ## Choose and read
 
 ### Daily triage
 
-Today ranks RSS papers against your research goals and lets you Add or Trash them. Start and watch feed backlog triage in Today; Ops monitors/cancels the separate selected-item jobs started in Library and links to Today rather than starting a backlog drain. Feed Add requires a current usable full-text review; Trash does not. The optional daemon reuses this pipeline but never automatically adds a pick to Zotero. Successful model-refined abstract responses project legacy deep-reading advice to `No` without changing the received refinement, scoring or full-text advice; saved summaries are not retroactively rewritten. [Code](../zotero_summarizer/services/triage/) · [Tests](../tests/test_review_eligibility.py) · [Source-mode boundary](../tests/test_abstract_reading_boundary.py).
+**Today** ranks RSS papers against your research goals and lets you **Add** or **Trash**
+them; start and watch backlog triage there, while **Ops** monitors or cancels review jobs
+started from Library. Add requires a current full-text review; Trash does not. The optional
+background daemon runs the same pipeline but never adds a paper to Zotero. Abstract-only
+triage never recommends a full read; that decision comes from the full-text review.
+Today also records, locally only (`data/today-exposure/<day>.jsonl`; `ZS_TODAY_EXPOSURE_LOG=0`
+turns it off), which papers it showed, how long each stayed on screen and which links
+you opened, and adds up to two clearly marked "Random check" papers per day from just
+below its bar (`ZS_TODAY_EXPLORATION_SLOTS`) so the ranking can later be checked against
+unbiased data. A review that is outdated but still of the same PDF stays on Today with an *Outdated review · Regenerate* line (a different or unresolved PDF is left out). Below the cards, **Not reviewed yet (N)** lists the best-ranked papers that have no usable review (same ranking, no verdict buttons); opening one starts its full review on the paper page. [Code](../zotero_summarizer/services/triage/) · [Tests](../tests/test_review_eligibility.py) · [Source-mode boundary](../tests/test_abstract_reading_boundary.py).
+
+### Today cards
+
+Each Today paper has a **decision card**: the deterministic facts (full text, own code +
+liveness, what's published, who's behind it) plus, with your consent, grounded AI fields —
+an English TL;DR of at most four terse bullets — `New` (what is actually new), `Take` (a method,
+protocol or prompt you could reuse), `Caveat` (overclaim / missing baseline / weak eval) and `Code`
+(own repo or not); quotes are checked against the paper and a bullet is dropped rather than padded. Without
+consent (or with AI off / offline) the card is facts-only and says why. Cards use a
+separate `card` model (operational, never affecting a review) and are generated ahead of
+time for Today's top papers, so opening one is instant; generation respects a per-paper
+call cap, a daily token cap and a circuit breaker. [Code](../zotero_summarizer/services/card/).
 
 ### Reading reviews
 
-Open a paper in Library for a digest, reading plan and figures. The existing disclosure explains missing targets/original value, uses the shared supported-goal rule for legacy data and owns applicability text once. When policy caps READ to SKIM, its recorded reasons are shown with the concrete reading targets; the client does not recompute the decision. Unknown job status has an explicit read-only retry, never duplicate generation; number-key verdicts require successful matching paper detail before writing. Stale generated HTML/figures are withheld until rebuilt, and a missing audited figure invalidates completeness without rewriting saved data. The standalone brief keeps one visible ordered plan beside the action, with unknown time distinct from zero and retained capped estimates labeled as saved; withheld actions do not revive stale rationale or targets. Incomplete new reading/writing assessments are refused; legacy display defaults do not replace supplied model fields. Writing-friction reasons have one shared disclosure home rather than a duplicate folded-digest row. Compact rubric labels reflect supplied criteria; failed retrieval remains distinct from an observed goal miss, including under folded remainder headings. Claim checks use original sources, not generated summaries; failed attempts preserve a current valid review. Current cache readers check the retained artifact and bound policy inputs before display projection, without rewriting or regenerating saved data; unsigned consistency is not scientific authentication. Missing verification evidence cannot upgrade a generated digest to current, while saved legacy context remains displayable. Review copies and feed qualification retain raw source records rather than re-signing their presentations. Claim-bearing retained snapshots cannot bypass proof through a no-digest placeholder, and feed consumers require base evidence even without optional project assessment; rejected proof retains observed source availability without rendering its claims. Malformed non-null saved digests remain per-paper errors rather than ordinary pending reviews. Failed duplicate setup also preserves any active review owner rather than allowing a second worker. Web-article review uses bounded extracted text, not a visual page facsimile. [Code](../zotero_summarizer/services/library/) · [Tests](../tests/test_review_source_boundary.py).
+Open a paper in **Library** to get a digest, a reading plan beside the action, and
+figures; when the app downgrades **Read** to **Skim**, it shows why. Claims are checked
+against the original source, not the generated summary, which is still not scientific
+validation. On a remote model every judging step (digest, claim check, rubric, self-check,
+section one-liners) reads the whole paper once cleaned: reference lists, acknowledgements,
+funding/licence boilerplate and running headers are dropped, appendices stay. Only a paper
+beyond the model's context window is read in parts, with a visible "Long paper" note. Stale, incomplete or unverified reviews and figures are withheld or marked
+until rebuilt, a failed new attempt keeps the last valid review, and saved data is never
+silently rewritten. If a job's status is unknown, use the read-only retry; it never starts
+a duplicate review. Web articles are reviewed from extracted text, not a visual copy of the
+page. [Code](../zotero_summarizer/services/library/) · [Tests](../tests/test_review_source_boundary.py).
 
 ### Paper questions and notes
 
-Manual-note app saves require literal `saved: true`; empty or invalid successful-response receipts retain the draft and navigation protection, without queuing a duplicate offline write. Leaving a paper with an unsaved manual note asks for confirmation across in-app links, programmatic navigation and history. Cancelling keeps the draft; accepting leaves without silently saving it. Clean/saved notes and same-paper anchors do not prompt. Reload/close uses the browser's native unload confirmation. [UI owner](../frontend/src/pages/PaperReviewPage.jsx) · [Navigation regressions](../frontend/src/pages/PaperReviewPage.test.jsx). Question capture does not require a PDF or built review; the same composer stays mounted, while raw-PDF answer modes still require a PDF. Ask Paper answers from retained source context with quotes, or abstains when support is unavailable. Malformed output encoding fails before answer publication, without an extra model repair; Ask HTTP retains the saved-question receipt on this failure. Questions and manual notes are saved independently of generating an answer; eligible question drafts remain mounted through sync/offline transitions, with an explicit retry rather than automatic server replay. A save acknowledgement is not confirmation of delivery into Zotero. [Code](../zotero_summarizer/services/library/review_questions.py) · [Tests](../tests/test_review_questions.py).
+Ask a question about a paper, even before it has a PDF or review, to get an answer quoted
+from its source, or an abstention when the source does not support one; answer modes that
+read the raw PDF need the PDF. Questions and manual notes are saved separately from
+answering, and a failed save keeps your draft with a **Retry** button instead of resending
+automatically. Leaving a paper with an unsaved note asks first: cancelling keeps the draft,
+and leaving never saves it silently. A note saved in the app is not yet confirmed in Zotero. [Code](../zotero_summarizer/services/library/review_questions.py) · [Tests](../tests/test_review_questions.py) · [UI](../frontend/src/pages/PaperReviewPage.jsx) · [Navigation tests](../frontend/src/pages/PaperReviewPage.test.jsx).
 
 ## Save results
 
 ### Zotero changes
 
-Committed verdicts mirror their current label and owned rationale through the same
-system-delivery owner as My notes. Positive applying claims bind source revision,
-backup and native target before dispatch; current state is rechecked after claim
-commit. Native terminal history precedes explicit deletion ACK. Unknown completion
-blocks replay, and these system records never authorize Pending Apply or Reject.
-Completed native components are not rewritten on a known partial retry; actual
-native changes can still require current-state repair. Read-only reconciliation
-without a matching configured writer leaves delivery pending. These local receipts
-do not make app and Zotero databases one distributed transaction.
-Explicit Add, metadata edits and approved Pending changes use the backed-up native write path. Pending actions validate the captured selection, and stale rejection refuses the whole selection. A received HTTP 409 is shown as stale only when its response body is fully read; if reading fails, Apply remains unconfirmed. An uncertain response does not prove rollback or authorize automatic replay. Verified reviews are published before an exact-revision generated note enters Pending; staging alone is not a saved-to-Zotero acknowledgement, and the review footer does not infer one from retained cache flags. A queue failure preserves the accepted review and reports an error without native retry. [Code](../zotero_summarizer/services/zotero/) · [Tests](../tests/test_pending_confirmation.py), [rejection](../tests/test_pending_rejection_atomic.py).
+Every write to Zotero (an explicit **Add**, a metadata edit, an approved **Pending**
+change, or a verdict and rationale mirrored as a note) backs up the Zotero database first.
+Pending changes wait for your **Apply** or **Reject**, and a stale selection is refused as
+a whole; mirrored verdicts never count as approving Pending changes. A generated review
+note enters Pending only after its review is published, and staging it is not "saved to
+Zotero". When a write's outcome is uncertain, the app shows it as unconfirmed and never
+replays it automatically; because the app and Zotero keep separate databases, a partial
+write may need repair in Zotero. [Code](../zotero_summarizer/services/zotero/) · [Tests](../tests/test_pending_confirmation.py), [rejection](../tests/test_pending_rejection_atomic.py).
 
 ### RSS read-state backups
 
-Read-state sync backs up the database before changing unread markers and rotates backups only after a successful write. Capacity refusal preserves recovery evidence: stop automatic ticks, export and inspect snapshots before making room. A retention failure after commit does not undo the write. [Code](../zotero_summarizer/integrations/) · [Tests](../tests/test_raw_feed_backup.py).
+Marking feed items read in Zotero backs up the Zotero database first and prunes old
+backups (keeping five) only after a successful write. When the backup limit blocks a
+sync, stop automatic syncs, export and inspect the snapshots, then make room before
+retrying. A cleanup failure after the write does not undo it. [Code](../zotero_summarizer/integrations/) · [Tests](../tests/test_raw_feed_backup.py).
 
 ## Learn from decisions
 
 ### Labels and learning
 
-Ops blocks label refresh/retraining while classifier configuration is unknown or failed, instead of guessing a model. Assign, change or retract reading verdicts to supply labels and retain decision history; retraining produces the relevance gate used by the app. Feedback describes observed reviewed items, not unbiased classifier recall. [Code](../zotero_summarizer/services/golden/) · [Tests](../tests/test_verdict_training.py).
+Assign, change or retract reading verdicts to supply labels; the app keeps their history.
+Retraining turns the labels into the relevance gate, the model that filters feed papers.
+Label refresh and retraining are blocked while the classifier configuration is unknown or
+failed, rather than guessing a model. Feedback describes the papers you reviewed, not
+unbiased classifier recall. [Code](../zotero_summarizer/services/golden/) · [Tests](../tests/test_verdict_training.py).
 
 ### Model history and restore
 
-Use `goldenset model-history` to list snapshots and `goldenset restore-model` to restore one while preserving the current artifact. Restart the daemon to load the restored model; restoring a snapshot does not demonstrate better predictions. [Code](../zotero_summarizer/services/model/classifier_backup.py) · [Tests](../tests/test_model_backup_rollback.py).
+Use `goldenset model-history` to list model snapshots and `goldenset restore-model` to
+restore one; the current model is kept. Restart the daemon to load the restored model;
+restoring does not show that predictions improve. [Code](../zotero_summarizer/services/model/classifier_backup.py) · [Tests](../tests/test_model_backup_rollback.py).
 
 ## Get digests
 
 ### Weekly digests
 
-Open Weekly to browse and download saved research-feed reports with project-oriented engineering cards. JSON and Markdown downloads return the selected saved bytes, with JSON validation performed on the same bytes returned. Malformed present card provenance is unavailable, while legacy absence and explicitly unqualified source observations remain readable. Browsing does not generate reviews; CLI generation and optional queued Zotero changes require their own explicit actions. Generation keeps nullable history objects unobserved rather than rejecting healthy papers; malformed non-null fields and blank/non-string payloads refuse. Consumed-number diagnostics are bounded without echoing bad scalar inputs. Native admission remains separate from descriptive projection; prebudget history/disposition provenance retains each source once across output homes and cuts, without inventing prediction for a missing qualified cache. Missing/unqualified reviews remain pending, not evidence that full text is unavailable; only observed acquisition failure enters the manual-text list. Pending reviews stay visible with separate reasons and no-auto-run paper links. Present malformed pending rows refuse display/download; legacy field absence and valid saved values stay unchanged. Bound source availability survives generation or card-projection failure, without automatic retry or backfill. Optional proposals must match the qualified base audit's original text and extent; an intact proposal checksum alone cannot authorize them. Markdown presents reproduction fields once, retaining explicit unrecorded states without migrating saved reports. New report provenance exports source hashes and a retained-receipt reference, not private source paths or focus input; original review receipts and prior report bytes stay intact. Cached abstract summaries refuse coercible booleans/numeric strings even with a matching checksum, without implicit regeneration. Exact configured-project goal observations remain explicit unverified notes, without becoming project-use assessments or new ideas; raw text/order and prior bundles are preserved. Pre-existing output-root/state links refuse before Weekly work; the shared publisher also refuses linked roots before staging, without claiming filesystem-race containment. [Code](../zotero_summarizer/services/research_feed/) · [Tests](../tests/test_research_feed_web.py) · [History admission](../tests/test_research_feed_ranking.py).
+Open **Weekly** to browse and download saved research-feed reports, with
+project-oriented engineering cards, as JSON or Markdown exactly as saved. Browsing never
+generates anything; generating a report (`research-feed run`) and queueing optional Zotero
+changes are separate explicit actions. Reviews still awaiting qualification stay visible
+with their reasons and links that do not start a review, and only an observed download
+failure lists a paper for manual full text. Matches to your project goals appear as
+unverified notes, not confirmed uses or new ideas. Exports include source hashes but not
+your private file paths or focus text, and malformed saved data is refused or shown as
+unavailable, never repaired or regenerated. [Code](../zotero_summarizer/services/research_feed/) · [Tests](../tests/test_research_feed_web.py) · [History admission](../tests/test_research_feed_ranking.py).
 
 ### Telegram news
 
-Later per-post collection failures keep earlier successful threads and explicit
-origin-bound unavailable/not-attempted coverage; flood/auth/admission/validation
-stops do not continue RPCs or replace the whole target. Broadcast post-window
-lookahead/scanned/retained/truncated state is separate from reply coverage in saved
-reports and Weekly. Group model inputs preserve observed parent/top relationships
-with peer-qualified IDs and explicit unresolved context, never invented joins or
-sender/private identities. Mixed-source report discovery is chronological before
-its limit (unavailable/undated entries use saved filesystem time). Local generation
-uses declared provider wire controls, with every declared token field rebound to
-the operation output cap rather than inherited or silently changed dialect.
-A safe underlying failure type remains visible; raw exception text stays private.
-Server context/output/thinking compatibility and semantic usefulness still require
-actual parent-owned runtime validation; client options alone are not that proof.
-New output uses a compact generation-only schema (short quoted points, one per
-supported category, budget-allocated topic count). Canonical source membership is
-derived from role-scoped evidence references; exact original span quotes are supplied
-by the service, not copied by the model. Independent role/quote validation remains.
-The broader retained report contract is not narrowed. Topic inventory covers selected
-news and discussion issues before grouping; interests are a lens, not a filter, and
-assertions must follow selected excerpts. These are concise syntheses, not exhaustive
-transcripts or human/scientific acceptance.
-A decoder-length refusal is an error, not a partial review presented as complete.
-Settings → Sources exposes explicit public channel, group and forum-topic selections,
-local provider/model selection and configurable work limits. Save is not collection;
-one consented **Collect & review selected sources** action runs the existing dedicated
-Telethon child, then one local-only semantic topic/mini-review call. Authorization
-remains TTY-only; connection status is an observed historical verification, never
-session-file presence. No joining, sending or personal inbox collection. Replies use
-the selected post’s resolved discussion peer/root; forwarded posts admit complete
-direct-origin or saved-from origin pairs. Group/thread overlaps share canonical
-peer+message evidence with distinct context memberships. Raw snapshots retain edits,
-ordering and scanned/skipped/cap coverage; unavailable, empty, fetched and truncated
-are distinct. Repeated runs refresh only the selected newest window, not old history.
-Source IDs and literal quotes bind assertions; linked papers are not independently
-paper-verified. Prompt/context budget refusal preserves originals rather than
-silently clipping or using cloud fallback. Source-specific v2 and retained v1 news
-reports open/download through the existing Weekly owner without rewriting RSS or
-old bundles. Machine fixtures establish wiring, not semantic quality or hardware
-safety. [Code](../zotero_summarizer/services/research_feed/telegram_workflow.py) ·
-[Tests](../tests/test_telegram_sources_web.py).
-Legacy CLI saved-news contracts remain available. Explicitly authorize a Telegram session and collect admitted posts to produce retained news reports. Authentication, collection and model processing are separate operations; viewing a saved report does not activate an account or collect more messages. Telegram rejects RSS-only `--from`, `--to` and explicitly supplied `--review-timeout` options rather than silently ignoring them. Saved processing refuses aliased known output parent/directory/state owners before inputs or models and rechecks before publication, without claiming filesystem-race containment. [Code](../zotero_summarizer/cli/_telegram.py) · [Tests](../tests/test_telegram_public_cli.py).
+In **Weekly → Telegram sources**, choose public channels, groups or forum topics, a local
+model and work limits and allow reading them once (a remembered, revocable checkbox). **Weekly** (linked from Today) shows
+**Сегодня в каналах** with the digest age and one **Проверить каналы** button: it runs in the background with staged progress and Russian errors, and new posts appear when it finishes. **Тренды недели** come first: the top 5 of up to 15 topics (**Show all N trends**) the channels discuss now, each with a short label, a one-line gist, notable ideas/tools, a new/growing marker against the previous week and the channels (links to posts). Below, compact cards: channel, age, headline, a few discussion lines (one per picked comment, plus a «Спор:» line for the main disagreement) where each line expands to the exact comment(s) it cites; lines are checked by a local NLI model (`data/models/nli-mdeberta`), **Важное (n)** quotes, **All comments (n)**, **Подробнее**, a «Continues …» line for series posts and «Also in: topic». Authorize
+your Telegram account once in a terminal with `research-feed telegram-auth` (shown as one
+copyable command on the page; optional `telegram` extra); the app never joins
+chats, sends messages or reads your personal inbox, and saving or viewing never collects or
+generates. Each run reads a bounded newest window, so reviews are concise syntheses, not
+complete histories; coverage, truncation and errors are saved with the report, and earlier
+threads are kept when a later post fails. One pipeline now fetches incremental posts, drops
+forward and near-duplicate reposts, keeps the posts closest to your goals (top per channel
+above a threshold, always a minimum), and fetches comments only for those kept posts that
+have replies; a Telegram rate-limit keeps the posts without comments and never drops the
+channel. The kept posts get a 2–3 line discussion summary that cites comment ids, or the top
+comments when no model is selected. Processing uses only the selected local model,
+never a cloud fallback or silent clipping, but a model name does not prove the server's
+limits or your hardware are safe, and linked papers are cited, not verified. Collection runs
+only from the UI; the one-time `telegram-auth` command is the sole terminal step. Up to ~30
+channels are allowed. Every run is also saved: **Past digests** lists them by date (with a lead topic, discussions · unread) and opens one with the same cards; unread come first, **Done** collapses a discussion to one line behind «n read» (**Mark all read** per digest, with Undo), and under **Details** one **Your feedback** group (Useful / New to me / Want to try / Good discussion, Not a fit, a note) is stored and downloadable via **Export feedback**. The digest is persisted under `data/research_feed/telegram/` and read
+back (posts, summaries, weekly trends) at `GET /telegram/today`; saving sources without a
+model never fails (no-summary mode). Summaries and trend labels use a local model by default; a non-local provider is used only after you explicitly allow sending channel text to it (the page shows the provider/model). **Не подошло** with optional reason chips on a post is stored in the database. The retired CLI saved-news path (`research-feed run
+--source telegram`) was removed and its interest ranking folded into this gate. The live
+collection path is verified with a fake client until Telegram is authorized. [Code](../zotero_summarizer/services/research_feed/telegram_workflow.py) · [Tests](../tests/test_telegram_sources_web.py) · [CLI](../zotero_summarizer/cli/_telegram.py).
 
 ### Feedback analysis
 
-Run feedback analysis to inspect retained labels, prediction identities and coverage in local descriptive reports. Weekly scheduling is opt-in; identity-bound prelaunch failures with no child or publication can retry, while ambiguous evidence stays held. Neither manual nor scheduled reports change labels, install a model or establish a causal improvement. [Code](../zotero_summarizer/services/golden/feedback_analysis/) · [Tests](../tests/test_feedback_analysis_operation.py).
+Run `goldenset analyze-feedback` to get local descriptive reports on your labels,
+predictions and coverage. Weekly scheduling is opt-in; a scheduled run that clearly never
+started may retry, while an uncertain one is held. Reports never change labels or install a
+model, and they do not prove that anything caused an improvement. [Code](../zotero_summarizer/services/golden/feedback_analysis/) · [Tests](../tests/test_feedback_analysis_operation.py).
 
 ## Work across devices and clients
 
 ### Offline review
 
-Sync a working set, then read saved context and edit verdicts or notes while disconnected. Device saves remain queued until server acknowledgement; compare both versions before resolving conflicts. A known transport outage permits a cached detail refresh even if the browser reports online; observed server refusals are still errors. PDFs and new AI work remain server-dependent, and browser storage can be lost. [Code](../zotero_summarizer/services/sync/) · [Tests](../tests/test_offline_sync.py).
+Sync a working set, then read saved context and edit verdicts or notes while
+disconnected. Edits stay queued on the device until the server acknowledges them; when
+versions conflict, compare both before choosing. If the server is unreachable, cached
+details still show even when the browser claims to be online, while a server refusal is
+still an error. PDFs and new AI work need the server, and browser storage can be cleared. [Code](../zotero_summarizer/services/sync/) · [Tests](../tests/test_offline_sync.py).
 
 ### Remote access
 
-Use an explicitly configured owner-authenticated HTTPS gateway for remote access; ordinary `serve` remains loopback-only. Gateway/device security needs separate deployment verification, and revocation cannot erase bytes already cached on a device. [Code](../zotero_summarizer/cli/_mobile_serve.py) · [Tests](../tests/test_gateway_real_transport.py).
+Run `make iphone` to use the app from your iPhone or another device signed in to your
+tailnet (your private Tailscale network). It reads this Mac's tailnet name and your
+Tailscale login, maps Tailscale Serve HTTPS (port 443) to the app on 127.0.0.1:8000 while
+it runs, and starts `serve-mobile`, which admits only requests that Tailscale marks with
+your login on the exact `https://<mac>.<tailnet>.ts.net` address. Ctrl+C stops the app and
+removes the mapping. Ordinary `make run`/`serve` stays loopback-only and refuses the
+tailnet address. The loopback port trusts other processes on this Mac, as `make run` does;
+`serve-mobile`'s default private Unix socket suits Tailscale builds that can reach sockets. There is no LAN binding or public Funnel, and revoking access cannot erase data
+already cached on a device. [Code](../zotero_summarizer/cli/_mobile_serve.py) · [Launcher](../tools/serve-iphone.sh) · [Tests](../tests/test_gateway_real_transport.py).
 
 ### MCP tools
 
-Connect an MCP client to the app API to use its operations outside the browser. Similarity requires a nonblank query/seed title and actual semantic confirmation; ordinary queue fallback is not a recommendation. It shares the app's workflow and acknowledgement boundaries; ingested paper content is not consent to Add, approve or mutate library data. [Code](../zotero_summarizer/mcp/) · [Tests](../tests/test_mcp_search_contract.py).
+Connect an MCP (Model Context Protocol) client, such as an AI assistant, to the app's API
+to use its operations outside the browser. It follows the app's consent and confirmation
+rules: paper content it reads never counts as permission to Add, approve or change your
+library. Similar-paper search needs a nonblank query or seed title and real semantic
+matching; it never presents the reading queue as recommendations. [Code](../zotero_summarizer/mcp/) · [Tests](../tests/test_mcp_search_contract.py).
 
 ## Experimental capabilities
 
 ### Search question evidence
 
-Opt into original-source question checking to locate quoted answers before review selection. Sufficient checked answers may change recommendation order; partial or unchecked evidence is not a negative answer, and stale evaluator/source provenance cannot remain active. [Code](../zotero_summarizer/services/search/_question_evidence.py) · [Tests](../tests/test_search_question_policy.py).
+Opt in for one Search to have original sources checked for quoted answers to your
+question before reviews are chosen; a failed request keeps the opt-in for retry. Well
+supported answers may reorder recommendations, while partial or unchecked evidence is not
+a "no". Results link the exact source used (PubMed Central XML or open-access PDF), and
+stale evidence never stays active. [Code](../zotero_summarizer/services/search/_question_evidence.py) · [Tests](../tests/test_search_question_policy.py).
 
 ### Support comparison
 
-Explicitly run the offline support tool to compare decisions over frozen inputs in a private attempt. Admission and inspection are effect-free, ground truth stays outside model inputs, and replay must match its original recording plus admitted native dispatch/byte observations, reservation count and file roles; self-consistent output hashes alone confer no authority. Direct transport argument errors refuse before call accounting or HTTP; valid finite overrides retain configured caps. All three task consumers preserve remaining total run time separately from idle gaps at stream checkpoints, without a remote-termination guarantee. [Code](../tools/method_validation/) · [Tests](../tests/test_recorded_support_binding.py).
+`python -m tools.method_validation support --config FILE` previews the configured
+comparison arms and their effective limits without calling models or writing files;
+adding `--run` consents to private writes and the configured model calls. The comparison
+replays decisions over frozen inputs, and models never see the ground truth. A replay
+counts only if it matches its original recording; matching output hashes alone prove
+nothing. Time limits stop local waiting but cannot guarantee that a remote provider stops
+working. [Code](../tools/method_validation/) · [Tests](../tests/test_recorded_support_binding.py).
 
 ### Priority comparison
 
-Development observations after the declared frozen split refuse admission; equal instants remain valid. Compare admitted native/retained priorities and matched ML/LLM artifacts without changing production ranking. Missing scores and provenance remain unavailable rather than invented or removed from coverage; running requires explicit consent. Omitted or null evidence stays per-paper unknown without native dispatch; operational failures cannot retain a semantic readout. Replay checks native dispatch/byte consistency and admitted publication roles, without authenticating server measurements. [Code](../tools/method_validation/PRIORITY-INTERFACES.md) · [Tests](../tests/test_priority_comparison.py).
+Explicitly run `python -m tools.method_validation priority --config FILE --run` to
+compare the app's priorities with matched ML and LLM results without changing production
+ranking. Inputs dated after the frozen split are refused. Missing scores or provenance stay
+"unavailable" rather than invented or dropped, and failed runs produce no readout. Replays
+check consistency but do not authenticate server measurements. [Code](../tools/method_validation/PRIORITY-INTERFACES.md) · [Tests](../tests/test_priority_comparison.py).
 
 ### Collection comparison
 
-Compare membership choices inside a frozen existing taxonomy, not proposed new collection names. Explicit runs retain their evidence without changing Zotero membership; missing corpus/reference support stays unknown. Empty-retrieval counts use the original suggestions, not the set remaining after workflow exclusions. Native replay shares the adapter's transport consistency check, rejecting boolean aliases for integer attempt/retry counters. Optional declared version/derivation graphs retain transitive holdout exclusions in replayed audits and refuse contaminated active references; unsigned or absent lineage is not authenticated purge proof. Shortlists require frozen provenance, and native no-match requires every distinct eligible question. [Code](../tools/method_validation/COLLECTION-INTERFACES.md) · [Tests](../tests/test_collection_comparison.py).
+Explicitly run `python -m tools.method_validation collections --config FILE --run` to
+see which existing collections a model would choose, within a frozen copy of your
+collection tree; it never proposes new names or changes Zotero membership. Missing corpus
+or reference support stays unknown, and "no match" requires every eligible question to be
+checked. Declared version links keep held-out papers out of audits, but they are unsigned
+and not proof of ancestry. [Code](../tools/method_validation/COLLECTION-INTERFACES.md) · [Tests](../tests/test_collection_comparison.py).
 
 ### Interpretation experiment
 
-Opt into digest/Q&A variants over frozen human-approved sources, with sensitive capture and inspection as separate actions. The optional note card shares Library's qualified Finding/Scope/Unproven projection, including complete fields/bases and one ordered support disclosure; omitted/disabled cards preserve ordinary note HTML. Ordinary readers/export refuse reserved experimental payloads, and retained item normalization cannot conceal changed evidence. Saved records decode verified bytes, while optional-only schema/source drift withholds the card without discarding valid base evidence. Original grounding and write authority stay unchanged; a pilot recommendation requires independent human judgments, not merely passing protocol tests. With no non-null human score, assigned errors alone cannot produce an adopt/reject decision. [Code](../zotero_summarizer/cli/_interpretation.py) · [Tests](../tests/test_interpretation_experiment_review_fleet.py).
+Opt into digest and Q&A variants over frozen, human-approved sources; capturing sensitive
+data and inspecting it are separate actions. An optional note card shows the same
+Finding/Scope/Unproven summary as Library, but experimental data never enters ordinary
+reviews or exports and never changes grounding or write permissions. Failed runs record
+each assigned item as failed rather than inventing answers. Adopting or rejecting a variant
+requires independent human scores; passing tests or execution errors alone cannot decide
+it. [Code](../zotero_summarizer/cli/_interpretation.py) · [Tests](../tests/test_interpretation_experiment_review_fleet.py).

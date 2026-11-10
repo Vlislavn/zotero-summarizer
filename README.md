@@ -1,67 +1,95 @@
 # Zotero Summarizer
 
-A local-first Zotero reading assistant: collect RSS papers, rank them against
-your research goals, read source-grounded reviews and train relevance from your
-own labels. Zotero remains the citation/PDF library; the app owns triage state
-and the history of your decisions.
+A local-first assistant for reading research papers with Zotero. It collects papers
+from RSS feeds, ranks them against your research goals, writes source-grounded reviews
+you can question, and learns relevance from your own labels. Zotero stays your
+citation/PDF library; the app keeps triage state and the history of your decisions.
 
 ```text
-RSS → relevance gate → optional AI review → daily slate → you read / label / Add
-          ↑                                                │
-          └──────────────── retrain on labels ──────────────┘
+RSS → relevance gate → optional AI review → Today shortlist → you read / label / Add to Zotero
+          ↑                                                         │
+          └───────────────────── retrain on your labels ─────────────┘
 ```
 
-## Quickstart
+## Quick start
 
-Requires Python 3.10+, [uv](https://docs.astral.sh/uv/getting-started/installation/)
-and Node 20.19+ for the browser build. Zotero desktop is optional for app-owned
-RSS triage but needed for native library/PDF workflows. An LLM endpoint is
-optional; hosted and explicitly configured local providers are supported.
-Local model memory requirements depend on the model and context, not just the app.
+You need macOS or Linux, [uv](https://docs.astral.sh/uv/getting-started/installation/)
+(Python 3.10+) and Node 20.19+. Zotero desktop is needed for library and PDF work.
+An AI model is optional: a hosted API or a local model server.
 
 ```bash
-uv sync
-npm ci --prefix frontend
-npm run build --prefix frontend
-uv run zotero-summarizer serve
+make install   # once, and again after dependency changes
+make run       # builds the UI when needed, then serves http://127.0.0.1:8000
 ```
 
-Open <http://127.0.0.1:8000/>. First launch creates missing configuration and
-opens Setup: choose AI or ML-only operation, connect Zotero where needed, and
-set your research goals. Add RSS subscriptions in Settings → Sources, refresh
-them, then run **Today → Triage backlog**. For headless setup use
-`uv run zotero-summarizer setup`.
+Open <http://127.0.0.1:8000>. The first launch creates `goals.yaml` and `.env` and
+opens **Setup**: choose AI or ML-only, connect Zotero and describe your research goals.
+Then add feeds in **Today → RSS sources** and run **Today → Triage backlog**.
+Ctrl+C in the terminal stops the app.
 
-Telegram is also available in **Settings → Sources**: explicitly save public
-channel/group links or forum-topic links, choose an already prepared local provider
-and model, then consent to **Collect & review selected sources**. One-time
-`research-feed telegram-auth` stays in the terminal (optional `telegram` extra).
-Linked replies and group windows are bounded snapshots, not complete history;
-coverage/errors and source-cited topic mini-reviews are saved in **Weekly**.
-Later collection stops retain earlier threads and unattempted-post coverage;
-post-window truncation is separate from reply coverage. Weekly merges saved sources
-chronologically. The chosen local provider must declare compatible output/thinking
-wire controls and have independently verified server context; model names and
-client-side limits alone do not prove those runtime properties. New reviews use
-short, source-cited points within an output-work budget; older broader saved reviews
-remain readable unchanged. Reviews prioritize distinct raised issues and selected
-source evidence; they are concise syntheses, not exhaustive transcripts.
-Saving/viewing never collects or generates. The Telegram-only model selection
-never falls back to global/feed routes; local processing is not hardware approval.
+## Everyday commands
 
-Saving settings is not verification. Local-model Doctor/calibration checks can
-refuse with **unknown** when effective runtime resources are not established;
-model inventory or free RAM is not a safety certificate. Local mode also requires
-a successful no-write dry-run, not inference alone; mode labels follow the current
-checklist rather than stale saved labels. Optional read-only load policy binds approved
-file bytes but cannot replace executing-runtime evidence or certify hardware.
-Verification also requires native request evidence; unresolved ownership survives
-callback return and configuration changes, without automatic replay. Choosing
-ML-only also refuses calibration before paper reads or model work; CLI Doctor
-can inventory a custom hosted endpoint saved in the selected project. See
-[setup behavior](docs/features.md#setup-and-configuration).
-Generated Reader HTML/figures must be current and complete; rebuild stale or missing
-outputs. See [reading behavior](docs/features.md#reading-reviews).
+| Command | Use it to |
+|---|---|
+| `make run` | use the app on this Mac at `http://127.0.0.1:8000` |
+| `make iphone` | use the app on your iPhone (and this Mac) through Tailscale, see below |
+| `make dev` | change the code: backend plus hot-reload UI at `http://localhost:5173` |
+| `make help` | list every command, including checks |
+
+Run one of `run`, `iphone` and `dev` at a time: they share port 8000 and your data.
+
+## Use on iPhone
+
+`make iphone` makes the app reachable over HTTPS from your own devices in your
+[Tailscale](https://tailscale.com/download) network, and only for your Tailscale login.
+
+One-time setup:
+
+1. Install Tailscale on this Mac and on the iPhone and sign in to the same account.
+2. In the [Tailscale admin console → DNS](https://login.tailscale.com/admin/dns), keep
+   MagicDNS on and enable **HTTPS Certificates**.
+3. Check that `tailscale status` works in Terminal; if not, install the command-line
+   tool from the Tailscale app's settings.
+
+Each time:
+
+```bash
+make iphone
+```
+
+It prints the address, such as `https://<mac>.<tailnet>.ts.net`. Open it in Safari on
+the iPhone with Tailscale connected, then **Share → Add to Home Screen** for an app icon.
+Use the same address on the Mac; `http://127.0.0.1:8000` answers 403 in this mode.
+Ctrl+C stops the app and removes the address from your tailnet.
+Details and limits: [remote access](docs/features.md#remote-access).
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `make` prints a list of commands | That is the help; start the app with `make run`. |
+| `command not found` or `Frontend dependencies missing` | Run `make install`. |
+| `address already in use` | Another `make run`, `dev` or `iphone` is running; stop it with Ctrl+C. |
+| 403 `local_access_only` | `make run` answers only `http://127.0.0.1:8000` on this Mac; use `make iphone` for other devices. |
+| 403 `Authenticated owner access …` | Open the exact `https://…ts.net` address that `make iphone` printed, signed in to Tailscale as the printed login. |
+| iPhone cannot reach the address | Turn Tailscale on in the iPhone and check that `make iphone` is still running. |
+| `make iphone`: Tailscale not connected / enable HTTPS | Follow the message; see one-time setup above. |
+| Test failures or crashes | See [tests](tests/README.md#troubleshooting). |
+
+## Settings, data and privacy
+
+- Setup and **Settings** edit `goals.yaml` (goals, model routes) and `.env` (paths) in
+  the settings folder: `ZOTERO_SUMMARIZER_HOME` if that variable is set, otherwise this
+  checkout. `make run` and `make iphone` print the folder they use; app data lives in
+  its `data/`. In a checkout these files are gitignored; do not commit them. API keys
+  go to the OS keyring or a named environment variable.
+- Local-first is not fully offline: hosted models and public-source lookups receive
+  the inputs they need. Sending private comments to a model needs separate consent.
+- The app never adds papers or writes notes and tags to Zotero without your explicit
+  action, and backs up Zotero before writing.
+- Optional Telegram sources: `uv sync --inexact --extra telegram`, then once
+  `uv run zotero-summarizer research-feed telegram-auth` in Terminal, then
+  **Weekly → Telegram sources**.
 
 ## Find your workflow
 
@@ -70,77 +98,22 @@ outputs. See [reading behavior](docs/features.md#reading-reviews).
 | Cull feed papers | [Daily triage](docs/features.md#daily-triage) |
 | Read a paper and ask questions | [Reading reviews](docs/features.md#reading-reviews), [questions and notes](docs/features.md#paper-questions-and-notes) |
 | Find papers on a topic | [Search](docs/features.md#search) |
-| Find related or new papers from a saved seed | [Related saved papers](docs/features.md#related-saved-papers), [discovery](docs/features.md#saved-paper-discovery) |
+| Find related or new papers from a saved paper | [Related saved papers](docs/features.md#related-saved-papers), [discovery](docs/features.md#saved-paper-discovery) |
 | Label papers and improve relevance | [Labels and learning](docs/features.md#labels-and-learning) |
-| Browse saved weekly reports | [Weekly digests](docs/features.md#weekly-digests) |
-| Work disconnected or from another device | [Offline review](docs/features.md#offline-review), [remote access](docs/features.md#remote-access) |
-| Understand native writes and recovery | [Zotero changes](docs/features.md#zotero-changes), [read-state backups](docs/features.md#rss-read-state-backups) |
-
-Paper briefs keep the reading plan beside the action, not hidden in Digest.
-Unknown decisions withhold stale instructions; saved time is not a new estimate.
-Writing-friction reasons appear once in the shared Idea/Evidence/Writing disclosure.
-Leaving a paper with unsaved manual notes asks for confirmation; cancelling keeps
-the draft, without an automatic save.
-Current review readers check retained evidence and its policy inputs before deriving
-the display; presentation changes do not rewrite or regenerate the saved review.
-Explicit Interpretation experiments remain separate: their stored optional payloads
-cannot enter ordinary cache views or exports, even through a digest subtype.
-Saved experiment records use verified byte snapshots; optional contract drift
-withholds the card without discarding valid base evidence. Without a non-null human
-score, assigned execution errors alone cannot produce an adopt/reject decision.
-Missing verification evidence cannot make a generated review current; older saved
-context remains displayable without gaining that authority. Feed cards require base
-proof even without optional project assessments; no-digest placeholders cannot
-reconstruct a current unaudited review from retained model output. Malformed saved
-digests are per-paper errors, not ordinary pending reviews or unavailable PDFs.
-Abstract-only triage cannot recommend full reading through its legacy advice field;
-full-text reading decisions remain separate.
-Weekly cards retain qualifying goal observations as unverified notes, not confirmed
-project uses or new research ideas. Reviews awaiting qualification stay visible
-with paper links, separately from source-unavailable cases. New exports retain source
-hashes and private-receipt references, not local source paths or focus input;
-private review evidence and already-saved report bytes remain unchanged.
-
-Current verdict mirrors retain backup-bound native action history before delivery.
-Those receipts are not Pending approval; unconfirmed completion blocks automatic
-replay. See [native recovery](docs/features.md#zotero-changes).
-Optional [collection comparisons](docs/features.md#collection-comparison) can retain
-declared version/derivation exclusions in replayed audits. Such declarations are
-not authenticated ancestry; incomplete question coverage cannot establish no-match.
-
-## Configuration and privacy
-
-Setup creates `goals.yaml` and `.env` only when absent. Edit intent and model
-routes through Setup/Settings; app state defaults to gitignored `data/`.
-Provider secrets may be resolved from a named environment variable or the OS
-keyring. Resolved stage snapshots reject unsupported fields rather than silently
-ignoring supplied routing/operation intent. Do not commit private configuration, account sessions, library exports
-or model/evaluation artifacts.
-
-Local-first does not mean every operation is offline: configured hosted models
-and public-source acquisition can transmit their declared inputs. Private
-comment-context experiments require their own consent. Generic Search reads exclude
-stored Related private context; the consented Related action is separate.
-Public-search adapters can return request-local status/count/error diagnostics,
-not response bodies, relevance judgments or proof of all-provider coverage.
-Ordinary public Search sessions do not gain an empty Discovery marker.
-Ordinary `serve` stays loopback-only; do not expose it through an unauthenticated LAN shortcut.
+| Browse saved weekly reports | [Weekly digests](docs/features.md#weekly-digests), [Telegram news](docs/features.md#telegram-news) |
+| Work offline or from another device | [Offline review](docs/features.md#offline-review), [remote access](docs/features.md#remote-access) |
+| Understand Zotero writes and recovery | [Zotero changes](docs/features.md#zotero-changes), [read-state backups](docs/features.md#rss-read-state-backups) |
+| Configure AI models | [Setup](docs/features.md#setup-and-configuration), [model routing](docs/features.md#model-routing) |
 
 ## Documentation
 
 ```text
-docs/architecture.md  system structure, dependencies and data ownership
-docs/features.md      one current behavior paragraph per feature, linked to code/tests
-docs/overrides.md     generated environment-variable reference
+docs/features.md      what each feature does and its limits
+docs/architecture.md  how the system is built and where data lives
+docs/overrides.md     environment-variable reference (generated)
+CONTRIBUTING.md       development setup, checks and documentation rules
+CHANGELOG.md          change history
 ```
 
-- [Contributing](CONTRIBUTING.md) — development setup, checks and PR publication.
-- [Tests](tests/README.md) — isolation, opt-in integration checks and failure diagnosis.
-- [PR208 added-function checklist](docs/validation/pr208/manual-checklist.md) — each added function, its originating GitHub issue, manual actions and expected result; no general regression/backlog checklist.
-- [PR208 swarm results and limits](docs/validation/pr208/README.md); [historical UI audit](docs/validation/ui-fleet50/README.md).
-- Package READMEs — local implementation contracts beside the code.
-- [Changelog](CHANGELOG.md) — change history, not current operating instructions.
-
-Use `uv run zotero-summarizer --help` and a command's `--help` for its current
-arguments. For code changes, follow [CONTRIBUTING.md](CONTRIBUTING.md); checks
-alone are not evidence of a real feature action or production acceptance.
+`uv run zotero-summarizer --help` lists the command-line tools; each command's
+`--help` shows its options.

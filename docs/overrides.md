@@ -20,7 +20,8 @@ Precedence: **code default < `goals.yaml` < `data/calibration.json` < `ZS_*` env
 | `ZS_FEEDS_DAEMON_TICK_SECONDS` | `feeds.daemon_tick_seconds` | int | 300 |
 | `ZS_FEEDS_DAEMON_BATCH_SIZE` | `feeds.daemon_batch_size` | int | 5 |
 | `ZS_FEEDS_MAX_FEEDS_PER_PASS` | `feeds.max_feeds_per_pass` | int | 10 |
-| `ZS_FEEDS_MAX_NEW_ITEMS_PER_FEED` | `feeds.max_new_items_per_feed` | int | 25 |
+| `ZS_FEEDS_BACKFILL_DAYS` | `feeds.backfill_days` | int | 7 |
+| `ZS_FEEDS_MAX_PAGES_PER_FEED` | `feeds.max_pages_per_feed` | int | 10 |
 | `ZS_FEEDS_PER_FEED_TIMEOUT_SECS` | `feeds.per_feed_timeout_secs` | float | 10.0 |
 | `ZS_FEEDS_MARK_PROCESSED_AS_READ` | `feeds.mark_processed_as_read` | bool | true |
 | `ZS_FEEDS_ZOTERO_READ_SYNC` | `feeds.zotero_read_sync` | bool | true |
@@ -60,6 +61,8 @@ Precedence: **code default < `goals.yaml` < `data/calibration.json` < `ZS_*` env
 | `ZS_QUALITY_REVIEW_ENABLED` | `quality_review.enabled` | bool | true |
 | `ZS_QUALITY_REVIEW_TOP_K` | `quality_review.top_k` | int | 5 |
 | `ZS_DEEP_REVIEW_PREWARM_K` | `quality_review.prewarm_on_startup_k` | int | 5 |
+| `ZS_QUALITY_REVIEW_FLEET_PAPERS` | `quality_review.fleet_papers` | int | 8 |
+| `ZS_QUALITY_REVIEW_CALLS_PER_PAPER` | `quality_review.calls_per_paper` | int | 2 |
 | `ZS_QUALITY_REVIEW_AUTO_ON_TICK_K` | `quality_review.auto_on_tick_k` | int | 10 |
 | `ZS_QUALITY_REVIEW_RENDER_ON_TICK_K` | `quality_review.render_on_tick_k` | int | 3 |
 | `ZS_QUALITY_BAND_PRIMARY` | `quality_review.quality_band_primary` | bool | false |
@@ -70,6 +73,7 @@ Precedence: **code default < `goals.yaml` < `data/calibration.json` < `ZS_*` env
 | `ZS_QUALITY_REVIEW_QUALITY_PROMOTE_RELEVANCE_FLOOR` | `quality_review.quality_promote_relevance_floor` | float | 3.0 |
 | `ZS_QUALITY_REVIEW_MAX_PDF_BYTES` | `quality_review.max_pdf_bytes` | int | 50000000 |
 | `ZS_QUALITY_REVIEW_FETCH_TIMEOUT_SECS` | `quality_review.fetch_timeout_secs` | float | 30.0 |
+| `ZS_QUALITY_REVIEW_CONTEXT_WINDOW_TOKENS` | `quality_review.context_window_tokens` | int | 256000 |
 | `ZS_QUALITY_REVIEW_MAX_TEXT_CHARS` | `quality_review.max_text_chars` | int | 60000 |
 | `ZS_QUALITY_REVIEW_SELF_CONSISTENCY_RUNS` | `quality_review.self_consistency_runs` | int | 3 |
 | `ZS_QUALITY_REVIEW_LEAN_SELF_CONSISTENCY_RUNS` | `quality_review.lean_self_consistency_runs` | int | 1 |
