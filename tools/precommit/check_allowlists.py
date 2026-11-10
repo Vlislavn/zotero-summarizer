@@ -8,9 +8,8 @@ was fixed — so the entry now grandfathers nothing and silently rots (worse, a
 gate only ever asks "is this NEW finding grandfathered?", never "does every
 grandfather still correspond to a finding?". This reconciler closes that loop.
 
-For each key-based allowlist it computes the LIVE key set from that detector's
-own ``dump`` and reports every committed key with no live finding. Wired into
-``make scan`` (advisory) and asserted by the test suite, so the allowlists can
+For the slop allowlist it computes the LIVE key set from that detector's
+own ``dump`` and reports every committed key with no live finding. Asserted by the test suite, so the allowlists can
 only shrink toward empty, never accrete dead grandfathers.
 
   reconcile   print stale entries per allowlist; exit 1 if any are stale
@@ -18,7 +17,6 @@ only shrink toward empty, never accrete dead grandfathers.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -26,20 +24,11 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
 
-_CHECK_DEAD = "tools/precommit/check_dead_code.py"
-_CHECK_REDUNDANCY = "tools/precommit/check_redundancy.py"
 _CHECK_SLOP = "tools/precommit/check_slop.py"
 
-# (label, committed allowlist file, argv that dumps the LIVE keys, required
-# third-party module or None). The hard LOC gate has no allowlist.
-# ``make scan`` already skips the Tier-2 vulture scan when vulture is
-# absent from the env (it runs in the gate: 'make lint'); the vulture-backed
-# reconciler mirrors that same contract instead of crashing the advisory scan.
+# (label, committed allowlist file, argv that dumps the LIVE keys). The hard LOC gate has no allowlist.
 RECONCILERS = [
-    ("dead_code_allowlist.txt", HERE / "dead_code_allowlist.txt", [_CHECK_DEAD, "dump-orphans"], None),
-    ("vulture_allowlist.txt", HERE / "vulture_allowlist.txt", [_CHECK_DEAD, "make-allowlist"], "vulture"),
-    ("redundancy_allowlist.txt", HERE / "redundancy_allowlist.txt", [_CHECK_REDUNDANCY, "dump"], None),
-    ("slop_allowlist.txt", HERE / "slop_allowlist.txt", [_CHECK_SLOP, "dump"], None),
+    ("slop_allowlist.txt", HERE / "slop_allowlist.txt", [_CHECK_SLOP, "dump"]),
 ]
 
 
@@ -83,15 +72,9 @@ def _dump(argv: list[str]) -> str:
 def _reconcile() -> int:
     """Report stale grandfathers across every key-based allowlist."""
     stale_total = 0
-    for label, allowlist_path, dump_argv, requires in RECONCILERS:
+    for label, allowlist_path, dump_argv in RECONCILERS:
         committed = parse_keys(allowlist_path.read_text()) if allowlist_path.exists() else set()
         if not committed:
-            continue
-        if requires is not None and importlib.util.find_spec(requires) is None:
-            sys.stderr.write(
-                f"⚠ {label} reconcile SKIPPED — {requires} not installed in this env "
-                "(it runs in the gate: 'make lint')\n"
-            )
             continue
         stale = sorted(find_stale(committed, live_keys(_dump(dump_argv))))
         if not stale:

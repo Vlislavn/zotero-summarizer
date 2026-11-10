@@ -13,6 +13,12 @@ existing Python/frontend development dependencies, `make`, `git`, and authentica
 `gh`; it does not repair hosted billing. See the canonical
 [verification workflow](../CONTRIBUTING.md#check-and-publish).
 
+`tools/serve-iphone.sh` is the `make iphone` launcher: it reads this Mac's tailnet
+address and owner login from `tailscale status --json`, refuses unless Tailscale is
+connected with HTTPS certificates, maps Tailscale Serve HTTPS:443 to
+`127.0.0.1:8000`, runs `serve-mobile` for that exact owner/origin and removes the
+mapping on exit. See [remote access](../docs/features.md#remote-access).
+
 Prestige validation and quality-promotion evaluation read model artifacts and
 library caches through `Settings.model_dir` (`data/models/`), not a HOME constant.
 Prestige validation uses the shared ZIP/legacy-joblib artifact resolver.

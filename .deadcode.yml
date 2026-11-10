@@ -1,0 +1,8 @@
+# deadcode-audit config (read from the repo root). source_roots is mandatory:
+# the default scan walks data/ and hangs.
+project:
+  source_roots: [zotero_summarizer]
+  import_roots: ['.']
+  test_roots: [tests]
+  vulture_whitelist: [scripts/vulture_whitelist.py]
+exclude: ["data/**", "frontend/**", ".venv/**"]

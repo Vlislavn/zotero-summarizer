@@ -68,7 +68,6 @@ def _reading_policy_agreement():
         signals = row["signals"]
         action, _flags = effective_read_decision(
             signals["digest"], signals.get("quality"),
-            goal_summaries=signals.get("goal_summaries"),
         )
         reading_matches += action == row["expected_read_decision"]
     return round(reading_matches / len(reading_rows), 3)

@@ -1,5 +1,8 @@
 # Offline support, priority and collection comparisons
 
+Top-level help names `support`, `priority` and `collections`, preserving read-only
+admission by default and explicit `--run` consent for all three commands.
+
 ## Existing-collection comparison (part of #42)
 
 Optional declared version/derivation DAGs bind every reference channel, exclude heldout ancestors into an immutable replayed audit, and refuse contaminated active uses. Shortlists require frozen selection provenance. Declarations are unsigned; legacy lineage stays unknown.
@@ -66,6 +69,9 @@ and any explicitly qualified, already-running native HTTP arms. Reopen with
 `python -m tools.method_validation support --inspect ATTEMPT_DIRECTORY`;
 inspection never calls a provider or writes. There is no default endpoint/model,
 server launch, credential lookup, retry engine, baseline constructor or model load.
+The admission preview lists each configured arm's kind and blockage reason plus
+effective input, prompt, response, call, work and time caps after overrides. These
+are declared limits, not measured runtime qualification or permission to run.
 
 ```
 explicit frozen configuration + exact original sources/pairs

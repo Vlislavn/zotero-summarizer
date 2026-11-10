@@ -22,7 +22,6 @@ def evaluate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         raw = str(signals["digest"].get("read_decision") or "")
         effective, flags = effective_read_decision(
             signals["digest"], signals.get("quality"),
-            goal_summaries=signals.get("goal_summaries"),
         )
         results.append({**row, "raw": raw, "effective": effective, "flags": flags})
     reads = [row for row in results if row["effective"] == "read"]

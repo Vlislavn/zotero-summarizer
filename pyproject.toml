@@ -18,7 +18,9 @@ dependencies = [
     "mcp>=1.0.0",
     "httpx>=0.27.0",
     "onprem>=0.21.5",
-    "anthropic>=0.69.0",
+    # Native schema/parser reuse and request-owned OpenAI auth need these APIs.
+    "anthropic>=0.105.2",
+    "openai>=2.36.0",
     "kneed>=0.8.5",
     "adapters>=1.3.0",
     "optuna>=4.8.0",
@@ -37,10 +39,8 @@ dev = [
     "pytest>=8.0.0",
     "pytest-forked>=1.6.0",
     "pre-commit>=3.7.0",
-    # Pinned EXACT for a reproducible Tier-2 sweep: findings drift between Vulture
-    # versions, so a float would desync `make scan` / the gate from the committed
-    # vulture_allowlist.txt. Keep in lockstep with the .pre-commit-config pin.
-    "vulture==2.16",
+    # Dead-code / duplication / overlap checks; tracks main (no pin); refreshed by `make deadcode-update`; needs Python >=3.11.
+    "deadcode-audit[vulture] @ git+https://github.com/Vlislavn/deadcode-audit.git@main ; python_version >= '3.11'",
 ]
 # Optional high-fidelity PDF parser (IBM Docling: TableFormer tables + figure
 # classification). Heavy (pulls layout models); install only when you want the

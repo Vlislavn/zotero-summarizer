@@ -1,6 +1,8 @@
-"""Opt-in #37 CLI; default is read-only admission, not a model run.
+"""Opt-in frozen support, priority and collection comparisons.
 
-Usage: python -m tools.method_validation support --config /absolute/config.json [--run]
+Default is read-only admission; --run consents to private writes and configured HTTP.
+Usage: python -m tools.method_validation {support,priority,collections}
+       --config /absolute/config.json [--run]
 """
 import argparse
 import os
@@ -51,7 +53,13 @@ def main(argv=None, *, transport=None):
         else:
             bundle, _, cases, *_ = prepare(cfg)
             result = {'mode': 'inspect-inputs', 'pairs': len(cases), 'synthetic': bundle.synthetic,
-                      'model_calls': 0, 'writes': 0}
+                      'model_calls': 0, 'writes': 0,
+                      'arms': [{'arm_id': arm.arm_id, 'kind': arm.kind,
+                                'blocked_reason': arm.blockage()} for arm in cfg.arms],
+                      'limits': {name: getattr(cfg, name) for name in (
+                          'max_pairs', 'max_input_bytes', 'max_prompt_chars', 'max_request_bytes',
+                          'max_response_bytes', 'max_calls', 'max_work_units',
+                          'idle_timeout_seconds', 'max_run_seconds')}}
     print(encoded(result).decode())
     return 0
 
