@@ -98,7 +98,7 @@ def _local_profile(settings: Settings) -> dict[str, Any]:
         return _row(
             "local_profile",
             "unavailable",
-            "Hosted or hybrid inference is active",
+            "Local-model check skipped: you use a hosted model.",
             "Local hardware profiles do not apply.",
             action="Change profile",
         )

@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
+import { basisText, listText, mergeProjectUse, plainReason, rangeText, rationaleText, worthText } from './weeklyDigestText.js';
 
-function TextList({ values, empty = 'Not recorded (not assessed)' }) {
+function TextList({ values, empty = 'Not checked' }) {
   return values?.length ? <ul className="list-disc pl-5 space-y-1">{values.map((value, i) => <li key={i}>{value}</li>)}</ul> : <p>{empty}</p>;
 }
 
@@ -20,16 +21,16 @@ function Card({ record, index }) {
   const { candidate, triage, card, provenance } = record;
   return <article className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4 break-words min-w-0">
     <header>
-      <p className="text-sm text-slate-600">{index + 1} · {card.worth_reading || 'unknown'} · {(triage.matched_projects || []).join(', ') || 'Project match unrecorded'}</p>
+      <p className="text-sm text-slate-600">{index + 1} · {worthText(card.worth_reading)} · {(triage.matched_projects || []).join(', ') || 'Project match unrecorded'}</p>
       <h3 className="font-display text-2xl text-forest-800">{candidate.title}</h3>
       <div className="flex flex-wrap gap-4 text-sm mt-2">
         <PaperLink id={candidate.source_id}>Open paper review</PaperLink>
         <ExternalLink url={candidate.url}>Original source</ExternalLink>
       </div>
     </header>
-    <section><h4 className="font-medium">Why chosen</h4><p>{triage.rationale || 'Not recorded'}</p></section>
+    <section><h4 className="font-medium">Why chosen</h4><p>{rationaleText(triage.rationale) || 'Not recorded'}</p></section>
     <section><h4 className="font-medium">Core idea</h4><p>{card.core_idea || 'Not established'}</p></section>
-    <section><h4 className="font-medium">Project use</h4><TextList values={card.project_use_notes} /></section>
+    <section><h4 className="font-medium">Project use</h4><TextList values={mergeProjectUse(card.project_use_notes)} /></section>
     <section><h4 className="font-medium">Artifacts</h4>
       {['code', 'dataset', 'model'].map((kind) => <div key={kind} className="mt-1">
         <span className="font-medium">{kind === 'model' ? 'Weights/models' : kind}: </span>
@@ -39,15 +40,16 @@ function Card({ record, index }) {
     <section><h4 className="font-medium">Reproducibility: {card.reproducibility_tier || 'unknown'}</h4>
       <p>{card.reproducibility_rationale || 'Effort not assessed'}</p>
       <p className="font-medium mt-2">Missing reproduction inputs</p><TextList values={card.missing_reproduction_inputs} />
-      <p className="font-medium mt-2">Evidence gaps</p><TextList values={card.evidence_gaps} />
+      <p className="font-medium mt-2">Evidence gaps</p><TextList values={(card.evidence_gaps || []).map(plainReason)} />
     </section>
     <details><summary className="cursor-pointer">Card details and provenance</summary>
       <p className="mt-2">{card.problem}</p><p>{card.engineering_novelty}</p>
       <p>Research / production impact / personal novelty (generated): {card.research_impact ?? 'unknown'} / {card.production_impact ?? 'unknown'} / {card.personal_novelty ?? 'unknown'}</p>
-      <p>Source basis: {provenance?.basis || 'unknown'} · model: {provenance?.model || 'unrecorded'} · generated: {provenance?.generated_at || 'unrecorded'}</p>
-      <p>Contribution: {(card.contribution_kind || []).join(', ') || 'unrecorded'} · Topics: {(card.topic_tags || []).join(', ') || 'unrecorded'}</p>
-      <p>Benchmarks: {(card.benchmark_names || []).join(', ') || 'unrecorded'} · Project actions: {(card.project_uses || []).join(', ') || 'unrecorded'}</p>
-      <pre className="whitespace-pre-wrap break-all text-xs mt-2">{JSON.stringify(provenance || {}, null, 2)}</pre>
+      <p>{basisText(provenance?.basis)} · generated {provenance?.generated_at || 'at an unrecorded time'}</p>
+      <p>The paper adds: {listText(card.contribution_kind, 'not recorded')} · Topics: {listText(card.topic_tags, 'not recorded')}</p>
+      <p>Benchmarks: {listText(card.benchmark_names, 'none named')} · Suggested use: {listText(card.project_uses, 'not recorded')}</p>
+      <details className="mt-2"><summary className="cursor-pointer text-sm text-slate-600">Technical details</summary>
+        <pre className="whitespace-pre-wrap break-all text-xs mt-2">{JSON.stringify(provenance || {}, null, 2)}</pre></details>
     </details>
   </article>;
 }
@@ -57,7 +59,7 @@ export default function WeeklyDigest({ report }) {
     unqualified_reviews: unqualified = [], failed, research_ideas_by_project: ideas = {} } = report;
   return <div className="space-y-6 min-w-0">
     <header><h2 className="font-display text-2xl">Research Intelligence digest</h2>
-      <p className="break-words">{metadata.from} → {metadata.to}</p>
+      <p className="break-words">{rangeText(metadata.from, metadata.to)}</p>
       <p>{cards.length} cards · {metadata.counts.shortlisted} shortlisted · {metadata.counts.discovered} discovered</p>
       <p className="text-sm text-slate-600">Saved snapshot, not a live queue. Generated project suggestions are unverified; unknown is not a negative result.</p>
     </header>
@@ -77,16 +79,16 @@ export default function WeeklyDigest({ report }) {
       {!missing.length && !unqualified.length && <p>None recorded.</p>}
       <ul>{missing.map((candidate) => <li key={candidate.source_id}><PaperLink id={candidate.source_id}>{candidate.title}</PaperLink></li>)}
         {unqualified.map(({ candidate, reason }, index) => <li key={`unqualified-${index}`}>
-          <PaperLink id={candidate.source_id}>{candidate.title}</PaperLink> — Review not qualified: {reason}
+          <PaperLink id={candidate.source_id}>{candidate.title}</PaperLink> — Review not qualified: {plainReason(reason)}
         </li>)}
       </ul>
     </section>
     <details><summary className="cursor-pointer">Why rejected near the threshold ({rejects.length})</summary>
       {!rejects.length && <p>No near-threshold rejects recorded (not a complete rejection audit).</p>}
-      <ul className="space-y-2 mt-2">{rejects.map(({ candidate, triage }) => <li key={candidate.source_id} className="break-words"><ExternalLink url={candidate.url}>{candidate.title}</ExternalLink> — {triage.rationale || 'Reason not recorded'}</li>)}</ul>
+      <ul className="space-y-2 mt-2">{rejects.map(({ candidate, triage }) => <li key={candidate.source_id} className="break-words"><ExternalLink url={candidate.url}>{candidate.title}</ExternalLink> — {rationaleText(triage.rationale) || 'Reason not recorded'}</li>)}</ul>
     </details>
     <section><h3 className="font-display text-xl">Per-paper failures ({failed.length})</h3>
-      {!failed.length ? <p>None recorded.</p> : <ul>{failed.map((row, i) => <li key={i} className="break-all"><PaperLink id={row.source_id}>{row.source_id}</PaperLink>: {row.error}</li>)}</ul>}
+      {!failed.length ? <p>None recorded.</p> : <ul>{failed.map((row, i) => <li key={i} className="break-all"><PaperLink id={row.source_id}>{metadata.source_history?.[row.source_id]?.candidate?.title || row.source_id}</PaperLink>: {plainReason(row.error.replace(/^\w+Error: /, ''))}</li>)}</ul>}
     </section>
     <details><summary className="cursor-pointer">Run metadata</summary>
       <pre className="whitespace-pre-wrap break-all text-xs mt-2">{JSON.stringify(metadata, null, 2)}</pre>

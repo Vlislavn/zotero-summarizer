@@ -12,7 +12,7 @@ export function formatDuration(seconds) {
 export function formatWhen(iso) {
   const date = iso ? new Date(iso) : null;
   if (!date || Number.isNaN(date.getTime())) return null;
-  return date.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 const CONNECTION_FAILURES = new Set(['endpoint_unreachable', 'inference_transport_error', 'inference_timeout', 'waiter_timeout']);

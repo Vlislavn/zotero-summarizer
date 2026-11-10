@@ -16,6 +16,7 @@ import {
 import { StatusBanner, ChangeGroup } from './pendingComponents.jsx';
 import { humanizeError } from '../utils/humanizeError.js';
 import Async from '../components/ui/Async.jsx';
+import { notifyPendingChanged } from '../hooks/usePendingCount.js';
 import { useKeyboardNav } from '../hooks/useKeyboardNav.js';
 import { useOptimisticAction } from '../hooks/useOptimisticAction.js';
 import { useFocusOnChange } from '../hooks/useFocusOnChange.js';
@@ -128,7 +129,9 @@ export default function Pending() {
           changes: [],
         });
       }
-      map.get(item.item_key).changes.push(item);
+      const group = map.get(item.item_key);
+      group.item_title ||= item.item_title; // any change of the paper may carry its title
+      group.changes.push(item);
     }
     return [...map.values()];
   }, [filteredPending]);
@@ -259,12 +262,16 @@ export default function Pending() {
       setIsError(data.failed > 0);
     } catch (err) {
       // The shared client adds body only after the response text is fully read.
-      setMessage(err?.status === 409 && Object.prototype.hasOwnProperty.call(err, 'body')
+      const foreign = /different or unknown native target/.test(err?.body?.message || '');
+      setMessage(foreign
+        ? 'This note was created for a different Zotero library and cannot be applied here. Reject it instead.'
+        : err?.status === 409 && Object.prototype.hasOwnProperty.call(err, 'body')
         ? 'The selected changes are no longer current. Review the refreshed payload and target, then reselect.'
         : `${humanizeError(err)} Delivery is unconfirmed. Inspect the refreshed state before any new action.`);
       setIsError(true);
     } finally {
       await load(status);
+      notifyPendingChanged();
       applyInFlight.current = false;
       setApplying(false);
     }
@@ -283,6 +290,7 @@ export default function Pending() {
       setMessage('Selected changes rejected.');
       setIsError(false);
       load(status);
+      notifyPendingChanged();
     },
     rollback: (err, _vars, ctx) => {
       if (ctx.version !== loadVersion.current) return;
@@ -355,7 +363,7 @@ export default function Pending() {
           <h2 className="text-lg font-medium">Pending Changes</h2>
           <p className="text-xs text-slate-500">
             {isPending && !loading && !loadError && pending.length > 0
-              ? `${pending.length} queued change${pending.length === 1 ? '' : 's'} on ${groupedPending.length} paper${groupedPending.length === 1 ? '' : 's'}. Apply writes to Zotero after a backup; recovery is backup-only, not undo.`
+              ? `${pending.length} queued change${pending.length === 1 ? '' : 's'} on ${groupedPending.length} paper${groupedPending.length === 1 ? '' : 's'}. Apply backs up Zotero first; there is no undo, only restoring that backup.`
               : 'Review, edit, and apply queued updates to Zotero.'}
           </p>
           {isPending && (
@@ -428,7 +436,7 @@ export default function Pending() {
         loadingText="Loading changes…"
         emptyMessage={titleFilter.trim()
           ? `No ${selectedLabel} changes match “${titleFilter.trim()}”.`
-          : `No ${selectedLabel} changes.`}
+          : status === 'applying' ? 'Nothing needs checking.' : `No ${selectedLabel} changes.`}
       >
         {groupedPending.map((group, idx) => (
           <ChangeGroup

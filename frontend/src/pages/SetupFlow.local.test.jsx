@@ -205,7 +205,7 @@ it('wires Full local through safe profile, save, real-check request, honest UNKN
     expect(api.updateConfig).toHaveBeenCalledTimes(1);
     fireEvent.click(await screen.findByRole('button', { name: 'Verify setup' }));
     expect(await screen.findByText('LLM verification needs action')).toBeTruthy();
-    expect(screen.getByText(/Local load safety is not established/)).toBeTruthy();
+    expect(screen.getByText(/Not enough free-memory information to run a local model safely/)).toBeTruthy();
     expect(api.runDoctor).toHaveBeenCalledWith(null);
     expect(screen.getByRole('button', { name: 'Open Today' }).disabled).toBe(true);
     expect(screen.getByRole('link', { name: 'Review endpoint settings' }).getAttribute('href')).toBe('/settings?task=connection');

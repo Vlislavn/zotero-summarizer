@@ -228,7 +228,7 @@ def test_invalid_consumed_number_does_not_echo_input_into_warning(tmp_path, capl
     warnings = [record for record in caplog.records if record.name == runner.LOGGER.name]
     assert len(warnings) == 1
     assert "private fixture value" not in warnings[0].getMessage()
-    assert warnings[0].getMessage() == f"research-feed triage failed source={bad}: triage_history_invalid"
+    assert warnings[0].getMessage() == 'research-feed triage failed for "Neutral record 01": triage_history_invalid'
     assert warnings[0].exc_info is None
     assert [record["candidate"]["source_id"] for record in payload["cards"]] == [good]
     assert payload["failed"] == [{"source_id": bad, "error": "ValueError: triage_history_invalid"}]

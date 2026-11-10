@@ -3,7 +3,7 @@ from uuid import UUID
 import json
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services.llm import connection_state as store
+from zotero_summarizer.services.llm import connection_state as store, credential_fingerprint
 from zotero_summarizer.services.llm.presets import PROVIDER_PRESET_REGISTRY, _compile_preset
 
 
@@ -19,13 +19,23 @@ def requires_approval(provider):
     }
 
 
+def _credential_current(provider, fingerprint, revision):
+    """Fingerprinted approval follows this slot's key; a legacy one keeps the whole-revision check."""
+    if fingerprint is None:
+        store.require_revision(revision)
+    elif not credential_fingerprint.matches(provider.api_key_env, fingerprint):
+        raise ValueError('Credential changed')
+
+
 def require_approval(provider):
     if not requires_approval(provider):
         return None
     try:
         pointer = store.approval_path(provider.name)
+        fingerprint = None
         if pointer.is_file() and not pointer.is_symlink():
-            operation = UUID(json.loads(pointer.read_text())['operation_id'])
+            recorded = json.loads(pointer.read_text())
+            operation, fingerprint = UUID(recorded['operation_id']), recorded.get('credential_fingerprint')
         elif provider.name.startswith('connection_'):
             operation = UUID(provider.name.removeprefix('connection_'))
         else:
@@ -37,11 +47,13 @@ def require_approval(provider):
         actual = store.current_provider(receipt)
         if actual is None or identity(actual) != identity(provider) or identity(approved) != identity(provider):
             raise ValueError('Destination or authentication changed')
-        store.require_revision(receipt['revision'])
-        return receipt['revision']
+        _credential_current(provider, fingerprint, receipt['revision'])
+        # Callers pin the returned revision for their request (factory._verification_key): a
+        # fingerprinted approval is valid now, so pin the CURRENT state, not the receipt's.
+        return receipt['revision'] if fingerprint is None else store.revision()
     except (APIError, ValueError, KeyError, TypeError, OSError):
         raise APIError('provider_approval_required',
-                       'Metadata/test permission is absent or expired. Open AI connection settings and approve this exact server and authorization.',
+                       'Metadata/test permission is absent or expired. In Settings → AI models, press “Load models” (or “Connect provider”) to approve this exact server.',
                        status_code=403, details={'recovery': 'open_ai_settings', 'attempted': False}) from None
 
 

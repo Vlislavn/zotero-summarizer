@@ -54,6 +54,8 @@ LOGGER = logging.getLogger(__name__)
 # One browser process at a time: RAM safety on the unified-memory Mac AND Chromium
 # refuses to open a profile already held by another process (SingletonLock).
 _BROWSER_LOCK = threading.Lock()
+# Concurrent reviews queue for the one browser instead of skipping their PDF source.
+_BROWSER_WAIT_SECS = 180.0
 # Generous one-time login budget (SSO + 2FA is interactive) — distinct from the
 # per-fetch timeout. Named constant, not a magic literal sprinkled inline.
 _LOGIN_TIMEOUT_SECS = 600.0
@@ -253,8 +255,8 @@ def fetch_pdf_via_browser(
     if sync_playwright is None:
         return None
 
-    if not _BROWSER_LOCK.acquire(blocking=False):
-        LOGGER.info("browser fetch skipped: another browser session is in flight")
+    if not _BROWSER_LOCK.acquire(timeout=_BROWSER_WAIT_SECS):
+        LOGGER.info("browser fetch skipped: another browser session stayed in flight for %.0fs", _BROWSER_WAIT_SECS)
         return None
     try:
         output = _drive_browser(_BrowserLib(sync_playwright, error_class), url, profile_dir, timeout, max_bytes,
@@ -302,8 +304,8 @@ def render_article_pdf(
     if sync_playwright is None:
         return None
     text_limit = _bounded_article_text_limit(max_bytes)
-    if not _BROWSER_LOCK.acquire(blocking=False):
-        LOGGER.info("article render skipped: another browser session is in flight")
+    if not _BROWSER_LOCK.acquire(timeout=_BROWSER_WAIT_SECS):
+        LOGGER.info("article render skipped: another browser session stayed in flight for %.0fs", _BROWSER_WAIT_SECS)
         return None
     timeout_ms = int(timeout * 1000)
     try:

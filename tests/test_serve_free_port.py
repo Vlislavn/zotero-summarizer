@@ -14,17 +14,14 @@ def test_serve_preserves_existing_listener(monkeypatch, tmp_path):
         listener.listen()
         port = listener.getsockname()[1]
 
-        def run(_app, **kwargs):
-            assert kwargs["port"] == port
-            with socket.socket() as attempt:
-                attempt.bind((kwargs["host"], port))
+        def run(_app, **_kwargs):
+            raise AssertionError("a busy port must fail before uvicorn/lifespan startup")
 
         monkeypatch.setattr(uvicorn, "run", run)
         args = build_parser().parse_args(["serve", "--port", str(port)])
         args.project_root = str(tmp_path)  # main() supplies the admitted root.
         monkeypatch.setenv("ZOTERO_SUMMARIZER_HOME", str(tmp_path))
-        with pytest.raises(OSError):
-            args.func(args)
+        assert args.func(args) == 1
         assert listener.getsockname()[1] == port
     with pytest.raises(SystemExit):
         build_parser().parse_args(["serve", "--no-kill"])

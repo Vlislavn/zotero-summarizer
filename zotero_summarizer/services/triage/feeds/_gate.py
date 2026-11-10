@@ -58,9 +58,7 @@ def _synthesize_gate_only_candidate(item: dict[str, Any]) -> "TriagedCandidate":
         composite_relevance_score=float(pred.calibrated_score) * 5.0,
         reading_priority=priority,
         triage_rationale=(
-            f"Predicted by classifier gate "
-            f"(raw={pred.raw_score:.4f}, cal={pred.calibrated_score:.4f}). "
-            "Open the Feed Review tab to inspect SHAP contributions."
+            "Picked by the relevance model alone; no AI explanation was written."
         ),
         triage_confidence=float(pred.calibrated_score),
         corpus_affinity_score=0.0,

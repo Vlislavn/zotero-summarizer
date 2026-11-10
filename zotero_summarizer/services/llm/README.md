@@ -90,8 +90,14 @@ Doctor verification retains UNKNOWN refusal and existing one-attempt behavior.
 `connection_approval.py` is the one consent owner for compatibility metadata and
 verification too: saved membership is insufficient for secret-bearing custom
 remotes. Receipt identity includes protocol, exact base, slot AND auth mode; a
-no-auth receipt cannot authorize a credential-bearing request. Current config/auth/
-profile revisions and per-send fences are checked before lookup/send. Preset/local
+no-auth receipt cannot authorize a credential-bearing request. Approval stays valid
+across unrelated saves: `approve()` records an HMAC-SHA256 fingerprint of the slot's
+current key (`credential_fingerprint.py`; random salt in `data/credential_fingerprint.salt`,
+0600; never the key) in the approval pointer, and `require_approval` then checks exact
+identity + that fingerprint (key absent or replaced = needs approval). A pointer without
+a fingerprint (legacy, or no key at approval time) keeps the strict whole-config/auth/
+profile revision check until re-approved. Apply/edit/test flows still fence with
+`require_revision`; per-send fences are checked before lookup/send. Preset/local
 non-secret/declared-none admission and ordinary legacy inference remain. An explicit
 Doctor action is not a bypass. Policy refusal is needs-approval/unknown with direct
 AI connection recovery, never unreachable/wrong-model/hardware-unsafe. CLI can

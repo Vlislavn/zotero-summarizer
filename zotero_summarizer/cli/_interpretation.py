@@ -24,6 +24,12 @@ def validate(args):
         raise ValueError('Human labels require an existing run ID')
     if args.run and not args.capture_local:
         raise ValueError('--run requires explicit --capture-local consent')
+    recipe = args.recipe or os.environ.get('ZS_INTERPRETATION_RECIPE')
+    if not args.run_id and not recipe:
+        raise ValueError('a frozen recipe is required: pass --recipe FILE or set ZS_INTERPRETATION_RECIPE '
+                         '(synthetic example: python -m tools.method_validation.examples OUT_DIR)')
+    if recipe and not os.path.isfile(recipe):
+        raise ValueError(f'recipe file not found: {recipe}')
 
 
 def command(args):
@@ -38,10 +44,7 @@ def command(args):
             raise ValueError('Invalid interpretation run ID')
         result = report(settings, settings.faithbench_dir / 'interpretation' / args.run_id, args.labels)
     else:
-        recipe = args.recipe or os.environ.get('ZS_INTERPRETATION_RECIPE')
-        if not recipe:
-            raise ValueError('A frozen recipe is required')
-        snapshot = inspect(settings, recipe)
+        snapshot = inspect(settings, args.recipe or os.environ['ZS_INTERPRETATION_RECIPE'])
         result = {'status': 'INSPECTED_NOT_EXECUTED', 'evaluation_papers': len(snapshot['evaluation']),
                   'assigned_per_condition': len(snapshot['items']), 'model_constructed': False}
         if args.run:

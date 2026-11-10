@@ -75,13 +75,13 @@ it('shows the supplied pending-check reason without claiming verification or run
 it('folds multiple pending checks without losing their identifiers or supplied reasons', async () => {
   api.fetchDoctorStatus.mockResolvedValue({ ...statusA, checks: [{ id: 'runtime_model', status: 'not_started', message: 'Not checked yet' }, { id: 'dry_run', status: 'not_started', message: 'Waiting for explicit verification' }] });
   mount(); const disclosure = (await screen.findByText('2 checks not started')).closest('details'); expect(disclosure.open).toBe(false);
-  for (const literal of ['runtime model', 'dry run', 'Not checked yet', 'Waiting for explicit verification']) expect(disclosure.textContent).toContain(literal);
+  for (const literal of ['Model check', 'Trial run', 'Not checked yet', 'Waiting for explicit verification']) expect(disclosure.textContent).toContain(literal);
   expect(api.runDoctor).not.toHaveBeenCalled(); expect(screen.queryByText('✓ Setup verified')).toBeNull();
 });
 it('projects unknown load admission from its structured receipt without inferring from prose', async () => {
   api.fetchDoctorStatus.mockResolvedValue({ ...statusA, status: 'needs_action', checks: [{ id: 'llm_inference', status: 'needs_action', message: 'Synthetic result',
     load_receipts: [{ admission: { status: 'unknown' }, attempted: false }], recovery: { action: 'open_ai_settings', label: 'Review endpoint settings' } }] });
-  mount(); await screen.findByText('Local load safety is not established.');
+  mount(); await screen.findByText('Not enough free-memory information to run a local model safely.');
   expect(screen.getByRole('link', { name: 'Review endpoint settings' }).getAttribute('href')).toBe('/settings?task=connection');
   expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy(); expect(api.runDoctor).not.toHaveBeenCalled(); expect(screen.queryByText('✓ Setup verified')).toBeNull();
 });

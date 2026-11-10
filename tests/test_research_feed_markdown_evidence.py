@@ -260,7 +260,7 @@ def test_minimal_legacy_card_keeps_existing_content_and_sections(typed_payload):
             f"## {index}. 研究 {key} · **verbatim**\n\n"
             "**Action:** skim · **Projects:** agent harness, биомедицина\n\n"
             f"Проблема {key}\n\n**Core idea:** 核心 {key}\n\n"
-            f"**Project use:** harness: идея {key}; biomed: идея {key}\n\n"
+            f"**Project use:** harness, biomed: идея {key}\n\n"
             f"**Artifacts:** https://example.test/{key}/code, "
             f"https://example.test/{key}/data, https://example.test/{key}/model\n"
         ) in text

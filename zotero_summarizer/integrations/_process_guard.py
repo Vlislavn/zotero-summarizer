@@ -54,53 +54,6 @@ def _members(root):
     return list(found.values())
 
 
-def _termination_evidence(record, runtime_directory, origin, *, rss_limit_mib=4096):
-    """Observe a stopped owned group; this never supplies a native model terminal."""
-    import httpx
-    import socket
-
-    from zotero_summarizer.integrations._ollama_store import _local_url
-
-    known_stop = record.get('guard_stop') in {'rss_mib', 'swap_growth_mib', 'free_percent', 'wall_seconds', 'explicit_stop'}
-    failed_exit = (record.get('guard_stop') is None and type(record.get('returncode')) is int
-                   and record['returncode'] != 0)
-    if (record.get('owner') != _OWNER or record.get('mode') != 'finite'
-            or record.get('state') != 'stopped' or not (known_stop or failed_exit)
-            or any(record.get('limits', {}).get(key) != value for key, value in _limits(rss_limit_mib).items())):
-        raise ValueError('A stopped finite owned guard with unchanged caps is required')
-    identities = {key: record[key] for key in ('guardian', 'child', 'sentinel')}
-    for identity in identities.values():
-        if (type(identity.get('pid')) is not int or identity['pid'] <= 0
-                or type(identity.get('created')) not in (int, float) or identity['created'] <= 0):
-            raise ValueError('Original process creation identities are required')
-        if psutil.pid_exists(identity['pid']):
-            raise ValueError('An original PID is live or reused; termination is not established')
-    needle = str(Path(runtime_directory).resolve())
-    for process in psutil.process_iter(['pid', 'name', 'create_time', 'uids', 'cmdline'], ad_value=None):
-        try:
-            if os.getpgid(process.pid) == identities['child']['pid']:
-                raise ValueError('An original owned process-group member remains')
-            uids = process.info['uids']
-            if uids is None:
-                raise ValueError('Process ownership could not be inspected')
-            if uids.real == os.getuid():
-                arguments = process.info['cmdline']
-                if arguments is None:
-                    if (process.info['name'] in {'ollama', 'llama-server', 'runner'}
-                            and process.info['create_time'] >= identities['child']['created']):
-                        raise ValueError('A possible owned native process could not be inspected')
-                elif any(value == needle or value.startswith(needle + '/')
-                         or value.partition('=')[2].startswith(needle + '/') for value in arguments):
-                    raise ValueError('An owned runtime process remains')
-        except (ProcessLookupError, psutil.NoSuchProcess):
-            continue
-    url = httpx.URL(_local_url(origin))
-    with socket.socket(socket.AF_INET6 if ':' in url.host else socket.AF_INET) as listener:
-        listener.bind((url.host, url.port or 80))
-    return {'identities': identities, 'group_absent': True, 'runtime_absent': True,
-            'listener_absent': True, 'native_terminal_observed': False, 'successful': False}
-
-
 def _reap(root, *, command=None):
     members = _members(root)
     for process in members:

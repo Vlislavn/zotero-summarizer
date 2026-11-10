@@ -35,7 +35,8 @@ def _run(args: argparse.Namespace) -> int:
             generate_reviews=not args.cached_only, review_timeout_seconds=args.review_timeout,
         )
     print(json.dumps(result, indent=2))
-    return 1 if result.get("failed", 0) else 0
+    # Papers a cached-only run has no stored triage for are not failures (nothing was attempted).
+    return 1 if result.get("failed", 0) - result.get("not_triaged", 0) > 0 else 0
 
 
 def _view(args: argparse.Namespace) -> int:

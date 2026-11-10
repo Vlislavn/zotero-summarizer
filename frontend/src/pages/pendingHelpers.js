@@ -2,13 +2,13 @@
 // the per-page LOC budget. No React here — only payload parsing, draft
 // construction, and presentational utilities for queued Zotero changes.
 
-export const UNBOUND_GENERATED_TARGET_MESSAGE = 'This generated note has no bound Zotero target. Reject it or regenerate the review before applying.';
+export const UNBOUND_GENERATED_TARGET_MESSAGE = 'This note has no Zotero target. Reject it or regenerate the review.';
 
 export function hasUnboundGeneratedTarget(change) {
   return Boolean(change.generated_preview && !change.generated_preview.target);
 }
 
-export const MISSING_APPROVAL_MESSAGE = 'Approval snapshot unavailable. Reload and review the payload and Zotero target before applying.';
+export const MISSING_APPROVAL_MESSAGE = 'Exact change not available. Reload and check it before applying.';
 
 export function hasApprovalPreview(change) {
   const preview = change.approval_preview;
@@ -33,8 +33,10 @@ export const STATUS_TABS = [
   { value: 'applied', label: 'Applied' },
   { value: 'rejected', label: 'Rejected' },
   { value: 'failed', label: 'Failed' },
-  { value: 'applying', label: 'Needs reconciliation' },
+  { value: 'applying', label: 'Needs checking' },
 ];
+
+export const statusLabel = (status) => STATUS_TABS.find((tab) => tab.value === status)?.label || status;
 
 export function flattenCollections(nodes, depth = 0) {
   const flat = [];
@@ -144,7 +146,8 @@ export function changeSummary(change) {
       return collection || 'No collection chosen';
     case 'add_note':
     case 'upsert_note': {
-      const excerpt = stripHtml(payload.note_html).slice(0, 90);
+      // Notes queued before the band was dropped from the heading still carry « · band highlight».
+      const excerpt = stripHtml(payload.note_html).replace(/ · band \w+/g, '').slice(0, 90);
       return `“${payload.note_title || 'Triage note'}”${excerpt ? ` — ${excerpt}` : ''}`;
     }
     default:
@@ -186,8 +189,16 @@ export function changeBadgeTone(type) {
   }
 }
 
+const CHANGE_TYPE_LABELS = {
+  tag_changes: 'Change tags',
+  add_to_collection: 'Add to collection',
+  remove_from_collection: 'Remove from collection',
+  add_note: 'Add note',
+  upsert_note: 'Add or update note',
+};
+
 export function changeTypeLabel(type) {
-  return String(type || '').replace(/_/g, ' ');
+  return CHANGE_TYPE_LABELS[type] || String(type || '').replace(/_/g, ' ');
 }
 
 export function collectionOptionLabel(entry) {

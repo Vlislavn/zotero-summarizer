@@ -14,6 +14,11 @@ const STATUS = {
   needs_action: ['!', 'Needs action', 'text-amber-800'],
   unavailable: ['—', 'Unavailable', 'text-slate-600'],
 };
+const CHECK_LABELS = {
+  environment: 'Environment', research_goals: 'Research goals', local_profile: 'Local model check',
+  zotero: 'Zotero', database: 'Database', runtime_model: 'Model check', llm_inference: 'AI test run',
+  ml_assets: 'Model files', rss_source: 'RSS source', dry_run: 'Trial run', optional_extras: 'Optional extras',
+};
 const RECOVERY_DESTINATIONS = {
   open_ai_settings: '/settings?task=connection',
   open_sources_settings: '/today?task=rss',
@@ -26,11 +31,11 @@ function DoctorCheck({ check, running, onRetry }) {
     <span className={`${meta[2]} font-medium w-4`} aria-hidden>{meta[0]}</span>
     <div className="min-w-0 flex-1">
       <p className="text-xs text-slate-600">
-        <span className={meta[2]}>{meta[1]}</span>{' · '}{check.id.replaceAll('_', ' ')}
+        <span className={meta[2]}>{meta[1]}</span>{' · '}{CHECK_LABELS[check.id] || check.id.replaceAll('_', ' ')}
       </p>
       <p className="text-sm text-slate-800">{check.message}</p>
       {check.load_receipts?.some((receipt) => receipt.admission?.status === 'unknown') &&
-        <p className="text-sm text-amber-800">Local load safety is not established.</p>}
+        <p className="text-sm text-amber-800">Not enough free-memory information to run a local model safely.</p>}
       {check.detail && <details className="text-xs text-slate-600 mt-1">
         <summary className="cursor-pointer">Technical details</summary>
         <p className="break-words mt-1">{check.detail}</p>

@@ -231,6 +231,12 @@ it.each([
   } }]);
 });
 
+// A non-pending row shows its status as a badge next to the matching tab label; a pending row in Details.
+function expectRowStatus(status) {
+  if (status === 'pending') return expect(screen.getByText('Status: Pending')).toBeTruthy();
+  return expect(screen.getAllByText(status[0].toUpperCase() + status.slice(1))).toHaveLength(2);
+}
+
 it.each(['pending', 'failed'])('preserves the captured %s map through force confirmation', async (status) => {
   const a = presented(1, undefined, 'add_note', status);
   let row = a;
@@ -239,7 +245,7 @@ it.each(['pending', 'failed'])('preserves the captured %s map through force conf
     apply: ({ force }) => new Response(JSON.stringify(force ? { applied: 1, failed: 0 } : { error: 'zotero_running' })),
   });
   vi.spyOn(window, 'confirm').mockImplementation(() => {
-    expect(screen.getByText(`status: ${status}`)).toBeTruthy();
+    expectRowStatus(status);
     row = { ...a, approval_preview: { ...a.approval_preview, preview_sha256: 'b'.repeat(64) } };
     return true;
   });
@@ -283,8 +289,8 @@ it('keeps pending status until the response and never retries an uncertain deliv
   await screen.findByLabelText('Approval mutation preview');
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: 'Apply selected' }));
-  expect(screen.getByText('status: pending')).toBeTruthy();
-  expect(screen.queryByText('status: applied')).toBeNull();
+  expect(screen.getByText('Status: Pending')).toBeTruthy();
+  expect(screen.getAllByText('Applied')).toHaveLength(1); // the tab only, no row badge
   expect(screen.getByRole('button', { name: 'Apply selected' }).disabled).toBe(true);
   fireEvent.keyDown(window, { key: 'a' });
   expect(writes).toHaveLength(1);
@@ -293,7 +299,7 @@ it('keeps pending status until the response and never retries an uncertain deliv
 
   expect(await screen.findByText('Connection lost Delivery is unconfirmed. Inspect the refreshed state before any new action.')).toBeTruthy();
   await waitFor(() => expect(reads).toHaveLength(2));
-  expect(await screen.findByText('Delivery outcome is uncertain. Reconcile Zotero against the backup before any new action; retry is blocked.')).toBeTruthy();
+  expect(await screen.findByText('Result unknown. Compare Zotero with the backup before doing anything else; retry is blocked.')).toBeTruthy();
   expect(screen.getAllByRole('alert')).toHaveLength(2);
   expect(screen.getByText('Backup: /owned/backup.sqlite')).toBeTruthy();
   expect(document.querySelector('details details pre').textContent).toBe(JSON.stringify(row.audit, null, 2));
@@ -355,7 +361,7 @@ it('does not acknowledge Applied from a malformed success response', async () =>
   expect(await screen.findByText('The server did not confirm the Apply outcome. Delivery is unconfirmed. Inspect the refreshed state before any new action.')).toBeTruthy();
   await waitFor(() => expect(reads).toHaveLength(2));
   expect(writes).toHaveLength(1);
-  expect(screen.queryByText('status: applied')).toBeNull();
+  expect(screen.getAllByText('Applied')).toHaveLength(1); // the tab only, no row badge
 });
 
 it.each(['pending', 'applied'])('keeps refreshed %s snapshot B retired after a deferred Reject failure for A', async (status) => {
@@ -378,7 +384,7 @@ it.each(['pending', 'applied'])('keeps refreshed %s snapshot B retired after a d
   expect(screen.getByRole('checkbox').checked).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Reject selected' }));
   await waitFor(() => expect(writes).toEqual([{ path: '/api/pending/reject', body: { change_ids: [a.id] } }]));
-  expect(screen.getByText('status: rejected')).toBeTruthy();
+  expectRowStatus('rejected');
   expect(screen.getByRole('checkbox').checked).toBe(false);
 
   row = b;
@@ -390,7 +396,7 @@ it.each(['pending', 'applied'])('keeps refreshed %s snapshot B retired after a d
   await waitFor(() => expect(screen.getByLabelText('Approval mutation preview').textContent).toBe(JSON.stringify(b.approval_preview, null, 2)));
   const expectedStatuses = status === 'pending' ? ['pending', 'applied', 'pending'] : ['pending', 'applied'];
   expect(reads.map((path) => new URLSearchParams(path.split('?')[1]).get('status'))).toEqual(expectedStatuses);
-  expect(screen.getByText(`status: ${status}`)).toBeTruthy();
+  expectRowStatus(status);
   expect(screen.getByRole('checkbox').checked).toBe(false);
   expect(screen.getByRole('checkbox').disabled).toBe(status !== 'pending');
   if (status === 'pending') expect(screen.getByRole('button', { name: 'Apply selected' }).disabled).toBe(true);
@@ -402,7 +408,7 @@ it.each(['pending', 'applied'])('keeps refreshed %s snapshot B retired after a d
   });
 
   expect(screen.getByLabelText('Approval mutation preview').textContent).toBe(JSON.stringify(b.approval_preview, null, 2));
-  expect(screen.getByText(`status: ${status}`)).toBeTruthy();
+  expectRowStatus(status);
   expect(screen.getByRole('checkbox').checked).toBe(false);
   expect(screen.getByRole('checkbox').disabled).toBe(status !== 'pending');
   expect(reads).toHaveLength(expectedStatuses.length);
@@ -436,7 +442,7 @@ it('preserves same-generation Reject rollback without restoring a different snap
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: 'Reject selected' }));
   await waitFor(() => expect(writes).toEqual([{ path: '/api/pending/reject', body: { change_ids: [a.id] } }]));
-  expect(screen.getByText('status: rejected')).toBeTruthy();
+  expectRowStatus('rejected');
   expect(screen.getByRole('checkbox').checked).toBe(false);
   expect(screen.getByRole('button', { name: 'Apply selected' }).disabled).toBe(true);
 
@@ -447,7 +453,7 @@ it('preserves same-generation Reject rollback without restoring a different snap
   });
 
   expect(screen.getByLabelText('Approval mutation preview').textContent).toBe(JSON.stringify(a.approval_preview, null, 2));
-  expect(screen.getByText('status: pending')).toBeTruthy();
+  expect(screen.getByText('Status: Pending')).toBeTruthy();
   expect(screen.getByRole('checkbox').checked).toBe(true);
   expect(screen.getByRole('button', { name: 'Apply selected' }).disabled).toBe(false);
   expect(screen.getByRole('alert').textContent).toBe(failure.message);

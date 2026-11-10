@@ -118,7 +118,7 @@ describe('displayed common approval snapshots', () => {
 
 describe('presentational helpers', () => {
   it('humanizes change_type labels', () => {
-    expect(changeTypeLabel('add_to_collection')).toBe('add to collection');
+    expect(changeTypeLabel('add_to_collection')).toBe('Add to collection');
     expect(changeTypeLabel(undefined)).toBe('');
   });
 

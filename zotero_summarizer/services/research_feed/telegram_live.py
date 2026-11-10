@@ -35,7 +35,7 @@ def collect(settings, profile, config) -> None:
     Exceptions (including ``TelegramChildFailed`` with a session ``code``) propagate
     to the caller, which maps session codes to ``needs_auth``.
     """
-    from zotero_summarizer.cli._telegram import run_child
+    from zotero_summarizer.integrations.telegram_child import run_child
 
     _require_model(settings, profile, config)
     run_child(settings, "digest")

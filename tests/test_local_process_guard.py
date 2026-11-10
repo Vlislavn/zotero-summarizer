@@ -13,55 +13,6 @@ from types import SimpleNamespace
 from zotero_summarizer.integrations import _process_guard
 
 
-@pytest.mark.parametrize('condition', ['closed', 'live_pid', 'reused_pid', 'orphan_group', 'escaped_runtime', 'live_listener',
-                                       'opaque_unrelated', 'opaque_native'])
-@pytest.mark.parametrize('stop_kind', ['resource_guard', 'failed_worker_exit'])
-@pytest.mark.parametrize('rss_mib', [4096, 6144])
-def test_owner_recovery_requires_kernel_absence_not_native_success(tmp_path, monkeypatch, condition, stop_kind, rss_mib):
-    import os
-    import socket
-
-    runtime = tmp_path / 'runtime'
-    record = {'owner': 'local-evaluation-v1', 'mode': 'finite', 'state': 'stopped', 'guard_stop': 'rss_mib',
-              'limits': {**_process_guard._LIMITS, 'rss_mib': rss_mib},
-              **{key: {'pid': number, 'created': 100.0} for number, key in enumerate(
-                  ['guardian', 'child', 'sentinel'], start=900001)}}
-    if stop_kind == 'failed_worker_exit':
-        record.update(guard_stop=None, returncode=1)
-    if rss_mib != 4096:
-        with pytest.raises(ValueError, match='stopped finite'):
-            _process_guard._termination_evidence(record, runtime, 'http://127.0.0.1:1')
-    monkeypatch.setattr(psutil, 'pid_exists', lambda _: condition in {'live_pid', 'reused_pid'})
-    arguments = ['llama-server', '--model', str(runtime / 'weights')] if condition == 'escaped_runtime' else []
-    if condition in {'opaque_native', 'opaque_unrelated'}:
-        arguments = None
-    process = SimpleNamespace(pid=900004, info={'uids': SimpleNamespace(real=os.getuid()),
-        'name': 'login' if condition == 'opaque_unrelated' else 'llama-server', 'create_time': 200.0,
-        'cmdline': arguments})
-    monkeypatch.setattr(psutil, 'process_iter', lambda *_, **__: [process])
-    monkeypatch.setattr(os, 'getpgid', lambda _: 900002 if condition == 'orphan_group' else 900010)
-    with socket.socket() as listener:
-        listener.bind(('127.0.0.1', 0))
-        port = listener.getsockname()[1]
-        if condition != 'live_listener':
-            listener.close()
-        if condition in {'closed', 'opaque_unrelated'}:
-            evidence = _process_guard._termination_evidence(record, runtime, f'http://127.0.0.1:{port}', rss_limit_mib=rss_mib)
-            assert evidence['group_absent'] and evidence['listener_absent']
-            assert evidence['successful'] is False and evidence['native_terminal_observed'] is False
-        else:
-            with pytest.raises((ValueError, OSError)):
-                _process_guard._termination_evidence(record, runtime, f'http://127.0.0.1:{port}', rss_limit_mib=rss_mib)
-
-
-@pytest.mark.parametrize('returncode', [0, None, True])
-def test_success_or_missing_worker_exit_does_not_authorize_termination_ack(tmp_path, returncode):
-    record = {'owner': 'local-evaluation-v1', 'mode': 'finite', 'state': 'stopped', 'guard_stop': None,
-              'returncode': returncode, 'limits': dict(_process_guard._LIMITS)}
-    with pytest.raises(ValueError, match='stopped finite'):
-        _process_guard._termination_evidence(record, tmp_path / 'runtime', 'http://127.0.0.1:1')
-
-
 @pytest.mark.parametrize('rss_mib', [4096, 6144])
 def test_monitor_keeps_original_time_and_swap_baseline(tmp_path, monkeypatch, rss_mib):
     observed_baselines = []

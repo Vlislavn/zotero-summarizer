@@ -19,7 +19,7 @@ export default function ReadinessStrip() {
   // nothing to fix is not rendered at all.
   const issues = [
     !pillars.llm && !pillars.llmDisabled && (approvalNeeded
-      ? { label: 'Provider approval', to: '/settings?task=connection', reason: 'The model-list permission is missing or expired. Approve the exact provider in AI models.' }
+      ? { label: 'Provider approval', to: '/settings?task=connection', reason: 'Approval is missing or expired. In AI models, press “Load models” (or “Connect provider”) to approve this server.' }
       : { label: 'AI provider', to: '/settings?task=connection', reason: tidyReason(status?.llm?.detail) || 'Not reachable or no key saved — check AI models.' }),
     !pillars.goals && { label: 'Goals', to: '/today?task=selection', reason: 'None set — article selection has nothing to match against.' },
     !pillars.model && { label: 'Classifier', to: '/ops?tab=system', reason: 'Not trained yet — retrain in Ops → System.' },

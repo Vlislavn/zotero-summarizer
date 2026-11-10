@@ -15,8 +15,12 @@ const bullets = (text) => (text || '').replace(/\s*\[c\d+\]/g, '').split('\n')
   .map((line) => line.replace(/^\s*(?:[-*•–—]|\d+[.)])\s*/, '').trim()).filter(Boolean).slice(0, BULLETS);
 
 // The first line of the post, cut at a word boundary (never mid-word) so it reads as one headline of ≤2 lines.
-function headlineOf(text) {
-  const line = (text || '').split('\n').find((row) => row.trim())?.trim() || '';
+// A line that is only a link is no headline: the first text line wins, and a pure link post is named by its channel.
+const BARE_URL = /^<?https?:\/\/\S+>?$/;
+const clean = (row) => row.trim().replace(/^[-*•–—]\s+/, '');
+function headlineOf(text, channel) {
+  const lines = (text || '').split('\n').map(clean).filter(Boolean);
+  const line = lines.find((row) => !BARE_URL.test(row)) || (lines.length && channel ? `Link post from @${channel}` : '');
   if (line.length <= HEADLINE_CHARS) return line;
   const cut = line.slice(0, HEADLINE_CHARS + 1);
   const space = cut.lastIndexOf(' ');
@@ -54,18 +58,18 @@ export default function TelegramPost({ post }) {
   const discussion = post.discussion;
   const points = discussion?.points?.length ? discussion.points : bullets(discussion?.summary).map((text) => ({ text, cites: [] }));
   const lines = points.map((point) => point.text);
-  const headline = headlineOf(post.text) || lines[0] || 'No text';
+  const headline = headlineOf(post.text, post.channel) || lines[0] || 'No text';
   const important = discussion?.important || [];
   const rows = (post.text || '').split('\n');
-  const first = rows.findIndex((line) => line.trim());
-  const body = (first >= 0 && rows[first].trim() === headline ? rows.slice(first + 1) : rows).join('\n').trim();  // the headline is not repeated
+  const first = rows.findIndex((line) => line.trim() && headlineOf(line, post.channel) === headline);
+  const body = (first >= 0 && clean(rows[first]) === headline ? [...rows.slice(0, first), ...rows.slice(first + 1)] : rows).join('\n').trim();  // the headline is not repeated
   const toggle = (name) => setOpen(open === name ? null : name);
   if (done) return <li className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-1.5 text-sm text-slate-600">
     <Icon name="check" size={14} /><span className="min-w-0 flex-1 truncate">{headline} · @{post.channel}{feedbackText(post, reasons) && ` · ${feedbackText(post, reasons)}`}</span>
     <button type="button" onClick={() => mark.mutate(false)} className="min-h-11 text-forest-800 underline underline-offset-4 sm:min-h-8">Undo</button>
   </li>;
   return <li className={`rounded-xl border border-slate-200 px-4 pb-1 pt-3.5 ${reasons ? 'bg-slate-50' : 'bg-white'}`}>
-    {post.continues && <p className="mb-1 break-words text-xs text-slate-600">Continues <TelegramLink href={post.continues.permalink}>@{post.continues.channel}: {headlineOf(post.continues.text)}</TelegramLink></p>}
+    {post.continues && <p className="mb-1 break-words text-xs text-slate-600">Continues <TelegramLink href={post.continues.permalink}>@{post.continues.channel}: {headlineOf(post.continues.text, post.continues.channel)}</TelegramLink></p>}
     <h3 className="break-words text-base font-medium leading-snug text-slate-900">{headline}</h3>
     {discussion && (points.length
       ? <ul className="mt-2 space-y-1 text-sm leading-snug text-slate-700">
@@ -75,7 +79,7 @@ export default function TelegramPost({ post }) {
           {point.text}
           {point.cites.length > 0 && <button type="button" aria-expanded={openPoint === index} aria-label={`Comments behind point ${index + 1}`}
             onClick={() => setOpenPoint(openPoint === index ? null : index)} className="relative ml-1 inline-flex items-center gap-0.5 align-baseline text-xs text-slate-600 before:absolute before:-inset-3 before:content-[''] hover:text-forest-800 sm:before:-inset-1">
-            <Icon name="chevron" size={12} className={`transition-transform ${openPoint === index ? 'rotate-90' : ''}`} />{point.cites.length}</button>}
+            <Icon name="chevron" size={12} className={`transition-transform ${openPoint === index ? 'rotate-90' : ''}`} />{commentsText(point.cites.length)}</button>}
           {openPoint === index && <div className="mt-1"><TelegramThread sourceId={post.source_id} ids={point.cites} /></div>}
         </li>)}
       </ul>

@@ -23,7 +23,7 @@ function Status({ tone, text, detail }) {
 function providerStatus(reach, row) {
   if (reach.isPending) return { tone: 'neutral', text: 'Checking provider…' };
   if (reach.isError || !row) return { tone: 'neutral', text: 'Provider status unavailable' };
-  if (row.status === 'needs_approval') return { tone: 'warn', text: 'Provider needs approval', detail: row.detail };
+  if (row.status === 'needs_approval') return { tone: 'warn', text: 'Needs approval' };
   if (row.reachable) return { tone: 'ok', text: 'Provider reachable' };
   return { tone: 'fail', text: 'Not reachable' };
 }

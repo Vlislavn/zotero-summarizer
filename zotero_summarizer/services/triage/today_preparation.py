@@ -6,10 +6,14 @@ paper at a time through the existing deep-review worker and cache: headless
 acquisition, no Zotero write, no visible browser. Current results, negative ones
 included, are reused; a failing key is tried once per process. A process exit
 loses only the paper in flight. Activation is ``quality_review.auto_on_tick_k``
-(papers per run, 0 = off), checked by the feed tick.
+(papers per run, 0 = off): a feed tick starts a run, and so does ``schedule_on_startup``
+shortly after launch (``serve`` runs no tick loop, so Today would stay empty until a
+manual batch). A run plans nothing when Today already has its target ready; the latch
+keeps runs single-flight.
 """
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -23,6 +27,7 @@ TARGET_READY = 20   # eligible-or-pending items to keep ahead of Today (shows <=
 SCAN_LIMIT = 60     # never look deeper than this in the ranked pool
 LOOKBACK_HOURS = 168
 _POLL_SECONDS = 5
+STARTUP_DELAY_SECONDS = 30  # let startup import/prewarm settle before the first run
 
 _latch = FlightLatch()
 _failed: set[str] = set()
@@ -68,6 +73,24 @@ def start(db_path: Path, *, limit: int) -> bool:
     if limit <= 0 or not _latch.try_start():
         return False
     run_in_background(lambda: _run(db_path, limit), name="today-preparation")
+    return True
+
+
+def schedule_on_startup(db_path: Path, *, limit: int, delay: float = STARTUP_DELAY_SECONDS) -> bool:
+    """Start a run ``delay`` seconds after launch; False when off (``limit`` <= 0)."""
+    if limit <= 0:
+        return False
+
+    def _start() -> None:
+        try:
+            if start(db_path, limit=limit):
+                LOGGER.info("today preparation started at startup (limit=%d)", limit)
+        except Exception:  # noqa: BLE001 — background-timer boundary; the next tick retries
+            LOGGER.exception("today preparation startup start failed")
+
+    timer = threading.Timer(delay, _start)
+    timer.daemon = True
+    timer.start()
     return True
 
 
@@ -128,4 +151,4 @@ def _prepare_one(db_path: Path, key: str) -> str:
     return "reviewed" if usable_review(entry) else "failed"
 
 
-__all__ = ["LOOKBACK_HOURS", "SCAN_LIMIT", "TARGET_READY", "plan", "start", "status"]
+__all__ = ["LOOKBACK_HOURS", "SCAN_LIMIT", "TARGET_READY", "plan", "schedule_on_startup", "start", "status"]

@@ -34,6 +34,8 @@ saved-settings reload; uncertain full-config ACKs do not advance Setup.
 
 ## Trustworthy verification boundary
 
+Refusal texts name the numbers and the next step, not internal reason codes (e.g. the local-test refusal shows free RAM/swap, not `memory_insufficient`).
+
 `load_admission.py` separates hardware safety from listing/configuration and
 profile advice. Ordinary/external local daemons have no authoritative effective
 LLM ResourceEnvelope and refuse UNKNOWN before client construction, including

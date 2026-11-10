@@ -142,6 +142,7 @@ Ordinary upserts/imports keep their existing update behavior.
 `item_titles.titles_for_keys` is a read-only corpus-cache title lookup by item key.
 
 `count_rss_items_by_feed` returns stored item counts per feed id (feed list UI).
+`import_zotero_feeds` returns `{imported, added}` — `added` counts feeds that were new (the UI says "Added N new feeds (M already present)").
 `rss_feeds.fetch_watermark` / `fetch_incomplete` (migration v17, nullable/defaulted) record per-feed fetch progress; `record_rss_fetch_result(watermark=, incomplete=)` only moves the watermark forward and `incomplete=None` leaves the flag untouched.
 
 RSS item reads accept `limit=None` for an uncapped whole-feed pass (`LIMIT -1`);

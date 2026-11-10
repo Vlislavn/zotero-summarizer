@@ -388,11 +388,17 @@ def startup(override_model: str | None = None, *, background: bool = True) -> No
     from zotero_summarizer.services.library.review_fleet import prewarm as review_fleet_prewarm
     review_fleet_scheduled = review_fleet_prewarm.schedule_on_startup(config, app_state)
 
+    # Today preparation otherwise starts only from a feed tick, and ``serve`` runs none.
+    from zotero_summarizer.services.triage import today_preparation
+    today_prep_scheduled = today_preparation.schedule_on_startup(
+        current_settings.triage_db_path,
+        limit=config.quality_review.auto_on_tick_k if config.quality_review.enabled else 0)
+
     LOGGER.info(
         (
             "Startup complete config=%s timeout=%ss log_file=%s corpus_db=%s embedding_model=%s "
             "zotero_data_dir=%s interrupted_jobs=%s resumed_jobs=%s auto_corpus_import=%s "
-            "startup_rss_refresh=%s deep_review_prewarm=%s review_fleet_prewarm=%s triage_job_concurrency=%s"
+            "startup_rss_refresh=%s deep_review_prewarm=%s review_fleet_prewarm=%s today_preparation=%s triage_job_concurrency=%s"
         ),
         current_settings.config_path,
         current_settings.summary_timeout_seconds,
@@ -406,5 +412,6 @@ def startup(override_model: str | None = None, *, background: bool = True) -> No
         rss_refresh_scheduled,
         prewarm_scheduled,
         review_fleet_scheduled,
+        today_prep_scheduled,
         current_settings.triage_job_concurrency,
     )

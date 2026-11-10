@@ -84,7 +84,7 @@ transport on construction failure or callback completion. Ordinary clients keep
 their prior options; all setup local-LLM requests must first pass admission.
 
 Shared files: `_common` (helpers: settings/logging/sqlite-ro/now_iso_z/html_to_text/
-`load_golden_rows` (delegates to `golden.csv_store.read_snapshot`), `atomic_write` (callback) + `write_json_atomic`
+`atomic_write` (callback) + `write_json_atomic`
 (dict→JSON) for tmp+replace artifact/cache writes. JSON publication delegates to
 the callback writer: both use a unique sibling staging file per invocation and
 clean it up on failure. They do not serialize read–modify–write operations or
@@ -163,7 +163,7 @@ system-owned knob — `apply_env_overrides` re-validates, `render_overrides_doc`
 generates `docs/overrides.md`; precedence: code default < `goals.yaml` < `ZS_*` env;
 `read_config` additionally forces `prestige.enabled` off under `ZS_OFFLINE` so the
 now-default-on OpenAlex prestige never hits the network air-gapped),
-`health` (reports `starting` until the runtime config exists), `results`,
+`health` (reports `starting` until the runtime config exists), `results` (`dashboard_results(item_keys="a,b")` = batch latest-row lookup, ≤200 keys),
 `corpus` (embeddings/affinity), `emoji_signals`
 (emoji→engagement taxonomy; `READ_EMOJIS` = non-meta engagement emojis only, used by the library read/hide partition).
 

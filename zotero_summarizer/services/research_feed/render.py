@@ -8,6 +8,18 @@ from pathlib import Path
 from typing import Any, Callable
 
 from zotero_summarizer.services._common import write_json_atomic
+from zotero_summarizer.services.research_feed.cursor import NOT_CACHED
+from zotero_summarizer.services.research_feed.source import PLAIN_REASONS
+
+
+def _project_use(notes: list[str]) -> str:
+    """«a: S; b: S» → «a, b: S» — the same sentence is said once."""
+    groups: dict[str, list[str]] = {}
+    for note in notes:
+        project, sep, sentence = note.partition(": ")
+        groups.setdefault(sentence if sep else note, []).append(project if sep else "")
+    return "; ".join(f"{', '.join(p for p in projects if p)}: {sentence}" if any(projects) else sentence
+                     for sentence, projects in groups.items())
 
 
 def markdown(payload: dict[str, Any]) -> str:
@@ -28,7 +40,7 @@ def markdown(payload: dict[str, Any]) -> str:
             f"{', '.join(record['triage']['matched_projects']) or 'none'}", "",
             card["problem"], "",
             f"**Core idea:** {card['core_idea'] or 'not established'}", "",
-            f"**Project use:** {'; '.join(card['project_use_notes'])}", "",
+            f"**Project use:** {_project_use(card['project_use_notes'])}", "",
             f"**Artifacts:** {', '.join(card['code_urls'] + card['dataset_urls'] + card['model_urls']) or 'none verified'}", "",
         ]
         for label, value in (
@@ -49,7 +61,18 @@ def markdown(payload: dict[str, Any]) -> str:
     failures = payload.get("failed") or []
     if failures:
         lines += ["## Failed assessments (not scientific rejections)", ""]
-        lines += [f"- {row['source_id']}: {row['error']}" for row in failures]
+        # Name the paper by title (failed candidates carry theirs in source_history); drop the exception class.
+        history = (payload.get("metadata") or {}).get("source_history") or {}
+        unscreened = [row for row in failures if row["error"].endswith(NOT_CACHED)]
+        for row in failures:
+            if row not in unscreened:
+                reason = row["error"].partition(": ")[2] or row["error"]
+                title = (history.get(row["source_id"]) or {}).get("candidate", {}).get("title") or row["source_id"]
+                lines.append(f"- {title}: {PLAIN_REASONS.get(reason, reason)}")
+        if unscreened:
+            lines.append(f"- {len(unscreened)} papers were not screened yet (cached-only mode skips papers "
+                         "without a stored triage; run without --cached-only to screen them).")
+        lines.append("")
     unqualified = payload.get("unqualified_reviews") or []
     if unqualified:
         lines += ["## Review qualification pending", ""]

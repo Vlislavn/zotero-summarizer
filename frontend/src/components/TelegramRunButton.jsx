@@ -4,7 +4,7 @@ import Button from './ui/Button.jsx';
 import Spinner from './ui/Spinner.jsx';
 import { AUTH_CODES, CONSENT_TEXT, failureText, partialText, progressText, stepOf } from './telegramRunText.js';
 
-const AUTH_COMMAND = 'research-feed telegram-auth';
+const AUTH_COMMAND = 'zotero-summarizer research-feed telegram-auth';
 
 export function AuthCommand() {
   const [copied, setCopied] = useState(false);

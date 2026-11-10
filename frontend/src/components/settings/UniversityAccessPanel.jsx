@@ -1,7 +1,7 @@
 // Library access — the review fleet's browser-based full-text fetch.
 //
 // For non-arXiv / paywalled papers a headless download can't pass Cloudflare/SSO,
-// so the fleet drives a real browser using a profile the user logs into ONCE here.
+// so the app opens a browser using a profile the user logs into ONCE here.
 // ConfigTask owns the revision-bound library-access draft and scoped save;
 // this controlled panel keeps only status and the separate one-time login.
 
@@ -54,8 +54,8 @@ export default function UniversityAccessPanel({ form, savedForm, saving = false,
   return (
     <div className="space-y-4">
       <p className="text-sm text-slate-600">
-        For non-arXiv / paywalled papers, the review fleet drives a real browser with your
-        institutional session to fetch the PDF. Edit the fields, <strong>Save library access</strong>,
+        For non-arXiv / paywalled papers, the app opens a browser with your
+        library sign-in to fetch the PDF. Edit the fields, <strong>Save library access</strong>,
         then log in once; the session persists.
       </p>
 
@@ -69,7 +69,7 @@ export default function UniversityAccessPanel({ form, savedForm, saving = false,
       <CheckboxField label="Enable browser PDF fetch for the review fleet" checked={form.ua_enabled} onChange={(value) => onUpdate('ua_enabled', value)} />
       <Field kind="select" label="Reuse an existing browser login (skip the in-app sign-in)" value={form.ua_cookie_browser}
         onChange={(value) => onUpdate('ua_cookie_browser', value)} options={COOKIE_BROWSERS}
-        hint="Reads that browser's session cookies so a paper you can already open there fetches without a second login. Safari is unreadable on recent macOS (Apple's hardened container) — use Chrome/Firefox. Falls back to the in-app login." />
+        hint="Reads that browser's session cookies so a paper you can already open there fetches without a second login. Safari blocks this on recent macOS — use Chrome/Firefox. Falls back to the in-app login." />
       <Field label="Library login URL" value={form.ua_login_url} onChange={(value) => onUpdate('ua_login_url', value)}
         placeholder="https://your-library.edu/login" />
       <Field label="EZproxy prefix" value={form.ua_ezproxy_prefix} onChange={(value) => onUpdate('ua_ezproxy_prefix', value)}

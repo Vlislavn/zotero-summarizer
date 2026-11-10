@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ### Added
 
+- CLI/MCP (#249): busy-port `serve` and `feeds select-daily` exit promptly; bad `--inspect`/recipe/snapshot → one line, exit 2; `restore-model` says to restart; MCP `search_papers` ~10 calls instead of ~770; synthetic experiment examples (`python -m tools.method_validation.examples DIR`).
+- RSS, Settings and offline wording (#248): plain feed errors, "Added N new feeds" and "Nothing new" refresh summaries, host-only feed rows, paper-named sync conflicts, one approval hint, iPhone home-screen icon.
 - Background processing (#219): Settings task for papers reviewed at once (8), calls per paper (2), feed catch-up days (7) and pages per feed (10); saved to goals.yaml only when changed from the default.
 - Checklist engine (#147): Settings choice Off (default) / Local / Cloud. When on, an external checklist model answers up to 5 checklist items (code/data, uncertainty, ablation, baselines, outside validation) with a verified evidence passage; unsure or failing cases fall back to the language model. Local = your own server address, not validated; Cloud sends paper text externally.
 - Your decisions (#47, #218): Ops → System analyses your accumulated verdicts (what changed, agreement with saved predictions, per-class ranges, data gaps) with “Run now”; also weekly with the feed daemon (switch in that card). Read-only: labels and models never change.
@@ -26,6 +28,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ### Changed
 
+- Ops wording (#246): a note made for another Zotero library says so (header pending count refreshes after Apply/Reject); retrain text matches the restorable model history; plain model-card, readiness and Gate-rejected labels.
+- Weekly digests in plain words (#247): date ranges, “Worth a skim”, sentences instead of snake_case flags and raw gate scores, project use said once, link-only Telegram posts titled by their first text line, “2 comments” labels.
+- UI noise leftovers (#237): plain Ops pending-changes copy, one chevron for every disclosure (no native ▶), shared label style on paper-page rail headings, 8 px shorter iPhone nav.
 - Field repair (#191) tries a fast attempt without reasoning first and escalates once with reasoning only if the field is still rejected (repair call ~10 s instead of 17–89 s); a field emptied by repair is listed as not established; lineage records rejected fields.
 - Calmer pages (#227): the paper verdict is on the first iPhone screen (long author lists fold to `+N more`, facts under the verdict, one-line outdated note); Today shows «Quality A», hides feed codes; Library hides raw HTML and folds explainers; no weight ≥600 anywhere.
 - Calmer Settings (#230): each provider failure and address is shown once (rows say «Not reachable»; reason on AI models, addresses under «Providers and status checks»); Needs-attention lists only open issues; short «Change» actions; repeated notes folded; Forest checkboxes.
@@ -47,6 +52,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ### Fixed
 
+- Connection approval (#244): an approved server stays approved across unrelated Settings saves, other providers' key saves and Telegram edits; it expires only when that provider's address/auth or its own key changes (one re-approval for older approvals).
+- Reviews (#242): web articles with non-breaking spaces or soft hyphens now render to PDF; heavy pages no longer fail on the browser proxy's connection cap; concurrent reviews wait for the browser instead of skipping it; Today preparation starts ~30 s after launch.
 - Find similar (#216, #225): works for feed-only papers too, sits right under the review, shows progress, drops the paper itself from results; library membership is cached until the library changes (/discover p50 1.1 s → 0.13 s).
 - Outdated-but-valid reviews (#116) keep the card recommended, accept verdict and Add for the same PDF, and show an «Outdated review» badge + refresh instead of a blank panel; review identity tracks only inputs that shape content.
 - Model Test (#101) keeps the true local memory-safety reason; connection approval is told apart from network failure with exact-connection recovery; setup cancellation or credential changes invalidate stale Ready.
@@ -61,3 +68,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 - Telegram: the duplicate CLI «saved news» pipeline (`research-feed run --source telegram`, `run_saved`, `TelegramNewsVerdict`, v1 reports), and the dead `conversations` path; the Re-label Audit page; Today's per-card Quality expander; legacy `llm.draft_model`/`refine_model`.
 - `make api`, `make ui` and `make ui-build` (use `make run` or `make dev`); `serve --no-kill`: it reports the bind error instead of stopping another process; `docs/benchmarking.md` is local-only.
+### Fixed
+
+- Readable labels: Weekly saved digests show date ranges, the Telegram sign-in command includes `zotero-summarizer`, `research-feed run --cached-only` names papers by title and exits 0 for uncached ones, Pending changes use plain action names and drop the internal band.
+

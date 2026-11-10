@@ -255,7 +255,8 @@ def _calibrate(args: argparse.Namespace) -> int:
     )
 
     if args.tier3:
-        from zotero_summarizer.services._common import load_golden_rows, read_config
+        from zotero_summarizer.services._common import read_config
+        from zotero_summarizer.services.golden.csv_store import load_golden_rows
         from zotero_summarizer.services.golden.hybrid_gt import apply_hybrid
         from zotero_summarizer.services.model.eval_baseline import run_baseline
 

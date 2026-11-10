@@ -77,7 +77,7 @@ English: `missing_session|session_unauthorized|revoked_session` (the only case t
 probes the model endpoint before the child starts), `telegram_incomplete`, `interrupted`,
 `telegram_action_failed`. The job runs the **one pipeline** behind an
 injectable `run_collect` seam: the default `telegram_live.collect` spawns the dedicated
-Telegram child (`run_child` purpose `digest`), which runs `collect_pages` + digest and
+Telegram child (`integrations.telegram_child.run_child` purpose `digest`), which runs `collect_pages` + digest and
 persists the result through `telegram_today`. `telegram_live.digest_seam` builds the live
 reply client (`integrations.telegram_reply_adapter.ThreadReplyClient`, reusing the bounded
 read-only `telegram_threads` discussion fetch), the SPECTER2 scorer, owner goals, the
@@ -165,7 +165,7 @@ rss_items → source/dedupe → prior triage → budget → existing deep_review
 | `ranking.py` | Continuous current-cohort relevance/goal/prestige ordering through the existing blend, before budgets. |
 | `runner.py` | Budgeted triage, optional missing deep reviews through `library.deep_review`, per-paper failure isolation, metrics/watermark, and dry-run/idempotent writeback. Tag idempotency looks up pending changes by target Zotero item, so unrelated older queue rows cannot push a matching writeback beyond a global scan cap. |
 | `card.py` | Base-qualified engineering-card assembly; only exact validated artifact URLs survive. No extraction or model calls. |
-| `render.py` | Canonical JSON and compact Markdown persistence. |
+| `render.py` | Canonical JSON and compact Markdown persistence (one identical project-use sentence is written once for all its projects). |
 | `reports.py` | Read-only list/detail/download lookup of published v1 RSS, retained v1 Telegram news and additive v2 Telegram conversation bundles, validated with existing candidate/triage/card models and present source/generation provenance references. Missing legacy provenance stays optional; malformed present references refuse. Source observations can retain an unqualified generation field; card provenance requires a valid generation hash. Listing labels unopenable runs with a one-line `reason` (old flat-file digests appear once, not openable). Reject symlink/path escapes; never generate or migrate artifacts. |
 
 Run weekly: `uv run zotero-summarizer research-feed run --from 2026-08-22
@@ -218,7 +218,7 @@ Successful abstract-stage writes use the existing atomic JSON writer under
 Settings.data_dir; reviews keep their existing owning cache writer. Neither is
 an fsync/power-loss guarantee or a cross-process generation claim.
 Missing abstract-stage caches are explicit cached-only failures, not low-relevance
-rejections. Optional cache errors affect only candidates needing that stage;
+rejections; reports and logs name failed papers by title (from `metadata.source_history`), never the `feed:g:` key, and `counts.not_triaged` counts those cache misses so the CLI exit code ignores them (a cached-only run exits 1 only for other failures). The report lists genuine failures first with plain reasons (`PLAIN_REASONS`, e.g. `history_abstract_conflict`) and folds the cache misses into one line, «N papers were not screened yet»; the log has one summary line instead of a warning per paper. Optional cache errors affect only candidates needing that stage;
 valid history neighbors still publish. Generating runs may reacquire missing PDFs
 through existing headless sources, never a browser. V1 provenance keeps numeric
 triage confidence; assessment confidence remains separately unknown.

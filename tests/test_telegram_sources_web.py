@@ -15,7 +15,7 @@ from zotero_summarizer.api.app import create_app
 from zotero_summarizer.api.routes import research_feed as routes
 from zotero_summarizer.services.research_feed import profile, telegram_job, telegram_live, telegram_today
 from zotero_summarizer.services.llm import factory
-from zotero_summarizer.cli import _telegram
+from zotero_summarizer.integrations import telegram_child as _telegram
 
 
 def request(app, method, path, data=None):

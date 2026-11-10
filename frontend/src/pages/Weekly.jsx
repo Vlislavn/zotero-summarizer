@@ -10,6 +10,17 @@ import WeeklyDigest from '../components/WeeklyDigest.jsx';
 import TelegramHistory from '../components/TelegramHistory.jsx';
 import TelegramToday from '../components/TelegramToday.jsx';
 
+const DAY = { day: 'numeric', month: 'short', year: 'numeric' };
+// Calendar day as written in the ISO string (no timezone shift): 2026-11-01… → «1 Nov 2026».
+const fmtDay = (iso) => new Date(`${String(iso).slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-GB', { ...DAY, timeZone: 'UTC' });
+// «1 Nov – 9 Nov 2026 · Telegram»; run slugs are internal ids (an old flat digest only has its slug date).
+export function runLabel(item) {
+  const slug = /(\d{4}-\d{2}-\d{2})/.exec(item.run_id || '')?.[1];
+  const range = item.start && item.end ? `${fmtDay(item.start)} – ${fmtDay(item.end)}` : slug ? `Digest of ${fmtDay(slug)}` : 'Saved digest';
+  const saved = item.generated_at ? ` · saved ${new Date(item.generated_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '';
+  return `${range}${item.source === 'telegram' ? ' · Telegram' : ''}${saved}`;
+}
+
 export default function Weekly() {
   const [params, setParams] = useSearchParams();
   const location = useLocation();
@@ -42,8 +53,8 @@ export default function Weekly() {
           return next;
         })}>
           <option value="">Choose a saved run</option>
-          {runId && !items.some((item) => item.run_id === runId) && <option value={runId}>{runId}</option>}
-          {items.map((item) => <option key={item.run_id} value={item.run_id}>{item.run_id}{item.available ? ` · ${item.counts.cards_generated} cards${item.source === 'telegram' ? ' · Telegram' : ''}` : ` · unavailable — ${item.reason || 'cannot be opened'}`}</option>)}
+          {runId && !items.some((item) => item.run_id === runId) && <option value={runId}>{runLabel({ run_id: runId })}</option>}
+          {items.map((item) => <option key={item.run_id} value={item.run_id}>{item.available ? `${runLabel(item)} · ${item.counts.cards_generated} cards` : `${runLabel(item)} · unavailable — ${item.reason || 'cannot be opened'}`}</option>)}
         </select>
       </label><Button variant="secondary" className="min-h-11" onClick={() => { runs.refetch(); if (runId) report.refetch(); }}>Refresh saved runs</Button></div>
       <Async error={runs.error} />

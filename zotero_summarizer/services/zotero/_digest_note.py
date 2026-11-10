@@ -55,8 +55,7 @@ def _checks(q: dict[str, Any]) -> str:
 def _quality(q: dict[str, Any], verification: str) -> str:
     if not q:
         return f"<h3>Quality</h3>{_p('Verification', verification)}"
-    head = [f"Grade {q['grade']}" if q.get("grade") else "", f"band {q['quality_band']}" if q.get("quality_band") else "",
-            _checks(q)]
+    head = [f"Grade {q['grade']}" if q.get("grade") else "", _checks(q)]
     if q.get("passes_total") == 1:
         head.append("1 pass")
     elif q.get("passes_total"):
@@ -147,7 +146,6 @@ def build_digest_note_html(digest: Any, *, entry: dict[str, Any] | None = None,
     grade = _g(digest, "grade", "")
     header = " · ".join(x for x in [e(decision), f"{minutes} min" if minutes else "",
                                     f"Quality {e(grade)}" if grade else "",
-                                    f"band {e(quality['quality_band'])}" if quality.get("quality_band") else "",
                                     e(_checks(quality))] if x)
     parts = [f"<!-- {DIGEST_NOTE_MARKER};version=1 -->", f"<h2>Digest — {header}</h2>", *_body(digest, decision)]
     if entry:

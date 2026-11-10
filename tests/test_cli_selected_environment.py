@@ -142,7 +142,7 @@ def test_serve_factory_uses_the_admitted_default_root(tmp_path):
         "def serve(*args,**kwargs):",
         "    print(json.dumps({'factory_root':str(Settings.load().project_root)}))",
         "sys.modules['uvicorn']=types.SimpleNamespace(run=serve)",
-        "assert cli.main(['serve'])==0",
+        "assert cli.main(['serve','--port','0'])==0",  # 0: the busy-port preflight must not see a live :8000
     ]), shell={"ZOTERO_SUMMARIZER_HOME": str(tmp_path / "selected")},
         selected_env=f"ZOTERO_SUMMARIZER_HOME={tmp_path / 'default'}\nZS_OFFLINE=1\n")
     assert row == {"factory_root": str(selected)}

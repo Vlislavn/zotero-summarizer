@@ -7,7 +7,7 @@ import { resolveConflict } from '../offlineStore.js';
 import { syncNow } from '../syncClient.js';
 
 vi.mock('../offlineStore.js', () => ({
-  publishStatus: vi.fn(), resolveConflict: vi.fn(), syncStatusEvent: 'zs-sync-status',
+  allPapers: () => Promise.resolve([]), publishStatus: vi.fn(), resolveConflict: vi.fn(), syncStatusEvent: 'zs-sync-status',
 }));
 vi.mock('../syncClient.js', () => ({ syncNow: vi.fn() }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -92,7 +92,7 @@ it('wraps long stable keys in both rejected drafts and conflicts on mobile', () 
     ],
   } })));
   expect(screen.getByText((_, node) => node.tagName === 'SPAN'
-    && node.textContent.startsWith('Sync conflict for')).className).toContain('break-words');
+    && node.textContent.startsWith('Your verdict on a paper')).className).toContain('break-words');
 });
 
 it('exposes every rejected draft for recovery without pretending refresh repairs it', () => {

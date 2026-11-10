@@ -11,6 +11,9 @@ from zotero_summarizer.services.library._feed_assessment import fingerprint
 from zotero_summarizer.services.llm import factory
 
 
+NOT_CACHED = "cached abstract triage unavailable"
+
+
 class CandidateCursor:
     def __init__(self, settings):
         self.path = settings.data_dir / "research_feed" / "triage.json"
@@ -23,7 +26,7 @@ class CandidateCursor:
 
     def row(self, candidate, profile, *, generate=True):
         if not generate and candidate.source_id not in self.entries:
-            raise ValueError("cached abstract triage unavailable")
+            raise ValueError(NOT_CACHED)
         app = state() if generate else None
         config = app.app_state.config if generate else read_config(self.settings.config_path, self.settings.calibration_path)
         config = config.model_copy(update={"research_goals": [*profile.themes, *profile.projects]})

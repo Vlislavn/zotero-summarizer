@@ -3,6 +3,7 @@ import { PRIORITY_LABELS, pretty, isAutoVerdict } from '../utils/priorityLabels.
 import { formatShortDate } from './library/shared.jsx';
 import { DECISION_BTN, DECISION_HOVER, DECISION_TINT, DECISION_WORD } from './decisionVocab.js';
 import Icon from './ui/Icon.jsx';
+import { SectionLabel } from './paper/review/primitives.jsx';
 
 // Verdict editor for a single paper.
 // Props:
@@ -96,7 +97,7 @@ export default function VerdictPanel({
   if (existingVerdict && !editing) {
     return (
       <div>
-        <h3 className="text-sm font-medium text-slate-900 mb-3">Your verdict</h3>
+        <SectionLabel level={3} className="mb-3">Your verdict</SectionLabel>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-slate-600">
           <span>
             {isAutoVerdict(existingVerdict) ? 'Auto:' : 'Yours:'}{' '}
@@ -152,7 +153,7 @@ export default function VerdictPanel({
   const dirty = existingVerdict ? editing : Boolean(priority || comment);
   return (
     <div>
-      <h3 className="text-sm font-medium text-slate-900 mb-3">Your verdict</h3>
+      <SectionLabel level={3} className="mb-3">Your verdict</SectionLabel>
 
       <div className="flex flex-wrap gap-2 mb-3">
         {PRIORITIES.map((p) => {

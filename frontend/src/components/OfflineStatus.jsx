@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { publishStatus, resolveConflict, syncStatusEvent } from '../offlineStore.js';
+import { allPapers, publishStatus, resolveConflict, syncStatusEvent } from '../offlineStore.js';
 import { syncNow } from '../syncClient.js';
 import { pretty } from '../utils/priorityLabels.js';
 import usePendingCount from '../hooks/usePendingCount.js';
@@ -14,7 +14,12 @@ function conflictValue(field, value, operation, comment) {
   return `${text}${comment ? `\n\nComment:\n${comment}` : ''}`;
 }
 
+const CONFLICT_WHAT = { review_note: 'note', verdict: 'verdict', review_question: 'question' };
+const conflictSentence = (conflict, title) =>
+  `Your ${CONFLICT_WHAT[conflict.field] || 'change'} on ${title ? `“${title}”` : 'a paper'} was changed elsewhere.`;
+
 export default function OfflineStatus() {
+  const [titles, setTitles] = useState({});
   const [sync, setSync] = useState({ online: navigator.onLine, connection: 'unchecked', pending: null, conflicts: [], rejected: [] });
   const [resolving, setResolving] = useState(null);
   const [open, setOpen] = useState(false);
@@ -25,6 +30,11 @@ export default function OfflineStatus() {
     publishStatus();
     return () => window.removeEventListener(syncStatusEvent, update);
   }, []);
+  const conflictCount = sync.conflicts?.length || 0;
+  useEffect(() => {
+    if (!conflictCount) return;
+    allPapers().then(rows => setTitles(Object.fromEntries(rows.map(row => [row.item_key, row.title])))).catch(() => {});
+  }, [conflictCount]);
   async function resolve(id, keepLocal) {
     setResolving(id);
     setResolutionError('');
@@ -50,11 +60,11 @@ export default function OfflineStatus() {
   const dot = down || sync.local_error ? 'bg-rose-600' : attention ? 'bg-amber-500' : sync.connection === 'connected' ? 'bg-emerald-600' : 'bg-slate-400';
   return (
     <section aria-label="Offline sync" className="min-w-0 text-xs text-slate-600">
-      <div className="flex items-center gap-2 min-h-11">
+      <div className="flex items-center gap-2 min-h-9 sm:min-h-11">
         <span aria-hidden="true" className={`h-2.5 w-2.5 shrink-0 rounded-full ${dot}`} />
         <p role="status" aria-live="polite" className="min-w-0 flex-1 truncate">{line}</p>
         {!attention && (
-          <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="min-h-11 px-2 -mr-2 text-forest-800 font-medium">
+          <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className={`no-tap-min relative min-h-9 sm:min-h-11 px-2 -mr-2 text-forest-800 font-medium after:absolute after:inset-x-0 after:top-0 sm:after:hidden ${open ? 'after:h-9' : 'after:h-11'}`}>
             {open ? 'Hide details' : 'Details'}
           </button>
         )}
@@ -69,7 +79,7 @@ export default function OfflineStatus() {
         {sync.last_synced_at && <p>Last synced {new Date(sync.last_synced_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}{sync.paper_count != null && ` · ${sync.paper_count} papers on this device`}</p>}
         {down && <p className="text-amber-800">
           Server unreachable — reading only. Works: papers already synced to this device (open from Library; verdicts and notes are kept here and sent later).
-          Not available: Today decisions, PDFs, AI, rescoring. Check that the Mac is running <code>make iphone</code> and Tailscale is on, then tap Sync now.
+          Not available: Today decisions, PDFs, AI, rescoring. Check that your Mac is on, the app is running for iPhone, and Tailscale is connected, then tap Sync now.
         </p>}
         {!down && sync.sync_error && <p role="status" className="text-amber-800">{sync.sync_error}. Changes made here stay on this device; retry Sync now.</p>}
         {sync.local_error && <p role="alert" className="text-rose-700">Device storage unavailable: {sync.local_error}. Offline saves cannot be confirmed. Do not clear site data; keep unsaved text until storage works.</p>}
@@ -79,7 +89,7 @@ export default function OfflineStatus() {
         return (
         <details key={conflict.mutation_id} open className="mt-2 border border-amber-200 rounded-lg p-2">
           <summary className="cursor-pointer">Changed elsewhere — compare before resolving</summary>
-          <span className="break-words">Sync conflict for <span className="break-all">{conflict.item_key}</span> ({conflict.field}).</span>
+          <span className="break-words">{conflictSentence(conflict, conflict.title || titles[conflict.item_key])}</span>
           <div className="grid sm:grid-cols-2 gap-2 my-2">
             <label>Server
               <textarea readOnly rows={4} className="block w-full border p-2" value={conflictValue(conflict.field, conflict.canonical?.value, 'set', conflict.canonical?.comment)} />

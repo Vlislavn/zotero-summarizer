@@ -3,7 +3,7 @@ import { askPaper, saveReviewQuestion } from '../../api/libraryApi.js';
 import { queueQuestionSubmission } from '../../offlineStore.js';
 import { questionSubmissionError, sameQuestion } from '../../questionSubmission.js';
 import Spinner from '../ui/Spinner.jsx';
-import { Disclosure } from '../paper/review/primitives.jsx';
+import { Disclosure, SectionLabel } from '../paper/review/primitives.jsx';
 
 const MODE_HELP =
   'Full context: metadata + generated notes + paper body. ' +
@@ -239,7 +239,7 @@ export default function AskPaperBox({ itemKey, variant = 'disclosure', allowRawP
   if (variant === 'rail') {
     return (
       <div>
-        <div className="mb-2 text-[11px] uppercase tracking-[0.08em] font-semibold text-slate-400">Ask this paper</div>
+        <SectionLabel level={3} className="mb-2">Ask this paper</SectionLabel>
         <p className="mb-2 text-[11px] text-slate-400">Answered only from this paper — it abstains if the answer isn't there.</p>
         {inner}
       </div>

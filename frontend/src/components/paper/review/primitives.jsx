@@ -23,10 +23,10 @@ export function Section({ label, action, children, className = '' }) {
   );
 }
 
-export function SectionLabel({ children, level = 2 }) {
+export function SectionLabel({ children, level = 2, className = '' }) {
   const Heading = `h${level}`;
   return (
-    <Heading className="text-[11px] uppercase tracking-[0.08em] font-medium text-slate-500">
+    <Heading className={`text-[11px] uppercase tracking-[0.08em] font-medium text-slate-500 ${className}`}>
       {children}
     </Heading>
   );

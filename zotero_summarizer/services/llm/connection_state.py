@@ -92,8 +92,18 @@ def save(receipt):
 
 
 def approve(receipt):
-    """Derived task-receipt pointer, not another provider/client store."""
-    write_json_atomic(approval_path(receipt['provider']['name']), {'operation_id': receipt['operation_id']})
+    """Derived task-receipt pointer, not another provider/client store.
+
+    Records the slot's credential fingerprint when a key resolves; without one the approval
+    keeps the strict whole-revision binding.
+    """
+    from zotero_summarizer.services.llm.credential_fingerprint import fingerprint
+
+    pointer = {'operation_id': receipt['operation_id']}
+    provider = receipt['provider']
+    if provider.get('auth_mode', 'legacy') != 'none' and (current := fingerprint(provider['api_key_env'])):
+        pointer['credential_fingerprint'] = current
+    write_json_atomic(approval_path(provider['name']), pointer)
 
 
 def approval_path(name):

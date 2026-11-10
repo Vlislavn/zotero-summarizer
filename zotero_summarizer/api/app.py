@@ -54,7 +54,7 @@ def _install_spa(app: FastAPI) -> None:
             return FileResponse(str(path))
         return endpoint
 
-    for name in ("sw.js", "manifest.webmanifest", "app-icon.svg"):
+    for name in ("sw.js", "manifest.webmanifest", "app-icon.svg", "apple-touch-icon.png"):
         app.add_api_route(f"/{name}", public_file(name), methods=["GET"], include_in_schema=False)
 
     async def spa_index() -> FileResponse:

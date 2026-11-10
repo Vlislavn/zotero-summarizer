@@ -7,10 +7,11 @@ Layering (lower layers must not import higher ones):
     mcp  is a standalone HTTP client (talks to the API over the wire only)
 
 Rules, keyed by source directory (plus the foundational runtime module):
-  - integrations/  must not import services or api      (low-level adapters)
+  - integrations/  must not import services, api or cli   (low-level adapters)
   - mcp/           must not import services, api, storage (HTTP client only)
-  - storage/       must not import services or api        (persistence only)
-  - services/      may import api.errors only within the API layer
+  - storage/       must not import services, api or cli    (persistence only)
+  - services/      may import api.errors only within the API layer; never cli
+  - models/        must not import cli
   - runtime.py     must not import services or api
 
 Structure:
@@ -27,10 +28,11 @@ import sys
 
 # (dir prefix, list of forbidden import prefixes)
 LAYER_RULES: list[tuple[str, tuple[str, ...]]] = [
-    ("zotero_summarizer/integrations/", ("zotero_summarizer.services", "zotero_summarizer.api")),
+    ("zotero_summarizer/integrations/", ("zotero_summarizer.services", "zotero_summarizer.api", "zotero_summarizer.cli")),
     ("zotero_summarizer/mcp/", ("zotero_summarizer.services", "zotero_summarizer.api", "zotero_summarizer.storage")),
-    ("zotero_summarizer/storage/", ("zotero_summarizer.services", "zotero_summarizer.api")),
-    ("zotero_summarizer/services/", ("zotero_summarizer.api",)),
+    ("zotero_summarizer/storage/", ("zotero_summarizer.services", "zotero_summarizer.api", "zotero_summarizer.cli")),
+    ("zotero_summarizer/services/", ("zotero_summarizer.api", "zotero_summarizer.cli")),
+    ("zotero_summarizer/models/", ("zotero_summarizer.cli",)),
 ]
 RUNTIME_FORBIDDEN = ("zotero_summarizer.services", "zotero_summarizer.api")
 

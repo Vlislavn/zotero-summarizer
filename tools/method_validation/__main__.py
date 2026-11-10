@@ -6,7 +6,10 @@ Usage: python -m tools.method_validation {support,priority,collections}
 """
 import argparse
 import os
+import sys
 from pathlib import Path
+
+from pydantic import ValidationError
 
 from .support import Config, encoded, loads
 from .support_run import prepare, reopen, run
@@ -64,5 +67,19 @@ def main(argv=None, *, transport=None):
     return 0
 
 
+def entry(argv=None):
+    """Console boundary: bad input paths/configs end as one line + exit 2, never a traceback."""
+    try:
+        return main(argv)
+    except ValidationError as error:
+        detail = '; '.join(f"{'.'.join(map(str, e['loc'])) or 'config'}: {e['msg']}" for e in error.errors())
+        message = f'invalid configuration: {detail}'
+    except (OSError, ValueError) as error:
+        message = f'{type(error).__name__}: {error}'
+    print(f'error: {message}\nhint: see tools/method_validation/README.md; runnable synthetic '
+          'examples: python -m tools.method_validation.examples OUT_DIR', file=sys.stderr)
+    return 2
+
+
 if __name__ == '__main__':
-    raise SystemExit(main())
+    raise SystemExit(entry())

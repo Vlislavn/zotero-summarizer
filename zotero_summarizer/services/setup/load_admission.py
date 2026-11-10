@@ -130,9 +130,9 @@ def local_refusal(admission: dict) -> dict | None:
     """The refusal receipt for an assessed admission, or None when it may proceed."""
     if admission["status"] in {"admitted", "not_applicable"}:
         return None
-    detail = (f"Local test not sent ({admission['reason_code']}): {admission['message']}. "
+    detail = (f"Local test not sent: {admission['message']}. "
               "No prompt was sent and no model was loaded." if "message" in admission else
-              f"Local test not sent ({admission['reason_code']}): the app only sends test prompts to local "
+              f"Local test not sent: the app only sends test prompts to local "
               "models it started itself, because loading a model can exhaust memory. "
               "No prompt was sent and no model was loaded or downloaded.")
     return {

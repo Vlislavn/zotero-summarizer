@@ -3,6 +3,26 @@
 Top-level help names `support`, `priority` and `collections`, preserving read-only
 admission by default and explicit `--run` consent for all three commands.
 
+## Synthetic examples
+
+`python -m tools.method_validation.examples OUT_DIR` (OUT_DIR new/empty) writes small, public,
+SYNTHETIC `support`, `priority` and `collections` configs (absolute paths + SHA-256 pins, hence
+generated) and a `faithbench interpretation` recipe with its frozen mini-benchmark, then prints
+the commands. No owner data, no model calls, no network: the three comparisons use recorded arms,
+so even `--run` replays bundled bytes and writes only under `OUT_DIR/<task>/selected`.
+
+```
+python -m tools.method_validation support --config OUT_DIR/support/config.json         # preview
+python -m tools.method_validation support --config OUT_DIR/support/config.json --run  # prints "Private artifacts: DIR"
+python -m tools.method_validation support --inspect DIR
+ZOTERO_SUMMARIZER_HOME=OUT_DIR/faithbench/home zotero-summarizer faithbench interpretation \
+    --recipe OUT_DIR/faithbench/home/data/faithbench/recipe.json                          # INSPECTED_NOT_EXECUTED
+```
+
+They exercise wiring only (no winner, no scientific meaning). The recipe's model-profile hashes
+are those of the default goals config, so `--run --capture-local` is not meant for it. Bad paths or
+configs (e.g. `--inspect <missing>`) end as `error: …` + exit 2, never a traceback.
+
 ## Existing-collection comparison (part of #42)
 
 Optional declared version/derivation DAGs bind every reference channel, exclude heldout ancestors into an immutable replayed audit, and refuse contaminated active uses. Shortlists require frozen selection provenance. Declarations are unsigned; legacy lineage stays unknown.

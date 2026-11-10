@@ -531,10 +531,10 @@ export default function Triage() {
                   <div>Predictions available: {p.with_prediction_count ?? 0} / {p.total_feedback ?? 0}</div>
                   <div className="mt-1">Agreement: <span className="mono">{formatPercent(p.agreement_rate)}</span></div>
                   <div title="Among approved items with a saved prediction, the fraction predicted should_read or must_read.">
-                    Observed recall: <span className="mono">{formatPercent(p.recall)}</span>
+                    Approved papers it rated worth reading: <span className="mono">{formatPercent(p.recall)}</span>
                   </div>
                   <div title="Approved items whose saved triage prediction was could_read or dont_read.">
-                    False negatives: <span className="mono">{p.false_negative_count ?? 0}</span>
+                    Approved papers it rated low: <span className="mono">{p.false_negative_count ?? 0}</span>
                   </div>
                 </div>
               );

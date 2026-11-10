@@ -46,7 +46,7 @@ def test_recovers_missing_namespace_without_reparsing_items(tmp_path, monkeypatc
 
     monkeypatch.setattr(feedparser, 'parse', parse_once)
     result = reader.refresh_feeds()
-    assert result == {'feeds': 1, 'inserted': 3, 'updated': 0, 'incomplete': 0, 'errors': []}
+    assert result == {'feeds': 1, 'inserted': 3, 'updated': 0, 'incomplete': 0, 'unchanged': 0, 'errors': []}
     assert seen == [body]
     stored = reader.get_feed_items(order='oldest_first', limit=None)
     for row, entry in zip(stored, parsed.entries, strict=True):
@@ -68,7 +68,7 @@ def test_recovers_missing_namespace_without_reparsing_items(tmp_path, monkeypatc
 def test_namespace_warning_with_zero_commits_retains_honest_counts(tmp_path, monkeypatch, count):
     reader, _ = _reader(tmp_path, monkeypatch, _body('<other:extra/>', count=count).encode())
     result = reader.refresh_feeds()
-    assert result == {'feeds': 1, 'inserted': 0, 'updated': 0, 'incomplete': 0, 'errors': []}
+    assert result == {'feeds': 1, 'inserted': 0, 'updated': 0, 'incomplete': 0, 'unchanged': 1, 'errors': []}
     assert reader.get_feed_items() == []
     assert reader.get_feed_groups()[0]['last_check_error'].startswith('RssNamespaceWarning:')
 

@@ -207,7 +207,7 @@ unavailable, never repaired or regenerated. [Code](../zotero_summarizer/services
 In **Weekly → Telegram sources**, choose public channels, groups or forum topics, a local
 model and work limits and allow reading them once (a remembered, revocable checkbox). **Weekly** (linked from Today) shows
 **Сегодня в каналах** with the digest age and one **Проверить каналы** button: it runs in the background with staged progress and Russian errors, and new posts appear when it finishes. **Тренды недели** come first: the top 5 of up to 15 topics (**Show all N trends**) the channels discuss now, each with a short label, a one-line gist, notable ideas/tools, a new/growing marker against the previous week and the channels (links to posts). Below, compact cards: channel, age, headline, a few discussion lines (one per picked comment, plus a «Спор:» line for the main disagreement) where each line expands to the exact comment(s) it cites; lines are checked by a local NLI model (`data/models/nli-mdeberta`), **Важное (n)** quotes, **All comments (n)**, **Подробнее**, a «Continues …» line for series posts and «Also in: topic». Authorize
-your Telegram account once in a terminal with `research-feed telegram-auth` (shown as one
+your Telegram account once in a terminal with `zotero-summarizer research-feed telegram-auth` (shown as one
 copyable command on the page; optional `telegram` extra); the app never joins
 chats, sends messages or reads your personal inbox, and saving or viewing never collects or
 generates. Each run reads a bounded newest window, so reviews are concise syntheses, not

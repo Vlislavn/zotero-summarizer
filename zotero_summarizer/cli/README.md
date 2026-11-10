@@ -3,7 +3,7 @@
 The `_telegram-child` has two purposes: `auth` (interactive terminal only) and `digest`
 (the Settings 'Collect' action: `collect_pages` + digest, persisted in-child as
 `telegram-today.json`). It retains the dedicated session/fuse/lease and a receipt
-verified before the parent proceeds; failures expose bounded status codes, never raw
+verified before the parent proceeds (`integrations.telegram_child.run_child` spawns it; `cli/_telegram.py` holds the child body); failures expose bounded status codes, never raw
 SDK messages/account paths. The `conversations` purpose and its v2 bundle export were
 removed (retired; historical bundles stay readable in Weekly).
 
@@ -13,8 +13,18 @@ A/B/C attempt; its stage clients resolve through `services.llm.factory` using
 invocation-local `RuntimeState` cache state. `--run-id` exports blinded human
 packets, and `--labels` scores an existing run. If no non-null human score is supplied,
 assigned execution errors alone leave the result inconclusive. Inconsistent/unconsented flags
-refuse at the existing pre-Settings validator, including the real dispatcher. See
+refuse at the existing pre-Settings validator, including the real dispatcher; a missing
+recipe (no `--recipe`/`ZS_INTERPRETATION_RECIPE`, or a nonexistent file) is a usage error
+(exit 2). A runnable synthetic recipe: `python -m tools.method_validation.examples OUT_DIR`
+([tools/method_validation/README.md](../../tools/method_validation/README.md#synthetic-examples)). See
 [experiment overview](../../docs/features.md#interpretation-experiment).
+
+`serve` probes its port before any app startup: a busy port prints one error and exits 1 at
+once (lifespan startup launches prewarm/RSS/import workers that otherwise outlive the failed
+bind). `feeds select-daily` bootstraps with `background=False` for the same reason — a read-only
+preview must not start daemon workers (it used to linger for minutes). `goldenset restore-model`
+with an unknown snapshot prints one line (exit 2, points at `model-history`) and, on success,
+"Restart the daemon to load the restored model."
 
 Each command group lives in its own module and owns both its handlers and its
 argparse registration. `__init__.build_parser()` just wires the groups together,
@@ -53,7 +63,7 @@ main() = parse args → validate command budgets → selected Settings/.env → 
 | `_goldenset_migrate.py` | `migrate-verdicts-to-zotero` — one-time transfer of in-app verdicts (`label_verdicts`) into Zotero `label:<priority>` tags (`--dry-run`, idempotent, library items only, single batch backup) |
 | `_goldenset_setup_colors.py` | `setup-tag-colors` — prints the one-time Zotero setup (colors + number keys 1-4 for the four `label:<priority>` tags) for native keypress labeling. Non-destructive (prints the plan; writes nothing into your synced Zotero settings); `--json` for machine output |
 | `_faithbench.py` | `faithbench build/run/judge/report` — faithfulness mini-benchmark of the deep_review-stage model (span-verified QA + traps + review-claim grounding). Build stages the review CSV before publishing the immutable benchmark file as its version marker; QA runs require explicit approval of every generated review-CSV row and bind that CSV hash into the manifest. `build --max-builder-windows` bounds contiguous 6,000-character source windows per paper; its CLI/env/default precedence, preflight behavior and cost are documented below. `run` is resumable via `--run-id` and takes `--provider/--model` to sweep a model for THIS run only (no goals.yaml edit; recorded in the manifest); `judge` uses the pinned remote judge (`CUSTOM_BASE_URL`/`CUSTOM_API_KEY`). See `services/faithbench/README.md` |
-| `_research_feed.py` / `_telegram.py` | `research-feed run` produces RSS or explicitly selected Telegram reports; `view` prints retained Markdown without processing; `telegram-auth` owns explicit interactive authorization. RSS generation reuses deep review unless `--cached-only`; queuing Zotero changes requires `--queue-zotero`. |
+| `_research_feed.py` / `_telegram.py` | `research-feed run` produces RSS or explicitly selected Telegram reports; `view` prints retained Markdown without processing; `telegram-auth` owns explicit interactive authorization. RSS generation reuses deep review unless `--cached-only` (papers without a cached triage are listed by title but do not make the exit code 1); queuing Zotero changes requires `--queue-zotero`. |
 
 Handlers use lazy imports inside the function bodies to keep CLI startup fast.
 

@@ -281,6 +281,7 @@ def import_zotero_feeds(
     feed_groups: list[dict[str, Any]],
 ) -> dict[str, int]:
     imported = 0
+    added = 0
     skipped = 0
     for feed in feed_groups:
         url = str(feed.get("url") or "").strip()
@@ -288,6 +289,7 @@ def import_zotero_feeds(
         if not url or not name:
             skipped += 1
             continue
+        added += conn.execute("SELECT 1 FROM rss_feeds WHERE url = ?", (url,)).fetchone() is None
         upsert_rss_feed(
             conn,
             name=name,
@@ -297,7 +299,7 @@ def import_zotero_feeds(
             imported_zotero_library_id=int(feed.get("library_id") or 0) or None,
         )
         imported += 1
-    return {"imported": imported, "skipped": skipped}
+    return {"imported": imported, "added": added, "skipped": skipped}
 
 
 def get_rss_item_by_stable_key(

@@ -35,3 +35,5 @@ window. MCP numeric environment settings are validated at import: timeout is
 1–86400 seconds.
 
 Original native-preview client source is retained: displayed approval hashes, explicit refresh/force and direct-editor outcomes use the existing backend; no new controls or protocols are designed. Original synthetic client tests remain unchanged.
+
+`api_client` batches per-paper result lookups (`GET /api/results?item_keys=a,b,…`, ≤100 keys per call), so `search_papers` no longer issues one request per item.

@@ -7,7 +7,7 @@ Enforcement runs explicitly via `make lint`; commit-hook installation is optiona
 | check | enforces |
 |---|---|
 | `check_file_loc.py` | hard `.py` ≤ 500 LOC with no allowlist |
-| `check_import_policy.py` | AST-based static import rules (relative, aliased, multi-name and nested imports included); `runtime.py` cannot import `services/` or `api/` (including `api.errors`); services may import only `api.errors`; new service modules go in a domain subpackage |
+| `check_import_policy.py` | AST-based static import rules (relative, aliased, multi-name and nested imports included); `runtime.py` cannot import `services/` or `api/` (including `api.errors`); services may import only `api.errors` and never `cli`; new service modules go in a domain subpackage |
 | `check_module_readme.py` | every package has a README; editing a package's code re-stages its README |
 | `check_slop.py` | debug leftovers + complexity limits block; heuristics are advisory (Tier 7, below); existing findings grandfathered |
 | `check_allowlists.py` | `reconcile`: flags STALE `slop_allowlist.txt` entries (run by the test suite) |
@@ -39,7 +39,8 @@ is mandatory: the default scan walks `data/` and hangs) and `scripts/vulture_whi
 - **Vulture** is installed as deadcode-audit's extra; model fields appear only at 60%
   confidence (advisory), so no local pydantic guard is needed for the ≥80% gate.
 
-The import gate also forbids `runtime.py` from importing `services/` or `api/`,
+The import gate also forbids `cli/` imports (upward) from `services/`,
+`integrations/`, `storage/` and `models/`, and `runtime.py` from importing `services/` or `api/`,
 including `api.errors`, at any AST scope. Leaf imports such as
 `models.providers` and `TYPE_CHECKING`-only integration/storage annotations remain
 permitted.

@@ -66,7 +66,7 @@ malformed headers/rows and failed writes raise, leaving the original intact.
 The sidecar stays beside the Settings-resolved CSV; SQLite releases locks on exit.
 
 `csv_store.read_snapshot` supplies parsed rows and the full SHA-256 of the same
-read to classification, training and the shared row loader. It never rereads the
+read to classification, training and `csv_store.load_golden_rows` (the shared row loader). It never rereads the
 file for provenance. Atomic replacement by app writers preserves a complete read
 snapshot; this is not a transaction across CSV, verdict SQLite and config, nor
 a lock against external in-place writers. File hashes describe bytes, not model

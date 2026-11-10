@@ -63,7 +63,7 @@ it('keeps legacy unbound generated notes rejectable but never applicable', async
   const writes = wire('pending', { ...preview, target: null });
   render(<Pending />);
   await screen.findByLabelText('Generated mutation preview');
-  expect(screen.getByText('This generated note has no bound Zotero target. Reject it or regenerate the review before applying.')).toBeTruthy();
+  expect(screen.getByText('This note has no Zotero target. Reject it or regenerate the review.')).toBeTruthy();
   fireEvent.click(screen.getByRole('checkbox'));
   expect(screen.getByRole('button', { name: 'Apply selected' }).disabled).toBe(true);
   expect(screen.getByRole('button', { name: 'Reject selected' }).disabled).toBe(false);
@@ -97,9 +97,9 @@ it('retains uncertain delivery as a non-retryable reconciliation state', async (
   const writes = wire('applying');
   render(<Pending />);
   await screen.findByLabelText('Generated mutation preview');
-  fireEvent.click(screen.getByRole('button', { name: 'Needs reconciliation' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Needs checking' }));
   expect((await screen.findByRole('alert')).textContent).toBe(
-    'Delivery outcome is uncertain. Reconcile Zotero against the backup before any new action; retry is blocked.',
+    'Result unknown. Compare Zotero with the backup before doing anything else; retry is blocked.',
   );
   expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Apply selected' })).toBeNull();

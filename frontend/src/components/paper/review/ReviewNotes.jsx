@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { saveReviewNote } from '../../../api/goldenApi.js';
 import { noteDeliveryText } from '../../../hooks/useNoteDelivery.js';
+import { SectionLabel } from './primitives.jsx';
 
 export default function ReviewNotes({ itemKey, initialNote = '', questions = [], questionMirror, onMirrorStart, onSaved, onDirtyChange }) {
   const [draft, setDraft] = useState({ itemKey, note: initialNote, baseline: initialNote });
@@ -63,7 +64,7 @@ export default function ReviewNotes({ itemKey, initialNote = '', questions = [],
 
   return (
     <div>
-      <h3 className="text-sm font-medium text-slate-900 mb-3">My notes</h3>
+      <SectionLabel level={3} className="mb-3">My notes</SectionLabel>
       {questions.length > 0 && (
         <ul aria-label="Saved review questions" className="mb-3 space-y-2 text-sm text-slate-700">
           {questions.map((row) => (

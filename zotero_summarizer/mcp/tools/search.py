@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Literal
 from urllib.parse import quote
 
 from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK
 
-from zotero_summarizer.mcp.api_client import _api_request, _fetch_pending_rows, _fetch_triage_row
+from zotero_summarizer.mcp.api_client import _api_request, _fetch_pending_rows, _fetch_triage_row, _fetch_triage_rows
 from zotero_summarizer.mcp.config import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT
 from zotero_summarizer.mcp.helpers import (
     _as_float,
@@ -53,29 +52,6 @@ def _clamp_score_bounds(
         safe_score_min, safe_score_max = safe_score_max, safe_score_min
 
     return safe_score_min, safe_score_max
-
-
-async def _enrich_paper_card(
-    item: dict[str, Any],
-    semaphore: asyncio.Semaphore,
-    triage_warnings: list[dict[str, Any]],
-) -> dict[str, Any]:
-    async with semaphore:
-        item_key = str(item.get("item_key") or "").strip()
-        if not item_key:
-            return _paper_card_from_item(item, None)
-
-        triage_row, triage_error = await _fetch_triage_row(item_key)
-        if triage_error:
-            triage_warnings.append(
-                {
-                    "item_key": item_key,
-                    "error": triage_error,
-                }
-            )
-
-        triage_payload = _triage_from_result_row(triage_row)
-        return _paper_card_from_item(item, triage_payload)
 
 
 def _matches_search_filters(
@@ -169,15 +145,17 @@ async def search_papers(
     if source_error is not None:
         return source_error
 
-    semaphore = asyncio.Semaphore(SEARCH_ENRICH_CONCURRENCY)
-    triage_warnings: list[dict[str, Any]] = []
-
-    cards = await asyncio.gather(
-        *[_enrich_paper_card(item, semaphore, triage_warnings) for item in source_items]
+    triage_rows, triage_warnings = await _fetch_triage_rows(
+        [str(item.get("item_key") or "") for item in source_items if item.get("item_key")],
+        SEARCH_ENRICH_CONCURRENCY,
     )
     if triage_warnings:
         return _error("search_incomplete", "Triage metadata could not be loaded; no ranked result is available",
                       details={"errors": triage_warnings})
+    cards = [
+        _paper_card_from_item(item, _triage_from_result_row(triage_rows.get(str(item.get("item_key") or ""))))
+        for item in source_items
+    ]
 
     filtered = [
         card

@@ -10,6 +10,7 @@
 // A saved artifact alone does not mean a model is loaded in this process.
 import { useQuery } from '@tanstack/react-query';
 import { fetchModelCard } from '../api/settingsApi.js';
+import { formatWhen } from '../utils/stepModelStatus.js';
 
 function Field({ label, value, mono = false, title = null }) {
   return (
@@ -74,11 +75,11 @@ function ModelDetails({ model }) {
   return (
     <div className="mt-3">
       <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-3">
-        <Field label="Classifier" value={model.classifier_name} />
-        <Field label="N train" value={model.n_train ?? '—'} />
-        <Field label="Trained at" value={model.trained_at || '—'} title="UTC" />
+        <Field label="Model type" value={model.classifier_name} />
+        <Field label="Papers used" value={model.n_train ?? '—'} />
+        <Field label="Trained on" value={formatWhen(model.trained_at) || '—'} title={model.trained_at || undefined} />
         <Field
-          label="Reading-decision ρ"
+          label="Agreement with your reading choices"
           value={
             model.oof_spearman_verified != null
               ? Number(model.oof_spearman_verified).toFixed(3)
@@ -87,8 +88,8 @@ function ModelDetails({ model }) {
         />
       </div>
       <p className="mt-3 text-[11px] text-slate-400 leading-relaxed">
-        Reading-decision ρ is the gate's out-of-fold ranking correlation on the
-        papers you actually read — expected to be low; the live slate blends it
+        Agreement is the model's ranking correlation (ρ) on papers it had not
+        seen in training, measured on the papers you actually read — expected to be low; the live slate blends it
         with goal similarity. This card is an audit trail, not a tuning surface.
       </p>
     </div>

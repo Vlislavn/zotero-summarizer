@@ -85,7 +85,7 @@ _DEFAULT_TIER3_MIN_LABELS = 200  # never recalibrate the classifier below this (
 
 def count_golden_labels(settings: Any) -> int:
     """How many golden labels exist — the gate for data-driven recal."""
-    from zotero_summarizer.services._common import load_golden_rows
+    from zotero_summarizer.services.golden.csv_store import load_golden_rows
 
     if not settings.golden_csv_path.exists():
         return 0

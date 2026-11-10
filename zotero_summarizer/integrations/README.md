@@ -36,7 +36,7 @@ Product behavior: [docs/features.md](../../docs/features.md); placement: [docs/a
 | `arxiv.py` · `europepmc.py` · `crossref.py` · `semantic_scholar.py` · `_search_http.py` | keyless search leaves (`ArxivHit`, `EuropePmcHit` + `fetch_fulltext_xml`, `CrossrefHit` with `mailto`, `SemanticScholarHit`) · shared request/owned-client lifecycle |
 | `openreview.py` | authenticated OpenReview leaf (`search_openreview` → `OpenReviewHit`) |
 | `unpaywall.py` · `pubmed.py` · `github.py` | DOI → OA PDF URL · PMID/DOI → PMC PDF URL (browser rung) · `check_repo` scrapes the public HTML page (not the REST API); transport error ⇒ `exists=None` |
-| `telegram.py` · `telegram_threads.py` · `telegram_reply_adapter.py` · `telegram_session.py` · `telegram_auth.py` | injected Telethon page client · bounded read-only conversation collector · thin adapter exposing the conversation fetch as the one-pipeline digest `reply_client.get_replies` seam (adds no capability; live-only) · dedicated macOS CLI session lifetime · explicit auth callback |
+| `telegram.py` · `telegram_threads.py` · `telegram_reply_adapter.py` · `telegram_session.py` · `telegram_child.py` · `telegram_auth.py` | injected Telethon page client · bounded read-only conversation collector · thin adapter exposing the conversation fetch as the one-pipeline digest `reply_client.get_replies` seam (adds no capability; live-only) · dedicated macOS CLI session lifetime · `run_child` spawns the one-shot auth/digest child and verifies its receipt (services and cli import it from here) · explicit auth callback |
 
 ## Zotero reads
 
@@ -91,7 +91,7 @@ Product behavior: [docs/features.md](../../docs/features.md); placement: [docs/a
 - `refresh_feeds`: offline returns before network/DB writes; each feed commits independently; HTTP/DNS/document
   failures are recorded and the rest continue (partial → `errors`; all failed → last exception propagates;
   storage/programming errors abort with rollback). Counts are committed items only; text is sanitized before DOI/key
-  derivation. `last_error` may carry the `RssNamespaceWarning:` marker, cleared by a clean refresh; a warning or
+  derivation. `refresh_feeds` also returns `unchanged` (feeds fetched cleanly with no new/updated item; the UI's "Nothing new" summary). `last_error` may carry the `RssNamespaceWarning:` marker, cleared by a clean refresh; a warning or
   compatibility never certifies source meaning.
 - `get_feed_items(limit=None)` (app RSS and Zotero) returns all rows; finite limits keep their cap.
 - `pdf_fetch` streams with a size cap, timeout and `%PDF` magic, sending the browser-like `github.BROWSER_UA` (publishers such as nature.com serve HTML to the default client UA; RSS fetching keeps its own UA); SSRF/redirect guards are unchanged. Cache admission (`valid_pdf_path`, shared by HTTP and
@@ -99,7 +99,8 @@ Product behavior: [docs/features.md](../../docs/features.md); placement: [docs/a
   browser nor network; invalid entries are never returned and stay untouched until a successful replacement.
 - Browser egress (`_browser_network.public_browser_options`): a session-scoped loopback HTTP/CONNECT proxy,
   authenticated with a random ephemeral secret, reuses the public-address resolver and connects only to the validated
-  numeric destination (≤32 connections; closes with the browser; not an app endpoint). No DIRECT fallback; implicit
+  numeric destination (≤32 concurrent connections; a burst beyond that queues ≤15 s for a free slot, a still-unserved
+  connection is dropped and retried by the browser, never failing the session; closes with the browser; not an app endpoint). No DIRECT fallback; implicit
   localhost bypass, QUIC and non-proxied WebRTC UDP are disabled; CONNECT preserves origin TLS and cookies. Metadata
   PDF links are validated before navigation (non-HTTP schemes rejected). An unresolved proxy hostname returns 502 for
   that request; an initial article DNS failure raises; non-public addresses stay blocked. Only the exact session proxy
@@ -114,6 +115,11 @@ Product behavior: [docs/features.md](../../docs/features.md); placement: [docs/a
   mutation, partial traversal, invalid/empty text or exhausted limits (never a prefix). `_article_pdf` writes a
   fixed-layout text-only PDF with source/page/output caps and a text round-trip check; `Page.printToPDF` is never
   used. These caps do not bound Chromium's own memory or subresource traffic.
+  Text the `cjk` font cannot draw is normalised first, not rejected: space separators (NBSP, thin space, …) → a plain
+  space, invisible format characters (soft hyphen, zero-width space, BOM) dropped, compatibility forms via NFKC, minus
+  sign → `-`; a character with no such form (e.g. emoji) still fails loudly.
+- One browser session at a time (`_BROWSER_LOCK`, profile singleton + RAM): a concurrent fetch/render waits up to 180 s
+  for it instead of skipping its PDF source; the interactive login flow still refuses when busy.
 - Snapshot cache keys: derivatives use `cache_dir/article-snapshots/<full SHA-256(raw URL)>.pdf`, reused only with
   `render_fallback=True` after the source-PDF cache check; captured publisher PDFs use `cache_dir/<first 16 hex
   SHA-256(raw URL)>.pdf`. See [reading source boundary](../../docs/features.md#reading-reviews).
@@ -163,7 +169,7 @@ Product behavior: [docs/features.md](../../docs/features.md); placement: [docs/a
 - `_process_guard` owns the evaluator/daemon/runner group: available-RAM floor 20%, swap growth ≤2 GiB, combined RSS 4
   GiB by default; one finite run may be scoped with a positive integral `--rss-mib` that the runtime must also accept
   via `rss_limit_mib` (a guard receipt alone never raises admission). A pipe sentinel reaps on monitor death or
-  command exit; absence evidence observes physical termination only and never creates model success.
+  command exit.
 - Admission needs native observations, not declared options: `/api/ps` digest, effective context and placement joined
   to the owned listener/runner; matching `-b`/`-ub`; allocated K/V types (`f16`/`q8_0`/`q5_0`/`q4_0`, agreeing with
   worker flags; defaults need both K and V facts); disabled host prompt-state cache and context checkpoints

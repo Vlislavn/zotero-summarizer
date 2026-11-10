@@ -33,7 +33,9 @@ before applying `g:<offset>` pagination; `filtered_count` covers the complete se
 Old window cursors require a restart. Inputs/library/triage state must stay stable
 between pages (this is not a snapshot). Missing metadata, stalled/duplicate pages,
 or changing totals fail explicitly. More than 10,000 matches requires narrowing
-the query, collection or tag. Enrichment uses at most eight concurrent requests;
+the query, collection or tag. Triage enrichment is batched: `GET /api/results?item_keys=a,b,…`
+(≤100 keys per request, at most eight in flight; papers without a triage result are absent, not
+404s) instead of one `/api/results/<key>` call per paper (770 items → 8 calls instead of ~770);
 `relevance` retains the backend's source order, not a semantic similarity score.
 
 `get_job_status` forwards the API's `active_items` list (item key and title),

@@ -26,8 +26,8 @@ it('labels observed triage feedback without claiming an unbiased gate audit', as
   expect(screen.getByText(/Only reviewed items are included/).textContent).toContain('not unbiased ML-gate metrics');
   expect(screen.getAllByText('Predictions available: 3 / 4')).toHaveLength(2);
   expect(screen.getByText('Predictions available: 0 / 1')).toBeTruthy();
-  expect(screen.getAllByText(/Observed recall:/).map((el) => el.textContent)).toEqual([
-    'Observed recall: 0%', 'Observed recall: n/a', 'Observed recall: 50%',
+  expect(screen.getAllByText(/Approved papers it rated worth reading:/).map((el) => el.textContent)).toEqual([
+    'Approved papers it rated worth reading: 0%', 'Approved papers it rated worth reading: n/a', 'Approved papers it rated worth reading: 50%',
   ]);
   expect(screen.queryByText('Gate recall:')).toBeNull();
   expect(screen.queryByText('Gate misses (audit FN):')).toBeNull();

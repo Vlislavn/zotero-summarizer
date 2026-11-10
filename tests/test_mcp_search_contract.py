@@ -24,8 +24,11 @@ def test_search_sorts_complete_filtered_set_before_pagination(sort_by):
             source_requests.append(offset)
             # Backend pages may be shorter than the requested limit.
             return httpx.Response(200, json={"items": items[offset:offset+3], "total": 8})
-        index = int(request.url.path.rsplit("/", 1)[-1])
-        return httpx.Response(200, json={"composite_score": scores[index], "reading_priority": "must_read"})
+        assert request.url.path == "/api/results"  # one batched lookup, never GET /api/results/<key> per item
+        keys = request.url.params["item_keys"].split(",")
+        return httpx.Response(200, json={"items": [
+            {"item_id": key, "composite_score": scores[int(key)], "reading_priority": "must_read"}
+            for key in keys]})
 
     async def pages():
         cursor = None
@@ -71,7 +74,7 @@ def test_incomplete_search_never_claims_a_sorted_complete_result(failure):
             return httpx.Response(200, json={"items": [{"item_key": key}], "total": total})
         if failure == "triage_error":
             return httpx.Response(503, json={"error": "unavailable"})
-        return httpx.Response(404, json={"error": "not_found"})
+        return httpx.Response(200, json={"items": []})
 
     client = httpx.AsyncClient
     with patch.object(httpx, "AsyncClient", side_effect=lambda **kw: client(

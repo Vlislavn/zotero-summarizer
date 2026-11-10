@@ -69,7 +69,8 @@ survivor from embeddings + prestige with **no per-item LLM call** — fast,
 memory-safe, GPU-accelerated. Rows are written `triaged_pending` + marked read
 (`review_mode=False`). This scoring phase does not perform full-text analysis;
 the separate bounded `today_preparation` pass runs after a tick only when
-`quality_review.auto_on_tick_k > 0`. Explicit per-paper Deep Review remains available.
+`quality_review.auto_on_tick_k > 0`, and once ~30 s after server startup (`today_preparation.schedule_on_startup`,
+because `serve` runs no tick loop; same latch, a no-op when Today already has its target ready). Explicit per-paper Deep Review remains available.
 **Fail-fast precondition:** the gate-only drain MANDATORILY needs a live
 classifier gate, so the `POST /api/daily/triage-backlog` route calls
 `services.readiness.require("classifier_gate")` first — a missing gate (e.g.

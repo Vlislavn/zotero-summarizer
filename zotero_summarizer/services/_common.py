@@ -17,7 +17,6 @@ from zotero_summarizer.models.config import USER_KNOBS, USER_OWNED_KEYS
 from zotero_summarizer.models.providers import ProviderConfig
 from zotero_summarizer.runtime import get_context
 from zotero_summarizer.services.config_overrides import apply_calibration, apply_env_overrides
-from zotero_summarizer.services.golden.csv_store import read_snapshot
 from zotero_summarizer.settings import Settings
 
 
@@ -431,13 +430,6 @@ def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     The caller owns the envelope (e.g. ``{"updated_at": now_iso_z(), ...}``)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(path, lambda tmp: tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8"))
-
-
-def load_golden_rows(csv_path: Path) -> list[dict[str, str]]:
-    """Read the golden CSV into a list of row dicts. Fail-fast if missing."""
-    if not csv_path.exists():
-        raise FileNotFoundError(f"golden CSV not found at {csv_path}")
-    return read_snapshot(csv_path)[0]
 
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")

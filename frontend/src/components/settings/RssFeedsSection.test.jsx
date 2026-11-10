@@ -135,7 +135,7 @@ it('reports zero returned items without claiming a triage or a successful story'
   await screen.findByText('No RSS feeds saved.');
   fireEvent.click(screen.getByRole('button', { name: 'Refresh RSS now' }));
 
-  await screen.findByText('Checked 2 feeds: 0 new, 0 updated. No items stored in this pass.');
+  await screen.findByText('Nothing new: checked 2 feeds, no new or changed items.');
   const call = fetch.mock.calls.find(([path]) => path === '/api/rss/refresh');
   expect(JSON.parse(call[1].body)).toEqual({ max_feeds: 10 });
   expect(fetch.mock.calls.some(([path]) => path.includes('triage-backlog'))).toBe(false);
@@ -160,7 +160,7 @@ it('reloads persisted feed errors even when every refresh fails, and clears the 
   await screen.findByText('Not refreshed yet');
   fireEvent.click(screen.getByRole('button', { name: 'Refresh RSS now' }));
 
-  const issue = await screen.findByText('Last source issue: HTTPStatusError: 403 Forbidden');
+  const issue = await screen.findByText('This feed refused access (403).');
   expect(issue.classList.contains('text-rose-700')).toBe(true);
   expect(screen.getByText('Last checked: 2026-10-08T12:00:00Z')).toBeTruthy();
   refresh = () => {
@@ -168,8 +168,8 @@ it('reloads persisted feed errors even when every refresh fails, and clears the 
     return response({ feeds: 1, inserted: 0, updated: 0, errors: [] });
   };
   fireEvent.click(screen.getByRole('button', { name: 'Refresh RSS now' }));
-  await screen.findByText(/Checked 1 feed: 0 new, 0 updated/);
-  await waitFor(() => expect(screen.queryByText(/Last source issue:/)).toBeNull());
+  await screen.findByText(/Nothing new: checked 1 feed/);
+  await waitFor(() => expect(screen.queryByText('This feed refused access (403).')).toBeNull());
   expect(screen.queryByText(/RSS refresh failed/)).toBeNull();
 });
 
@@ -182,15 +182,15 @@ it.each([0, 1])('retains the typed nonfatal source warning separately from %s co
   };
   const view = mount();
   fireEvent.click(await screen.findByRole('button', { name: 'Refresh RSS now' }));
-  const notice = `Checked 1 feed: ${inserted} new, 0 updated.${inserted ? '' : ' No items stored in this pass.'}`;
+  const notice = inserted ? 'Checked 1 feed: 1 new, 0 updated.' : 'Nothing new: checked 1 feed, no new or changed items.';
   await screen.findByText(notice);
-  const issue = await screen.findByText(`Last source issue: ${warning}`);
+  const issue = await screen.findByText('Feed has minor formatting problems; it still works.');
   expect(issue.classList.contains('text-amber-800')).toBe(true);
   expect(issue.classList.contains('text-rose-700')).toBe(false);
   view.unmount();
   client.clear();
   mount();
-  expect((await screen.findByText(`Last source issue: ${warning}`)).classList.contains('text-amber-800')).toBe(true);
+  expect((await screen.findByText('Feed has minor formatting problems; it still works.')).classList.contains('text-amber-800')).toBe(true);
 });
 
 it('retains the ordinary custom-feed save flow', async () => {
@@ -250,8 +250,8 @@ it('keeps partial failure distinct from a clean refresh and reloads its persiste
   await screen.findByText('Not refreshed yet');
   fireEvent.click(screen.getByRole('button', { name: 'Refresh RSS now' }));
 
-  await screen.findByText('Checked 2 feeds: 1 new, 1 updated. 1 feed(s) failed — see their errors below.');
-  await screen.findByText('Last source issue: 403 Forbidden');
+  await screen.findByText('Checked 2 feeds: 1 new, 1 updated, 1 failed. Failed feeds are marked below.');
+  await screen.findByText('This feed refused access (403).');
   expect(screen.getByText('Last checked: 2026-10-22T12:00:00Z')).toBeTruthy();
 });
 

@@ -335,6 +335,7 @@ class AppRssReader:
         inserted = 0
         updated = 0
         incomplete = 0
+        unchanged = 0
         errors = []
         last_failure = None
         with self._conn() as conn:
@@ -353,6 +354,7 @@ class AppRssReader:
                     inserted += new
                     updated += changed
                     incomplete += int(cut_off)
+                    unchanged += not (new or changed)
                 except Exception as exc:
                     conn.rollback()
                     rss_storage.record_rss_fetch_result(
@@ -373,6 +375,7 @@ class AppRssReader:
             "inserted": inserted,
             "updated": updated,
             "incomplete": incomplete,
+            "unchanged": unchanged,
             "errors": errors,
         }
 

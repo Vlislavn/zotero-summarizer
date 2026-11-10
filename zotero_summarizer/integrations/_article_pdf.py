@@ -24,6 +24,7 @@ _FONT_NAME = "helv"
 _UNICODE_FONT_NAME = "article-unicode"
 _UNICODE_BUILTIN_FONT_NAME = "cjk"
 _TAB_SPACES = "    "
+_ASCII_FALLBACKS = {"\u2212": "-"}  # minus sign: no glyph in the cjk font
 _PDF_METADATA = {
     "title": "Text-only article conversion",
     "subject": "Text-only conversion; original visual layout is not preserved.",
@@ -101,8 +102,34 @@ def _unicode_font() -> fitz.Font:
     return fitz.Font(fontname=_UNICODE_BUILTIN_FONT_NAME)
 
 
+def _renderable(char: str) -> str:
+    """Return the text to draw for ``char``: itself, a compatibility form, or a space/nothing.
+
+    Web text is full of characters the ``cjk`` font has no glyph for: NBSP and other space
+    separators (drawn as a plain space), invisible format characters such as soft hyphen or
+    zero-width space (nothing visible to keep), compatibility forms (ligatures, superscripts)
+    and the minus sign. Anything else that cannot be drawn still fails loudly.
+    """
+    category = unicodedata.category(char)
+    if category == "Cf":
+        return ""
+    if category in {"Zs", "Zl", "Zp"}:
+        return " "
+    glyph = ord(char)
+    if glyph <= 0x7F:
+        return char
+    font = _unicode_font()
+    if font.has_glyph(glyph):
+        return char
+    compat = unicodedata.normalize("NFKC", char)
+    if compat != char and all(ord(c) <= 0x7F or font.has_glyph(ord(c)) for c in compat):
+        return compat
+    if char in _ASCII_FALLBACKS:
+        return _ASCII_FALLBACKS[char]
+    raise ValueError(f"text contains a character unsupported by the built-in font: U+{glyph:04X}")
+
+
 def _layout_lines(text: str, maximum_pages: int) -> list[str]:
-    unicode_font = None
     maximum_lines = maximum_pages * _LINES_PER_PAGE
     lines: list[str] = []
 
@@ -112,20 +139,14 @@ def _layout_lines(text: str, maximum_pages: int) -> list[str]:
             continue
         paragraph = paragraph.replace("\t", _TAB_SPACES)
         current: list[str] = []
-        for char in paragraph:
-            category = unicodedata.category(char)
-            if category in {"Cc", "Cf"}:
+        for source_char in paragraph:
+            if unicodedata.category(source_char) == "Cc":
                 raise ValueError("text contains an unsupported control character")
-            glyph = ord(char)
-            if glyph > 0x7F:
-                if unicode_font is None:
-                    unicode_font = _unicode_font()
-                if not unicode_font.has_glyph(glyph):
-                    raise ValueError(f"text contains a character unsupported by the built-in font: U+{glyph:04X}")
-            if len(current) >= _MAX_LINE_CHARS:
-                _append_line(lines, "".join(current), maximum_lines)
-                current = []
-            current.append(char)
+            for char in _renderable(source_char):
+                if len(current) >= _MAX_LINE_CHARS:
+                    _append_line(lines, "".join(current), maximum_lines)
+                    current = []
+                current.append(char)
         _append_line(lines, "".join(current), maximum_lines)
 
     return lines
@@ -177,7 +198,8 @@ def _verify_text_roundtrip(pdf: bytes, expected: str) -> None:
 def render_text_pdf(text: str, *, max_bytes: int) -> bytes:
     """Apply source/page/output budgets, not a browser RAM sandbox.
 
-    Tabs map to four spaces; every other control character is rejected.
+    Tabs map to four spaces; every other control character is rejected. Space separators
+    (NBSP, thin space, …) become a plain space and invisible format characters are dropped.
     """
     if not isinstance(text, str):
         raise TypeError("text must be a string")

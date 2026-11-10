@@ -91,6 +91,12 @@ def summary(row, field="summary"):
     return value
 
 
+PLAIN_REASONS = {
+    "history_abstract_conflict": "the stored triage was made for a different abstract than the feed now shows "
+                                 "(history_abstract_conflict)",
+}
+
+
 def admit_history(candidate, row):
     entry = {"history": "missing", "reason": "no_prior_history",
              "text_basis": "rss" if candidate.abstract.strip() else "not_available",

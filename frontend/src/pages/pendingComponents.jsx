@@ -7,6 +7,7 @@ import {
   hasUnboundGeneratedTarget,
   hasApprovalPreview,
   MISSING_APPROVAL_MESSAGE,
+  statusLabel,
   UNBOUND_GENERATED_TARGET_MESSAGE,
 } from './pendingHelpers.js';
 import { ActionBadge } from '../components/ui/Badge.jsx';
@@ -187,7 +188,7 @@ export function ChangeGroup({
       }`}
     >
       <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-200">
-        <div className="text-sm font-semibold line-clamp-2">{group.item_title || group.item_key}</div>
+        <div className="text-sm font-semibold line-clamp-2">{group.item_title || 'Untitled paper'}</div>
       </div>
       <div className="p-2 space-y-1.5">
         {group.changes.map((change) => (
@@ -206,10 +207,10 @@ export function ChangeGroup({
                     {changeTypeLabel(change.change_type)}
                   </ActionBadge>
                   {change.status && change.status !== 'pending' && (
-                    <ActionBadge tone="slate">status: {change.status}</ActionBadge>
+                    <ActionBadge tone="slate">{statusLabel(change.status)}</ActionBadge>
                   )}
                   <span className="text-xs text-slate-700 break-words min-w-0">
-                    {changeSummary(change)}{change.generated_preview && ' · generated, immutable'}
+                    {changeSummary(change)}{change.generated_preview && ' · generated, read-only'}
                   </span>
                 </div>
                 {change.applied_at && (
@@ -241,17 +242,16 @@ export function ChangeGroup({
               <p className="mt-1 text-xs text-slate-700">{UNBOUND_GENERATED_TARGET_MESSAGE}</p>
             )}
             {change.status === 'applying' && (
-              <p role="alert" className="mt-1 text-xs text-slate-700">Delivery outcome is uncertain. Reconcile Zotero against the backup before any new action; retry is blocked.</p>
+              <p role="alert" className="mt-1 text-xs text-slate-700">Result unknown. Compare Zotero with the backup before doing anything else; retry is blocked.</p>
             )}
             <details className="mt-1 ml-6 text-xs text-slate-700">
               <summary className="cursor-pointer text-slate-500 min-h-6">Details</summary>
               <div className="mt-1 space-y-1">
-                <div className="font-mono text-[11px] text-slate-500">{group.item_key}</div>
-                {(!change.status || change.status === 'pending') && <div>status: pending</div>}
+                {(!change.status || change.status === 'pending') && <div>Status: Pending</div>}
                 {change.generated_preview && (
                   <>
                     {!hasUnboundGeneratedTarget(change) && (
-                      <p>Apply selected approves this exact generated payload and target. Recovery is backup-only, not undo.</p>
+                      <p>Apply selected writes exactly this note to this target. No undo, only the backup.</p>
                     )}
                     <pre aria-label="Generated mutation preview" className="whitespace-pre-wrap break-words">
                       {JSON.stringify(change.generated_preview, null, 2)}
@@ -259,7 +259,7 @@ export function ChangeGroup({
                   </>
                 )}
                 {hasApprovalPreview(change) && (
-                  <p>Apply or Retry approves this saved payload and Zotero target, not unsaved edits. Save edits and reselect before applying. Recovery is backup-only, not undo.</p>
+                  <p>Apply or Retry uses the saved change, not unsaved edits: save, then reselect. No undo, only the backup.</p>
                 )}
                 <pre aria-label="Approval mutation preview" className="whitespace-pre-wrap break-words">
                   {JSON.stringify(change.approval_preview || { payload: change.payload_json, target: null }, null, 2)}

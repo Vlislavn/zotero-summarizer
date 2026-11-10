@@ -3,14 +3,33 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 
 from zotero_summarizer.services.setup.deployment import require_loopback_bind
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.storage.migrations import migrate_existing
 
 
+def _port_is_busy(host: str, port: int) -> bool:
+    import socket
+
+    with socket.socket() as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind((host, port))
+        except OSError:
+            return True
+    return False
+
+
 def _serve(args: argparse.Namespace) -> int:
     require_loopback_bind(args.host)
+    # uvicorn binds only AFTER the lifespan startup, which has already launched the
+    # prewarm/rescore workers; a bind failure then left those threads running for
+    # minutes. Fail before any startup work (the listener is never touched).
+    if _port_is_busy(args.host, args.port):
+        print(f"error: {args.host}:{args.port} is already in use; pick another --port", file=sys.stderr)
+        return 1
     # The string factory (including reload workers) must use the admitted root.
     os.environ["ZOTERO_SUMMARIZER_HOME"] = args.project_root
     import uvicorn

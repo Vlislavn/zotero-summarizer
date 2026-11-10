@@ -46,7 +46,7 @@ it('opens a retained CLI run with cards, paper links, downloads and honest unkno
   expect(screen.getAllByText(/None verified — availability unknown/)).toHaveLength(2);
   expect(screen.getByText('Trace release missing')).toBeTruthy();
   expect(screen.getByText('No clinical evaluation')).toBeTruthy();
-  expect(screen.getByText(/model: unrecorded/)).toBeTruthy();
+  expect(screen.getByText(/generated at an unrecorded time/)).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Open paper review' }).getAttribute('href')).toBe('/paper/feed%3Aone?autoRun=false');
   expect(screen.getByRole('link', { name: 'Missing current review' }).getAttribute('href')).toBe('/paper/feed%3Athree?autoRun=false');
   expect(screen.getByRole('link', { name: 'feed:four' }).getAttribute('href')).toBe('/paper/feed%3Afour?autoRun=false');
@@ -98,7 +98,7 @@ it('shows unqualified reviews without claiming unavailable full text or hiding t
   expect(link.getAttribute('href')).toBe('/paper/feed%3Awaiting?autoRun=false');
   expect(link.closest('details')).toBeNull();
   const section = screen.getByRole('heading', { name: 'Needs a current review / full text' }).parentElement;
-  expect(section.textContent).toContain('Review not qualified: review_missing');
+  expect(section.textContent).toContain('Review not qualified: Review missing');
   expect(section.textContent).not.toContain('None recorded.');
   expect(section.textContent).toContain('does not prove the PDF is unavailable');
   expect(researchFeedApi.get).toHaveBeenCalledTimes(1);
@@ -114,18 +114,18 @@ it('keeps manual source needs and unqualified reviews in one visible section wit
   const pending = await screen.findByRole('link', { name: 'Unbound current review' });
   const manual = screen.getByRole('link', { name: 'Missing current review' });
   expect(pending.closest('section')).toBe(manual.closest('section'));
-  expect(pending.closest('section').textContent).toContain('Review not qualified: review_source_unbound');
+  expect(pending.closest('section').textContent).toContain('Review not qualified: Review source unbound');
   expect(pending.getAttribute('href')).toBe('/paper/feed%3Aother?autoRun=false');
 });
 
 it('does not replace the selected run when an older detail request completes late', async () => {
   let resolveOld;
-  researchFeedApi.list.mockResolvedValue({ items: ['weekly-old', 'weekly-new'].map((run_id) => ({ run_id, available: true, counts: { cards_generated: 1 } })) });
+  researchFeedApi.list.mockResolvedValue({ items: ['weekly-old', 'weekly-new'].map((run_id, i) => ({ run_id, available: true, start: `2026-01-0${i + 1}`, end: `2026-01-0${i + 2}`, counts: { cards_generated: 1 } })) });
   researchFeedApi.get.mockImplementation((id) => id === 'weekly-old'
     ? new Promise((resolve) => { resolveOld = resolve; }) : Promise.resolve(report()));
   mount('/weekly?run=weekly-old');
   await waitFor(() => expect(researchFeedApi.get).toHaveBeenCalledWith('weekly-old'));
-  await screen.findByRole('option', { name: 'weekly-new · 1 cards' });
+  await screen.findByRole('option', { name: '2 Jan 2026 – 3 Jan 2026 · 1 cards' });
   fireEvent.change(screen.getByLabelText('Saved digest'), { target: { value: 'weekly-new' } });
   await screen.findByRole('heading', { name: 'Agent benchmark' });
   const stale = report(); stale.cards[0].candidate.title = 'Older report title';
@@ -150,7 +150,7 @@ it('renders missing legacy provenance and idea groups without inventing assessme
   researchFeedApi.list.mockResolvedValue({ items: [] }); researchFeedApi.get.mockResolvedValue(legacy);
   mount('/weekly?run=weekly-legacy');
   await screen.findByRole('heading', { name: 'Agent benchmark' });
-  expect(screen.getByText(/Source basis: unknown · model: unrecorded/)).toBeTruthy();
+  expect(screen.getByText(/Source of the reading not recorded/)).toBeTruthy();
   expect(screen.getByText('No structured ideas recorded.')).toBeTruthy();
 });
 

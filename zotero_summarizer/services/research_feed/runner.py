@@ -15,12 +15,12 @@ from zotero_summarizer.models import ResearchCandidate, ResearchFeedTriage
 from zotero_summarizer.models.research_feed import parse_run_budgets
 from zotero_summarizer.services._common import now_iso_z, write_json_atomic
 from zotero_summarizer.services.library import _feed_assessment
-from zotero_summarizer.services.research_feed.cursor import CandidateCursor
+from zotero_summarizer.services.research_feed.cursor import NOT_CACHED, CandidateCursor
 from zotero_summarizer.services.research_feed.card import build_card
 from zotero_summarizer.services.research_feed.profile import load_profile
 from zotero_summarizer.services.research_feed.render import persist
 from zotero_summarizer.services.research_feed.source import (
-    CandidateReader, admit_history, load_candidates, native_admission, native_decision,
+    PLAIN_REASONS, CandidateReader, admit_history, load_candidates, native_admission, native_decision,
     number, source_history_metadata, summary,
 )
 from zotero_summarizer.services.research_feed.ranking import rank_candidates
@@ -158,7 +158,8 @@ def _assess(
         if entry["history"] == "withheld":
             entry["admission"] = {"status": "failed", "reason": "history_withheld", "native_decision": None}
             failed.append({"source_id": candidate.source_id, "error": f"ValueError: {entry['reason']}"})
-            LOGGER.warning("research-feed triage failed source=%s: %s", candidate.source_id, entry["reason"])
+            LOGGER.warning("research-feed triage failed for \"%s\": %s", candidate.title,
+                           PLAIN_REASONS.get(entry["reason"], entry["reason"]))
             continue
         native = row is not None
         decision = native_decision(row.get("decision")) if native else None
@@ -169,7 +170,7 @@ def _assess(
                     cursor = CandidateCursor(settings)
                 row = cursor.row(candidate, profile, generate=generate)
                 if row is None:
-                    raise ValueError("cached abstract triage unavailable")
+                    raise ValueError(NOT_CACHED)
             accepted_rows[candidate.source_id] = row
             try:
                 triage = triage_candidate(candidate, row, profile)
@@ -178,7 +179,7 @@ def _assess(
             except Exception as exc:  # noqa: BLE001 - callback failure cannot expose raw input or stop peers.
                 entry["admission"] = {"status": "failed", "reason": "triage_history_invalid", "native_decision": decision}
                 failed.append({"source_id": candidate.source_id, "error": f"{type(exc).__name__}: triage_history_invalid"})
-                LOGGER.warning("research-feed triage failed source=%s: triage_history_invalid", candidate.source_id)
+                LOGGER.warning("research-feed triage failed for \"%s\": triage_history_invalid", candidate.title)
                 continue
             entry["admission"] = native_admission(triage, decision, native=native)
             if entry["admission"]["status"] == "failed":
@@ -186,8 +187,14 @@ def _assess(
             triage = triage.model_copy(update={"include": entry["admission"]["status"] == "eligible"})
             assessed.append((candidate, triage))
         except Exception as exc:  # noqa: BLE001 - preserve source/cursor/native stage diagnostics per paper.
-            LOGGER.warning("research-feed triage failed source=%s: %s", candidate.source_id, exc)
+            # A cached-only cache miss is "not screened yet", summarised once below, not 500 warnings.
+            (LOGGER.debug if str(exc) == NOT_CACHED else LOGGER.warning)(
+                "research-feed triage failed for \"%s\": %s", candidate.title, exc)
             failed.append({"source_id": candidate.source_id, "error": f"{type(exc).__name__}: {exc}"})
+    unscreened = sum(row["error"].endswith(NOT_CACHED) for row in failed)
+    if unscreened:
+        LOGGER.warning("research-feed: %d papers were not screened yet (no stored triage; "
+                       "run without --cached-only to screen them)", unscreened)
     return profile, effective, accepted_rows, assessed, failed, source_history
 
 
@@ -430,7 +437,8 @@ def run_weekly(
         "last_run_at": now_iso_z(), "last_json": str(json_path), "writebacks": writebacks,
     })
     return {"json_path": str(json_path), "markdown_path": str(md_path),
-            "writebacks_queued": writebacks["succeeded"], **payload["metadata"]["counts"]}
+            "writebacks_queued": writebacks["succeeded"], **payload["metadata"]["counts"],
+            "not_triaged": sum(row["error"].endswith(NOT_CACHED) for row in failed)}
 
 
 def _ideas_by_project(records: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:

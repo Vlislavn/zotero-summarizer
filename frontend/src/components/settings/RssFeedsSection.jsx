@@ -15,6 +15,21 @@ const HACKERNOON_FEEDS = [
 ];
 const values = feed => ({ name: feed.name || '', url: feed.url || '', enabled: Boolean(feed.enabled) });
 const EMPTY = { name: '', url: '', enabled: true };
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+function importNotice({ imported = 0, added = imported }) {
+  if (!added) return imported ? `No new feeds: all ${plural(imported, 'feed')} from Zotero are already here.` : 'No feeds found in Zotero.';
+  const present = imported - added;
+  return `Added ${plural(added, 'new feed')}${present > 0 ? ` (${present} already present)` : ''}. Nothing fetched yet.`;
+}
+function refreshNotice({ feeds = 0, inserted = 0, updated = 0, unchanged, incomplete = 0, errors = [] }) {
+  const failed = errors.length;
+  if (!inserted && !updated && !failed) return `Nothing new: checked ${plural(feeds, 'feed')}, no new or changed items.${incomplete ? ` ${plural(incomplete, 'feed')} cut off by the source; the rest is read next time.` : ''}`;
+  const parts = [`${inserted} new`, `${updated} updated`];
+  if (unchanged) parts.push(`${unchanged} unchanged`);
+  if (failed) parts.push(`${failed} failed`);
+  const tail = failed ? ' Failed feeds are marked below.' : incomplete ? ` ${plural(incomplete, 'feed')} cut off by the source; the rest is read next time.` : '';
+  return `Checked ${plural(feeds, 'feed')}: ${parts.join(', ')}.${tail}`;
+}
 function subscriptionUrlKey(value) {
   try { const url = new URL(value); url.hash = ''; return url.href; } catch { return value; }
 }
@@ -56,17 +71,13 @@ export default function RssFeedsSection({ onDirtyChange, onPendingChange }) {
   const importMutation = useMutation({
     mutationFn: importRssFeedsFromZotero, onError: sourceWriteFailed,
     onSettled: (_response, error) => invalidateSetupDoctor(cache, error),
-    onSuccess: result => { setNotice({ kind: 'success', text: `Imported ${result.imported || 0} feed${result.imported === 1 ? '' : 's'}. Nothing fetched.` }); return invalidate(); },
+    onSuccess: result => { setNotice({ kind: 'success', text: importNotice(result) }); return invalidate(); },
   });
   const refreshMutation = useMutation({
     mutationFn: () => refreshRssFeeds({ max_feeds: 10 }), onError: showError,
     onSuccess: result => {
       if (result.offline) { setNotice({ kind: 'error', text: 'RSS refresh skipped: the app is offline. Sources were not checked.' }); return; }
-      const counts = `Checked ${result.feeds || 0} feed${result.feeds === 1 ? '' : 's'}: ${result.inserted || 0} new, ${result.updated || 0} updated.`;
-      const detail = result.errors?.length ? ` ${result.errors.length} feed(s) failed — see their errors below.`
-        : result.incomplete ? ` ${result.incomplete} feed(s) cut off by the source: incomplete fetch, the rest is read on the next refresh.`
-        : !result.inserted && !result.updated ? ' No items stored in this pass.' : '';
-      setNotice({ kind: result.errors?.length ? 'error' : 'success', text: counts + detail });
+      setNotice({ kind: result.errors?.length ? 'error' : 'success', text: refreshNotice(result) });
     }, onSettled: invalidate,
   });
   const sourceWritePending = addMutation.isPending || importMutation.isPending || updateMutation.isPending || deleteMutation.isPending;
