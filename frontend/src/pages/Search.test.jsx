@@ -48,9 +48,9 @@ it('shows every server query variant and files identical-title cards by their di
     return new Response(JSON.stringify(body));
   }));
   render(<Search />);
-  await screen.findByText('Query plan (per source)');
-  fireEvent.click(screen.getByText('Query plan (per source)'));
-  expect(screen.getByText('"precise topic"')).toBeTruthy();
+  await screen.findByText('What was searched, by source');
+  fireEvent.click(screen.getByText('What was searched, by source'));
+  expect(screen.getByText('precise topic')).toBeTruthy();
   expect(screen.getByText('broad topic')).toBeTruthy();
   expect(screen.getByText('peer-reviewed topic')).toBeTruthy();
 
@@ -418,7 +418,7 @@ it('sends only explicitly confirmed constraints, not restrictions inferred from 
   fireEvent.click(screen.getByRole('button', { name: 'Search' }));
   await waitFor(() => expect(requests).toHaveLength(2));
   expect(requests[1].constraints).toEqual({ must_include: [], must_not_include: ['animal'], study_types: ['Review'] });
-  fireEvent.click(screen.getByText('Query plan (per source)'));
+  fireEvent.click(screen.getByText('What was searched, by source'));
   expect(screen.getByText('observations: 0; status: unknown')).toBeTruthy();
   expect(screen.getByText('confirmation required: study_types')).toBeTruthy();
 });

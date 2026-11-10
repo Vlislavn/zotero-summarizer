@@ -1,7 +1,7 @@
 import { Section, SectionLabel, Disclosure, Chip, KeyVal, Bullets, Fold } from './primitives.jsx';
 import { gradeTone, qualityBasis, BAND_LABEL } from './tones.js';
 import {
-  bandGloss, METHOD_CLAUSE, LEGEND, rubricLabel, paperTypeLabel,
+  bandGloss, dedupeFlags, METHOD_CLAUSE, LEGEND, rubricLabel, paperTypeLabel, standardLabel,
   decisiveRows, fullChecklist, shortGoal, isSupportedGoal,
 } from './briefModel.js';
 import { formatShortDate, timeAgo } from '../../library/shared.jsx';
@@ -118,7 +118,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
   // digest's own read decision instead of the goals×rigor verdict.
   const isNonPaper = quality?.basis === 'non_paper';
   const band = isNonPaper ? '' : String(quality?.quality_band || '');
-  const redFlags = isNonPaper ? [] : (quality?.red_flags || []).map((x) => String(x || '').trim()).filter(Boolean);
+  const redFlags = isNonPaper ? [] : dedupeFlags((quality?.red_flags || []).map((x) => String(x || '').trim()).filter(Boolean));
   const nHitGoals = goals.filter(isSupportedGoal).length;
   const overstated = quality && !isNonPaper ? (quality.overstatements || []).filter(Boolean) : [];
   const findings = (digest?.key_findings || []).filter(text => !overstated.includes(text));
@@ -469,7 +469,7 @@ function GoalBoard({ goals, goalLoc, foldReasons = false }) {
 // loud red-flags callout (the only semantic box). Everything that explains HOW the
 // band was reached moves to QualityDetails, behind the one "Details" disclosure.
 function QualityHeadline({ quality, band, flagLoc, missLoc, critiqueViews = false }) {
-  const redFlags = (quality.red_flags || []).map((x) => String(x || '').trim()).filter(Boolean);
+  const redFlags = dedupeFlags((quality.red_flags || []).map((x) => String(x || '').trim()).filter(Boolean));
   // Derived so the gloss never says "No red flags" while the box below lists some.
   const gloss = bandGloss(band, redFlags.length > 0);
   const standard = String(quality.coverage_standard || '');
@@ -493,7 +493,7 @@ function QualityHeadline({ quality, band, flagLoc, missLoc, critiqueViews = fals
         <div>
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[13px]">
             {/* The reading page names the checklist and paper type once, beside the full checklist. */}
-            {!critiqueViews && standard && <span className="font-medium text-slate-900">{standard}</span>}
+            {!critiqueViews && standard && <span className="font-medium text-slate-900">{standardLabel(standard)}</span>}
             <span className="text-slate-700">{applicable > 0 ? `${met}/${applicable} applicable items met` : 'Checklist coverage unavailable'}</span>
             {!critiqueViews && <PaperTypeChip quality={quality} />}
           </div>
@@ -562,7 +562,7 @@ function ChecklistBasis({ quality }) {
   if (!standard && !quality.paper_type) return null;
   return (
     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[13px]">
-      {standard && <span className="font-medium text-slate-900">{standard}</span>}
+      {standard && <span className="font-medium text-slate-900">{standardLabel(standard)}</span>}
       <PaperTypeChip quality={quality} />
     </div>
   );

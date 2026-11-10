@@ -10,7 +10,7 @@ structure and ownership in [docs/architecture.md](../../../docs/architecture.md)
 ## Review pipeline
 
 ```
-deep_review.start ─ per-item job, one provider-aware pool ─> _review_worker ─> _review_one
+deep_review.start ─ per-item job ─ _review_queue (owner lane ▸ background lane) ─ one provider-aware pool ─> _review_worker ─> _review_one
  PDF text ─ _source_admission.admit_source (operational pages fail `source_unusable`)
    │
    ▼ GENERATOR  _map_reduce.digest_for_strategy   (quality_review.chunk_strategy)
@@ -52,6 +52,7 @@ code_link, verification_audit, review_identity, review_contract_version, …}`.
 | `app_library_reader.py` | Zotero-absent reader over kept `processed_feed_items` ⨝ `rss_items`, keyed by `stable_feed_key` |
 | `deep_review.py` | per-item job registry, worker, status, cache publication; `_review_one` composes the pipeline |
 | `_deep_review_layers.py` / `_deep_review_progress.py` / `_deep_review_errors.py` | optional layers, `ReviewReporter` (phase/ETA), job-level error summary |
+| `_review_queue.py` | two-lane admission for the shared review pool: owner-requested reviews (Generate/Regenerate, Add) start before queued background ones (`start(background=True)`: Today preparation, both prewarms, the fleet) and background work never takes the last slot when the pool has more than one, so an owner review starts at once; a local pool of one cannot reserve a slot, there the owner review runs next. Total pool size is unchanged. A queued job is `running` with `queue_ahead` (jobs that start first) in `deep_review.status(key)`; `None` once it has a slot. An owner request for a paper already queued as background work moves it up |
 | `deep_review_prewarm.py` / `_flight.py` | startup prewarm; `FlightLatch`, `run_in_background`, `resolve_prewarm_k` (shared with `review_fleet/prewarm.py`) |
 | `quality_review.py` | digest prompt, generation, parse retry, verification + one correction, `build_response_format` re-export |
 | `_map_reduce.py` | strategy dispatch (`digest_for_strategy`, `ChunkBudget`), chunk MAP then reduce |
@@ -110,6 +111,7 @@ code_link, verification_audit, review_identity, review_contract_version, …}`.
 - Export opens no native database and no reader; retained evidence is labelled `retained_source_only` / `not_established`. Receipts are unsigned consistency evidence, not authentication.
 - Worker publication holds `review_publication_lock`: write the review once, then `stage_current_digest` stages a note *proposal* (`zotero_note_written` stays false). Staging failure leaves the review intact and reports a worker error. Native write belongs to explicit Pending approval.
 - A placeholder (`needs_pdf`, source-unavailable) never replaces a current usable review (`publishable_entry`); failures never write labels or overwrite an earlier valid review.
+- Owner-requested reviews outrank background ones (see `_review_queue.py`); Search's targeted review does not use this pool (it runs its own per-paper threads, see `services/search/README.md`).
 - Per-item jobs are single-flight; a failed duplicate setup cannot settle a running job. Every-item failure sets a job-level `error`. Review completion never runs the label-writing quality gate; `quality_gate.fire_full` is the only scheduled writer and existing human labels are skipped.
 
 ### Optional layers
@@ -176,3 +178,4 @@ Imports `zotero/` (pending), `golden/` (labels), `model/` and `daily_select` (sc
 ## Review parallelism and call speed (#193)
 
 Two knobs in `goals.yaml` `quality_review` (env `ZS_QUALITY_REVIEW_FLEET_PAPERS`, `ZS_QUALITY_REVIEW_CALLS_PER_PAPER`; defaults 8 and 2; 0 = the provider's `max_sub_concurrency`; a local provider stays serial): **papers reviewed at once** (`fleet_papers`) and **LLM calls in flight per paper** (`calls_per_paper`). Every call logs `LLM call stage=… tok_per_s=…` (completion tokens ÷ call seconds, prefill included) and the same number is in each stage row of `timings`. Measured defaults: see `data/perf-20261107/speed/fleet/report.md`.
+- Review wording (#252): the weak-evidence reading-policy sentence is «This is an idea paper; its claims are not yet backed by evidence.»; the presentation's method line/legend and dataset rubric labels are plain words (mirrored in `frontend/.../briefModel.js`); `qa.ask_paper` turns a missing PDF into «No PDF saved for this paper yet. Add it to your library to ask questions.»

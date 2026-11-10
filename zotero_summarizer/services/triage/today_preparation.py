@@ -138,9 +138,9 @@ def _prepare_one(db_path: Path, key: str) -> str:
     if acquired.path is not None and not acquired.web_article:
         overrides = {key: {"path": str(acquired.path), "source": acquired.source,
                            "source_url": acquired.source_url}}
-        deep_review.start(item_keys=[key], pdf_overrides=overrides, reader=reader)
+        deep_review.start(item_keys=[key], pdf_overrides=overrides, reader=reader, background=True)
     else:  # publishes the existing needs_pdf placeholder; no model call
-        deep_review.start(item_keys=[key], reader=reader)
+        deep_review.start(item_keys=[key], reader=reader, background=True)
     while deep_review.status(key)["status"] == "running":
         time.sleep(_POLL_SECONDS)
     if deep_review.status(key)["status"] == "error":

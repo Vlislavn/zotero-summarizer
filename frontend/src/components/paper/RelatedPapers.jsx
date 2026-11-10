@@ -3,10 +3,14 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { fetchRelatedPapers, assessRelatedPapers, fetchDiscovery, findNewRelevant } from '../../api/libraryApi.js';
 
+const COMMENTS_LABEL = { available: 'Has your comments', empty: 'No comments' };
+const SOURCE_BASIS = { abstract_only: 'Matched on abstract only', title_only: 'Matched on title only',
+  metadata_only_model_judgment: 'Judged from title and abstract' };
+
 export function Comments({ comments, used = [], submitted = [] }) {
   if (!comments) return <p>Comments unavailable.</p>;
   return <details className="mt-2">
-    <summary className="cursor-pointer text-forest">Comments · {comments.availability}</summary>
+    <summary className="cursor-pointer text-forest">{COMMENTS_LABEL[comments.availability] || `Comments ${comments.availability}`}</summary>
     <p>App: {comments.app_state}; native: {comments.native_state}. Context, not paper evidence.</p>
     {comments.records.map(record => <blockquote key={record.id} className="my-2 border-l pl-3 whitespace-pre-wrap break-words">
       <p>{record.text}</p>
@@ -84,11 +88,11 @@ export default function RelatedPapers({ itemKey, heading = true }) {
         : 'Not in your library yet. Searches open sources for papers like this one.'}</p>
       <button type="button" className="mt-2 text-forest underline disabled:opacity-50" onClick={find}
         disabled={finding || !discovery.context_fingerprint}>{finding ? 'Searching…' : 'Find new relevant'}</button>
-      {discovery.context_fingerprint && <details className="mt-2"><summary className="cursor-pointer text-forest">Discovery processing and optional comments</summary>
+      {discovery.context_fingerprint && <details className="mt-2"><summary className="cursor-pointer text-forest">What is sent, and optional comments</summary>
         <p>Search providers receive public paper metadata only. No review or Add starts. Full context and results are retained locally.</p>
         <p>Optional private context includes seed comments and your reading verdict/rationale.</p>
         <p>Private seed context: {discovery.private_context.status} · {discovery.private_context.record_count ?? 'unknown'} records.</p>
-        <p>Processing boundary: {discovery.boundary?.provider} / {discovery.boundary?.model} · {discovery.boundary?.endpoint || 'native provider API'}.</p>
+        <p>Comments would be sent to: {discovery.boundary?.provider}. Only after you confirm.</p>
         <label><input type="checkbox" checked={Boolean(consent && consent === discovery.boundary?.token)}
           disabled={finding || !discovery.boundary?.enabled} onChange={event => setConsent(event.target.checked && window.confirm(
             `Send complete private seed comments and your reading verdict/rationale only to ${discovery.boundary.provider} / ${discovery.boundary.model} (${discovery.boundary.endpoint || 'native provider API'})? Search providers still receive public metadata only. Full context and results stay locally. Experimental usefulness is unqualified.`
@@ -106,10 +110,10 @@ export default function RelatedPapers({ itemKey, heading = true }) {
     {query.error && <p role="alert">Related papers unavailable: {query.error.message}. Review remains usable; previous comments stay hidden until a fresh read succeeds.
       <button type="button" className="ml-2 underline" onClick={() => query.refetch()}>Retry library read</button></p>}
     {data && <>
-      <p className="mt-2">{data.comments_in_ranking ? 'Experimental comment-aware assessment of a metadata-retrieved pool; model-cited use, influence unverified.'
-        : data.assessment_status === 'assessed' ? 'Metadata-retrieved pool; model reported no comment use.'
-          : 'Metadata hybrid search; no successful comment-use assessment.'}
-        {' '}Usefulness is unqualified; comment-only candidate recall is not supported.</p>
+      {!heading && <h3 className="mt-3 font-display text-lg text-forest">Related in my library</h3>}
+      <p className="mt-2">{data.comments_in_ranking ? 'Found by title and abstract; the model says it used your comments (experimental).'
+        : data.assessment_status === 'assessed' ? 'Found by title and abstract. The model reported no use of your comments.'
+          : 'Found by title and abstract only. Comments were not used.'}</p>
       {outdated && <p role="status">Context changed; the previous assessment is stale. Showing metadata results.</p>}
       {data.assessment_status && <p role="status">Comment assessment: {data.assessment_status}.
         {data.assessment_status !== 'assessed' && ' Showing metadata results, not a successful comment assessment.'}</p>}
@@ -119,8 +123,8 @@ export default function RelatedPapers({ itemKey, heading = true }) {
         disabled={!boundary?.enabled || assessment.isPending || query.isFetching || Boolean(query.error)}>
         Try with comments — experimental
       </button>
-      {boundary && <p className="text-xs mt-1">Processing boundary: {boundary.provider} / {boundary.model} · {boundary.endpoint || 'native provider API'}.
-        Complete private comments are sent only after confirmation. Up to 10 candidates / 30,000 input characters; over-budget contexts are not clipped.</p>}
+      {boundary && <p className="text-xs mt-1">Comments would be sent to: {boundary.provider}. Only after you confirm.
+        Up to 10 candidates / 30,000 input characters; over-budget contexts are not clipped.</p>}
       {data.status === 'unavailable' && <p role="status">Saved-library search unavailable; check corpus/model availability.</p>}
       {data.status === 'empty' && <p role="status">No related saved papers found in this scope{data.assessment_status === 'assessed' ? ' with a supported, preference-compatible assessment' : ''}.</p>}
       <Comments comments={data.seed_comments} used={used} submitted={submitted} />
@@ -128,7 +132,7 @@ export default function RelatedPapers({ itemKey, heading = true }) {
         {(data.items || []).map(row => <li key={row.item_key}>
           <Link className="text-forest underline" to={`/paper/${encodeURIComponent(row.item_key)}`}>{row.title}</Link>
           <p>{row.relationship}</p>
-          <p className="text-xs text-slate-500">{row.source_basis}</p>
+          <p className="text-xs text-slate-500">{SOURCE_BASIS[row.source_basis] || row.source_basis}</p>
           {row.evidence && <details className="mt-1"><summary className="cursor-pointer text-forest">Metadata evidence</summary>
             <p>Quote membership is checked; entailment is not independently verified.</p>
             {Object.entries(row.evidence).map(([side, evidence]) => <blockquote key={side} className="mt-2 border-l pl-3">
@@ -139,7 +143,7 @@ export default function RelatedPapers({ itemKey, heading = true }) {
         </li>)}
       </ol>
       <button type="button" className="mt-3 text-forest underline" disabled={query.isFetching || assessment.isPending}
-        onClick={() => { assessment.reset(); query.refetch(); }}>Refresh saved context</button>
+        onClick={() => { assessment.reset(); query.refetch(); }}>Reload related papers</button>
     </>}
   </section>;
 }

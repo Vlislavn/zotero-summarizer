@@ -72,7 +72,7 @@ it('shows a rejected local question honestly instead of promising another sync',
   render(<ReviewNotes itemKey="P1" questions={[{ submission_id: 'q1', question: 'Rejected question',
     saved_offline: true, sync_status: 'rejected' }]} />);
   expect(screen.getByText('Saved on this device — sync rejected')).toBeTruthy();
-  expect(screen.getByText('Zotero note delivery: unknown.')).toBeTruthy();
+  expect(screen.getByText('Not yet saved to Zotero.')).toBeTruthy();
   expect(screen.queryByText(/waiting to sync/)).toBeNull();
 });
 

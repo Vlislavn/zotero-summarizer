@@ -82,14 +82,14 @@ it.each([
   null, {}, { ...acknowledged, note_written: 1 }, { ...acknowledged, projection_revision: true },
   { ...acknowledged, note_pending: 'false' }, { ...acknowledged, target_key: null },
 ])('never fabricates delivery from an unavailable or malformed receipt: %j', (receipt) => {
-  expect(noteDeliveryText(receipt)).toBe('Zotero note delivery: unknown.');
+  expect(noteDeliveryText(receipt)).toBe('Not yet saved to Zotero.');
 });
 
 it('recognizes the already-acknowledged no-op receipt without another external write', () => {
   expect(noteDeliveryText({ ...acknowledged, note_written: false }))
     .toBe('Zotero note delivery: acknowledged (revision 7).');
   expect(noteDeliveryText({ ...acknowledged, note_written: false, projection_revision: 0 }))
-    .toBe('Zotero note delivery: unknown.');
+    .toBe('Not yet saved to Zotero.');
 });
 
 it('retires a delayed acknowledgement after a newer request clears delivery', () => {

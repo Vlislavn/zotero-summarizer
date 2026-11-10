@@ -13,7 +13,7 @@ from typing import Any
 _PHRASE: dict[str, str] = {
     "semantic_match_specter2": "topic close to papers you saved",
     "corpus_affinity": "similar to papers you kept",
-    "nearest_kept_cosine": "near-twin of a paper you kept",
+    "nearest_kept_cosine": "very similar to a paper you kept",
     "positive_centroid_cosine": "fits your library’s themes",
     "recent_centroid_cosine": "fits what you read lately",
     "prestige_score": "well-cited venue or authors",

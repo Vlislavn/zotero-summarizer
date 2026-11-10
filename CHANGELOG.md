@@ -4,6 +4,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ## [Unreleased]
 
+- Library, Setup and AI approval read plainly: no glued abstract text, «Papers the model is unsure about» / «Not interested» labels, `/setup` shows the current state, and AI models has an explicit «Approve this connection» button.
+- Paper page and Today read plainly: «Loading today's papers…», «← Back», no raw item keys in Ask errors, one wording for verdicts, plain checklist/legend text, repeated red flags merged, bottom bar no longer covers text.
+- Search and Find similar read in plain words and fit a 390 px screen: no sideways scroll, no raw HTML in abstracts, readable source and status labels, the saved query shown.
+- Reviews you ask for no longer wait behind background work (#251): Generate/Regenerate and Add start before Today preparation, prewarm and fleet reviews (`queue_ahead` in review status); Search reviews 4 papers at a time, not 14 in a row.
+
 ### Added
 
 - CLI/MCP (#249): busy-port `serve` and `feeds select-daily` exit promptly; bad `--inspect`/recipe/snapshot → one line, exit 2; `restore-model` says to restart; MCP `search_papers` ~10 calls instead of ~770; synthetic experiment examples (`python -m tools.method_validation.examples DIR`).
@@ -52,6 +57,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ### Fixed
 
+- Zotero (#254): applying an `upsert note` replaces the paper's earlier app-written digest/verdict/My-notes note in place, including legacy ones whose marker was HTML-escaped, and trashes extra owned duplicates, so one note per paper.
 - Connection approval (#244): an approved server stays approved across unrelated Settings saves, other providers' key saves and Telegram edits; it expires only when that provider's address/auth or its own key changes (one re-approval for older approvals).
 - Reviews (#242): web articles with non-breaking spaces or soft hyphens now render to PDF; heavy pages no longer fail on the browser proxy's connection cap; concurrent reviews wait for the browser instead of skipping it; Today preparation starts ~30 s after launch.
 - Find similar (#216, #225): works for feed-only papers too, sits right under the review, shows progress, drops the paper itself from results; library membership is cached until the library changes (/discover p50 1.1 s → 0.13 s).

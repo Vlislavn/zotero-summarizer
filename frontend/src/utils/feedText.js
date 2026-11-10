@@ -34,6 +34,9 @@ export function feedLabel(name) {
 export function cleanAbstract(abstract) {
   return String(abstract || '')
     .replace(/<br\s*\/?>/gi, '\n')
+    // Block ends ("…-5</a></p>An agentic…") carry the only separator; keep it.
+    .replace(/<\/(p|div|li|h[1-6])>/gi, ' ')
     .replace(/<[^>]+>/g, '')
+    .replace(/[ \t]{2,}/g, ' ')
     .trim();
 }

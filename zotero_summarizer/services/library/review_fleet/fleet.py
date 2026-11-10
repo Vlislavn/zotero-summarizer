@@ -208,7 +208,7 @@ def _run_batched_review(item_keys: list[str], *, overrides: dict[str, Any] | Non
         if not pending:
             return
         ov = {k: overrides[k] for k in pending if overrides and k in overrides} or None
-        accepted = bool(deep_review.start(item_keys=pending, pdf_overrides=ov).get("accepted"))
+        accepted = bool(deep_review.start(item_keys=pending, pdf_overrides=ov, background=True).get("accepted"))
         while True:
             dr_status = deep_review.status()
             with _LOCK:

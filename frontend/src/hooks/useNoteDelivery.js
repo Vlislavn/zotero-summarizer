@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 export function noteDeliveryText(receipt) {
-  const unknown = 'Zotero note delivery: unknown.';
+  const unknown = 'Not yet saved to Zotero.';
   if (!receipt || typeof receipt.note_written !== 'boolean' || typeof receipt.note_pending !== 'boolean'
       || !Number.isSafeInteger(receipt.projection_revision) || receipt.projection_revision < 0
       || (receipt.note_error !== null && typeof receipt.note_error !== 'string')

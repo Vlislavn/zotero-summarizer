@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { isAutoVerdict } from '../../../utils/priorityLabels.js';
-import { DECISIONS, DECISION_BTN, DECISION_HOVER, DECISION_TINT, DECISION_WORD, NEG_CHIPS, POS_CHIPS } from '../../decisionVocab.js';
+import { isAutoVerdict, pretty } from '../../../utils/priorityLabels.js';
+import { DECISIONS, DECISION_BTN, DECISION_HOVER, DECISION_TINT, NEG_CHIPS, POS_CHIPS } from '../../decisionVocab.js';
 
 // Sticky compact verdict bar for the paper page on phones (lg:hidden). It brings
 // the decision onto the first screen (the full rail editor is ~screens down), using
@@ -44,7 +44,7 @@ export default function MobileVerdictBar({ itemKey, verdict }) {
       {decision ? (
         <div>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-            <span className="font-medium text-slate-800">{auto ? 'Auto' : 'Yours'}: {DECISION_WORD[decision]}</span>
+            <span className="font-medium text-slate-800">{auto ? 'Auto' : 'Yours'}: {pretty(decision)}</span>
             <button type="button" onClick={undo} disabled={busy}
               className="min-h-10 text-forest-800 underline underline-offset-2 disabled:opacity-50">Undo</button>
           </div>

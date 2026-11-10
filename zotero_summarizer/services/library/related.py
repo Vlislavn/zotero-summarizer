@@ -122,7 +122,7 @@ def _snapshot(item_key, collection, tag):
 
 def _baseline(snapshot):
     rows = [{**row, "score": snapshot["scores"].get(row["item_key"]),
-             "relationship": "Metadata-search similarity; a concrete relationship is unverified.",
+             "relationship": "Similar by topic; not confirmed as related.",
              "source_basis": "abstract_only" if row["abstract"] and snapshot["seed"]["abstract"] else "title_only"}
             for row in snapshot["pool"][:3]]
     unavailable = snapshot["search"].get("semantic_unavailable")

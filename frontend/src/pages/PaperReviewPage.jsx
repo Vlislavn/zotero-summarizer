@@ -137,7 +137,7 @@ export default function PaperReviewPage() {
   const [params] = useSearchParams();
   const fromToday = params.get('from') === 'today';
   const visitId = params.get('visit');
-  const autoRun = !fromToday && params.get('autoRun') !== 'false';
+  const autoRun = params.get('autoRun') !== 'false';
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   useEffect(() => { // link opens on this page belong to the Today slate it was opened from
@@ -277,9 +277,9 @@ export default function PaperReviewPage() {
   ].filter(Boolean);
 
   return (
-    <div className="paper-reading-page mx-auto w-full min-w-0 max-w-[76rem] pb-24 lg:pb-6">
+    <div className="paper-reading-page mx-auto w-full min-w-0 max-w-[76rem] pb-44 lg:pb-6">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-0 text-[13px] text-slate-500">
-        <Link to={fromToday ? '/today' : '/library'} className="inline-flex min-h-11 items-center hover:text-forest-800">{fromToday ? '← Back to Today' : '← Read next'}</Link>
+        <Link to={fromToday ? '/today' : '/library'} className="inline-flex min-h-11 items-center hover:text-forest-800">{fromToday ? '← Back to Today' : '← Back'}</Link>
         {navIdx >= 0 && (
           <>
             <span className="text-slate-300" aria-hidden="true">·</span>
@@ -344,7 +344,7 @@ export default function PaperReviewPage() {
                   className="text-[13px] font-medium text-forest-800 hover:text-forest-700 disabled:opacity-50"
                   title="Attach these figures to the paper's Zotero item so they show in Zotero. Skips any already attached; needs Zotero closed (or confirm force)."
                 >
-                  {attaching ? 'Attaching…' : '+ Attach to Zotero'}
+                  {attaching ? 'Saving…' : '+ Save figures to this paper in Zotero'}
                 </button>
                 {attachMsg && <span className="text-[13px] text-slate-500">{attachMsg}</span>}
               </div>

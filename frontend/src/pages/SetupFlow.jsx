@@ -48,7 +48,8 @@ function modeMatchesStages(routing, mode) {
 export default function SetupFlow() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { status } = useSetupStatus();
+  const { status, isConfigured } = useSetupStatus();
+  const zoteroConnected = Boolean(status?.zotero?.db_found);
 
   const configQuery = useQuery({ queryKey: ['runtime-config'], queryFn: fetchConfig });
 
@@ -80,6 +81,16 @@ export default function SetupFlow() {
       setBaseConfig(configQuery.data);
     }
   }, [configQuery.data, draft]);
+
+  // An already-configured install opens showing its current choices, not a blank wizard.
+  useEffect(() => {
+    if (!isConfigured || !draft || mode !== null || saved.mode) return;
+    const stages = ['default', 'feed', 'backlog', 'deep_review'].map((s) => resolveStage(draft.llm_routing, s).provider);
+    const current = draft.llm_enabled === false ? 'none'
+      : !draft.llm_routing?.default?.model ? null
+        : stages.every((p) => p && isLocalProvider(p)) ? 'local' : 'hosted';
+    if (current) { setMode(current); setMaxStepReached(3); }
+  }, [isConfigured, draft, mode, saved.mode]);
 
   useEffect(() => {
     if (status?.paths) {
@@ -200,6 +211,8 @@ export default function SetupFlow() {
   const stepValid = step < 4 ? validity[step] : true;
   const isLast = step === 3;
   const labels = mode === 'none' ? STEP_LABELS.filter((_, i) => i !== 2) : STEP_LABELS;
+  const progressValidity = validity.map((ok, i) => (i === 1 ? ok && zoteroConnected
+    : i === 2 ? ok || (isConfigured && Boolean(draft.llm_routing?.default?.model)) : ok));
   const progressStep = mode === 'none' && step === 3 ? 2 : step;
 
   return (
@@ -213,8 +226,14 @@ export default function SetupFlow() {
             )}
           </div>
           {step < 4 && (
-            <StepProgress current={progressStep} validity={mode === 'none' ? validity.filter((_, i) => i !== 2) : validity}
+            <StepProgress current={progressStep} validity={mode === 'none' ? progressValidity.filter((_, i) => i !== 2) : progressValidity}
               maxReached={mode === 'none' && maxStepReached >= 3 ? 2 : maxStepReached} labels={labels} />
+          )}
+          {step < 4 && isConfigured && (
+            <p className="text-sm text-slate-600">
+              Already set up{zoteroConnected ? ' — Zotero is connected' : ''}. Your current choices are shown;
+              change any step, or Skip. Nothing changes until you press Finish.
+            </p>
           )}
           {step < 4 && (
             <p className="text-sm font-medium text-slate-700 sm:sr-only" role="status" aria-live="polite" aria-atomic="true">

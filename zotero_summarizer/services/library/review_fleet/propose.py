@@ -160,7 +160,7 @@ def apply_reading_policy(
     elif effective != raw:
         warnings.append("Full reading threshold not met; skim targeted parts.")
     if "weak_evidence" in flags:
-        warnings.append("Concept/hypothesis source only; claims not established.")
+        warnings.append("This is an idea paper; its claims are not yet backed by evidence.")
     if "writing_friction" in flags:
         warnings.append("Idea preserved; writing friction is high.")
     reason = str(digest.get("read_why") or "")

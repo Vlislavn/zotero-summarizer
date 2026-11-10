@@ -43,15 +43,15 @@ export function bandGloss(band, hasRedFlags = false) {
 
 // The literal answer to "what did we apply?" (· N/M passes agree is appended).
 export const METHOD_CLAUSE =
-  'How we judged it: a reference-free rubric + red-flag scan — no citation counts, ' +
-  'authors hidden, scored only from what the paper itself shows. Agreement below is ' +
-  'self-consistency across runs, not yet human-validated.';
+  'How we judged it: a general checklist plus a scan for red flags — no citation counts, ' +
+  'authors hidden, scored only from what the paper itself shows. We run the check several ' +
+  'times; agreement is how often the runs gave the same answer, not a human check.';
 
 // Legend terms (rendered as <b>term</b> gloss, joined by ·).
 export const LEGEND = [
-  { term: 'FLAG', gloss: 'material concerns / checklist gaps' },
-  { term: 'NEUTRAL', gloss: 'mixed coverage' },
-  { term: 'HIGHLIGHT', gloss: 'strong coverage of applicable type-aware checks' },
+  { term: 'FLAG', gloss: 'serious concerns or missing checks' },
+  { term: 'NEUTRAL', gloss: 'mixed results' },
+  { term: 'HIGHLIGHT', gloss: 'most applicable checks met' },
 ];
 
 // Plain-English labels for rubric keys (mirrors _paper_read_brief._RUBRIC_LABEL).
@@ -70,8 +70,43 @@ const RUBRIC_LABEL = {
   clinical_calibration: 'Calibration / multi-site validation',
   determinism: 'Reports run-to-run determinism',
   eval_contamination: 'Addresses eval contamination',
+  motivation: 'Dataset motivation and intended use documented',
+  composition: 'Dataset contents (instances, labels, splits) described',
+  collection: 'Data collection process described',
+  known_biases: 'Known biases and limits of the data disclosed',
 };
 export const rubricLabel = (k) => RUBRIC_LABEL[k] || String(k || '').replace(/_/g, ' ');
+
+// Checklist names in plain words (the standard stays in brackets where it is the recognised name).
+const STANDARD_LABEL = {
+  'Datasheets for Datasets': 'Dataset documentation checklist',
+  'Leakage taxonomy': 'Data-leakage checks',
+  };
+export const standardLabel = (s) => Object.entries(STANDARD_LABEL).reduce((t, [name, plain]) => t.replace(name, plain), String(s || ''));
+
+// Red flags come from several model runs that word the same concern differently
+// ("The literature search is not described" / "No description of the search strategy").
+// Keep the first of each near-identical group (token Jaccard >= 0.7 on word stems; negation
+// must match so "X is provided" never merges with "No X is provided").
+const FLAG_STOP = new Set(['the', 'and', 'for', 'with', 'that', 'are', 'was', 'were', 'does', 'did',
+  'has', 'have', 'been', 'any', 'its', 'their', 'from', 'into']);
+const flagStems = (text) => new Set((String(text).toLowerCase().match(/[a-z0-9]+/g) || [])
+  .map((w) => (w === 'no' ? 'not' : w)).filter((w) => w === 'not' || (w.length > 2 && !FLAG_STOP.has(w)))
+  .map((w) => w.slice(0, 5)));
+export function dedupeFlags(flags) {
+  const kept = [];
+  const stems = [];
+  for (const flag of flags) {
+    const own = flagStems(flag);
+    const dup = stems.some((other) => {
+      const shared = [...own].filter((w) => other.has(w)).length;
+      return own.has('not') === other.has('not') && own.size > 0
+        && shared / (own.size + other.size - shared) >= 0.7;
+    });
+    if (!dup) { kept.push(flag); stems.push(own); }
+  }
+  return kept;
+}
 
 // Paper-type → display label (mirrors _paper_type_checklists labels). The two
 // generic_* are the safe supertypes the detector falls back to (shown "type uncertain").

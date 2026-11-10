@@ -4,7 +4,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { renderRouter } from '../testRouter.jsx';
-const api = vi.hoisted(() => ({ fetchConfig: vi.fn(), updateConfig: vi.fn() }));
+const api = vi.hoisted(() => ({ fetchConfig: vi.fn(), updateConfig: vi.fn(), fetchLlmReachability: vi.fn(async () => ({ stages: [] })) }));
 const conn = vi.hoisted(() => ({ fetchConnections: vi.fn(), registerConnection: vi.fn(), listConnectionModels: vi.fn(), previewConnection: vi.fn(), applyConnection: vi.fn(), testConnection: vi.fn(), replaceConnectionCredential: vi.fn(), readConnectionCredential: vi.fn() }));
 vi.mock('../api/settingsApi.js', () => api);
 vi.mock('../api/connectionsApi.js', async importOriginal => ({ ...await importOriginal(), ...conn }));

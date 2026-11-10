@@ -1,6 +1,7 @@
 // Below the reviewed cards: the best-ranked pool papers with no review yet. Each row is one
 // tap target into the paper page, where the full review starts; no verdict or Add controls here.
 import { Link } from 'react-router-dom';
+import { todayPaperUrl } from '../../utils/todayVisit.js';
 import { trackToday } from '../../utils/todayEvents.js';
 import { feedLabel } from '../../utils/feedText.js';
 
@@ -15,7 +16,7 @@ export default function NotReviewedShelf({ papers, visitId }) {
       <ul className="mt-2 divide-y divide-slate-200 rounded-xl border border-slate-200">
         {papers.map(paper => (
           <li key={paper.item_id}>
-            <Link to={`/paper/${encodeURIComponent(paper.stable_feed_key)}`}
+            <Link to={todayPaperUrl(paper.stable_feed_key, visitId, { autoRun: true })}
               onClick={() => trackToday(visitId, { item_key: paper.stable_feed_key, item_id: paper.item_id, kind: 'open_review' })}
               className="block min-h-11 px-3 py-2 hover:bg-slate-50 focus-visible:bg-slate-50">
               <span className="block break-words text-[14px] leading-snug text-forest-800">{paper.title}</span>

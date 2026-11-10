@@ -208,11 +208,14 @@ export default function ProvenanceBreakdown({ provenance = null }) {
           </tbody>
         </table>
       </div>
-      <div className="mt-2 text-[11px] text-slate-500">
-        Bins: dont&lt;{fmt(thresholds.dont_read_upper)} ≤ could&lt;
-        {fmt(thresholds.could_read_upper)} ≤ should&lt;
-        {fmt(thresholds.should_read_upper)} ≤ must
-      </div>
+      <details className="mt-2 text-[11px] text-slate-500">
+        <summary className="cursor-pointer select-none">About the priority bins</summary>
+        <div className="mt-1">
+          Bins: dont&lt;{fmt(thresholds.dont_read_upper)} ≤ could&lt;
+          {fmt(thresholds.could_read_upper)} ≤ should&lt;
+          {fmt(thresholds.should_read_upper)} ≤ must
+        </div>
+      </details>
       </>
       )}
     </div>

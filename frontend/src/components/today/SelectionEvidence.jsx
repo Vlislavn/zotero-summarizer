@@ -151,7 +151,7 @@ function evidenceView({ paper, selectionPolicy, currentStatus, statusFresh, reta
     selection_evidence: { review: currentStatus?.review_evidence } } : paper;
   const review = blinded ? { text: 'Review evidence: unavailable (blinded selection)', tone: 'slate' }
     : retained && (!statusFresh || !currentStatus?.available)
-      ? { text: 'Review status: not current', tone: 'slate', detail: 'Refresh status to check this retained member. Selection reasons below are historical.' }
+      ? { text: 'Updating review status…', tone: 'slate', detail: 'Use Refresh status (under More) if this stays. The reasons below were recorded when the shortlist was made.' }
       : reviewPresentation(observed);
   return { blinded, review };
 }

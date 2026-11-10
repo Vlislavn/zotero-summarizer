@@ -26,7 +26,7 @@ of Today. `plan` walks the top 60 of `daily_select.ranked_unhandled_candidates`
 (negative and `needs_pdf` placeholders included) and lists unreviewed stable feed
 keys. `start` runs one background thread per process (`_flight.FlightLatch`), one
 paper at a time: headless acquisition (`allow_headed_fallback=False`; browser only
-when `university_access.headless`), then the existing `deep_review` worker with a
+when `university_access.headless`), then the existing `deep_review` worker (started `background=True`: it queues behind any review the owner asks for and never takes the last pool slot) with a
 `pdf_overrides` path, or a `needs_pdf` placeholder when nothing (or only a web page)
 was found. A failing key is not retried in the same process. It runs in whichever
 process ticks (the API's triage button or `feeds serve`); a one-shot `feeds tick`

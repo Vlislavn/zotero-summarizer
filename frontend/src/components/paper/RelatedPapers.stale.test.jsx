@@ -73,7 +73,7 @@ it.each(['edited', 'deleted'])('explicit reload after %s reads fresh context wit
   await waitFor(() => expect(fetchRelatedPapers).toHaveBeenCalledTimes(2));
   await waitFor(() => expect(screen.queryByText('Loading saved-library connections…')).toBeNull());
   if (change === 'edited') expect(screen.getByText('CURRENT SAVED EXCERPT')).toBeTruthy();
-  else expect(screen.getByText('Comments · empty')).toBeTruthy();
+  else expect(screen.getByText('No comments')).toBeTruthy();
 
   await act(async () => { finishOld(old); });
 
@@ -94,7 +94,7 @@ it('a fresh read failure after a save is an error, never old comments or observe
   fireEvent.click(screen.getByRole('button', { name: 'Show related saved papers' }));
   await screen.findByRole('alert');
   expect(screen.queryByText('OBSOLETE PRIVATE EXCERPT')).toBeNull();
-  expect(screen.queryByText('Comments · empty')).toBeNull();
+  expect(screen.queryByText('No comments')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Retry library read' }));
   await screen.findByText('RECOVERED CURRENT EXCERPT');
   expect(screen.queryByText('OBSOLETE PRIVATE EXCERPT')).toBeNull();

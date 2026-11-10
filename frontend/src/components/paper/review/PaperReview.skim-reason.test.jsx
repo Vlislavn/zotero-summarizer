@@ -24,7 +24,7 @@ it('shows the policy reason for a capped SKIM with its concrete targets', () => 
   expect(getByText(policyReason).closest('details')).toBeNull();
   expect(getByRole('region', { name: 'Reading plan' }).textContent).toContain(target);
   expect(within(getByRole('region', { name: 'Reading plan' })).getByText(target)).toBeTruthy();
-  expect(getByText(/Concept\/hypothesis source/).closest('details')).toBeNull();
+  expect(getByText(/This is an idea paper; its claims are not yet backed by evidence/).closest('details')).toBeNull();
 });
 
 it('uses the shared weak-evidence flag for missing critical support', () => {
@@ -38,5 +38,5 @@ it('uses the shared weak-evidence flag for missing critical support', () => {
     reading_policy_flags: ['weak_evidence'],
   }} />);
 
-  expect(getByText(/Concept\/hypothesis source/).closest('details')).toBeNull();
+  expect(getByText(/This is an idea paper; its claims are not yet backed by evidence/).closest('details')).toBeNull();
 });

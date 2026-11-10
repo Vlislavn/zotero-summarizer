@@ -69,6 +69,42 @@ def live_progress(job: dict[str, Any]) -> dict[str, Any]:
     return progress
 
 
+def trim_finished(jobs: dict[str, dict[str, Any]], keep: int) -> None:
+    """Drop the oldest FINISHED jobs beyond ``keep`` (running jobs are always kept).
+    The caller holds the registry lock."""
+    finished = [(k, j) for k, j in jobs.items() if j.get("status") != "running"]
+    finished.sort(key=lambda kv: kv[1].get("started_at") or "")
+    for key, _ in finished[: max(0, len(finished) - keep)]:
+        jobs.pop(key, None)
+
+
+def aggregate_status(jobs: list[dict[str, Any]]) -> dict[str, Any]:
+    """The 'is any review running?' payload over the whole job registry."""
+    running = [j for j in jobs if j.get("status") == "running"]
+    latest = max((j for j in jobs if j.get("status") in ("ready", "error")),
+                 key=lambda j: str(j.get("started_at") or ""), default={})
+    error = latest.get("error") if not running and latest.get("status") == "error" else None
+    completed = sum(1 for j in jobs if j.get("status") in ("ready", "error"))
+    if running:
+        state = "running"
+    elif error:
+        state = "error"
+    elif completed > 0:
+        state = "ready"
+    else:
+        state = "idle"
+    return {
+        "status": state,
+        "total": len(jobs),
+        "completed": completed,
+        "error": error,
+        "attempt": latest.get("attempt") if not running else None,
+        "diagnostic": latest.get("diagnostic") if error else None,
+        "started_at": min((j.get("started_at") for j in jobs if j.get("started_at")), default=None),
+        "progress": live_progress(running[0]) if running else {},
+    }
+
+
 class ReviewReporter:
     """Threads through one deep review: tracks the current phase + sub-progress,
     pushes it to ``on_update`` for the polled status, and logs INFO timing per

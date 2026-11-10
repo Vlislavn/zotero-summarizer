@@ -5,6 +5,7 @@ import { connectionLabel, connectionTaskLabel } from '../../utils/connectionTask
 import { Field, Banner } from '../form/Fields.jsx';
 import Button from '../ui/Button.jsx';
 import ConnectionImpact from './ConnectionImpact.jsx';
+import ConnectionApproval from './ConnectionApproval.jsx';
 import ConnectionAuthorization from './ConnectionAuthorization.jsx';
 import ConnectionCorrections from './ConnectionCorrections.jsx';
 import ConnectionTestResult from './ConnectionTestResult.jsx';
@@ -92,6 +93,8 @@ export default function ConnectionTask({ onSaved, disabled = false, autoOpen = f
   const table = { routing, test, testing: Boolean(task.busy && task.effect === 'test'), onChange: start, onTest: workflow.testModel, disabled, testDisabled: disabled || pending };
   return <div className="space-y-3 min-w-0">
     <h3 className="font-display text-lg font-light">{editing ? 'Choose a model' : 'Model for each step'}</h3>
+    {!editing && <ConnectionApproval providers={providers} busy={Boolean(task.busy)} disabled={disabled || pending}
+      onApprove={provider => workflow.connect({ ...draftFor(provider), approved: true, revision: query.data.revision })} />}
     {!editing && <>
       {advancedSteps ? <>
         <StepModelsTable {...table} summary />

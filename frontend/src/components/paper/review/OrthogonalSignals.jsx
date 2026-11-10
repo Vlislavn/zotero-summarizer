@@ -1,6 +1,6 @@
 import { Bullets, Disclosure, KeyVal } from './primitives.jsx';
 import { BAND_LABEL } from './tones.js';
-import { isSupportedGoal, paperTypeLabel } from './briefModel.js';
+import { isSupportedGoal, paperTypeLabel, standardLabel } from './briefModel.js';
 
 const POLICY_REASONS = {
   abstract_only: 'Abstract-only digest: full-paper reading is not supported by this review.',
@@ -48,7 +48,7 @@ export default function OrthogonalSignals({ deep, folded = false }) {
   const scoreText = (value) => Number.isInteger(value) && value >= 1 && value <= 5 ? `${value}/5` : 'not assessed';
 
   const notes = <>
-    {weakEvidence && <p>Concept/hypothesis source — claims are not established convincingly; inspect the evidence gap before relying on them.</p>}
+    {weakEvidence && <p>This is an idea paper; its claims are not yet backed by evidence. Check what is missing before relying on them.</p>}
     {friction === 'high' && ['read', 'skim'].includes(digest.read_decision) && (
       <p>Idea preserved — high writing friction limits automatic advice to a targeted skim, not a judgment of bad science.</p>
     )}
@@ -76,7 +76,7 @@ export default function OrthogonalSignals({ deep, folded = false }) {
           <KeyVal label="Scientific quality">
             <p>{nonPaper ? 'Not a research paper; scientific criteria do not apply.' : 'Independent type-aware QualityEval (model assessment); writing polish is excluded.'}</p>
             {!nonPaper && <p>{quality.paper_type ? paperTypeLabel(quality.paper_type) : 'Paper type not recorded'}
-              {quality.coverage_standard ? ` · ${quality.coverage_standard}` : ''}.</p>}
+              {quality.coverage_standard ? ` · ${standardLabel(quality.coverage_standard)}` : ''}.</p>}
             {!nonPaper && !BAND_LABEL[band] && <p>Scientific support was not assessed; a digest grade is not a substitute.</p>}
           </KeyVal>
           <KeyVal label={friction ? `Writing friction · ${friction}` : 'Writing friction'}>

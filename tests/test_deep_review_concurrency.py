@@ -35,6 +35,7 @@ def _isolated(tmp_path, monkeypatch):
     _shutdown_pool(wait=True)
     with deep_review._LOCK:
         deep_review._JOBS.clear()
+    monkeypatch.setattr(deep_review, "_QUEUE", deep_review._review_queue.ReviewQueue())  # held fake pools never release a slot
     monkeypatch.setattr(_review_cache, "_cache_path", lambda: tmp_path / "deep_reviews.json")
     monkeypatch.setattr(deep_review, "_try_rebuild_render", lambda _k: None)
     yield

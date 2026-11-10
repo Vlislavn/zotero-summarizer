@@ -218,8 +218,8 @@ export function memberPresentation(member, fresh) {
   }
   if (action?.fulltext?.error) text += ` Batch reported optional full text unavailable: ${action.fulltext.error}`;
   if (!fresh) text = facts
-    ? (text ? `Status not current. Last observed: ${text}` : 'Status not current.')
-    : 'Checking this paper…';
+    ? (text ? `Updating status. Last known: ${text}` : 'Updating status…')
+    : 'Loading this paper…';
   else if (!available) text = 'This member is unavailable or its identity changed. No replacement was selected.';
   const handled = rejected || materialized || Boolean(facts?.user_priority)
     || ['selected', 'black_swan', 'user_approved', 'dedup_library', 'dedup_processed'].includes(facts?.decision);
@@ -233,7 +233,8 @@ export function memberPresentation(member, fresh) {
   };
 }
 
-export function todayPaperUrl(key, visitId) {
-  const query = new URLSearchParams({ from: 'today', visit: visitId, autoRun: 'false' });
+export function todayPaperUrl(key, visitId, { autoRun = false } = {}) {
+  const query = new URLSearchParams({ from: 'today', visit: visitId });
+  if (!autoRun) query.set('autoRun', 'false');
   return `/paper/${encodeURIComponent(key)}?${query}`;
 }

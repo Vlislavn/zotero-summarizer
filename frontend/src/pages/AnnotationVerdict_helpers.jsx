@@ -13,7 +13,7 @@ export const PRIORITY_FILTERS = [
   { key: 'must_read', label: pretty('must_read'), cls: 'bg-emerald-600 text-white border-emerald-600' },
   { key: 'should_read', label: pretty('should_read'), cls: 'bg-sky-600 text-white border-sky-600' },
   { key: 'could_read', label: pretty('could_read'), cls: 'bg-amber-500 text-white border-amber-500' },
-  { key: 'dont_read', label: pretty('dont_read'), cls: 'bg-rose-600 text-white border-rose-600' },
+  { key: 'dont_read', label: 'Not interested', cls: 'bg-rose-600 text-white border-rose-600' },
   // NOTE: 'border' (active-learning) is intentionally NOT a chip here — it swaps
   // the data source and polls for minutes while it re-scores the library, so it
   // renders as a distinct labelled button in AnnotationVerdict, not a cheap

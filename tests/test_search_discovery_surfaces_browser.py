@@ -368,7 +368,7 @@ def _find(state, availability):
     page = state['page']
     retry = any(row['path'].endswith('/discover') for row in state['posts'])
     if retry:
-        page.get_by_role('link', name='Return to seed to explicitly retry discovery', exact=True).click()
+        page.get_by_role('link', name='Try again (opens the paper)', exact=True).click()
     expected = {'method': 'POST', 'path': '/api/library/related/PAPER001/discover', 'query': '',
                 'body': {'context_fingerprint': 'a' * 64, 'consent_token': None, 'retry': retry}}
     result = _discovery(availability)
@@ -392,12 +392,12 @@ def _related_evidence(page):
     expect(first.get_by_text('Quote membership is checked; entailment is not independently verified.', exact=True)).to_be_visible()
     assert first.locator('details').first.locator('blockquote').all_text_contents() == [
         'seed · PAPER001 · abstract: “Graph retrieval”', 'candidate · PAPER002 · title: “Graph retrieval”']
-    _open(page, first.get_by_text('Comments · available', exact=True))
+    _open(page, first.get_by_text('Has your comments', exact=True))
     for text in ('Не подходит. Not useful.', 'Synthetic app context only.',
                  'native_note · uncertain · native:n1', 'app_note · user · app:n1'):
         expect(first.get_by_text(text, exact=True)).to_be_visible()
     expect(first.get_by_text('Context, not paper evidence.', exact=False)).to_be_visible()
-    _open(page, related.get_by_text('Discovery processing and optional comments', exact=True))
+    _open(page, related.get_by_text('What is sent, and optional comments', exact=True))
     expect(related.get_by_role('checkbox')).not_to_be_checked()
 
 
@@ -476,7 +476,7 @@ def test_built_related_positive_context_and_explicit_discovery(surface_browser, 
     for availability in ('partial', 'unknown', 'observed'):
         _find(state, availability)
         status = page.get_by_role('region', name='Discovery status', exact=True)
-        expect(status.get_by_label('Retrieval status')).to_contain_text(f'Retrieval: {availability}.')
+        expect(status.get_by_label('Retrieval status')).to_contain_text({'partial': 'Some sources did not answer', 'unknown': 'It is unknown whether the sources answered.', 'observed': 'The sources returned results.'}[availability])
         _open(page, status.get_by_text('Provider observations', exact=True))
         if availability == 'partial':
             _open(page, page.locator('summary').filter(has_text='retained candidates'))
@@ -484,7 +484,7 @@ def test_built_related_positive_context_and_explicit_discovery(surface_browser, 
             expect(status.get_by_text('openalex_semantic · failed · count: unknown · rate_limited', exact=True)).to_be_visible()
             expect(status.get_by_text('openalex_lexical · success_empty · count: 0 ·', exact=True)).to_be_visible()
         elif availability == 'unknown':
-            expect(status.get_by_text('Private evidence hidden:', exact=False)).to_be_visible()
+            expect(status.get_by_text('Comment details are hidden', exact=False)).to_be_visible()
             expect(status.get_by_text('Scheduled providers successfully returned no candidates.', exact=True)).to_have_count(0)
         else:
             expect(status.get_by_text('Scheduled providers successfully returned no candidates.', exact=True)).to_be_visible()

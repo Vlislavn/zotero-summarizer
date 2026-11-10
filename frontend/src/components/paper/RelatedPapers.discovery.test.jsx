@@ -123,7 +123,7 @@ it.each(['default', 'declined', 'confirmed'])('captures actual public/comment co
   });
   const find = await screen.findByRole('button', { name: 'Find new relevant' });
   if (consent !== 'default') {
-    fireEvent.click(screen.getByText('Discovery processing and optional comments'));
+    fireEvent.click(screen.getByText('What is sent, and optional comments'));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Use private seed comments — experimental' }));
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(confirm.mock.calls[0][0]).toBe('Send complete private seed comments and your reading verdict/rationale only to fixture-provider / fixture-model (https://example.test/v1)? Search providers still receive public metadata only. Full context and results stay locally. Experimental usefulness is unqualified.');
@@ -146,7 +146,7 @@ it('POST refusal permits explicit refreshed fingerprint and retry but clears pri
   const { requests } = mount(async (path, init) => init.method === 'POST' ? reply({ message: 'fixture changed context' }, 409)
     : reply({ ...metadata(), context_fingerprint: ++reads === 1 ? fp : 'd'.repeat(64) }));
   await screen.findByRole('button', { name: 'Find new relevant' });
-  fireEvent.click(screen.getByText('Discovery processing and optional comments'));
+  fireEvent.click(screen.getByText('What is sent, and optional comments'));
   fireEvent.click(screen.getByRole('checkbox', { name: 'Use private seed comments — experimental' }));
   fireEvent.click(screen.getByRole('button', { name: 'Find new relevant' }));
   await screen.findByRole('alert');
@@ -154,7 +154,7 @@ it('POST refusal permits explicit refreshed fingerprint and retry but clears pri
 
   fireEvent.click(screen.getByRole('button', { name: 'Refresh discovery eligibility' }));
   const find = await screen.findByRole('button', { name: 'Find new relevant' });
-  fireEvent.click(screen.getByText('Discovery processing and optional comments'));
+  fireEvent.click(screen.getByText('What is sent, and optional comments'));
   expect(screen.getByRole('checkbox', { name: 'Use private seed comments — experimental' }).checked).toBe(false);
   fireEvent.click(find);
 
@@ -198,15 +198,15 @@ it('real Search retry link returns to fresh seed admission/consent and requires 
     throw new Error(`Unexpected: ${path}`);
   });
   fireEvent.click(await screen.findByRole('button', { name: 'Find new relevant' }));
-  await screen.findByRole('link', { name: 'Return to seed to explicitly retry discovery' });
+  await screen.findByRole('link', { name: 'Try again (opens the paper)' });
   expect(screen.getByLabelText('Location').textContent).toBe('/search?session=discovery-retained');
 
-  fireEvent.click(screen.getByRole('link', { name: 'Return to seed to explicitly retry discovery' }));
+  fireEvent.click(screen.getByRole('link', { name: 'Try again (opens the paper)' }));
   const find = await screen.findByRole('button', { name: 'Find new relevant' });
 
   expect(requests.filter(r => r.init.method === 'POST')).toHaveLength(1);
   expect(requests.filter(r => r.path.endsWith('/discover') && !r.init.method)).toHaveLength(2);
-  fireEvent.click(screen.getByText('Discovery processing and optional comments'));
+  fireEvent.click(screen.getByText('What is sent, and optional comments'));
   expect(screen.getByRole('checkbox', { name: 'Use private seed comments — experimental' }).checked).toBe(false);
   fireEvent.click(find);
   await waitFor(() => expect(requests.filter(r => r.init.method === 'POST')).toHaveLength(2));

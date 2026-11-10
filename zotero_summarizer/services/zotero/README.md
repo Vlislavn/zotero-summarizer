@@ -65,6 +65,9 @@ text loses identification; upsert replaces an identified app-owned note, includi
 manual edits inside it, but leaves unrelated unmarked notes untouched. Previously
 stripped notes are not retroactively adopted. Comment-discard parser tests are a
 wiring floor only; native save/reopen acceptance is verified separately.
+Legacy notes that the app once stored fully HTML-escaped (literal `&lt;!-- zs:note_type=…` text) count as owned
+only when their whole body is that escaped app rendering, so an `upsert_note` rewrites them in place and trashes
+extra owned duplicates (one digest/verdict/My-notes note per paper); partly user-edited notes stay untouched.
 
 Triage headlines select the first nonblank rationale or overview, including Unicode
 whitespace. Optional controversies, impact, implementation and unknowns are rendered.

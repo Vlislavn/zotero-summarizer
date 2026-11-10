@@ -595,7 +595,7 @@ export default function LibraryReadNext() {
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyUp={(e) => { if (e.key === 'Enter') applySearch(); }}
               disabled={!serverAvailable}
-              placeholder={serverAvailable ? 'Search by meaning… (e.g. hallucination mitigation)' : 'Meaning search needs the Mac — cached sorting remains available'}
+              placeholder={serverAvailable ? 'Search by meaning… (e.g. hallucination mitigation)' : 'Meaning search needs the Mac (offline)'}
               className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
             {/* Search is semantic by default (hybrid); Enter submits — no Meaning/

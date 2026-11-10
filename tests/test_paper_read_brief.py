@@ -201,7 +201,7 @@ def test_goal_summary_disclosure_is_keyboard_accessible_and_responsive():
 
 def test_flag_verdict_inlines_the_red_flag():
     html = h._render_presentation(CONTENT, {**DIGEST, "read_parts": ["Methods"]}, FLAG_Q, GOALS)
-    assert "SKIM" in html and "claims not established" in html
+    assert "SKIM" in html and "not yet backed by evidence" in html
     assert "near-perfect 99.2% metric with no leakage discussion" in html  # visible in the verdict bar
 
 
@@ -232,7 +232,7 @@ def test_quality_panel_is_self_explaining():
     assert "Strong checklist coverage" in html              # plain-language band gloss
     assert "How we judged it" in html and "no citation counts" in html  # the method clause
     assert "3/3 passes agree" in html                        # self-consistency in words
-    assert "HIGHLIGHT" in html and "applicable type-aware checks" in html  # legend
+    assert "HIGHLIGHT" in html and "most applicable checks met" in html  # legend
     assert "What earned it" in html and "applicable checks met" in html
     # the full 9-point rubric is present but behind a disclosure, with REAL questions
     assert "Show the full" in html and "held-out / independent" in html

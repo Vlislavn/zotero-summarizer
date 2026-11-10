@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { renderRouter } from '../testRouter.jsx';
 const api = vi.hoisted(() => Object.fromEntries(['fetchConfig', 'updateConfig', 'fetchDoctorStatus', 'runDoctor', 'cancelDoctor',
   'fetchUniversityAccessStatus', 'runUniversityLogin', 'fetchRssFeeds', 'addRssFeed', 'updateRssFeed', 'deleteRssFeed',
-  'importRssFeedsFromZotero', 'refreshRssFeeds'].map(name => [name, vi.fn()])));
+  'importRssFeedsFromZotero', 'refreshRssFeeds', 'fetchLlmReachability'].map(name => [name, vi.fn()])));
 const conn = vi.hoisted(() => ({ fetchConnections: vi.fn() }));
 vi.mock('../api/settingsApi.js', () => api);
 vi.mock('../api/libraryApi.js', () => api);
@@ -30,6 +30,7 @@ beforeEach(() => {
   api.fetchConfig.mockResolvedValue(config);
   api.updateConfig.mockImplementation(async payload => ({ status: 'ok', config: { ...payload, _revision: 'r2' } }));
   conn.fetchConnections.mockResolvedValue({ revision: 'r1', config, providers: [] });
+  api.fetchLlmReachability.mockResolvedValue({ stages: [] });
   api.fetchRssFeeds.mockResolvedValue({ feeds: [] });
   api.fetchUniversityAccessStatus.mockResolvedValue({ browser_available: true, login_url: '' });
   api.runUniversityLogin.mockReturnValue(new Promise(() => {}));

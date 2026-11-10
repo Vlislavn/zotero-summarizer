@@ -578,7 +578,7 @@ export default function AnnotationVerdict() {
                 : 'bg-white text-violet-700 border-violet-300 hover:bg-violet-50'
             }`}
           >
-            🎯 {isBorderMode ? 'Active learning — borderline picks (click to exit)' : 'Active learning: review borderline picks'}
+            🎯 {isBorderMode ? 'Papers the model is unsure about (click to exit)' : 'Papers the model is unsure about'}
           </button>
           <details
             open={Boolean(flagFilter) || Boolean(selectedCollection) || Boolean(selectedTag)}

@@ -48,7 +48,10 @@ run_screen ─save→ ResearchSession(status=screened)                          
   invalid environment value falls back to the default, an invalid direct override raises `ValueError`.
 - Quality is measured before the deep set: `light_review` over the top band → `rank_candidates` again →
   `select_deep_set` (2 highest-relevance, 1 quality, 1 exploration). Missing text yields `uncertain`.
-  A review failure is recorded on that paper and later candidates continue.
+  A review failure is recorded on that paper and later candidates continue. Papers are light-/deep-reviewed
+  `SearchDeps.paper_concurrency` at a time (`pipeline.MAX_PAPER_CONCURRENCY` = 4, bounded by each review stage's provider cap; a local model
+  stays serial); `screened_count` rises as each light review lands ("reviewed N of 10") and each deep review is saved as it lands. The deep-review
+  pool is not involved: Search calls the stage clients directly.
 - `rank.py` never counts passes or sources; extra passes only enrich the pool.
 - Lexical sources (OpenAlex, Europe PMC, arXiv) issue a tight quoted-phrase pass plus a bag pass;
   variants divide the source's quota, so variants never multiply the candidate budget. OpenAlex lexical is

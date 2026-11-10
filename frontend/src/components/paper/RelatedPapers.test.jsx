@@ -43,7 +43,7 @@ it('loads saved metadata only on request and requires consent to the actual proc
   expect(confirm.mock.calls[0][0]).toContain('complete private comments');
   fireEvent.click(tryComments);
   await waitFor(() => expect(assessRelatedPapers).toHaveBeenCalledWith('SEED0001', 'token', false));
-  await screen.findByText(/Experimental comment-aware assessment/);
+  await screen.findByText(/the model says it used your comments/);
   client.clear();
 });
 
@@ -73,7 +73,7 @@ it('retains three saved links, attributed comments and exact two-sided evidence 
   expect(screen.queryByText('Metadata evidence')).toBeNull();
   expect(assessRelatedPapers).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Try with comments — experimental' }));
-  await screen.findByText(/Experimental comment-aware assessment/);
+  await screen.findByText(/the model says it used your comments/);
   expect(screen.getAllByText('seed · SEED0001 · abstract: “Graph retrieval”')).toHaveLength(3);
   current.items.forEach(row => expect(screen.getByText(`candidate · ${row.item_key} · title: “${row.title}”`)).toBeTruthy());
   expect(screen.getAllByText('Quote membership is checked; entailment is not independently verified.')).toHaveLength(3);
@@ -103,12 +103,12 @@ it('distinguishes submitted related comments from model-cited comments only afte
   const { client } = mount();
   fireEvent.click(screen.getByRole('button', { name: 'Show related saved papers' }));
   await screen.findByText('Seed context');
-  expect(screen.getByText(/Metadata hybrid search; no successful comment-use assessment/)).toBeTruthy();
+  expect(screen.getByText(/Found by title and abstract only. Comments were not used/)).toBeTruthy();
   expect(screen.queryByText(/submitted, not model-cited/)).toBeNull();
 
   fireEvent.click(screen.getByRole('button', { name: 'Try with comments — experimental' }));
 
-  await screen.findByText(/Metadata-retrieved pool; model reported no comment use/);
+  await screen.findByText(/The model reported no use of your comments/);
   expect(screen.getByText(/seed-note · submitted, not model-cited/)).toBeTruthy();
   expect(screen.getByText(/candidate-note · submitted, not model-cited/)).toBeTruthy();
   client.clear();
@@ -153,7 +153,7 @@ it('keeps observed empty and unavailable saved-library reads distinct from pendi
   await screen.findByText('No related saved papers found in this scope.');
   expect(screen.queryByText('Loading saved-library connections…')).toBeNull();
   fetchRelatedPapers.mockResolvedValue({ ...baseline, status: 'unavailable', items: [] });
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh saved context' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Reload related papers' }));
   await screen.findByText('Saved-library search unavailable; check corpus/model availability.');
   expect(screen.queryByText('No related saved papers found in this scope.')).toBeNull();
   expect(assessRelatedPapers).not.toHaveBeenCalled();
@@ -172,7 +172,7 @@ it('keeps an unavailable comment-assessment boundary non-operational without hid
   fireEvent.click(button);
   expect(confirm).not.toHaveBeenCalled();
   expect(assessRelatedPapers).not.toHaveBeenCalled();
-  expect(screen.queryByText(/Experimental comment-aware assessment/)).toBeNull();
+  expect(screen.queryByText(/the model says it used your comments/)).toBeNull();
   client.clear();
 });
 
@@ -185,7 +185,7 @@ it.each(['failed', 'budget_exceeded', 'interrupted', 'stale'])('keeps %s honest 
   fireEvent.click(await screen.findByRole('button', { name: 'Try with comments — experimental' }));
   await screen.findByText(new RegExp(`Comment assessment: ${status}`));
   expect(screen.getByRole('link', { name: 'Saved read paper' })).toBeTruthy();
-  expect(screen.queryByText(/Experimental comment-aware assessment/)).toBeNull();
+  expect(screen.queryByText(/the model says it used your comments/)).toBeNull();
   client.clear();
 });
 
@@ -201,10 +201,10 @@ it('refresh invalidates a previous assessment and retains short native negative 
   await screen.findByText('Нет. Not useful.');
   expect(screen.getByText(/App: observed; native: failed/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Try with comments — experimental' }));
-  await screen.findByText(/Experimental comment-aware assessment/);
+  await screen.findByText(/the model says it used your comments/);
   fetchRelatedPapers.mockResolvedValue({ ...baseline, context_fingerprint: 'changed' });
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh saved context' }));
-  await waitFor(() => expect(screen.queryByText(/Experimental comment-aware assessment/)).toBeNull());
+  fireEvent.click(screen.getByRole('button', { name: 'Reload related papers' }));
+  await waitFor(() => expect(screen.queryByText(/the model says it used your comments/)).toBeNull());
   expect(screen.getByRole('link', { name: 'Saved read paper' })).toBeTruthy();
   client.clear();
 });

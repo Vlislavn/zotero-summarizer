@@ -35,13 +35,13 @@ _BAND_GLOSS = {
 }
 # The literal answer to "what did we apply?" — appended with "· N/M passes agree".
 _METHOD_CLAUSE = (
-    "How we judged it: a reference-free rubric + red-flag scan — no citation counts, "
-    "authors hidden, scored only from what the paper itself shows. Agreement is "
-    "self-consistency across runs, not yet human-validated"
+    "How we judged it: a general checklist plus a scan for red flags — no citation counts, "
+    "authors hidden, scored only from what the paper itself shows. We run the check several "
+    "times; agreement is how often the runs gave the same answer, not a human check"
 )
 _LEGEND = (
-    "<b>FLAG</b> material concerns / checklist gaps · <b>NEUTRAL</b> mixed coverage · "
-    "<b>HIGHLIGHT</b> strong coverage of applicable type-aware checks"
+    "<b>FLAG</b> serious concerns or missing checks · <b>NEUTRAL</b> mixed results · "
+    "<b>HIGHLIGHT</b> most applicable checks met"
 )
 # Short plain-English labels for the decisive-signal list (the full prompt
 # questions live in _quality_prompts and drive the collapsed checklist).
@@ -60,6 +60,10 @@ _RUBRIC_LABEL = {
     "clinical_calibration": "Calibration / multi-site validation",
     "determinism": "Reports run-to-run determinism",
     "eval_contamination": "Addresses eval contamination",
+    "motivation": "Dataset motivation and intended use documented",
+    "composition": "Dataset contents (instances, labels, splits) described",
+    "collection": "Data collection process described",
+    "known_biases": "Known biases and limits of the data disclosed",
 }
 
 
@@ -164,7 +168,7 @@ def _gauge_html(band: str, agreed: int, total: int) -> str:
         '<div class="gauge-scale"><span>Tentative</span><span>Moderate</span><span>Strong</span></div>'
         f'<div class="gauge-read"><span class="gauge-band">{_h(_BAND_LABEL.get(band, "—"))}</span>'
         f'{passes_html}</div>'
-        '<div class="gauge-method">reference-free · author-blind · self-consistency</div></div>'
+        '<div class="gauge-method">no citation counts · authors hidden · repeated runs</div></div>'
     )
 
 

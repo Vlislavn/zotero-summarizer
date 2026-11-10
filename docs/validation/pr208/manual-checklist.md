@@ -72,7 +72,7 @@
 | ☐ PAPER-01 | `/paper/KEY` | Открыть saved paper на 390 px. | Verdict-карточка на первом экране: вердикт, why, read first, code row; авторы свёрнуты «+N more»; без sticky-перекрытий. | | |
 | ☐ PAPER-02 | карточка | Проверить полосу фактов под вердиктом. | Факты (full text, свой код, публикация, группа) без пустых кружков. | | |
 | ☐ PAPER-03 | review | Открыть review с планом (v3.3 FEATURE-03, #9). | Рядом с READ/SKIM: «Read first», «Skip», «What the original adds»; нет плана для отсутствующего решения; время «Time not estimated», не 0. | | |
-| ☐ PAPER-04 | review | Раскрыть «Idea, evidence and writing» (FEATURE-04, #15). | Идея/доказательства/изложение раздельно; при SKIM — «Why SKIM» и конкретные targets. | | |
+| ☐ PAPER-04 | review | Под вердиктом раскрыть строку-сворачиваемый блок «Idea: … · Evidence: … · Writing: …» (FEATURE-04, #15). | Внутри идея/качество/изложение раздельно; при SKIM — «Why SKIM» (причины) и конкретные targets. | | |
 | ☐ PAPER-05 | review | Раскрыть **Evidence** fold. | Дословные цитаты по полям (Summary, Findings, Methods…); «Show full passage»; «Quotes not saved — re-run the review» вместо пустоты. | | |
 | ☐ PAPER-06 | review | «Red flags», «Possible overstatement», goal board, «Details», «On this page». | Информируют, но не меняют вердикт; тип статьи (в т.ч. experience report; «type uncertain» — общий чеклист) виден; секции сворачиваются. | | |
 | ☐ PAPER-07 | review | Вердикт: **Decide** / **Save verdict** / «Yours:» / **Delete**; sticky-панель на телефоне. | Своё решение сохраняется, показано «Yours:», «Auto:» отдельно; Confirm/Override на предложенном вердикте. | | |

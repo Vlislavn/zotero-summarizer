@@ -109,6 +109,7 @@ def test_run_review_isolates_candidate_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline, "targeted_review", lambda cand, **kw: calls.append(("deep", cand.title)))
     deps = SimpleNamespace(
         extractor=object(), unpaywall_client=None, llm_light=object(), llm=object(), config=object(), max_chars=100,
+        paper_concurrency=1,
     )
     result = pipeline.run_review("batch", deps=deps)
     assert result.candidates[0].review == {"state": "error", "error": "bad PDF"}

@@ -73,6 +73,11 @@ Product behavior: [docs/features.md](../../docs/features.md); placement: [docs/a
   wins; malformed/duplicate fields fail safe; escaped comments and code/quote blocks never establish ownership;
   leading legacy HTML comments are honored; a comment-free native note is unowned. Triage metadata needs version,
   generated_at and source; verdict/digest/user_note keep their version-1 two-field protocol.
+  Legacy exception: a note whose whole app-rendered markup (marker comment + `<h2>…`) was stored HTML-escaped inside one
+  `<p>` (older writer bug, shows literal `&lt;!-- …`) is owned only when that text is exactly such a rendering; extra
+  paragraphs/markup (user edits) or a lone escaped comment stay unowned.
+- `upsert_note` rewrites the first owned note (legacy escaped included) in place with the new body; any further owned
+  notes with the same marker are duplicates and go to the Zotero trash (`deletedItems`, restorable) — one note per marker.
 - Tag removal deletes every case variant (SQLite `lower`) linked to the selected item and leaves shared tag rows and
   other items' links.
 - Stored-attachment names strip separators and non-printable characters; known PDF/PNG extensions are reserved before

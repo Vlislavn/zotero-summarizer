@@ -47,7 +47,7 @@ def test_read_intersection_preserves_the_idea_and_independent_signals(changes, q
     assert (source, quality) == before
     assert (flag in flags) if flag else not flags
     if flag == "weak_evidence":
-        assert "claims not established" in applied["read_why"]
+        assert "not yet backed by evidence" in applied["read_why"]
 
 
 def test_cap_without_legacy_targets_withholds_instead_of_inventing_a_skim():
@@ -65,7 +65,7 @@ def test_existing_skim_is_qualified_when_evidence_is_weak_and_projection_is_idem
     applied, _, flags = propose.apply_reading_policy(source, quality)
     repeated, _, repeated_flags = propose.apply_reading_policy(applied, quality)
     assert applied == repeated and flags == repeated_flags == ["weak_evidence"]
-    assert "claims not established" in applied["read_why"]
+    assert "not yet backed by evidence" in applied["read_why"]
     assert source["read_why"] == DIGEST["read_why"]
 
 
@@ -272,7 +272,7 @@ def test_material_evidence_caveat_is_independent_of_raw_reading_action(decision,
     applied, raw, flags = propose.apply_reading_policy(source, quality)
     assert raw == decision
     assert "weak_evidence" in flags
-    assert "Concept/hypothesis source only; claims not established." in applied["read_why"]
+    assert "This is an idea paper; its claims are not yet backed by evidence." in applied["read_why"]
     assert applied["read_decision"] == ("skim" if decision == "read" else decision)
     assert source["read_why"] == DIGEST["read_why"]
     assert propose.apply_reading_policy(applied, quality)[0] == applied

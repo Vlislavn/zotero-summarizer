@@ -18,11 +18,13 @@ with fakes (no hidden global reach inside the stages).
 from __future__ import annotations
 
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
 from zotero_summarizer.models import GoalsConfig
-from zotero_summarizer.services._common import settings, state
+from zotero_summarizer.services._common import deep_review_fleet_concurrency, settings, state
 from zotero_summarizer.services.llm import factory
 from zotero_summarizer.services.search import session as session_store
 from zotero_summarizer.services.search import require_online
@@ -42,6 +44,7 @@ from zotero_summarizer.services.search.review import light_review, select_deep_s
 # targeted session is a handful of papers, not a feed.
 LIGHT_REVIEW_N = 10
 DEEP_SET_K = 4
+MAX_PAPER_CONCURRENCY = 4  # papers reviewed at once (a remote provider's own cap still applies; local → 1)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -62,6 +65,7 @@ class SearchDeps:
     reader: Any = None             # ZoteroReader for library-coverage annotation; None → skip
     max_chars: int = 0             # quality-review text cap; 0 → config default
     quota: int = 15
+    paper_concurrency: int = 1     # papers light-/deep-reviewed at once; 1 = serial
     crossref_mailto: str | None = None  # Crossref polite-pool mailto (optional)
 
 
@@ -86,6 +90,13 @@ def _search_openalex_client(app: Any, config: GoalsConfig) -> Any:
     return _SEARCH_OPENALEX
 
 
+def _paper_concurrency(app: Any) -> int:
+    """Papers reviewed at once: ``MAX_PAPER_CONCURRENCY`` bounded by each review stage's
+    provider (a local model stays serial; a remote one honours its own cap)."""
+    return min(deep_review_fleet_concurrency(app.resolve_stage_provider(stage), MAX_PAPER_CONCURRENCY)
+               for stage in ("deep_review", "feed"))
+
+
 def default_deps() -> SearchDeps:
     """Wire dependencies from the running app (mirrors ``deep_review._build_ctx``)."""
     require_online()
@@ -108,6 +119,7 @@ def default_deps() -> SearchDeps:
         reader=app.zotero_reader,
         max_chars=int(config.quality_review.max_text_chars),
         crossref_mailto=config.prestige.user_agent_email or None,
+        paper_concurrency=_paper_concurrency(app),
     )
 
 
@@ -194,10 +206,22 @@ def _max_chars(deps: SearchDeps) -> int:
     return deps.max_chars or int(deps.config.quality_review.max_text_chars)
 
 
+def _for_each(items: list[Candidate], work: Any, workers: int) -> None:
+    """Run ``work(item)`` over ``items`` — in order when serial, else ``workers`` at once.
+    ``work`` isolates its own per-paper failures."""
+    if workers <= 1 or len(items) <= 1:
+        for item in items:
+            work(item)
+        return
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="search-review") as pool:
+        list(pool.map(work, items))
+
+
 def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N, k: int = DEEP_SET_K) -> ResearchSession:
     """Phase 2: light-review the top band, re-rank on quality, select + deep-read the
-    set. Serial by design — each step downloads a PDF and calls the LLM, and stacking
-    heavy local-model calls is unsafe on a unified-memory box (memory-safety rule)."""
+    set. Papers run ``deps.paper_concurrency`` at a time (1 for a local model — stacking
+    heavy local calls is unsafe on a unified-memory box; remote: up to
+    ``MAX_PAPER_CONCURRENCY``); ``screened_count`` counts light-reviewed papers as they land."""
     require_online()
     sess = session_store.load(session_id)
     if sess.discovery:
@@ -210,9 +234,12 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
     request = ScreenRequest(query=sess.raw_query, questions=sess.questions, evidence_policy=sess.evidence_policy)
     fulltext: dict[str, str] = {}
     run_question_evidence(sess, deps, fulltext)
-    for cand in sess.candidates[:top_n]:
+    sess.screened_count = 0
+    progress = threading.Lock()
+
+    def light_one(cand: Candidate) -> None:
         if session_store.is_deleted(session_id):
-            return sess
+            return
         try:
             text = fulltext.get(cand.candidate_id)
             if text is None:
@@ -221,8 +248,13 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
             light_review(cand, full_text=text, sections=[], llm=deps.llm_light, max_chars=_max_chars(deps))
         except Exception as exc:  # noqa: BLE001 — isolate failures to this paper
             cand.review = {"state": "error", "error": str(exc)[:500]}
-        if session_store.is_deleted(session_id):
-            return sess
+        with progress:  # "reviewed N of M": the UI reads screened_count from the polled session
+            sess.screened_count += 1
+            session_store.save_merge(sess)
+
+    _for_each(sess.candidates[:top_n], light_one, deps.paper_concurrency)
+    if session_store.is_deleted(session_id):
+        return sess
 
     rank_candidates(sess.candidates)  # quality now populated → re-rank the band
     apply_question_policy(sess)
@@ -232,11 +264,10 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
     session_store.save_merge(sess)
 
     deep_set = select_deep_set(sess.candidates, k=k)
-    for cand in deep_set:
-        if session_store.is_deleted(session_id):
-            return sess
-        if cand.review and cand.review.get("state") == "error":
-            continue
+
+    def deep_one(cand: Candidate) -> None:
+        if session_store.is_deleted(session_id) or (cand.review and cand.review.get("state") == "error"):
+            return
         try:
             targeted_review(
                 cand, full_text=fulltext.get(cand.candidate_id, ""),
@@ -245,6 +276,8 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
         except Exception as exc:  # noqa: BLE001 — isolate failures to this paper
             cand.review = {"state": "error", "error": str(exc)[:500]}
         session_store.save_merge(sess)  # incremental: each deep review appears as it lands
+
+    _for_each(deep_set, deep_one, deps.paper_concurrency)
 
     if session_store.is_deleted(session_id):
         return sess

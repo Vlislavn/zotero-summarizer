@@ -73,7 +73,15 @@ def ask_paper(
             error="validation_error", message=f"mode must be one of {MODES}", status_code=422
         )
 
-    artifact = paper_render.build_paper_read(item_key)
+    try:
+        artifact = paper_render.build_paper_read(item_key)
+    except APIError as exc:
+        if exc.error != "needs_pdf":
+            raise
+        raise APIError(
+            error="needs_pdf", status_code=exc.status_code,
+            message="No PDF saved for this paper yet. Add it to your library to ask questions.",
+        ) from exc
     deterministic = _answer_from_artifact_counts(artifact, question)
     if deterministic is not None:
         return _with_evidence(

@@ -94,7 +94,7 @@ export default function Today() {
       <div className="mt-3 flex items-center gap-2">
         <button type="button" onClick={() => view.renew()} disabled={!view.canRenew}
           className="min-h-11 flex-1 rounded-lg bg-forest-800 px-4 text-sm font-medium text-white hover:bg-forest-700 disabled:bg-slate-300 disabled:text-slate-100 sm:flex-none">
-          {view.busy && !view.visit ? 'Selecting…' : 'New shortlist'}
+          New shortlist
         </button>
         <button type="button" aria-expanded={showMore} aria-controls="today-more" onClick={() => setMoreOpen(!moreOpen)}
           className="inline-flex min-h-11 items-center gap-1 rounded-lg border border-slate-300 px-3 text-sm text-slate-700 hover:bg-slate-100">
@@ -126,8 +126,8 @@ export default function Today() {
     {view.persistenceFailed && <StatusBanner tone="warn" message="Browser storage is unavailable. This shortlist stays open here but may not survive reload. The shortlist itself never resends actions." />}
     {view.visit?.invalid && <StatusBanner tone="warn" message="The saved shortlist could not be read. New shortlist explicitly replaces it; no saved action is replayed." />}
     {view.carryCount > 0 && <StatusBanner tone="warn" message={`${view.carryCount} unfinished action(s) stay in the next shortlist. Only the remaining places can contain new papers; shortlist refresh does not retry writes.`} />}
-    {view.loading && <div role="status" aria-label="Selecting your shortlist…" className="space-y-3">
-      <p className="flex items-center gap-2 text-sm text-slate-600"><Spinner size="sm" color="teal" />Selecting your shortlist…</p>
+    {view.loading && <div role="status" aria-label="Loading today’s papers…" className="space-y-3">
+      <p className="flex items-center gap-2 text-sm text-slate-600"><Spinner size="sm" color="teal" />Loading today’s papers…</p>
       {[0, 1].map(i => <div key={i} aria-hidden="true" className="space-y-3 rounded-xl border border-slate-200 p-4">
         <Skeleton width="w-24" height="h-4" rounded="rounded-full" /><Skeleton width="w-5/6" height="h-5" /><Skeleton count={2} />
         <div className="grid grid-cols-4 gap-2">{[0, 1, 2, 3].map(j => <Skeleton key={j} height="h-11" rounded="rounded-lg" />)}</div>

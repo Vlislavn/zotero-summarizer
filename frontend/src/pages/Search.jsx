@@ -9,6 +9,7 @@ import {
 import CollectionPicker from '../components/CollectionPicker.jsx';
 import QuestionEvidence, { EvidencePolicyStatus } from '../components/search/QuestionEvidence.jsx';
 import { ErrorBanner, StatusBanner } from '../components/library/shared.jsx';
+import { cleanAbstract } from '../utils/feedText.js';
 import { humanizeError } from '../utils/humanizeError.js';
 import { sortSearchCandidates } from '../utils/searchSort.js';
 import { reviewPaperUrl } from './reviewHelpers.js';
@@ -26,6 +27,10 @@ import PageTitle from '../components/ui/PageTitle.jsx';
 // Full-text quality band chip. Von Restorff: relevance is the master signal (it owns
 // the saturated pill), so a quality *win* stays neutral — only a quality *problem*
 // (flag) earns a warning color. Keeps the card from emphasizing everything at once.
+const BAND_LABEL = { highlight: 'looks solid', flag: 'needs checking', uncertain: 'quality unclear' };
+const SOURCE_LABEL = { crossref: 'Crossref', europepmc: 'Europe PMC', openalex: 'OpenAlex', arxiv: 'arXiv',
+  semantic_scholar: 'Semantic Scholar', openreview: 'OpenReview', library: 'Your library' };
+const VERSION_LABEL = { version_of_record: 'Published article', preprint: 'Preprint', accepted_manuscript: 'Accepted manuscript' };
 const BAND_CLASS = {
   highlight: 'bg-slate-100 text-slate-600',
   flag: 'bg-rose-100 text-rose-800',
@@ -40,17 +45,22 @@ const REL_BAND = {
   weak: { label: 'weak match', pill: 'bg-slate-200 text-slate-600', card: 'border-slate-200 bg-slate-50/60' },
 };
 
+// Strip boolean syntax (AND/OR, quotes, field tags, parentheses) so the plan reads as words.
+const readableQuery = (q) => String(q || '')
+  .replace(/\b(?:TITLE_ABS|TITLE|ABSTRACT|all|ti|abs):/g, '').replace(/[()"]/g, '')
+  .replace(/\s+(?:AND|OR)\s+/g, ' · ').replace(/\s+/g, ' ').trim();
+
 function QueryPlan({ plan }) {
   const rows = plan.display || [];
   if (!rows.length) return null;
   return (
     <details className="mb-4 text-[12px]">
-      <summary className="cursor-pointer text-slate-600 font-semibold">Query plan (per source)</summary>
+      <summary className="cursor-pointer text-slate-600 font-semibold">What was searched, by source</summary>
       <div className="mt-2 grid gap-1">
         {rows.map(({ source: src, query: q }, index) => (
-          <div key={index} className="flex gap-2">
-            <span className="text-slate-500 w-40 shrink-0">{src}</span>
-            <span className="mono text-slate-800">{q}</span>
+          <div key={index} className="flex flex-wrap gap-x-2">
+            <span className="text-slate-500 sm:w-40 shrink-0">{SOURCE_LABEL[src] || src}</span>
+            <span className="text-slate-800 min-w-0 break-words">{readableQuery(q)}</span>
           </div>
         ))}
       </div>
@@ -116,20 +126,27 @@ function ReviewPanel({ review }) {
 }
 
 const RETRIEVAL = {
-  observed: 'Scheduled providers returned observed results.', partial: 'Partial provider coverage; this is not a complete search.',
-  failed: 'Provider retrieval failed.', unknown: 'Provider availability is unknown.', not_attempted: 'Provider retrieval was not attempted.',
+  observed: 'The sources returned results.', partial: 'Some sources did not answer, so this is not a complete search.',
+  failed: 'The sources did not answer.', unknown: 'It is unknown whether the sources answered.', not_attempted: 'The sources were not searched.',
 };
 const ASSESSMENT = {
-  not_requested: 'Private comment assessment was not requested.', assessed: 'Metadata-bound model judgment; not a full-text review or quality finding.',
-  no_comments: 'Observed empty seed comments.', no_candidates: 'No candidates available for assessment.', disabled: 'Comment assessment is disabled.',
-  budget_exceeded: 'Complete context exceeds the budget; it was not clipped.', context_unavailable: 'Seed context is unavailable or incomplete.',
-  failed: 'Comment assessment failed.', interrupted: 'Assessment was interrupted; no successful completion is established.', stale: 'Assessment context changed.',
+  not_requested: 'Your comments were not used.', assessed: 'A model judged these from titles and abstracts; this is not a full-text review.',
+  no_comments: 'This paper has no comments.', no_candidates: 'There were no candidates to judge.', disabled: 'Comment assessment is turned off.',
+  budget_exceeded: 'Your comments were too long to send, so they were not used.', context_unavailable: 'Your comments could not be read, so they were not used.',
+  failed: 'Comment assessment failed.', interrupted: 'Comment assessment was interrupted.', stale: 'Your comments changed since the assessment.',
 };
+const STATUS_LINE = {
+  discovery_failed: 'The search did not finish. Try again later.', discovery_ready: 'Search finished.',
+  discovery_pending: 'Search is starting…', discovery_running: 'Searching…', discovery_interrupted: 'The search was interrupted. Try again.',
+  reviewing: 'Reviewing the found papers…', reviewed: 'Search and review finished.', error: 'Review failed.',
+};
+const failureLine = (error) => /rate|429|limit/i.test(error?.code || '')
+  ? 'The search service did not answer (rate limit). Try again later.' : null;
 
 function DiscoveryEvidence({ row }) {
   if (!row) return null;
   return <div className="review-prose min-w-0 mt-2 text-sm">
-    <p>{row.sentence}</p><p>Metadata-bound model judgment · relevance: {row.relevance}; preference: {row.preference}.</p>
+    <p>{row.sentence}</p><p>Judged from title and abstract · relevance: {row.relevance}; preference: {row.preference}.</p>
     <details><summary>Metadata evidence</summary>
       <p>Quote membership is checked; entailment is not independently verified. Comments are context, not paper evidence.</p>
       {Object.entries(row.evidence || {}).map(([side, quote]) => <blockquote key={side} className="border-l pl-3">
@@ -145,15 +162,15 @@ function DiscoveryStatus({ session, trusted }) {
   const cited = trusted ? discovery.assessment.items.flatMap(row => row.used_context_ids || []) : [];
   return <section aria-label="Discovery status" className="mb-4 text-sm break-words">
     <h2 className="font-display text-xl">Find new relevant · {discovery.seed_title}</h2>
-    <p role="status">Session: {session.status} · Freshness: {discovery.freshness}</p>
-    <p aria-label="Retrieval status">OpenAlex semantic + lexical only · Retrieval: {discovery.retrieval.status}. {RETRIEVAL[discovery.retrieval.status]}</p>
-    <p aria-label="Assessment status">Assessment: {discovery.assessment.status}. {ASSESSMENT[discovery.assessment.status]}</p>
+    <p role="status">{(session.status === 'discovery_failed' && failureLine(discovery.error)) || STATUS_LINE[session.status] || session.status}
+      {discovery.freshness === 'stale' && ' The saved paper changed since this search, so results may be out of date.'}</p>
+    <p aria-label="Retrieval status">Searched OpenAlex by topic and keywords. {RETRIEVAL[discovery.retrieval.status]}</p>
+    <p aria-label="Assessment status">{ASSESSMENT[discovery.assessment.status]}</p>
     {discovery.retrieval.empty_reason && <p>{discovery.retrieval.empty_reason === 'providers_empty'
       ? 'Scheduled providers successfully returned no candidates.' : 'Observed candidates were all known saved.'}</p>}
     {trusted && !discovery.retrieval.empty_reason && !discovery.recommended_ids.length && <p>No supported default recommendations; retained observations may still be available below.</p>}
-    {!trusted && <p>Private evidence hidden: Discovery is not ready, inputs are stale/unverified, or a status read is pending/failed. New actions are unavailable.</p>}
-    {discovery.error && <p role="alert">Discovery error: {discovery.error.stage} · {discovery.error.code}</p>}
-    <Link className="text-forest underline" to={`/paper/${encodeURIComponent(discovery.seed_key)}?retryDiscovery=1`}>Return to seed to explicitly retry discovery</Link>
+    {!trusted && session.status !== 'discovery_failed' && <p>Comment details are hidden until the search is finished and up to date. Actions are unavailable meanwhile.</p>}
+    <Link className="text-forest underline" to={`/paper/${encodeURIComponent(discovery.seed_key)}?retryDiscovery=1`}>Try again (opens the paper)</Link>
     <details><summary>Provider observations</summary>
       {discovery.retrieval.variants.map((variant, index) => <p key={index}>{variant.channel} · {variant.outcome?.status || 'unknown'} · count: {variant.outcome?.count ?? 'unknown'} · {variant.outcome?.error_code}</p>)}
     </details>
@@ -189,7 +206,7 @@ function CandidateCard({ cand, onAdd, questions = [], discovery, actionsAllowed 
   const cardCls = cand.is_retracted ? 'bg-rose-50 border-rose-300' : (rel?.card || 'bg-white border-slate-200');
   return (
     <article aria-label={cand.title} className={`min-w-0 border rounded-xl p-3 ${cardCls}`}>
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-slate-900">
             {url ? <a href={url} target="_blank" rel="noreferrer" className="hover:underline">{cand.title}</a> : cand.title}
@@ -197,14 +214,14 @@ function CandidateCard({ cand, onAdd, questions = [], discovery, actionsAllowed 
           {!url && <p className="text-xs text-slate-600">No supported link available.</p>}
           {meta && <div className="text-[12px] text-slate-500">{meta}</div>}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2">
           {rel && <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${rel.pill}`}>{rel.label}</span>}
           {typeof cand.query_score === 'number' && (
             <span className="mono text-[11px] text-slate-500" title="query relevance (our cross-encoder), 0–1">
               {cand.query_score.toFixed(2)}
             </span>
           )}
-          {band && <span className={`text-[11px] px-2 py-0.5 rounded-full ${BAND_CLASS[band] || BAND_CLASS.uncertain}`} title="full-text quality band">{band}</span>}
+          {band && <span className={`text-[11px] px-2 py-0.5 rounded-full ${BAND_CLASS[band] || BAND_CLASS.uncertain}`} title="full-text quality band">{BAND_LABEL[band] || band}</span>}
         </div>
       </div>
       {/* why chips: secondary context → neutral, so they don't compete with the band
@@ -217,13 +234,13 @@ function CandidateCard({ cand, onAdd, questions = [], discovery, actionsAllowed 
         </div>
       )}
       <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-slate-500">
-        {sources.map((s) => <span key={s} className="px-1.5 py-0.5 bg-slate-100 rounded">{s}</span>)}
+        {sources.map((s) => <span key={s} className="px-1.5 py-0.5 bg-slate-100 rounded">{SOURCE_LABEL[s] || s}</span>)}
         {cand.version_type && cand.version_type !== 'unknown' && (
-          <span className="px-1.5 py-0.5 bg-slate-100 rounded">{cand.version_type}</span>
+          <span className="px-1.5 py-0.5 bg-slate-100 rounded">{VERSION_LABEL[cand.version_type] || cand.version_type}</span>
         )}
         {cand.is_retracted && <span className="px-1.5 py-0.5 bg-rose-200 text-rose-900 rounded font-semibold">RETRACTED</span>}
       </div>
-      {cand.abstract && <p className="mt-2 text-[12px] text-slate-600 line-clamp-3">{cand.abstract}</p>}
+      {cand.abstract && <p className="mt-2 text-[12px] text-slate-600 line-clamp-3 break-words">{cleanAbstract(cand.abstract)}</p>}
       {discovery && <>
         {(discovery.unresolved_membership || []).includes(cand.candidate_id) || cand.in_library == null
           ? <p>Membership unknown — not established new.</p> : <p>{cand.in_library ? 'Known saved paper.' : 'Not saved in the checked membership snapshot.'}</p>}
@@ -338,6 +355,11 @@ function SearchSession({ urlSearch = '', onPointer }) {
       if (currentRead()) setLoading(false);
     }
   }, [pollUntilDone, current]);
+
+  // A saved session shows its own query in the box (only while the box is still empty).
+  useEffect(() => {
+    if (session?.raw_query) setQuery(prev => prev || session.raw_query);
+  }, [session?.id, session?.raw_query]);
 
   useLayoutEffect(() => {
     const id = new URLSearchParams(urlSearch).get('session') || savedIdRef.current;
@@ -498,17 +520,19 @@ function SearchSession({ urlSearch = '', onPointer }) {
                 <option value="relevance_prestige">Relevance + prestige</option>
               </select>
             </label>}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full">
               {reviewing && (
                 <div className="text-[12px] text-slate-500 flex items-center gap-1.5">
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  {refining ? 'Refining the search…' : 'Deep-reviewing the top papers…'}
+                  {refining ? 'Refining the search…' : 'Reviewing the top papers… this can take several minutes'}
                 </div>
               )}
               <span className="text-[11px] text-slate-500">Add to:</span>
               <CollectionPicker value={targetCollection} onChange={setTargetCollection} />
             </div>
           </div>
+          {(session.candidates || []).some(c => c.quality?.quality_band) && <p className="mb-2 text-[12px] text-slate-500">
+            Labels like “needs checking” come from reading the full text: “needs checking” means a possible quality problem; “quality unclear” means the text could not settle it.</p>}
           {session.status === 'error' && <StatusBanner isError message="Review failed — see server log." />}
           {!discovery && sort === 'relevance_prestige' && <p className="mb-2 text-[12px] text-slate-500">85% relevance + 15% citation prestige (log-scaled within these results; unknown citations use the median). Citation counts favor older papers and vary by field.</p>}
           {(() => {

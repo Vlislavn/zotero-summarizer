@@ -197,7 +197,7 @@ def test_built_search_plan_and_same_title_adds_survive_reload(application_browse
     page.goto("http://127.0.0.1/search")
     page.evaluate("id => sessionStorage.setItem('zs.searchSession', JSON.stringify({id}))", research.id)
     page.reload()
-    page.get_by_text("Query plan (per source)", exact=True).click()
+    page.get_by_text("What was searched, by source", exact=True).click()
     for query in ('"tight topic"', "broad topic", "peer-review topic"):
         expect(page.get_by_text(query, exact=True)).to_be_visible()
     adds = page.get_by_role("button", name="Add to library", exact=True)

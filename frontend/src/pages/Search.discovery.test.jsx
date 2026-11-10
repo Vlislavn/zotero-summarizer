@@ -82,7 +82,7 @@ it('shows pending restored session reads without blocking a replacement search',
   await act(async () => retried.resolve(reply(session())));
 
   expect(screen.getByRole('heading', { name: 'Find new relevant · Fixture seed' })).toBeTruthy();
-  expect(screen.getByRole('status').textContent).toBe('Session: discovery_ready · Freshness: current');
+  expect(screen.getByRole('status').textContent).toBe('Search finished.');
   expect(screen.queryByText('Waiting for the current request…')).toBeNull();
 });
 
@@ -101,7 +101,7 @@ it('shows three ordered recommendations, retains the pool, and separates review/
   expect(first.getByText('Quote membership is checked; entailment is not independently verified. Comments are context, not paper evidence.')).toBeTruthy();
   expect(first.getByText('Model-cited comment IDs: comment:cited.')).toBeTruthy();
   expect(first.getByText('seed · SEED0001 · title [0, 12]: “Fixture seed”')).toBeTruthy();
-  fireEvent.click(screen.getByText('Comments · available'));
+  fireEvent.click(screen.getByText('Has your comments'));
   expect(screen.getByText('Synthetic cited seed comment.')).toBeTruthy();
   expect(screen.getByText('human_verdict · user · comment:cited · cited by assessment')).toBeTruthy();
   expect(screen.getByText('native_note · uncertain · comment:submitted · submitted, not model-cited')).toBeTruthy();
@@ -154,7 +154,7 @@ it.each(['observed', 'partial', 'failed', 'unknown', 'not_attempted'])('renders 
 
   await screen.findByRole('heading', { name: 'Find new relevant · Fixture seed' });
 
-  expect(screen.getByLabelText('Retrieval status').textContent).toContain(`Retrieval: ${status}.`);
+  expect(screen.getByLabelText('Retrieval status').textContent).toContain({ observed: 'The sources returned results.', partial: 'Some sources did not answer', failed: 'The sources did not answer.', unknown: 'It is unknown whether the sources answered.', not_attempted: 'The sources were not searched.' }[status]);
   expect(screen.queryByText('Scheduled providers successfully returned no candidates.')).toBeNull();
   fireEvent.click(screen.getByText('Provider observations'));
   expect(screen.getByText(`openalex_semantic · ${status === 'not_attempted' ? 'not_attempted' : 'unknown'} · count: unknown · network_disabled`)).toBeTruthy();
@@ -203,7 +203,7 @@ it.each(['not_requested', 'assessed', 'no_comments', 'no_candidates', 'disabled'
 
     await screen.findByRole('heading', { name: 'Find new relevant · Fixture seed' });
 
-    expect(screen.getByLabelText('Assessment status').textContent).toContain(`Assessment: ${status}.`);
+    expect(screen.getByLabelText('Assessment status').textContent).toContain({ not_requested: 'Your comments were not used.', assessed: 'A model judged these', no_comments: 'This paper has no comments.', no_candidates: 'There were no candidates to judge.', disabled: 'Comment assessment is turned off.', budget_exceeded: 'too long to send', context_unavailable: 'could not be read', failed: 'Comment assessment failed.', interrupted: 'Comment assessment was interrupted.', stale: 'Your comments changed' }[status]);
     expect(within(screen.getByRole('article', { name: 'Candidate 1' })).getByText('Not reviewed.')).toBeTruthy();
     expect(requests.every(r => !r.init.method)).toBe(true);
   },
@@ -214,7 +214,7 @@ it.each(['discovery_pending', 'discovery_running', 'discovery_ready', 'discovery
     const dto = { ...session(), status };
     const { requests } = mount(async () => reply(dto));
     await screen.findByRole('heading', { name: 'Find new relevant · Fixture seed' });
-    expect(screen.getByText(`Session: ${status} · Freshness: current`)).toBeTruthy();
+    expect(screen.getByText({ discovery_pending: 'Search is starting…', discovery_running: 'Searching…', discovery_ready: 'Search finished.', discovery_failed: 'The search did not finish. Try again later.', discovery_interrupted: 'The search was interrupted. Try again.' }[status])).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Review retained candidates' }).disabled).toBe(status !== 'discovery_ready');
     expect(requests.every(r => !r.init.method)).toBe(true);
   },
@@ -226,7 +226,7 @@ it.each(['stale', 'unverified'])('hides private postimages and disables effects 
 
   expect(screen.queryByText('Fixture metadata connection.')).toBeNull();
   expect(screen.queryByText('Synthetic cited seed comment.')).toBeNull();
-  expect(screen.queryByText('Comments · available')).toBeNull();
+  expect(screen.queryByText('Has your comments')).toBeNull();
   expect(screen.getByRole('button', { name: 'Review retained candidates' }).disabled).toBe(true);
   fireEvent.click(screen.getByText('5 retained candidates ▾'));
   expect(screen.getByRole('article', { name: 'Candidate 1' })).toBeTruthy();
@@ -238,7 +238,7 @@ it.each(['discovery_pending', 'discovery_running', 'discovery_failed', 'discover
     mount(async () => reply({ ...session(), status }));
     await screen.findByRole('heading', { name: 'Find new relevant · Fixture seed' });
     expect(screen.queryByText('Fixture metadata connection.')).toBeNull();
-    expect(screen.queryByText('Comments · available')).toBeNull();
+    expect(screen.queryByText('Has your comments')).toBeNull();
     expect(screen.queryByText('Synthetic cited seed comment.')).toBeNull();
     expect(screen.getByText('5 retained candidates ▾').closest('details').open).toBe(false);
     expect(screen.getByRole('button', { name: 'Review retained candidates' }).disabled).toBe(true);
@@ -331,7 +331,7 @@ it('successful Add consumes server freshness rather than claiming remaining reco
 
   fireEvent.click(within(screen.getByRole('article', { name: 'Candidate 1' })).getByRole('button', { name: 'Add to library' }));
 
-  await screen.findByText('Session: discovery_ready · Freshness: stale');
+  await screen.findByText(/The saved paper changed since this search/);
   expect(requests.filter(r => r.path === '/api/search/discovery-one')).toHaveLength(2);
   expect(screen.queryByText('Synthetic cited seed comment.')).toBeNull();
   expect(screen.getByRole('button', { name: 'Review retained candidates' }).disabled).toBe(true);
@@ -377,7 +377,7 @@ it('explicit Review polls its owner, stops on read failure and resumes only from
   expect(screen.queryByText('Synthetic cited seed comment.')).toBeNull();
   await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Retry session status' })));
   expect(reads).toBe(4);
-  expect(screen.getByText('Session: reviewed · Freshness: current')).toBeTruthy();
+  expect(screen.getByText('Search and review finished.')).toBeTruthy();
   expect(view.requests.filter(r => r.init.method === 'POST').map(r => r.path)).toEqual(['/api/search/discovery-one/review']);
 });
 
@@ -402,7 +402,7 @@ it('a stale retained plan reconciles only on a click while new actions and priva
   expect(screen.queryByText('Synthetic cited seed comment.')).toBeNull();
   await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Reconcile retained Add' })));
   await screen.findByText('✓ In library');
-  expect(screen.getByRole('region', { name: 'Discovery status' }).textContent).toContain('Freshness: stale');
+  expect(screen.getByRole('region', { name: 'Discovery status' }).textContent).toContain('The saved paper changed since this search');
   expect(screen.queryByText('Synthetic cited seed comment.')).toBeNull();
   expect(view.requests.filter(row => row.init.method === 'POST')).toHaveLength(1);
 });

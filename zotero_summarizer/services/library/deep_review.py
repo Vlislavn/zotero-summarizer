@@ -25,6 +25,7 @@ from zotero_summarizer.services.library import (
     _map_reduce,
     _paper_body,
     _review_cache,
+    _review_queue,
     quality_review,
     reading_queue,
     _review_attempt,
@@ -61,16 +62,13 @@ _POOL_LOCK = threading.Lock()     # guards (re)building the shared pool
 _JOBS: dict[str, dict[str, Any]] = {}
 _POOL: ThreadPoolExecutor | None = None
 _POOL_SIZE = 0
+_QUEUE = _review_queue.ReviewQueue()  # who takes the next free pool slot (owner requests first)
 
 
 def _ensure_pool(provider: Any) -> ThreadPoolExecutor:
-    """The shared review pool, sized provider-aware: local→1 (a 2nd paper QUEUES
-    behind the 1st), remote→``max_sub_concurrency`` else ``_MAX_CONCURRENT``. Rebuilt
-    when the size changes (a provider / LLM-routing edit).
-
-    The replaced pool is shut down without waiting: its queued and in-flight reviews
-    still finish on its own threads, but its threads are released afterwards.
-    """
+    """The shared review pool, sized provider-aware (local→1, remote→``max_sub_concurrency``
+    else ``_MAX_CONCURRENT``); rebuilt when the size changes. The replaced pool is shut
+    down without waiting: its in-flight reviews finish on its own threads."""
     global _POOL, _POOL_SIZE
     size = deep_review_fleet_concurrency(provider, _MAX_CONCURRENT)
     with _POOL_LOCK:
@@ -80,17 +78,6 @@ def _ensure_pool(provider: Any) -> ThreadPoolExecutor:
             _POOL = ThreadPoolExecutor(max_workers=size, thread_name_prefix="deep-review")
             _POOL_SIZE = size
         return _POOL
-
-
-def _trim_jobs_locked() -> None:
-    """Drop the oldest FINISHED jobs beyond ``_MAX_FINISHED_JOBS`` (running jobs are
-    always kept). Caller holds ``_LOCK``."""
-    finished = [(k, j) for k, j in _JOBS.items() if j.get("status") != "running"]
-    if len(finished) <= _MAX_FINISHED_JOBS:
-        return
-    finished.sort(key=lambda kv: kv[1].get("started_at") or "")
-    for key, _ in finished[: len(finished) - _MAX_FINISHED_JOBS]:
-        _JOBS.pop(key, None)
 
 
 def _set_job(item_key: str, *, preserve_running: bool = False, **fields: Any) -> None:
@@ -103,7 +90,7 @@ def _set_job(item_key: str, *, preserve_running: bool = False, **fields: Any) ->
             return
         job.update(fields)
         _JOBS[item_key] = job
-        _trim_jobs_locked()
+        _deep_review_progress.trim_finished(_JOBS, _MAX_FINISHED_JOBS)
 
 
 def _set_job_progress(item_key: str, progress: dict[str, Any]) -> None:
@@ -131,31 +118,10 @@ def status(item_key: str | None = None) -> dict[str, Any]:
                 "diagnostic": job.get("diagnostic") if job.get("status") == "error" else None,
                 "started_at": job.get("started_at"),
                 "progress": _deep_review_progress.live_progress(job),
+                "queue_ahead": _QUEUE.ahead(item_key),  # queued jobs that start first; None once it has a slot
             }
         jobs = list(_JOBS.values())
-    running = [j for j in jobs if j.get("status") == "running"]
-    latest = max((j for j in jobs if j.get("status") in ("ready", "error")),
-                 key=lambda j: str(j.get("started_at") or ""), default={})
-    error = latest.get("error") if not running and latest.get("status") == "error" else None
-    completed = sum(1 for j in jobs if j.get("status") in ("ready", "error"))
-    if running:
-        state = "running"
-    elif error:
-        state = "error"
-    elif completed > 0:
-        state = "ready"
-    else:
-        state = "idle"
-    return {
-        "status": state,
-        "total": len(jobs),
-        "completed": completed,
-        "error": error,
-        "attempt": latest.get("attempt") if not running else None,
-        "diagnostic": latest.get("diagnostic") if error else None,
-        "started_at": min((j.get("started_at") for j in jobs if j.get("started_at")), default=None),
-        "progress": _deep_review_progress.live_progress(running[0]) if running else {},
-    }
+    return _deep_review_progress.aggregate_status(jobs)
 
 
 def _try_rebuild_render(item_key: str) -> None:
@@ -432,20 +398,44 @@ def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str)
                      exc, ctx.get("_provider"), phase=status(item_key)['progress'].get('phase')))
 
 
+def _drain(provider: Any) -> None:
+    """Hand queued reviews to the pool while a slot is free (owner requests first)."""
+    capacity = deep_review_fleet_concurrency(provider, _MAX_CONCURRENT)
+    while (claimed := _QUEUE.claim(capacity)) is not None:
+        lane, (item, ctx, focus_prompt) = claimed
+        try:
+            _ensure_pool(provider).submit(_run_slot, item, {**ctx, "_lane": lane}, focus_prompt)
+        except Exception as exc:  # noqa: BLE001 — never leave the job 'running' without a worker
+            _QUEUE.release(lane)
+            LOGGER.warning("deep_review could not start item=%s: %s", item["item_key"], exc)
+            _set_job(str(item["item_key"]), status="error", completed=1, progress={},
+                     error=f"{type(exc).__name__}: {exc}")
+
+
+def _run_slot(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str) -> None:
+    """One pool slot: review the item, then free the slot for the next queued one."""
+    try:
+        _review_worker(item, ctx, focus_prompt)
+    finally:
+        _QUEUE.release(ctx["_lane"])
+        _drain(ctx.get("_provider"))
+
+
 def _submit(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str) -> None:
-    """Per-item single-flight: start a review for ``item`` unless one is already running
-    for that key, on the shared provider-aware pool (local→queue, remote→concurrent)."""
+    """Per-item single-flight: queue a review for ``item`` unless one is already running
+    for that key (an owner request promotes a queued background one), then fill free pool
+    slots (local→queue, remote→concurrent). ``ctx['_background']`` marks non-owner work."""
     item_key = str(item["item_key"])
+    background = bool(ctx.get("_background"))
     with _LOCK:
         existing = _JOBS.get(item_key)
         if existing is not None and existing.get("status") == "running":
+            if not background:
+                _QUEUE.promote(item_key)
             return  # already in flight for this paper — don't double-review
         _JOBS[item_key] = {"status": "running", "started_at": now_iso_z(), "completed": 0, "progress": {}, "error": None}
-    try:
-        _ensure_pool(ctx.get("_provider")).submit(_review_worker, item, ctx, focus_prompt)
-    except Exception as exc:  # noqa: BLE001 — never leave the job 'running' without a worker
-        LOGGER.warning("deep_review could not start item=%s: %s", item_key, exc)
-        _set_job(item_key, status="error", completed=1, progress={}, error=f"{type(exc).__name__}: {exc}")
+    _QUEUE.add(item_key, (item, ctx, focus_prompt), _review_queue.BACKGROUND if background else _review_queue.INTERACTIVE)
+    _drain(ctx.get("_provider"))
 
 
 def start(
@@ -457,6 +447,7 @@ def start(
     acquire_missing: bool = False,
     reader: Any = None,
     feed_contexts: dict[str, Any] | None = None,
+    background: bool = False,
 ) -> dict[str, Any]:
     """Start explicit papers or top unread picks on the provider-aware per-item pool.
 
@@ -465,8 +456,9 @@ def start(
     Duplicate keys retain first-seen order; an empty list changes no jobs.
     Running papers are not resubmitted or settled by another request's setup error;
     genuinely inactive targets still receive that failure. Local work queues while
-    remote work may run concurrently. Return aggregate status plus ``accepted``
-    (False for an explicit empty list).
+    remote work may run concurrently. ``background=True`` (Today preparation, prewarm,
+    fleet) queues behind owner-requested reviews and never takes the last pool slot.
+    Return aggregate status plus ``accepted`` (False for an explicit empty list).
     """
     from zotero_summarizer.models.research_feed import FeedReviewContext
     contexts = {key: FeedReviewContext.model_validate(value).model_copy(deep=True)
@@ -480,6 +472,7 @@ def start(
         ctx = _build_ctx(reader=reader)
         ctx["_feed_contexts"] = contexts
         ctx["_acquire_missing"] = bool(acquire_missing)
+        ctx["_background"] = background
         items = _resolve_items(top_k, item_keys, overrides)
     except Exception as exc:  # noqa: BLE001 — surface setup failure on the targeted jobs
         msg = f"{type(exc).__name__}: {exc}"

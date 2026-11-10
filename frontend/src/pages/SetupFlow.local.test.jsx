@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 
-const api = vi.hoisted(() => ({ fetchConfig: vi.fn(), updateConfig: vi.fn(), listModels: vi.fn(),
+const api = vi.hoisted(() => ({ fetchConfig: vi.fn(), fetchLlmReachability: vi.fn(async () => ({ stages: [] })), updateConfig: vi.fn(), listModels: vi.fn(),
   fetchAiPresets: vi.fn(), saveAiCredential: vi.fn(), validateSetup: vi.fn(), detectZotero: vi.fn(),
   updatePaths: vi.fn(), fetchDoctorStatus: vi.fn(), runDoctor: vi.fn(), cancelDoctor: vi.fn(),
   fetchConnections: vi.fn(), registerConnection: vi.fn(), listConnectionModels: vi.fn(), previewConnection: vi.fn(),
