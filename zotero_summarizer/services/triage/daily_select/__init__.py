@@ -52,9 +52,9 @@ from zotero_summarizer.services.triage.daily_select._querying import (
     fetch_decided_content_keys,
     fetch_handled_keys,
     fetch_rows_by_decisions,
-    fetch_trashed_guids,
     open_ro,
 )
+from zotero_summarizer.storage.feeds_lookup import fetch_trashed_guids
 from zotero_summarizer.storage.feed_identity import row_feed_keys
 from zotero_summarizer.storage.interleave import record_interleave_slate
 
@@ -185,8 +185,8 @@ def _unhandled_pool(conn) -> list[dict]:
     )
     trashed_guids = fetch_trashed_guids(
         conn,
-        trashed_decisions=_TRASH_DECISIONS,
-        trashed_outcomes=_TRASH_OUTCOMES,
+        decisions=tuple(_TRASH_DECISIONS),
+        outcomes=tuple(_TRASH_OUTCOMES),
     )
 
     primary_decisions = [_DECISION_AWAITING_REVIEW, _DECISION_TRIAGED_PENDING]

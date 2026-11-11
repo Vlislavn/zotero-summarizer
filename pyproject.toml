@@ -40,7 +40,7 @@ dev = [
     "pytest-forked>=1.6.0",
     "pre-commit>=3.7.0",
     # Dead-code / duplication / overlap checks; tracks main (no pin); refreshed by `make deadcode-update`; needs Python >=3.11.
-    "deadcode-audit[vulture] @ git+https://github.com/Vlislavn/deadcode-audit.git@main ; python_version >= '3.11'",
+    "deadcode-audit[vulture,javascript,embeddings] @ git+https://github.com/Vlislavn/deadcode-audit.git@main ; python_version >= '3.11'",
 ]
 # Optional high-fidelity PDF parser (IBM Docling: TableFormer tables + figure
 # classification). Heavy (pulls layout models); install only when you want the

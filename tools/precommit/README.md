@@ -34,8 +34,11 @@ is mandatory: the default scan walks `data/` and hangs) and `scripts/vulture_whi
   it is rewritten by every refresh, never edited by hand.
 - **Update + gates:** `make deadcode-update`.
 - **Reports (advisory, exit 0):** `make scan` (whole tree: reachability, import cycles,
-  overlaps, Vulture, redundancy, slop) and `make scan-diff` (changes vs `BASE`).
-  Overlaps run with `--no-embed` (no torch).
+  pass-1 overlaps, Vulture, redundancy, slop, and a Python + JS/TS quality scan that
+  needs `oxlint` from `cd frontend && npm install`), `make scan-overlaps` (two-pass
+  embedding overlaps over Python + JS/TS; ~12 min, ~1.8 GB RSS, run alone) and
+  `make scan-diff` (changes vs `BASE`). `.deadcode.yml` lists `frontend/src` as a source root;
+  the gates stay Python-only. `make scan` overlaps run with `--no-embed` (no torch).
 - **Vulture** is installed as deadcode-audit's extra; model fields appear only at 60%
   confidence (advisory), so no local pydantic guard is needed for the ≥80% gate.
 

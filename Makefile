@@ -1,4 +1,4 @@
-.PHONY: help install run iphone dev test lint check scan scan-diff deadcode-update deadcode-refresh deadcode-gates
+.PHONY: help install run iphone dev test lint check scan scan-diff deadcode-update deadcode-refresh deadcode-gates scan-overlaps
 .DEFAULT_GOAL := help
 
 # Prefer project-venv tools so targets work without activating it; fall back to PATH.
@@ -81,7 +81,8 @@ check: ## Full local check before a PR (lint, tests, frontend, smoke test)
 	PYTHONPATH="$(CURDIR)$${PYTHONPATH:+:$$PYTHONPATH}" $(ZS) smoke-test --project-root .
 
 # Advisory reports (always exit 0, never block); enforcement is `make lint`.
-#   make scan        whole tree: deadcode-audit reachability/cycles/overlaps/vulture/redundancy + slop
+#   make scan        whole tree: deadcode-audit reachability/cycles/overlaps(pass 1)/vulture/redundancy + slop + JS/TS quality scan
+#   make scan-overlaps  two-pass (embedding) overlaps over Python + JS/TS; slow and heavy
 #   make scan-diff   changed files vs BASE
 scan: ## Advisory code-health report, whole tree
 	@set +e; \
@@ -91,7 +92,14 @@ scan: ## Advisory code-health report, whole tree
 	echo "── Redundant transforms ──"; $(DEADCODE) redundancy $$(git ls-files 'zotero_summarizer/*.py') 2>&1 | sed 's/^/  /'; \
 	echo "── Vulture (60%+) ──"; .venv/bin/vulture zotero_summarizer scripts/vulture_whitelist.py 2>&1 | sed 's/^/  /'; \
 	echo "── AI-slop ──"; $(PY) tools/precommit/check_slop.py dump | sed 's/^/  /'; \
+	echo "── Quality scan (Python + JS/TS) ──"; \
+	if [ -x frontend/node_modules/.bin/oxlint ]; then \
+	  DEADCODE_OXLINT=$(CURDIR)/frontend/node_modules/.bin/oxlint $(DEADCODE) scan --no-history 2>&1 | sed 's/^/  /'; \
+	else echo "  oxlint missing: run 'cd frontend && npm install' to scan JS/TS"; fi; \
 	true
+
+scan-overlaps: ## Two-pass overlaps, Python + JS/TS (~12 min, ~1.8 GB RSS; run alone)
+	OMP_NUM_THREADS=2 TOKENIZERS_PARALLELISM=false $(DEADCODE) overlaps --top 0 --json
 
 scan-diff: ## Advisory code-health report, changes vs BASE
 	@set +e; \

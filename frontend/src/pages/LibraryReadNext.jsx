@@ -24,7 +24,7 @@ import { Section } from '../components/paper/review/primitives.jsx';
 import {
   EMPTY_FILTERS, buildPredicate, goalHighKeys, isFilterActive,
   serializeFilters, hydrateFilters, prestigeBucketCounts,
-  DEFAULT_SORT, sortQueue, serializeSort, hydrateSort,
+  sortQueue, serializeSort, hydrateSort,
 } from '../utils/relevanceBands.js';
 import { isMachineTag } from '../utils/tags.js';
 import { fulltextMessage } from './todayHelpers.js';

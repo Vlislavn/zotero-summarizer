@@ -189,24 +189,22 @@ def fetch_trashed_guids(
     (e.g. ``user_rejected`` — trashed from Today) OR a trashing ``final_outcome``
     (e.g. ``trashed`` / ``deleted_all`` — thrown away inside Zotero). Both
     taxonomies are passed in by the caller so this stays pure SQL with no import
-    of the constants module.
+    of the constants module. Raises ``ValueError`` when either taxonomy is
+    empty (caller bug).
     """
-    clauses: list[str] = []
-    params: list[Any] = []
-    if decisions:
-        placeholders = ",".join("?" * len(decisions))
-        clauses.append(f"decision IN ({placeholders})")
-        params.extend(decisions)
-    if outcomes:
-        placeholders = ",".join("?" * len(outcomes))
-        clauses.append(f"final_outcome IN ({placeholders})")
-        params.extend(outcomes)
-    if not clauses:
-        return set()
-    where = " OR ".join(clauses)
+    if not decisions:
+        raise ValueError("decisions must be non-empty")
+    if not outcomes:
+        raise ValueError("outcomes must be non-empty")
+    dec_ph = ",".join("?" * len(decisions))
+    out_ph = ",".join("?" * len(outcomes))
     rows = conn.execute(
-        f"SELECT DISTINCT guid FROM processed_feed_items WHERE {where}",
-        params,
+        f"""
+        SELECT DISTINCT guid
+        FROM processed_feed_items
+        WHERE decision IN ({dec_ph}) OR final_outcome IN ({out_ph})
+        """,
+        (*decisions, *outcomes),
     ).fetchall()
     return {str(r[0]).strip() for r in rows if str(r[0] or "").strip()}
 
