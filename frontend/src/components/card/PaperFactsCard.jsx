@@ -12,7 +12,7 @@ import Icon from '../ui/Icon.jsx';
 import { authorsView, codeView, methodFacts, notFoundLine, publishedFacts } from './cardModel.js';
 
 // Shared view of one card's facts (icons, code, who) — one cache entry via useCard.
-function useFacts(cardKey) {
+function useFacts(cardKey, rubric = null) {
   const card = useCard(cardKey).data;
   const facts = card?.facts || {};
   // No full text means the published/method icons never scanned the body: show
@@ -21,7 +21,7 @@ function useFacts(cardKey) {
   return {
     card,
     published: publishedFacts(facts.published, noFullText),
-    method: methodFacts(facts.method_checklist, noFullText),
+    method: methodFacts(facts.method_checklist, noFullText, rubric),
     code: codeView(facts.code),
     authors: authorsView(facts.authors),
   };
@@ -29,8 +29,8 @@ function useFacts(cardKey) {
 
 // The part tucked behind a disclosure: the icon legend. Today renders it inside its
 // single “more”; the paper page inside the card's “more”.
-export function CardMore({ cardKey }) {
-  const { card, published, method, code } = useFacts(cardKey);
+export function CardMore({ cardKey, rubric = null }) {
+  const { card, published, method, code } = useFacts(cardKey, rubric);
   if (!card) return null;
   return <FactLegend published={published} method={method} code={code} />;
 }
@@ -39,10 +39,11 @@ export function CardMore({ cardKey }) {
 // keeps its compact scale there (unboxed: the verdict card above is the only box).
 const PAPER_SCALE = '[&_li]:!text-[13px] [&_li]:!leading-snug [&_p]:!text-[12px] [&_p]:!leading-snug';
 
-// `rubric` = the paper's review checklist, when the caller has a review (it gates the “Not found” line).
+// `rubric` = the paper's review checklist, when the caller has a review: it decides the method
+// icons (yes/no) and gates the “Not found” line.
 export default function PaperFactsCard({ cardKey, variant = 'today', rubric = null }) {
   const cardQuery = useCard(cardKey);
-  const { card, published, method, code, authors } = useFacts(cardKey);
+  const { card, published, method, code, authors } = useFacts(cardKey, rubric);
   if (!cardKey) return null;
   if (cardQuery.isLoading) {
     return <div className="mt-2 h-4 w-2/3 animate-pulse rounded bg-slate-100" aria-hidden="true" />;
@@ -59,7 +60,7 @@ export default function PaperFactsCard({ cardKey, variant = 'today', rubric = nu
           <summary className="flex min-h-8 cursor-pointer list-none items-center gap-1 rounded text-[12px] text-slate-600 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest-600 [&::-webkit-details-marker]:hidden">
             <Icon name="chevron" size={14} className="transition-transform duration-150 group-open:rotate-90" />more
           </summary>
-          <div className="mt-2"><CardMore cardKey={cardKey} /></div>
+          <div className="mt-2"><CardMore cardKey={cardKey} rubric={rubric} /></div>
         </details>
       )}
     </div>

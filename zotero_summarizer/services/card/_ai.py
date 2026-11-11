@@ -4,7 +4,7 @@ One call over the configured ``card`` stage returns at most three labelled Engli
 bullets the owner scans in seconds — ``New`` (what is actually new), ``Take`` (a
 reusable method/protocol/prompt/eval; needs a verbatim evidence span), ``Caveat``
 (overclaim / missing baseline / weak eval; a verbatim quote of the paper's own
-limitation, or an ABSENCE the deterministic facts confirm). The app adds a fourth
+limitation, or an ABSENT CODE the deterministic facts confirm). The app adds a fourth
 ``Code`` bullet itself from the facts (never from the model). A bullet that fails its
 grounding is dropped, not padded. Judge validation counts only vs humans and the eval
 protocol is how THE PAPER evaluates — both come from the deterministic facts.
@@ -22,7 +22,7 @@ from zotero_summarizer.services.library._grounding import quote_is_grounded
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 
 CLARITY_CAP = 50_000  # pilot2 fix: cap the method/clarity input at 50k chars
-PROMPT_VERSION = "card-ai-2"
+PROMPT_VERSION = "card-ai-3"
 
 Basis = Literal["code", "uncertainty", "external_validation", "judge_validation", "data", "other"]
 LABELS = ("New", "Take", "Caveat", "Code")
@@ -33,7 +33,7 @@ class Bullet(BaseModel):
     label: Literal["New", "Take", "Caveat"]
     text: str = Field(min_length=1)
     quote: str = ""  # verbatim span: required for Take; for Caveat unless `absence` is set
-    absence: Basis | None = None  # Caveat only: the missing thing, when the facts confirm it
+    absence: Basis | None = None  # Caveat only: the missing thing, when the facts confirm it (only `code` can be)
 
 
 class AIFields(BaseModel):
@@ -57,27 +57,36 @@ _INSTRUCTION = (
     "(8-25 words) from the excerpts proving it exists. Nothing reusable -> omit the bullet.\n"
     "- Caveat: the single strongest reason to trust the paper LESS: an overclaim, a missing baseline, a "
     "weak or unvalidated evaluation, a tiny sample, a limitation that undercuts the headline. quote: a "
-    "verbatim span of the paper's OWN limitation. Alternatively set `absence` (code, judge_validation, "
-    "uncertainty, external_validation, data) and leave quote empty — ONLY when the facts block confirms "
-    "that absence AND it matters for THIS paper (judge_validation only if the paper uses an LLM judge). "
+    "verbatim span of the paper's OWN limitation. Alternatively set `absence` to `code` and leave quote "
+    "empty — ONLY when the facts block shows no own code AND it matters for THIS paper. Never claim any "
+    "other absence from the facts block: unlisted flags are unknown, not missing. "
     "Generic hedges ('LLMs may err') are not caveats -> omit.\n"
 )
 
 
+def _found(group: dict[str, Any], key: str) -> bool:
+    return bool((group.get(key) or {}).get("present"))
+
+
 def _facts_block(facts: dict[str, Any]) -> str:
+    """Trusted facts for the prompt: the code status plus only the text flags the collector FOUND.
+    A regex that finds nothing proves nothing (narrow vocabulary), so no absence is ever stated."""
     code = facts.get("code") or {}
     pub = facts.get("published") or {}
     checklist = facts.get("method_checklist") or {}
     judge = pub.get("judge_validation") or {}
-    lines = [
-        f"code: status={code.get('status')} url={code.get('url')}",
-        f"eval_protocol_described={bool((pub.get('evaluation_protocol') or {}).get('present'))} "
-        f"(how THE PAPER evaluates its own results)",
-        f"judge_validated_vs_humans={bool(judge.get('present'))} numbers={judge.get('numbers')}",
-        f"data_released={bool((pub.get('data_released') or {}).get('present'))}",
-        f"uncertainty_reported={bool((checklist.get('uncertainty') or {}).get('present'))}",
-        f"external_validation={bool((checklist.get('external_validation') or {}).get('present'))}",
-    ]
+    lines = [f"code: status={code.get('status')} url={code.get('url')}"]
+    if _found(pub, "evaluation_protocol"):
+        lines.append("eval_protocol_described=True (how THE PAPER evaluates its own results)")
+    if judge.get("present"):
+        lines.append(f"judge_validated_vs_humans=True numbers={judge.get('numbers')}")
+    if _found(pub, "data_released"):
+        lines.append("data_released=True")
+    if _found(checklist, "uncertainty"):
+        lines.append("uncertainty_reported=True")
+    if _found(checklist, "external_validation"):
+        lines.append("external_validation=True")
+    lines.append("(Flags not listed were not detected by a text scan: that is NOT evidence of absence.)")
     return "\n".join(lines)
 
 
@@ -97,21 +106,13 @@ def build_prompt(facts: dict[str, Any], title: str, abstract: str, text: str) ->
 
 # --- deterministic absence verification -------------------------------------
 def _absent_bases(facts: dict[str, Any]) -> set[str]:
-    """Bases whose absence the deterministic facts actually confirm."""
+    """Bases whose absence the deterministic facts actually confirm. Only the code cascade can:
+    the text-scan flags (uncertainty, external validation, judge validation, data) can miss, so
+    their absence is never confirmed."""
     code = facts.get("code") or {}
-    pub = facts.get("published") or {}
-    checklist = facts.get("method_checklist") or {}
     absent: set[str] = set()
     if (code.get("status") or "none") in {"none", "unclear", "unknown"}:
         absent.add("code")
-    if not (pub.get("judge_validation") or {}).get("present"):
-        absent.add("judge_validation")
-    if not (checklist.get("uncertainty") or {}).get("present"):
-        absent.add("uncertainty")
-    if not (checklist.get("external_validation") or {}).get("present"):
-        absent.add("external_validation")
-    if not (pub.get("data_released") or {}).get("present"):
-        absent.add("data")
     return absent
 
 

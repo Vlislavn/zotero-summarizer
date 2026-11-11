@@ -42,6 +42,9 @@ const CONSUMPTION = {
 
 // Everything the owner does NOT need to decide: authors, venue, the abstract, and
 // the card's icon legend. Lives behind the card's ONE “more” disclosure.
+// The review's checklist rides on the member payload (`quality.rubric`); only a current review decides the icons.
+const reviewRubric = (paper) => (paper.selection_evidence?.review?.quality_origin === 'current_entry' ? paper.quality?.rubric : null) || null;
+
 function MoreBody({ paper, authors }) {
   const abstract = cleanAbstract(paper.abstract);
   return (
@@ -55,7 +58,7 @@ function MoreBody({ paper, authors }) {
         </div>
       </div>
       {abstract && <p className="whitespace-pre-line text-xs leading-relaxed text-slate-600">{abstract}</p>}
-      {paper.stable_feed_key && <CardMore cardKey={paper.stable_feed_key} />}
+      {paper.stable_feed_key && <CardMore cardKey={paper.stable_feed_key} rubric={reviewRubric(paper)} />}
     </div>
   );
 }
@@ -187,7 +190,7 @@ export default function PaperCard({ paper, selected, onToggleSelect, llmEnabled 
 
           {outdatedReview && <OutdatedReviewNote itemKey={paper.stable_feed_key} />}
 
-          {paper.stable_feed_key && <PaperFactsCard cardKey={paper.stable_feed_key} variant="today" />}
+          {paper.stable_feed_key && <PaperFactsCard cardKey={paper.stable_feed_key} variant="today" rubric={reviewRubric(paper)} />}
 
           <SelectionWhy paper={paper} selectionPolicy={selectionPolicy}
             currentStatus={currentFacts} statusFresh={statusFresh} retained={Boolean(visitId)}

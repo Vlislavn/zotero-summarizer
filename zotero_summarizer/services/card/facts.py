@@ -35,7 +35,7 @@ from zotero_summarizer.services.card._code import code_facts
 from zotero_summarizer.services.card._fulltext import get_fulltext
 from zotero_summarizer.services.card._published import method_checklist, published_facts
 
-EXTRACTOR_VERSION = "card-facts-1"
+EXTRACTOR_VERSION = "card-facts-2"
 
 _DAY = 86400
 TTL_LIVENESS = 7 * _DAY      # code repo reachability

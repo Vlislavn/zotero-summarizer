@@ -1,7 +1,7 @@
 """Deterministic "what is published" + method checklist.
 
 A ported, trimmed subset of the card ``det_v3`` checks (``data/perf-20261107/card``):
-pure regex over the paper's full text with the reference list stripped — no LLM,
+pure regex over the paper's full text with the reference list stripped (appendices kept) — no LLM,
 no network. Each chip is ``{"present": bool, "evidence": quote|None}``.
 
 "What is published" answers the owner's "methods you can take" rule: prompts,
@@ -14,15 +14,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-_REF_HEAD = re.compile(r"(?im)^\s*(references|bibliography|literature cited)\s*$")
+from zotero_summarizer.services.library._paper_body import _strip_references
 
 
 def _body(text: str) -> str:
-    """Strip the reference list and join line wraps (keeps quotes readable)."""
-    t = text or ""
-    heads = list(_REF_HEAD.finditer(t))
-    if heads and heads[-1].start() > 0.3 * len(t):
-        t = t[: heads[-1].start()]
+    """Strip the reference list (appendices after it stay) and join line wraps (keeps quotes readable)."""
+    t, _removed = _strip_references(text or "")
     return re.sub(r"[ \t]*\n[ \t]*", " ", t)
 
 

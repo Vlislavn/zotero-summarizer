@@ -18,7 +18,7 @@ cached_bullets(keys)-> {key: TL;DR bullets} for fresh cached cards only (no fact
   stage): the model returns `bullets` — at most 3, labelled `New` (what is actually
   new), `Take` (ONE reusable method/protocol/prompt/eval, with a verbatim evidence
   quote) and `Caveat` (overclaim / missing baseline / weak eval: a verbatim quote of
-  the paper's OWN limitation, or an `absence` basis the deterministic facts confirm AND
+  the paper's OWN limitation, or `absence: code` when the code facts confirm it AND
   that matters for this paper) — each a telegraphic English fragment of ≤12 words,
   ≤45 words in all, dropped rather than padded. The app adds a 4th `Code` bullet from
   the facts (never from the model; nothing when no full text was read). Output is
@@ -26,7 +26,10 @@ cached_bullets(keys)-> {key: TL;DR bullets} for fresh cached cards only (no fact
   a `Take`/`Caveat` bullet that fails its grounding is dropped. Quotes use the shared
   fuzzy grounding contract; the method input is capped at 50k chars. Eval protocol =
   how THE PAPER evaluates; judge validation counts only vs humans — both from the facts.
-  `PROMPT_VERSION=card-ai-2` + `CARD_VERSION=card-v5-1` + the new schema change the
+  The facts block lists the code status plus only the text flags the collector FOUND: a regex
+  that finds nothing proves nothing, so no absence of a text flag is stated to the model or
+  accepted as an `absence` caveat (only `code` can be confirmed absent).
+  `PROMPT_VERSION=card-ai-3` + `CARD_VERSION=card-v5-1` + the new schema change the
   cache identity, so old prose (`card-ai-1`) cards are never read as current.
 - **Consent** (`_consent.py`): reuses `ResolvedStage.fingerprint()` — the same
   processing-boundary token the review stages use. `record_consent(token)` persists the
@@ -60,6 +63,8 @@ collect_facts(PaperRef)                      cache: Settings.card_facts_dir/<sta
       │                 (no full text obtained → `unknown`, not a proven `none`)
       ├─ _published ── regex "what's published": prompts · eval protocol · judge-vs-human
       │                 validation WITH numbers · agent contracts · data  +  method checklist
+      │                 (scans the text minus its reference list; appendices stay —
+      │                 `library._paper_body._strip_references`)
       └─ _authors   ── PDF header affiliations (boilerplate stripped) + OpenAlex h-index
 ```
 
