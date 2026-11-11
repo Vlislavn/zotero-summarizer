@@ -54,7 +54,8 @@ it('profile suggestions only prepare a draft; incompatible suggestions cannot ch
   expect(screen.getByRole('button', { name: 'Balanced' }).disabled).toBe(true);
   fireEvent.click(light);
   expect(screen.getByLabelText('API address').value).toBe(local.base_url);
-  expect(screen.getByRole('button', { name: 'Connect provider' }).disabled).toBe(false);
+  // The suggestion's address equals the saved `local` connection, so it is reused, not duplicated.
+  expect(screen.getByRole('button', { name: 'Load models' }).disabled).toBe(false);
   expect(api.registerConnection).not.toHaveBeenCalled();
   expect(api.applyConnection).not.toHaveBeenCalled();
   expect(saved).not.toHaveBeenCalled();

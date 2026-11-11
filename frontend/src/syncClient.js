@@ -2,14 +2,17 @@ import { request } from './api/client.js';
 import { offlineRequestBudget } from './api/offlineTransport.js';
 import {
   applyPull, applyPushResults, beginPull, getMeta, mutationError, pendingMutations, publishStatus, pushPredecessors,
+  publishNoResponse, serverBusy,
 } from './offlineStore.js';
 
 let running = null;
 let requestedAgain = false;
 let activeQueryClient = null;
-function failureMessage(error, timedOut, transport) {
+// 502/503/504 (incl. 503 database_busy) answer "alive but overloaded".
+const BUSY_STATUSES = [502, 503, 504];
+function failureMessage(error, busy, transport) {
+  if (busy) return '';
   if (error?.status) return `Sync request failed (HTTP ${error.status}): ${error.message}`;
-  if (timedOut) return 'Sync timed out';
   if (error?.message?.startsWith('Sync protocol changed') || error?.message?.startsWith('Invalid sync')) return error.message;
   return transport ? 'Server unavailable' : `Sync unavailable: ${error?.message || String(error)}`;
 }
@@ -64,13 +67,17 @@ export function syncNow(client = activeQueryClient) {
       boundary = 'local';
       if (pulled?.protocol !== 1) throw new Error('Sync protocol changed; refresh the app');
       await applyPull(pulled, sequence);
+      const recovered = serverBusy();
       await publishStatus('', 'connected');
+      if (recovered) await client?.invalidateQueries({ queryKey: ['deep-review-reachability'] });
       await client?.invalidateQueries({ queryKey: ['review-detail'] });
     } catch (error) {
       const received = Boolean(error.status || error.responseReceived);
       const transport = boundary === 'request' && error.transportFailure === true && !received;
-      const unavailable = boundary === 'request' && !received && (controller.signal.aborted || transport);
-      await publishStatus(failureMessage(error, unavailable && controller.signal.aborted, transport), unavailable ? 'unavailable' : 'blocked');
+      const silent = boundary === 'request' && !received && (controller.signal.aborted || error.noResponse === true);
+      const busy = silent || (boundary === 'request' && BUSY_STATUSES.includes(error.status));
+      if (silent) await publishNoResponse(error);
+      else await publishStatus(failureMessage(error, busy, transport), busy ? 'busy' : transport ? 'unavailable' : 'blocked');
     } finally {
       clearTimeout(timeout);
     }

@@ -4,6 +4,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ## [Unreleased]
 
+- Long papers in Triage (#284): a remote provider reads the whole paper in one call (its window, as deep review); longer sources (>80k chars on local) map chunks (parallel on remote, serial on local; same map step as deep review), and a cancelling job says «Stopping after the current AI call finishes…».
+- RSS refresh counts (#285): a story served by several feeds keeps its first feed instead of flipping on every fetch, and GitHub release notes no longer change per fetch (expiring image tokens dropped), so a repeat refresh reports 0 updated; «unchanged» now counts items, not feeds.
+- Settings connections (#281): «Connect provider»/«Load models» on an address and authorization that is already saved reuses that connection (no more duplicates); provider status re-checks after a save instead of showing a stale «✓ Provider reachable»; a briefly busy settings file waits ≤2 s, then says «Settings are saving — try again in a moment».
+- Slow server vs. absent server (#282): a request timeout or 502/503/504 now shows «Server is busy — retrying…» and keeps retrying; «Server unreachable» when the connection is refused, the device is offline, or 3 timeouts in a row get no answer; Today no longer says «AI not connected» after a failed or timed-out status check.
 - Plain wording (#277): digest reproducibility rationale (page and Markdown), search «What was searched» source names («OpenAlex · keyword search»), and Pending apply result («6 changes applied.»).
 - Search clarity (#274): «Reviewed N of 10» while reviewing, plain per-source «What was searched» lines (results / not available right now / «Some sources failed»), HTML entities and heading breaks in abstracts and titles, one «Published article · Crossref» chip.
 - Find new relevant no longer fails with «Seed context changed; reload discovery» (#275): the discovery fingerprint ignores the constantly written `corpus_cache.db` file marker and changes only with the seed's own data.
@@ -67,6 +71,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ### Fixed
 
+- Find similar papers no longer marks its AI check as stale after unrelated background work.
 - Zotero (#254): applying an `upsert note` replaces the paper's earlier app-written digest/verdict/My-notes note in place, including legacy ones whose marker was HTML-escaped, and trashes extra owned duplicates, so one note per paper.
 - Connection approval (#244): an approved server stays approved across unrelated Settings saves, other providers' key saves and Telegram edits; it expires only when that provider's address/auth or its own key changes (one re-approval for older approvals).
 - Reviews (#242): web articles with non-breaking spaces or soft hyphens now render to PDF; heavy pages no longer fail on the browser proxy's connection cap; concurrent reviews wait for the browser instead of skipping it; Today preparation starts ~30 s after launch.

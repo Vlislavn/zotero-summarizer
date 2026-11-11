@@ -588,9 +588,41 @@ export async function resolveConflict(mutationId, keepLocal) {
   await publishStatus();
 }
 
+// A slow (not absent) server: re-ask after a growing pause until a sync settles on another phase.
+// Silence (no HTTP response at all) is only "busy" for the first NO_RESPONSE_LIMIT times in a row —
+// a blackholed network (Mac asleep, VPN off) must end up "unavailable"; any HTTP response resets it.
+const BUSY_RETRY_MS = [5_000, 15_000];
+const NO_RESPONSE_LIMIT = 3;
+let busyRetry = null;
+let busyRetries = 0;
+let noResponses = 0;
+
+export function noteResponse() {
+  noResponses = 0;
+}
+
+export function publishNoResponse(error) {
+  if (!error?.noResponseCounted) {
+    noResponses += 1;
+    if (error) error.noResponseCounted = true;
+  }
+  return noResponses >= NO_RESPONSE_LIMIT ? publishStatus('Server unavailable', 'unavailable') : publishStatus('', 'busy');
+}
+
 export async function publishStatus(message = '', phase) {
   if (phase) {
     connection = phase;
+    if (phase !== 'syncing' && phase !== 'busy') {
+      clearTimeout(busyRetry);
+      busyRetry = null;
+      busyRetries = 0;
+    }
+    if (phase === 'busy' && !busyRetry) {
+      busyRetry = setTimeout(() => {
+        busyRetry = null;
+        window.dispatchEvent(new Event('zs-sync-request'));
+      }, BUSY_RETRY_MS[Math.min(busyRetries++, BUSY_RETRY_MS.length - 1)]);
+    }
     if (phase !== 'syncing') syncError = ['unavailable', 'blocked'].includes(phase) ? message : '';
   }
   let local;
@@ -612,11 +644,15 @@ export async function publishStatus(message = '', phase) {
 }
 
 export function isServerAvailable({ allowSyncFailure = false } = {}) {
-  return navigator.onLine && (connection === 'connected' || (allowSyncFailure && connection === 'blocked'));
+  return navigator.onLine && (connection === 'connected' || (allowSyncFailure && ['blocked', 'busy'].includes(connection)));
 }
 
 export function transportUnavailable() {
   return connection === 'unavailable';
+}
+
+export function serverBusy() {
+  return connection === 'busy';
 }
 
 export const syncStatusEvent = EVENT;

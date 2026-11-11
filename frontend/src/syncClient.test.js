@@ -10,7 +10,7 @@ vi.mock('./api/client.js', () => ({ request: mocks.request }));
 vi.mock('./offlineStore.js', () => ({
   applyPull: mocks.applyPull, applyPushResults: mocks.applyPushResults,
   getMeta: mocks.getMeta, pendingMutations: mocks.pendingMutations,
-  publishStatus: mocks.publishStatus,
+  publishStatus: mocks.publishStatus, serverBusy: () => false, publishNoResponse: mocks.publishStatus,
   mutationError: () => null, pushPredecessors: async () => [], beginPull: async () => 1,
 }));
 

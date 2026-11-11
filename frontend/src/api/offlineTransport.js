@@ -1,4 +1,4 @@
-import { publishStatus } from '../offlineStore.js';
+import { noteResponse, publishStatus } from '../offlineStore.js';
 
 const DEFAULT_SYNC_TIMEOUT_MS = 15_000;
 const MAX_SYNC_TIMEOUT_MS = 60_000;
@@ -13,7 +13,9 @@ export function offlineRequestBudget() {
 
 export async function fetchTransport(path, options) {
   try {
-    return await fetch(path, options);
+    const response = await fetch(path, options);
+    noteResponse(); // any HTTP answer (200 or 503) proves the server is there: reset the silent-timeout count
+    return response;
   } catch (cause) {
     const error = new Error(cause?.message || String(cause));
     error.name = cause?.name || 'Error';
@@ -35,8 +37,12 @@ export async function offlineRequest(path, options, decode) {
     try {
       response = await fetchTransport(path, { ...options, signal: controller.signal });
     } catch (error) {
-      if (controller.signal.aborted && !options.signal?.aborted) error.transportFailure = true;
-      if (error.transportFailure) await publishStatus('Server unavailable', 'unavailable');
+      const timedOut = controller.signal.aborted && !options.signal?.aborted;
+      if (timedOut) error.transportFailure = true;
+      // A read deadline with no answer is a slow server. Only sync's own silent deadlines count towards
+      // 'unavailable' (syncClient → publishNoResponse), so parallel page reads cannot escalate an overloaded server.
+      if (timedOut) await publishStatus('', 'busy');
+      else if (error.transportFailure) await publishStatus('Server unavailable', 'unavailable');
       throw error;
     }
     return await decode(response);

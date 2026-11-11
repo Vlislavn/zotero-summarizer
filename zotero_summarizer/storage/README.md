@@ -20,7 +20,7 @@ cached/live use; the gated digest pipeline reads it directly. Posts carry
 (no SQL migration), feeding forward-dedup and comment gating. Migration 16 adds the
 nullable `reasons_json` (owner's 'не подошло' chips) via `set_reasons`/`read_reasons`; upserts keep it.
 
-`configuration_lock.py` provides a nonwaiting, no-follow cross-process file lock
+`configuration_lock.py` provides a nonwaiting (unless a sync worker-thread caller opts into a bounded `wait`), no-follow cross-process file lock
 under the selected `Settings.data_dir`. It is reentrant only within the same
 synchronous thread owner; that ownership is not inherited by another worker.
 `shared=True` takes `LOCK_SH` for read-only snapshots: readers never block each other and
@@ -141,7 +141,7 @@ Ordinary upserts/imports keep their existing update behavior.
 
 `item_titles.titles_for_keys` is a read-only corpus-cache title lookup by item key; `feed_titles_for_keys` does the same for feed keys (stable, legacy `feed:<id>`) in the triage DB.
 
-`upsert_rss_item` returns `(id, "inserted"|"updated"|"unchanged")`; an existing row is rewritten only if incoming content differs.
+`upsert_rss_item` returns `(id, "inserted"|"updated"|"unchanged")`; an existing row is rewritten only if incoming content differs; it keeps its first feed (`rss_feed_id`, `publication_title`), so the same key from another feed is `unchanged`.
 `count_rss_items_by_feed` returns stored item counts per feed id (feed list UI).
 `import_zotero_feeds` returns `{imported, added}` — `added` counts feeds that were new (the UI says "Added N new feeds (M already present)").
 `rss_feeds.fetch_watermark` / `fetch_incomplete` (migration v17, nullable/defaulted) record per-feed fetch progress; `record_rss_fetch_result(watermark=, incomplete=)` only moves the watermark forward and `incomplete=None` leaves the flag untouched.

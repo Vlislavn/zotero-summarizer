@@ -41,9 +41,9 @@ export default function ConnectionTask({ onSaved, disabled = false, autoOpen = f
   const providers = query.data?.providers || [];
   const routing = query.data?.config?.llm_routing;
   const current = providers.find(p => p.name === routing?.default?.provider);
-  const source = providers.find(p => p.name === draft.source);
-  const reusing = source && source.type === draft.type && (source.base_url || '') === draft.base_url
-    && (draft.auth === 'none' && source.auth_mode === 'none' || draft.auth === 'existing' && draft.authorization === source.name);
+  // Same address + authorization as a saved connection: the server reuses it instead of saving another.
+  const reused = providers.find(p => p.type === draft.type && (p.base_url || '').replace(/\/+$/, '') === (draft.base_url || '').replace(/\/+$/, '')
+    && (draft.auth === 'none' && p.auth_mode === 'none' || draft.auth === 'existing' && p.auth_mode !== 'none' && p.name === draft.authorization));
   const test = task.test && { ...task.test, current: task.test.current === true
     && typeof query.data?.revision === 'string' && task.test.revision === query.data.revision };
   const catalogNeedsFirstModel = Boolean(task.bootstrap && task.state === 'draft' && task.reason && !task.detail);
@@ -125,9 +125,9 @@ export default function ConnectionTask({ onSaved, disabled = false, autoOpen = f
         {!draft.source && <Field label="API address" value={draft.base_url || ''} onChange={base_url => change({ base_url })} />}
         <ConnectionOptions draft={draft} providers={providers} onChange={change} />
         {model && <p className="text-sm">Currently saved model: {model}</p>}
-        <p className="text-xs break-words">{reusing ? 'Reuse this connection and fetch model names' : 'Save an unused connection and fetch model names'} from {draft.base_url || 'https://api.anthropic.com'} with {metadataAuth}. Current assignments stay unchanged. No model is run.</p>
+        <p className="text-xs break-words">{reused ? `Reuse the saved connection ${connectionLabel(reused)} and fetch model names` : 'Save an unused connection and fetch model names'} from {draft.base_url || 'https://api.anthropic.com'} with {metadataAuth}. Current assignments stay unchanged. No model is run.</p>
         <Button type="button" variant="secondary" disabled={task.busy || task.uncertain} onClick={() => workflow.connect({ ...draft, approved: true, revision: query.data.revision })}>
-          {task.busy ? 'Loading model names…' : reusing ? 'Load models' : 'Connect provider'}
+          {task.busy ? 'Loading model names…' : reused ? 'Load models' : 'Connect provider'}
         </Button>
       </>}
       {task.provider && <>

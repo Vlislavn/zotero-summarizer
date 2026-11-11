@@ -30,6 +30,8 @@ export function useConnectionTask(onSaved) {
     if (!active()) return;
     if (!admitted()) return changed();
     client.setQueryData(['llm-connections'], current);
+    // A saved address/assignment is a new thing to probe: never keep showing the old provider status.
+    ['llm-reachability', 'deep-review-reachability'].forEach(key => client.invalidateQueries({ queryKey: [key] }));
     if (current.config) onSaved?.({ ...current.config, _revision: current.revision }, { previousRevision });
     await invalidateSetupDoctor(client);
     return current;

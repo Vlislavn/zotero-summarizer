@@ -57,11 +57,12 @@ export default function OfflineStatus() {
   const attention = down || Boolean(sync.sync_error || sync.local_error || sync.conflicts?.length || sync.rejected?.length);
   const headline = !sync.online ? 'Offline'
     : sync.connection === 'unavailable' ? 'Server unreachable'
+      : sync.connection === 'busy' ? 'Server is busy — retrying…'
       : sync.connection === 'syncing' ? 'Syncing…'
         : sync.connection === 'connected' ? 'Connected' : 'Connection not confirmed';
   const unsent = sync.pending == null ? 'device storage unavailable' : sync.pending > 0 ? `${sync.pending} unsent on this device` : null;
   const line = [headline, queued == null ? null : `${queued} pending change${queued === 1 ? '' : 's'}`, unsent].filter(Boolean).join(' · ');
-  const dot = down || sync.local_error ? 'bg-rose-600' : attention ? 'bg-amber-500' : sync.connection === 'connected' ? 'bg-emerald-600' : 'bg-slate-400';
+  const dot = down || sync.local_error ? 'bg-rose-600' : attention || sync.connection === 'busy' ? 'bg-amber-500' : sync.connection === 'connected' ? 'bg-emerald-600' : 'bg-slate-400';
   return (
     <section aria-label="Offline sync" className="min-w-0 text-xs text-slate-600">
       <div className="flex items-center gap-2 min-h-9 sm:min-h-11">

@@ -37,6 +37,7 @@ it('keeps availability unknown until the actual typed pull and device commit fin
 it.each([
   ['transport', Object.assign(new TypeError('Owned connection refused'), { transportFailure: true }), 'unavailable'],
   ['HTTP', Object.assign(new Error('Forbidden'), { status: 403 }), 'blocked'],
+  ['busy HTTP', Object.assign(new Error('database is busy'), { status: 503, body: { error: 'database_busy' } }), 'busy'],
 ])('distinguishes %s failure without enabling server actions', async (_label, error, phase) => {
   const offline = await import('./offlineStore.js');
   transport.request.mockRejectedValue(error);
@@ -47,7 +48,7 @@ it.each([
     await (await import('./syncClient.js')).syncNow();
     expect(status.connection).toBe(phase);
     expect(offline.isServerAvailable()).toBe(false);
-    expect(status.sync_error).toBe(phase === 'unavailable' ? 'Server unavailable' : 'Sync request failed (HTTP 403): Forbidden');
+    expect(status.sync_error).toBe({ unavailable: 'Server unavailable', busy: '', blocked: 'Sync request failed (HTTP 403): Forbidden' }[phase]);
   } finally { window.removeEventListener(offline.syncStatusEvent, update); }
 });
 

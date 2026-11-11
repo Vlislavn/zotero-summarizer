@@ -63,7 +63,8 @@ async function connectCatalog(bootstrap, catalog) {
     state: bootstrap ? 'draft' : 'registered_inactive', bootstrap, ...catalog });
   fireEvent.click(await screen.findByRole('button', { name: 'Add provider' }));
   fireEvent.change(screen.getByLabelText('API address'), { target: { value: provider.base_url } });
-  fireEvent.click(screen.getByRole('button', { name: 'Connect provider' }));
+  // The typed address equals the saved connection (#281): the server reuses it, so the button reads 'Load models'.
+  fireEvent.click(screen.getByRole('button', { name: bootstrap ? 'Connect provider' : 'Load models' }));
   await screen.findByLabelText('Model');
 }
 

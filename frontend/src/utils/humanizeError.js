@@ -24,7 +24,7 @@ const STATUS_MESSAGES = {
   422: 'This view needs the updated backend — restart the app, then reload.',
   429: 'Too many requests — wait a moment and try again.',
   500: 'The server hit an internal error — try again.',
-  502: 'The server is unreachable right now (bad gateway).',
+  502: 'The server is busy right now — try again.',
   503: 'The service is unavailable right now — try again shortly.',
   504: 'The server took too long to respond (gateway timeout).',
 };

@@ -13,14 +13,23 @@ from zotero_summarizer.services.llm.connection_impact import impact, crossed_sta
 from zotero_summarizer.services.llm.factory import resolve_api_key
 from zotero_summarizer.services.research_feed.profile import load_profile
 
+_WAIT = 2.0  # seconds a sync connection route waits for another short config owner before answering "busy"
+
 
 def context():
-    with store.reading():
+    with store.reading(wait=_WAIT):
         store.require_disk_current()
         holder = state().app_state
         return {'revision': store.revision(),
                 'config': holder.config.model_dump(mode='json') if holder else None,
                 'providers': [p.model_dump(mode='json') for p in holder.config.llm_routing.providers] if holder else []}
+
+
+def _same_connection(saved: ProviderConfig, candidate: ProviderConfig) -> bool:
+    """Same protocol, API address and authorization identity (technical options do not make a new connection)."""
+    address = lambda p: (p.base_url or '').rstrip('/')
+    return (saved.type == candidate.type and address(saved) == address(candidate) and saved.auth_mode == candidate.auth_mode
+            and (saved.auth_mode == 'none' or saved.api_key_env == candidate.api_key_env))
 
 
 def _candidate(command):
@@ -45,15 +54,18 @@ def _candidate(command):
         options.update(auth_mode='legacy', api_key_env=authorization.api_key_env)
     elif command.auth == 'new':
         options['auth_mode'] = 'legacy'
-    if source and source.type == command.type and (source.base_url or None) == base:
-        if (command.auth == 'none' and source.auth_mode == 'none'
-                or command.auth == 'existing' and source.auth_mode != 'none' and source.api_key_env == options['api_key_env']):
-            return source.model_copy(deep=True)
-    return ProviderConfig.model_validate(options)
+    candidate = ProviderConfig.model_validate(options)
+    if command.auth != 'new':  # a new credential slot is always its own connection
+        saved = [source] if source else []
+        saved += routing.providers if routing else []
+        existing = next((p for p in saved if _same_connection(p, candidate)), None)
+        if existing:
+            return existing.model_copy(deep=True)
+    return candidate
 
 
 def register(command: RegisterConnection):
-    with store.editing():
+    with store.editing(wait=_WAIT):
         if store.receipt_path(command.operation_id).exists():
             raise APIError('connection_already_attempted', 'Read back this registration; do not repeat an uncertain write.', status_code=409)
         store.require_revision(command.revision)
@@ -90,7 +102,7 @@ def _view(receipt):
 
 
 def readback(operation_id: UUID):
-    with store.editing():
+    with store.editing(wait=_WAIT):
         receipt = store.load(operation_id)
         persisted = store.persisted_config()
         actual = next((p for p in persisted.llm_routing.providers if p.name == receipt['provider']['name']), None) if persisted else None
@@ -123,7 +135,7 @@ def _owned_receipt(operation_id, revision=None):
 
 
 def catalog(operation_id: UUID):
-    with store.editing():
+    with store.editing(wait=_WAIT):
         receipt, provider = _owned_receipt(operation_id)
         if receipt['bootstrap'] and not provider.is_local:
             return {**_view(receipt), 'reason': 'First remote connection: enter a manual model ID and explicitly save a complete default before metadata discovery.'}
@@ -134,7 +146,7 @@ def catalog(operation_id: UUID):
             return _catalog_result(operation_id, revision, error=error)
 
     def before_send(_request):
-        with store.editing():
+        with store.editing(wait=_WAIT):
             store.require_revision(revision)
 
     try:
@@ -152,7 +164,7 @@ def _catalog_result(operation_id, revision, *, ids=None, auth=None, error=None):
 
     if isinstance(error, APIError) and error.error in {'connection_conflict', 'configuration_busy', 'config_changed_on_disk', 'provider_approval_required'}:
         raise error
-    with store.editing():
+    with store.editing(wait=_WAIT):
         receipt, _provider = _owned_receipt(operation_id, revision)
         observation = catalog_observation(error) if error else {'reason_code': '', 'detail': '', 'http_status': None}
         receipt.update(models=[] if error else sorted(set(ids)), catalog='unavailable' if error else 'returned', **observation)
@@ -181,7 +193,7 @@ def _selected_config(provider, command):
 
 
 def preview(command: ConnectionSelection):
-    with store.editing():
+    with store.editing(wait=_WAIT):
         receipt, provider = _owned_receipt(command.operation_id, command.revision)
         after = _selected_config(provider, command)
         profile = load_profile(settings().data_dir, persist_default=False)
@@ -203,7 +215,7 @@ def preview(command: ConnectionSelection):
 
 
 def apply(command: ConnectionSelection):
-    with store.editing():
+    with store.editing(wait=_WAIT):
         receipt, provider = _owned_receipt(command.operation_id, command.revision)
         if (any(c not in {'previous', 'default'} for c in command.corrections.values())
                 or not command.preview or command.preview != receipt.get('preview') or not receipt.get('ready_to_apply')

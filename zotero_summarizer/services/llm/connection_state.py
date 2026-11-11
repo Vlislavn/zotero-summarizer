@@ -47,23 +47,26 @@ def require_revision(expected):
         raise APIError('connection_conflict', 'Configuration, authorization or Telegram selection changed. Refresh and review again.', status_code=409)
 
 
+_BUSY = 'Settings are saving — try again in a moment.'
+
+
 @contextmanager
-def editing(selected=None):
+def editing(selected=None, *, wait: float = 0):
     try:
-        with configuration_lock((selected or settings()).data_dir):
+        with configuration_lock((selected or settings()).data_dir, wait=wait):
             yield
     except BlockingIOError:
-        raise APIError('configuration_busy', 'Another configuration owner is saving. Refresh before trying again.', status_code=409) from None
+        raise APIError('configuration_busy', _BUSY, status_code=409) from None
 
 
 @contextmanager
-def reading():
+def reading(*, wait: float = 0):
     """Read-only snapshot: concurrent GETs share the lock; only a real save makes it busy."""
     try:
-        with configuration_lock(settings().data_dir, shared=True):
+        with configuration_lock(settings().data_dir, shared=True, wait=wait):
             yield
     except BlockingIOError:
-        raise APIError('configuration_busy', 'Another configuration owner is saving. Refresh before trying again.', status_code=409) from None
+        raise APIError('configuration_busy', _BUSY, status_code=409) from None
 
 
 def publish(config: GoalsConfig):

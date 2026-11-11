@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import hashlib
 import fcntl
 import os
+import time
 from pathlib import Path
 from threading import local
 
@@ -14,8 +15,11 @@ def file_revision(path: Path):
 
 
 @contextmanager
-def configuration_lock(data_dir: Path, *, shared: bool = False):
-    """Exclusive for writers; ``shared`` for read-only snapshots (readers never block each other)."""
+def configuration_lock(data_dir: Path, *, shared: bool = False, wait: float = 0):
+    """Exclusive for writers; ``shared`` for read-only snapshots (readers never block each other).
+
+    Nonwaiting unless a sync (worker-thread) caller opts into a bounded ``wait`` in seconds.
+    """
     key = str(data_dir.absolute())
     held = getattr(_OWNED, 'paths', set())
     if key in held:
@@ -24,7 +28,15 @@ def configuration_lock(data_dir: Path, *, shared: bool = False):
     data_dir.mkdir(parents=True, exist_ok=True)
     fd = os.open(data_dir / 'configuration.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
-        fcntl.flock(fd, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                fcntl.flock(fd, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.05)
         _OWNED.paths = held | {key}
         try:
             yield

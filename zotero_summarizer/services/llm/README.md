@@ -49,14 +49,15 @@ receipt/config write is not a rollback; restart/reload is required if another
 process changed disk behind this runtime. Missing initial config stays a draft until
 a real explicit model builds a complete first config. Unchanged protocol/base/auth
 reuses the saved provider identity/options instead of appending an indistinguishable
-record; only changed destinations/auth ownership create candidates. Approval lookup
+record (any saved provider with the same protocol, API address without trailing `/` and
+none/existing-slot authorization matches, not only the picked source; a new credential slot never does); only changed destinations/auth ownership create candidates. Approval lookup
 uses a derived provider-name → task-receipt pointer for reused names, not a second
 provider/client store; exact identity and current revisions still authorize lookup/send.
 A new generated credential slot can be deliberately established through the same
 separate consumer-preview/keyring/receipt owner, even before first config creation. Unknown remote bootstrap
 catalogs require manual-ID/default save first; existing invalid files are preserved.
 
-The shared nonwaiting configuration lock serializes app-owned config, credential
+The shared configuration lock (nonwaiting by default; the sync connection routes wait ≤2 s via `connections._WAIT`, then answer 409 «Settings are saving — try again in a moment.») serializes app-owned config, credential
 and Telegram-source saves. Full-config HTTP clients must round-trip `_revision`;
 scoped edits compare config/disk/calibration/auth-marker/profile revisions before
 publishing. Concurrent owners get 409, never a blocking flock on the event loop.
