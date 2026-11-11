@@ -39,7 +39,7 @@ cached_bullets(keys)-> {key: TL;DR bullets} for fresh cached cards only (no fact
   (`ZS_CARD_CALL_CAP`), daily token ledger (`ZS_CARD_DAILY_TOKENS`), circuit breaker
   (`ZS_CARD_BREAKER_N` consecutive failures → facts-only for `ZS_CARD_BREAKER_MINUTES`).
 - **Stage**: a new `card` routing stage (`ROUTABLE_STAGES`, NOT user-facing `STAGES`);
-  default provider Kather `sota` with thinking `off` in the config. Card knobs are
+  the default hosted provider with thinking `off` in the config. Card knobs are
   operational — deliberately OUTSIDE the deep-review identity allowlist (#88).
 - **API** (`api/routes/_card.py`): `GET /api/card/{key}` (cached or facts-only, never
   generates synchronously beyond facts) and `POST /api/card/{key}/generate` (single
