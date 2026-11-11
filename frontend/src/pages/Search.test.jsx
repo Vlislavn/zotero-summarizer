@@ -32,9 +32,13 @@ it('shows every server query variant and files identical-title cards by their di
         { source: 'arxiv', query: '"precise topic"' },
         { source: 'arxiv', query: 'broad topic' },
         { source: 'openreview', query: 'peer-reviewed topic' },
+        { source: 'retrieval arxiv', query: '12 results' },
+        { source: 'retrieval openalex', query: 'not available right now (rate limited) — results may be incomplete' },
+        { source: 'retrieval', query: 'Some sources failed — results may be incomplete.' },
       ],
     },
-    candidates: [{ candidate_id: 'local:first', title: 'Same title' }, { candidate_id: 'local:second', title: 'Same title' }],
+    candidates: [{ candidate_id: 'local:first', title: 'Same title', abstract: '<h4>Background</h4>Staining H&amp;E slides',
+      version_type: 'version_of_record', provenance: [{ source: 'crossref' }] }, { candidate_id: 'local:second', title: 'Same title' }],
   };
   sessionStorage.setItem('zs.searchSession', JSON.stringify({ id: research.id }));
   vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {
@@ -53,6 +57,11 @@ it('shows every server query variant and files identical-title cards by their di
   expect(screen.getByText('precise topic')).toBeTruthy();
   expect(screen.getByText('broad topic')).toBeTruthy();
   expect(screen.getByText('peer-reviewed topic')).toBeTruthy();
+  expect(screen.getByText('arXiv: 12 results')).toBeTruthy(); // SRCH-06: plain per-source lines, no raw dict
+  expect(screen.getByText('OpenAlex: not available right now (rate limited) — results may be incomplete')).toBeTruthy();
+  expect(screen.getAllByText('Some sources failed — results may be incomplete.')).toHaveLength(1);
+  expect(screen.getByText('Background: Staining H&E slides')).toBeTruthy(); // entity decoded, heading separated
+  expect(screen.getByText('Published article · Crossref')).toBeTruthy(); // one chip, not two
 
   fireEvent.click(screen.getAllByRole('button', { name: 'Add to library' })[0]);
   await waitFor(() => expect(screen.getAllByRole('button', { name: 'Add to library' })).toHaveLength(1));
@@ -181,7 +190,7 @@ it.each(['reviewing', 'reviewed'].flatMap(status => [
   const writes = [];
   const chosen = { candidate_id: 'chosen', title: 'Paper awaiting review' };
   const removed = { candidate_id: 'removed', title: 'Removed by later refinement' };
-  const snapshot = (state, candidates) => ({ id: 'poll-race', status: state, candidates });
+  const snapshot = (state, candidates) => ({ id: 'poll-race', status: state, candidates, screened_count: 1 });
   const obsolete = snapshot(status, [{ ...chosen, review: { brief: { tldr: 'Pre-Add review snapshot' } } }, removed]);
   let reads = 0, release, oldSignal;
   sessionStorage.setItem('zs.searchSession', JSON.stringify({ id: 'poll-race' }));
@@ -207,6 +216,8 @@ it.each(['reviewing', 'reviewed'].flatMap(status => [
   await act(async () => render(<Search />));
   await act(async () => vi.advanceTimersByTimeAsync(3000));
   expect(reads).toBe(2);
+  expect(screen.getByText(/Reviewed 1 of 2/)).toBeTruthy(); // SRCH-03: counter from screened_count
+  expect(screen.getByText(/Reviewing the top papers/)).toBeTruthy();
   if (beforeAck) await act(async () => release());
 
   await act(async () => fireEvent.click(within(screen.getByRole('article', { name: chosen.title }))
@@ -403,7 +414,8 @@ it('sends only explicitly confirmed constraints, not restrictions inferred from 
       requests.push(JSON.parse(options.body));
       return new Response(JSON.stringify({ id: 'confirmed', status: 'reviewed', candidates: [], plan: { display: [
         { source: 'confirmation required: study_types', query: 'review' },
-        { source: 'retrieval europepmc', query: 'observations: 0; status: unknown' },
+        { source: 'retrieval europepmc', query: 'no results returned' },
+        { source: 'retrieval', query: 'Some sources failed — results may be incomplete.' },
       ] } }));
     }
     return new Response(JSON.stringify({ items: [] }));
@@ -419,6 +431,7 @@ it('sends only explicitly confirmed constraints, not restrictions inferred from 
   await waitFor(() => expect(requests).toHaveLength(2));
   expect(requests[1].constraints).toEqual({ must_include: [], must_not_include: ['animal'], study_types: ['Review'] });
   fireEvent.click(screen.getByText('What was searched, by source'));
-  expect(screen.getByText('observations: 0; status: unknown')).toBeTruthy();
+  expect(screen.getByText('Europe PMC: no results returned')).toBeTruthy();
+  expect(screen.getByText('Some sources failed — results may be incomplete.')).toBeTruthy();
   expect(screen.getByText('confirmation required: study_types')).toBeTruthy();
 });

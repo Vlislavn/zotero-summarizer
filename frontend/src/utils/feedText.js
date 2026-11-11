@@ -38,9 +38,24 @@ export function cleanAbstract(abstract) {
   const text = String(abstract || '')
     .replace(/<br\s*\/?>/gi, '\n')
     // Block ends ("…-5</a></p>An agentic…") carry the only separator; keep it.
-    .replace(/<\/(p|div|li|h[1-6])>/gi, ' ')
+    .replace(/[:.]?\s*<\/h[1-6]>/gi, ': ') // a heading ends with a separator ("Background: Text")
+    .replace(/<\/(p|div|li)>/gi, ' ')
     .replace(/<[^>]+>/g, '')
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
+  return stripNotice(decodeEntities(text));
+}
+
+const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+// Decode HTML entities once, after tags are stripped ("H&amp;E" → "H&E"); never re-decodes "&amp;lt;".
+export function decodeEntities(text) {
+  return String(text || '').replace(/&(?:#(\d+)|#x([0-9a-f]+)|([a-z]+));/gi, (m, dec, hex, name) => {
+    if (name) return ENTITIES[name.toLowerCase()] ?? m;
+    const code = dec ? Number(dec) : parseInt(hex, 16);
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+  });
+}
+
+function stripNotice(text) {
   return text.replace(PUB_NOTICE_PREFIX, '') || text;
 }

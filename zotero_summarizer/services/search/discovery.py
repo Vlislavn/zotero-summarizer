@@ -19,7 +19,6 @@ from zotero_summarizer.services.search.intent import build_query_plan
 from zotero_summarizer.services.search.pipeline import _annotate_library_coverage, _search_openalex_client
 from zotero_summarizer.services.search.rank import _epsilon, rank_candidates, score_query_relevance
 from zotero_summarizer.services.zotero.zotero import resolve_reader_for_key
-from zotero_summarizer.storage.corpus_read import _corpus_fingerprint
 from zotero_summarizer.storage.library_context import read_context, read_discovery_membership
 
 _PUBLIC_TITLE_CHARS = 500
@@ -138,10 +137,6 @@ def _inputs(item_key):
             _unavailable()
         seed = related._paper(item_key, detail, comments, context)
         boundary, config = semantic.model_boundary(), state().app_state.config
-        try:
-            corpus = _corpus_fingerprint(str(settings().corpus_db_path))
-        except FileNotFoundError:
-            corpus = None
         paths = [Path(__file__), Path(semantic.__file__), Path(related.__file__),
                  Path(related.__file__).with_name("_related_context.py"),
                  Path(related.__file__).with_name("_prompt_security.py"),
@@ -149,9 +144,9 @@ def _inputs(item_key):
                  Path(__file__).parents[2] / "runtime.py"]
         paths.extend(Path(__file__).with_name(name + ".py") for name in
                      ("_models", "intent", "_queries", "federate", "dedup", "rank", "pipeline"))
+        # Content only: no file stat markers (corpus_cache.db is also the OpenAlex cache and moves constantly).
         identity = {"seed": seed, "context": contexts, "membership": digest, "basis": basis,
                     "boundary": boundary, "config": config.model_dump(mode="json"),
-                    "corpus": corpus, "corpus_path": str(settings().corpus_db_path),
                     "encoder": getattr(state().embedding_cache, "_encoder_id", None),
                     "assessment": semantic.assessment_identity(), "epsilon": _epsilon(), "quota": _DISCOVERY_QUOTA,
                     "timeout": settings().summary_timeout_seconds,

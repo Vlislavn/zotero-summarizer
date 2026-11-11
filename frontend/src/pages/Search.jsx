@@ -10,7 +10,7 @@ import CollectionPicker from '../components/CollectionPicker.jsx';
 import { COMMENT_CHECK_TOO_LARGE } from '../components/paper/RelatedPapers.jsx';
 import QuestionEvidence, { EvidencePolicyStatus } from '../components/search/QuestionEvidence.jsx';
 import { ErrorBanner, StatusBanner } from '../components/library/shared.jsx';
-import { cleanAbstract } from '../utils/feedText.js';
+import { cleanAbstract, decodeEntities } from '../utils/feedText.js';
 import { humanizeError } from '../utils/humanizeError.js';
 import { sortSearchCandidates } from '../utils/searchSort.js';
 import { reviewPaperUrl } from './reviewHelpers.js';
@@ -31,6 +31,7 @@ import PageTitle from '../components/ui/PageTitle.jsx';
 const BAND_LABEL = { highlight: 'looks solid', flag: 'needs checking', uncertain: 'quality unclear' };
 const SOURCE_LABEL = { crossref: 'Crossref', europepmc: 'Europe PMC', openalex: 'OpenAlex', arxiv: 'arXiv',
   semantic_scholar: 'Semantic Scholar', openreview: 'OpenReview', library: 'Your library' };
+const REVIEW_TOP_N = 10; // = services/search/pipeline.py LIGHT_REVIEW_N
 const VERSION_LABEL = { version_of_record: 'Published article', preprint: 'Preprint', accepted_manuscript: 'Accepted manuscript' };
 const BAND_CLASS = {
   highlight: 'bg-slate-100 text-slate-600',
@@ -51,6 +52,27 @@ const readableQuery = (q) => String(q || '')
   .replace(/\b(?:TITLE_ABS|TITLE|ABSTRACT|all|ti|abs):/g, '').replace(/[()"]/g, '')
   .replace(/\s+(?:AND|OR)\s+/g, ' · ').replace(/\s+/g, ' ').trim();
 
+// Backend sends "retrieval <source>" rows with a plain sentence; the overall row has no source.
+const retrievalLine = (src, text) => {
+  const name = src.replace(/^retrieval\s*/, '');
+  return name ? `${SOURCE_LABEL[name] || name}: ${text}` : text;
+};
+
+// Provider receipts of a Find-new-relevant search → one plain line each (no raw codes).
+const PROVIDER_LABEL = { openalex_lexical: 'OpenAlex (keywords)', openalex_semantic: 'OpenAlex (topic)',
+  arxiv: 'arXiv', europepmc: 'Europe PMC', crossref: 'Crossref', semantic_scholar: 'Semantic Scholar' };
+const ERROR_WORDS = { rate_limited: 'rate limited', http_error: 'request error', timeout: 'timed out', client_unavailable: 'not configured' };
+function providerLine(variant) {
+  const { status, count, error_code: code } = variant.outcome || {};
+  const name = PROVIDER_LABEL[variant.channel] || SOURCE_LABEL[variant.channel] || variant.channel;
+  if (status === 'failed' || status === 'not_attempted') {
+    return `${name}: not available right now${code ? ` (${ERROR_WORDS[code] || String(code).replace(/_/g, ' ')})` : ''} — results may be incomplete`;
+  }
+  if (status === 'success_empty') return `${name}: no results`;
+  if (status === 'success_nonempty') return `${name}: ${count ?? 'some'} result${count === 1 ? '' : 's'}`;
+  return `${name}: not confirmed`;
+}
+
 function QueryPlan({ plan }) {
   const rows = plan.display || [];
   if (!rows.length) return null;
@@ -58,7 +80,9 @@ function QueryPlan({ plan }) {
     <details className="mb-4 text-[12px]">
       <summary className="cursor-pointer text-slate-600 font-semibold">What was searched, by source</summary>
       <div className="mt-2 grid gap-1">
-        {rows.map(({ source: src, query: q }, index) => (
+        {rows.map(({ source: src, query: q }, index) => src.startsWith('retrieval') ? (
+          <div key={index} className="text-slate-700 break-words">{retrievalLine(src, q)}</div>
+        ) : (
           <div key={index} className="flex flex-wrap gap-x-2">
             <span className="text-slate-500 sm:w-40 shrink-0">{SOURCE_LABEL[src] || src}</span>
             <span className="text-slate-800 min-w-0 break-words">{readableQuery(q)}</span>
@@ -173,7 +197,8 @@ function DiscoveryStatus({ session, trusted }) {
     {!trusted && session.status !== 'discovery_failed' && <p>Comment details are hidden until the search is finished and up to date. Actions are unavailable meanwhile.</p>}
     <Link className="text-forest underline" to={`/paper/${encodeURIComponent(discovery.seed_key)}?retryDiscovery=1`}>Back to the paper</Link>
     <details><summary>Provider observations</summary>
-      {discovery.retrieval.variants.map((variant, index) => <p key={index}>{variant.channel} · {variant.outcome?.status || 'unknown'} · count: {variant.outcome?.count ?? 'unknown'} · {variant.outcome?.error_code}</p>)}
+      {discovery.retrieval.variants.some(v => ['failed', 'not_attempted'].includes(v.outcome?.status)) && <p>Some sources failed — results may be incomplete.</p>}
+      {discovery.retrieval.variants.map((variant, index) => <p key={index}>{providerLine(variant)}</p>)}
     </details>
     {trusted && <>
       <p>{discovery.comments_in_ranking ? 'Model reported comment use; influence is unverified.' : 'No model-cited comment use reported.'}</p>
@@ -186,6 +211,7 @@ function DiscoveryStatus({ session, trusted }) {
 function CandidateCard({ cand, onAdd, questions = [], discovery, actionsAllowed = true, trusted = false }) {
   const sources = [...new Set((cand.provenance || []).map((p) => p.source))];
   const band = (cand.quality?.quality_band || '').toLowerCase();
+  const title = decodeEntities(cand.title);
   const meta = [cand.venue, cand.year].filter(Boolean).join(' · ');
   const added = Boolean(cand.materialized_zotero_key || cand.existing_zotero_key);
   const rel = REL_BAND[cand.relevance_band];
@@ -206,11 +232,11 @@ function CandidateCard({ cand, onAdd, questions = [], discovery, actionsAllowed 
   const url = reviewPaperUrl(cand);
   const cardCls = cand.is_retracted ? 'bg-rose-50 border-rose-300' : (rel?.card || 'bg-white border-slate-200');
   return (
-    <article aria-label={cand.title} className={`min-w-0 border rounded-xl p-3 ${cardCls}`}>
+    <article aria-label={title} className={`min-w-0 border rounded-xl p-3 ${cardCls}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-slate-900">
-            {url ? <a href={url} target="_blank" rel="noreferrer" className="hover:underline">{cand.title}</a> : cand.title}
+            {url ? <a href={url} target="_blank" rel="noreferrer" className="hover:underline">{title}</a> : title}
           </div>
           {!url && <p className="text-xs text-slate-600">No supported link available.</p>}
           {meta && <div className="text-[12px] text-slate-500">{meta}</div>}
@@ -235,9 +261,12 @@ function CandidateCard({ cand, onAdd, questions = [], discovery, actionsAllowed 
         </div>
       )}
       <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-slate-500">
-        {sources.map((s) => <span key={s} className="px-1.5 py-0.5 bg-slate-100 rounded">{SOURCE_LABEL[s] || s}</span>)}
-        {cand.version_type && cand.version_type !== 'unknown' && (
-          <span className="px-1.5 py-0.5 bg-slate-100 rounded">{VERSION_LABEL[cand.version_type] || cand.version_type}</span>
+        {/* one chip: "Published article · Crossref" (what it is · where it was found) */}
+        {(sources.length > 0 || (cand.version_type && cand.version_type !== 'unknown')) && (
+          <span className="px-1.5 py-0.5 bg-slate-100 rounded" title="Article type · where it was found">
+            {[cand.version_type && cand.version_type !== 'unknown' ? (VERSION_LABEL[cand.version_type] || cand.version_type) : null,
+              sources.map((s) => SOURCE_LABEL[s] || s).join(', ') || null].filter(Boolean).join(' · ')}
+          </span>
         )}
         {cand.is_retracted && <span className="px-1.5 py-0.5 bg-rose-200 text-rose-900 rounded font-semibold">RETRACTED</span>}
       </div>
@@ -438,6 +467,7 @@ function SearchSession({ urlSearch = '', onPointer }) {
   // review has landed yet — showing "Deep-reviewing…" then would mislabel the wait.
   const anyReviewed = (session?.candidates || []).some((c) => c.review && c.review.state);
   const refining = !discovery && reviewing && (session?.refinements || []).length > 0 && !anyReviewed;
+  const reviewTotal = Math.min(REVIEW_TOP_N, (session?.candidates || []).length);
   return (
     <div className="max-w-3xl mx-auto">
       <PageTitle title="Targeted Search" page="search" />
@@ -525,7 +555,10 @@ function SearchSession({ urlSearch = '', onPointer }) {
               {reviewing && (
                 <div className="text-[12px] text-slate-500 flex items-center gap-1.5">
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  {refining ? 'Refining the search…' : 'Reviewing the top papers… this can take several minutes'}
+                  <span>
+                    {refining ? 'Refining the search…' : `Reviewed ${Math.min(session.screened_count || 0, reviewTotal)} of ${reviewTotal}`}
+                    <span className="block">Reviewing the top papers… this can take several minutes</span>
+                  </span>
                 </div>
               )}
               <span className="text-[11px] text-slate-500">Add to:</span>

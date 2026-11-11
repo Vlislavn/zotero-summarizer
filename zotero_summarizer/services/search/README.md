@@ -25,7 +25,7 @@ run_screen ─save→ ResearchSession(status=screened)                          
 |---|---|
 | `__init__.py` | `require_online()`: strict offline → `APIError strict_offline` (409) |
 | `_models.py` | `ScreenRequest`, `ConfirmedConstraints`, `Provenance`, `Candidate`, `SearchIntent`, `QueryPlan`, `ResearchSession` (JSON round-trip, `to_dict(for_storage=)`) |
-| `intent.py` | topic → `SearchIntent` → per-source `QueryPlan` (`_tight_query` quoted phrase + broad bag; `QueryPlan.display()` is the wire projection) |
+| `intent.py` | topic → `SearchIntent` → per-source `QueryPlan` (`_tight_query` quoted phrase + broad bag; `QueryPlan.display()` is the wire projection; its `retrieval <source>` rows are plain sentences from `_accounting.describe_retrieval`, plus one «Some sources failed» row when a receipt says failed) |
 | `_queries.py` · `_publication_types.py` · `_accounting.py` | complementary lexical passes · exact-DOI publication-type recovery (`ZS_SEARCH_TYPE_LOOKUPS`) · per-source retrieval accounting |
 | `federate.py` | channel fan-out, quotas, provenance, constraint filter, OpenReview signal channel |
 | `dedup.py` | version families; `reconcile_operation_state` |
@@ -179,7 +179,10 @@ run_screen ─save→ ResearchSession(status=screened)                          
   family map and add their seed; nothing seed-specific is cached.
 - Raw session snapshots serialize only for storage. `discovery_view` is the HTTP projection: while
   pending/running/failed, stale or interrupted it hides seed comments, assessment items/IDs and
-  recommendations; public retained metadata stays visible. Freshness fingerprints (`_freshness`) must be
+  recommendations; public retained metadata stays visible. The context fingerprint hashes content only (seed
+  context, content digest of kept/native membership, model boundary, config, source files) — never file
+  size/mtime markers such as `corpus_cache.db` (also the OpenAlex cache, written constantly by Today preparation
+  and by Find itself), which made unchanged seeds 409 `discovery_stale` (#275). Freshness fingerprints (`_freshness`) must be
   `current` before work, publication and Add.
 - Only explicit Review may claim a discovery session (`explicit_review_required` 409).
 

@@ -157,14 +157,15 @@ it.each(['observed', 'partial', 'failed', 'unknown', 'not_attempted'])('renders 
   expect(screen.getByLabelText('Retrieval status').textContent).toContain({ observed: 'The sources returned results.', partial: 'Some sources did not answer', failed: 'The sources did not answer.', unknown: 'It is unknown whether the sources answered.', not_attempted: 'The sources were not searched.' }[status]);
   expect(screen.queryByText('Scheduled providers successfully returned no candidates.')).toBeNull();
   fireEvent.click(screen.getByText('Provider observations'));
-  expect(screen.getByText(`openalex_semantic · ${status === 'not_attempted' ? 'not_attempted' : 'unknown'} · count: unknown · network_disabled`)).toBeTruthy();
+  expect(screen.getByText(status === 'not_attempted' ? 'OpenAlex (topic): not available right now (network disabled) — results may be incomplete' : 'OpenAlex (topic): not confirmed')).toBeTruthy();
+  expect(screen.queryByText('Some sources failed — results may be incomplete.') !== null).toBe(status === 'not_attempted');
   expect(requests.every(r => !r.init.method)).toBe(true);
 });
 
 it.each([
   ['success_empty', 0, null], ['success_nonempty', 3, null], ['failed', null, 'rate_limited'],
   ['failed', null, 'parse_error'], ['not_attempted', null, 'network_disabled'], ['unknown', null, null],
-])('discloses provider receipt %s/count %s/code %s literally', async (status, count, error_code) => {
+])('describes provider receipt %s/count %s/code %s in plain words', async (status, count, error_code) => {
   const dto = session('discovery-one', { retrieval: { status: 'partial', empty_reason: null,
     variants: [{ channel: 'openalex_lexical', outcome: { status, count, error_code } }] } });
   mount(async () => reply(dto));
@@ -172,7 +173,12 @@ it.each([
 
   fireEvent.click(screen.getByText('Provider observations'));
 
-  expect(screen.getByText(`openalex_lexical · ${status} · count: ${count ?? 'unknown'} · ${error_code || ''}`.trim())).toBeTruthy();
+  const failed = status === 'failed' || status === 'not_attempted';
+  const why = { rate_limited: ' (rate limited)', parse_error: ' (parse error)', network_disabled: ' (network disabled)' }[error_code] || '';
+  const line = failed ? `OpenAlex (keywords): not available right now${why} — results may be incomplete`
+    : { success_empty: 'OpenAlex (keywords): no results', success_nonempty: 'OpenAlex (keywords): 3 results', unknown: 'OpenAlex (keywords): not confirmed' }[status];
+  expect(screen.getByText(line)).toBeTruthy();
+  expect(screen.queryByText('Some sources failed — results may be incomplete.') !== null).toBe(failed);
 });
 
 it('observed per-candidate review error is not a reviewed or missing-full-text placeholder', async () => {

@@ -19,7 +19,7 @@ recipe (no `--recipe`/`ZS_INTERPRETATION_RECIPE`, or a nonexistent file) is a us
 ([tools/method_validation/README.md](../../tools/method_validation/README.md#synthetic-examples)). See
 [experiment overview](../../docs/features.md#interpretation-experiment).
 
-`serve` probes its port before any app startup: a busy port prints one error and exits 1 at
+`serve` probes its port (IPv4 and IPv6; only EADDRINUSE counts as busy) before any app startup: a busy port prints one error and exits 1 at
 once (lifespan startup launches prewarm/RSS/import workers that otherwise outlive the failed
 bind). `feeds select-daily` bootstraps with `background=False` for the same reason — a read-only
 preview must not start daemon workers (it used to linger for minutes). `goldenset restore-model`

@@ -11,14 +11,20 @@ from zotero_summarizer.storage.migrations import migrate_existing
 
 
 def _port_is_busy(host: str, port: int) -> bool:
+    """True only when something already listens there (EADDRINUSE); any other bind problem is left to uvicorn."""
+    import errno
     import socket
 
-    with socket.socket() as probe:
+    try:
+        family = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)[0][0]
+    except OSError:
+        return False
+    with socket.socket(family) as probe:
         probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind((host, port))
-        except OSError:
-            return True
+        except OSError as exc:
+            return exc.errno == errno.EADDRINUSE
     return False
 
 

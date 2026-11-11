@@ -4,6 +4,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ## [Unreleased]
 
+- Search clarity (#274): «Reviewed N of 10» while reviewing, plain per-source «What was searched» lines (results / not available right now / «Some sources failed»), HTML entities and heading breaks in abstracts and titles, one «Published article · Crossref» chip.
+- Find new relevant no longer fails with «Seed context changed; reload discovery» (#275): the discovery fingerprint ignores the constantly written `corpus_cache.db` file marker and changes only with the seed's own data.
 - Busy database and Ask (#269): a locked database answers 503 «The app was busy; try again in a moment.» (quiet retry ×2) instead of a 500; Ask on a paper without a PDF fails at once with plain wording and no Retry; triage errors read «The model did not answer in time» / «The database was busy; run again»; editors say «The app is busy» (not «need the Mac») when the server merely errored.
 - Plain-words fixes (#270): «Not interested» everywhere with readable priority bins, «Saved to Zotero» / «will be written when the Mac is connected», no journal/DOI prefix in abstract previews, no mid-sentence red-flag fragments or licence quotes, no «Outdated review» flash, folded duplicate Pending rows with local times.
 - Review output cut off (#268): a digest/verifier call that hits the output limit is re-run once with a doubled output budget (≤32768) and recorded in the lineage; failure banners say why in plain words (cut off, connection dropped, no answer in time) instead of «Inspect the attempt error».

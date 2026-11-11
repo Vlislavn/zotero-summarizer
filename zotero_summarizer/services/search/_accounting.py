@@ -20,3 +20,22 @@ def account_retrieval(raw, families, accepted, plan, requests):
                      'status': 'observed' if raw[source] else 'unknown',
                      'variants': [request for request in requests if request['source'] == source]}
             for source in sources}
+
+
+_ERROR_WORDS = {'rate_limited': 'rate limited', 'http_error': 'request error', 'timeout': 'timed out',
+                'client_unavailable': 'not configured'}
+
+
+def describe_retrieval(counts: dict) -> tuple[str, bool]:
+    """Plain per-source line for the plan panel -> (text, failed). A provider that reported
+    failed/not_attempted is distinguished from an empty answer; without a receipt a zero count stays unknown."""
+    bad = [v.get('outcome') or {} for v in counts.get('variants', [])
+           if (v.get('outcome') or {}).get('status') in ('failed', 'not_attempted')]
+    if bad:
+        code = bad[0].get('error_code')
+        why = f" ({_ERROR_WORDS.get(code, str(code).replace('_', ' '))})" if code else ''
+        return f'not available right now{why} — results may be incomplete', True
+    n = counts.get('observations') or 0
+    if n:
+        return f"{n} result{'s' if n != 1 else ''}", False
+    return 'no results returned', False

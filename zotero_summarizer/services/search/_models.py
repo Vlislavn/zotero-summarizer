@@ -16,6 +16,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from zotero_summarizer.domain import normalize_arxiv_id, normalize_doi
+from zotero_summarizer.services.search._accounting import describe_retrieval
 
 class ConfirmedConstraints(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, strict=True, extra="forbid")
@@ -252,8 +253,11 @@ class QueryPlan:
         for name in ("must_include", "must_not_include", "study_types"):
             if values := getattr(self, name):
                 rows.append((f"local {name} (" + ("source metadata" if name == "study_types" and self.constraint_origin != "legacy_unknown" else "title/abstract") + ")", "; ".join(values)))
-        for source, counts in self.retrieval_accounting.items():
-            rows.append((f"retrieval {source}", "; ".join(f"{key}: {value}" for key, value in counts.items())))
+        described = {s: describe_retrieval(c) for s, c in self.retrieval_accounting.items() if isinstance(c, dict) and "observations" in c}
+        for source, (text, _failed) in described.items():
+            rows.append((f"retrieval {source}", text))
+        if any(failed for _text, failed in described.values()):
+            rows.append(("retrieval", "Some sources failed — results may be incomplete."))
         rows.append(("constraint authority", self.constraint_origin))
         if self.domain_note:
             rows.append(("domain context", self.domain_note))
