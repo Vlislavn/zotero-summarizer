@@ -44,6 +44,7 @@ from zotero_summarizer.integrations._browser_response import (
     install_response_capture as _install_response_capture,
     looks_pdf as _looks_pdf,
 )
+from zotero_summarizer.integrations._browser_deadline import SessionDeadline
 from zotero_summarizer.integrations._browser_network import public_browser_options
 from zotero_summarizer.integrations.app_rss import validate_rss_url
 
@@ -150,9 +151,12 @@ def _load_browser_cookies(browser: str) -> list[dict[str, Any]]:
     return _cookie_dicts(jar)
 
 
+def _url_key(url: str) -> str:
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+
+
 def _cache_path(url: str, cache_dir: Path) -> Path:
-    url_key = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
-    return cache_dir / f"{url_key}.pdf"
+    return cache_dir / f"{_url_key(url)}.pdf"
 
 
 def article_snapshot_path(url: str, cache_dir: Path) -> Path:
@@ -309,7 +313,9 @@ def render_article_pdf(
         return None
     timeout_ms = int(timeout * 1000)
     try:
-        with public_browser_options(url, timeout) as network, sync_playwright() as pw:
+        with (SessionDeadline(timeout, _url_key(url)) as deadline,
+              public_browser_options(url, timeout) as network, sync_playwright() as pw):
+            deadline.attach(pw)
             browser = pw.chromium.launch(headless=True, **network)
             try:
                 ctx = browser.new_context()
@@ -329,7 +335,7 @@ def render_article_pdf(
                 else:
                     body = _article_text_pdf(page, max_bytes, timeout)
             finally:
-                browser.close()
+                deadline.close(browser)
     finally:
         _BROWSER_LOCK.release()
 
@@ -391,7 +397,9 @@ def _drive_browser(
     sync_playwright, error_class = lib
     profile_dir.mkdir(parents=True, exist_ok=True)
     timeout_ms = int(timeout * 1000)
-    with public_browser_options(url, timeout) as network, sync_playwright() as pw:
+    with (SessionDeadline(timeout, _url_key(url), armed=headless) as deadline,
+          public_browser_options(url, timeout) as network, sync_playwright() as pw):
+        deadline.attach(pw)
         ctx = pw.chromium.launch_persistent_context(
             str(profile_dir), channel=(channel or None), headless=headless, no_viewport=True, **network)
         try:
@@ -420,7 +428,7 @@ def _drive_browser(
                 return _BrowserOutput(_article_text_pdf(page, max_bytes, timeout), is_rendered_text=True)
             return _BrowserOutput(b"", is_rendered_text=False)
         finally:
-            ctx.close()  # flushes the persistent profile's cookies to disk
+            deadline.close(ctx)  # flushes the persistent profile's cookies to disk
 
 
 def open_login_window(login_url: str, profile_dir: Path, *, channel: str = "",

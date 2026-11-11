@@ -24,7 +24,7 @@ Product behavior: [docs/features.md](../../docs/features.md); placement: [docs/a
 | `_zotero_write_common.py` | `ZoteroWriteError`, `resolve_user_library_item_id` (user-library item resolution; `required=False` for best-effort batch removes) |
 | `app_rss.py` · `rss_paging.py` | `AppRssReader`: app-owned RSS items, rotating bounded refresh, `stream_public_url` (shared with PDF fetch). **No entry is sliced before dedupe** (REQ-S4): every entry is upserted; arXiv `api/query` URLs sorted `submittedDate desc` are paged via `start` (≥3 s apart per arXiv terms) until `max(feed watermark, now − feeds.backfill_days)` or `feeds.max_pages_per_feed`. The per-feed `fetch_watermark` advances only on a confirmed boundary; a cut-off sets `fetch_incomplete` (Settings shows “Incomplete fetch”) and the next refresh re-reads the tail |
 | `pdf.py` · `pdf_fetch.py` | local PDF → analysis text via OnPrem `pdf_markdown=False`; OA PDF download with size/timeout/magic caps; `valid_pdf_path` cache admission; `biorxiv_pdf_url` maps a bioRxiv/medRxiv `/content/` landing to `<landing>.full.pdf` (RSS mangles the preprint DOI, so Unpaywall/OpenAlex miss it) |
-| `browser_fetch.py` | institutional PDF acquisition with Patchright/Playwright Chromium and a persistent login profile; `article_snapshot_path` |
+| `browser_fetch.py` · `_browser_deadline.py` | institutional PDF acquisition with Patchright/Playwright Chromium and a persistent login profile; `article_snapshot_path` · headless-session deadline watchdog |
 | `_browser_network.py` · `_browser_response.py` · `_browser_article.py` · `_article_pdf.py` | public-only loopback egress proxy · bounded CDP response capture + proxy auth · isolated-world `document.body` text collection · bounded text-only PDF writer (PyMuPDF Helvetica/`cjk`) |
 | `llm.py` · `llm_callbacks.py` · `llm_models.py` | `LLMClient` protocol + `InstrumentedLLMClient` (logging, capability-gated JSON Schema via `build_response_format`; `with_larger_output()` → a sibling client with a doubled reply budget ≤ `OUTPUT_RETRY_CEILING`, used once by the review pipeline after `finish_reason=length`; none for verification clients) · completion-metadata guard that raises `LLMOutputTruncated` on `length`; `llm_models.py` lists provider models for the Settings picker (read-only, key already resolved) |
 | `llm_anthropic.py` · `_anthropic_http.py` | native Anthropic client (lazy `import anthropic`; `thinking_budget` ⇒ `thinking` + `max_tokens ≥ budget+1024`; temperature never sent) · no-auth native HTTP helpers |
@@ -115,6 +115,7 @@ Product behavior: [docs/features.md](../../docs/features.md); placement: [docs/a
   bytes within `max_bytes` regardless of MIME; a typed missing-PDF status needs a main-frame `application/pdf`
   response with HTTP 400+ (not 407). A declared-but-unavailable scholarly PDF never becomes a rendered paywall stub.
   Missing dependency/non-PDF → `None`; oversized bodies and unexpected acquisition errors propagate.
+  A pass-through `Fetch.continueRequest` answered `Invalid InterceptionId` (request already dropped by Chromium) is ignored; every other CDP error still fails the fetch.
 - HTML-only articles: the main-document response is capped before fulfillment; `_browser_article` walks
   `document.body` text nodes in a CDP isolated world (≤8 KiB chunks; byte/node/deadline limits) and fails closed on
   mutation, partial traversal, invalid/empty text or exhausted limits (never a prefix). `_article_pdf` writes a
@@ -125,6 +126,11 @@ Product behavior: [docs/features.md](../../docs/features.md); placement: [docs/a
   sign → `-`; a character with no such form (e.g. emoji) still fails loudly.
 - One browser session at a time (`_BROWSER_LOCK`, profile singleton + RAM): a concurrent fetch/render waits up to 180 s
   for it instead of skipping its PDF source; the interactive login flow still refuses when busy.
+- Headless sessions have a wall-clock deadline (`_browser_deadline.py`): `min(900, 10 × fetch_timeout_secs)` s, no new
+  setting. At the deadline a daemon timer kills THIS fetch's browser only (the patchright driver found via its private
+  `_impl_obj._connection._transport._proc.pid`, plus its descendants — Chromium is detached) and the fetch raises
+  `BrowserDeadlineError` (a `RuntimeError`, never `needs_login`). Not applied to `open_login_window` or the headed
+  fallback; not covering DNS, cookie reads or driver start. No driver pid → watchdog disarmed with a WARNING.
 - Snapshot cache keys: derivatives use `cache_dir/article-snapshots/<full SHA-256(raw URL)>.pdf`, reused only with
   `render_fallback=True` after the source-PDF cache check; captured publisher PDFs use `cache_dir/<first 16 hex
   SHA-256(raw URL)>.pdf`. See [reading source boundary](../../docs/features.md#reading-reviews).

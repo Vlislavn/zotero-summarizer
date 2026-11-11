@@ -99,6 +99,15 @@ def authenticate_proxy(cdp: Any, event: dict, proxy: dict, attempted: set[str]) 
     cdp.send("Fetch.continueWithAuth", {"requestId": event["requestId"], "authChallengeResponse": response})
 
 
+def _continue_if_alive(cdp: Any, request: dict) -> None:
+    """Pass a request through; Chromium having already dropped it leaves nothing to continue."""
+    try:
+        cdp.send("Fetch.continueRequest", request)
+    except Exception as error:
+        if "Invalid InterceptionId" not in str(error):
+            raise
+
+
 def capture_response(
     cdp: Any, event: dict, capture: ResponseCapture, max_bytes: int, frame_id: str,
     document_limit: int | None = None,
@@ -113,7 +122,7 @@ def capture_response(
         cdp.send("Fetch.failRequest", {**request, "errorReason": "Aborted"})
         return
     if code in {0, 401, 407} or 300 <= code < 400 or not (is_pdf or is_document):
-        cdp.send("Fetch.continueRequest", request)
+        _continue_if_alive(cdp, request)
         return
     if capture.pdf_bodies:
         cdp.send("Fetch.failRequest", {**request, "errorReason": "Aborted"})
