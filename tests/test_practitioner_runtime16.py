@@ -24,7 +24,7 @@ from zotero_summarizer.services.triage.prompts import DEFAULT_PRACTITIONER_TRIAG
 
 from _practitioner_inputs import practitioner_inputs as practitioner_inputs
 
-SOURCE = Path('/Users/vladnikulin/.pi/agent/skills/biomni-codex-subscription/scripts/pi_codex_transport.py')
+SOURCE = Path.home() / '.pi/agent/skills/biomni-codex-subscription/scripts/pi_codex_transport.py'
 SOURCE_SHA = 'ac33d26ff917d90dcf629e461342f5c9828322cae8b846da2e49320a00f286ed'
 _INPUTS = None
 

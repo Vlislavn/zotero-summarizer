@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 import sys
+import sysconfig
 import types
 from pathlib import Path
 
@@ -16,9 +17,9 @@ from pydantic import BaseModel
 
 from tools.method_validation.client import ClientError, ClientOptions, MethodValidationClient
 
-SOURCE = Path('/Users/vladnikulin/.pi/agent/skills/biomni-codex-subscription/scripts/pi_codex_transport.py')
+SOURCE = Path.home() / '.pi/agent/skills/biomni-codex-subscription/scripts/pi_codex_transport.py'
 SOURCE_SHA = 'ac33d26ff917d90dcf629e461342f5c9828322cae8b846da2e49320a00f286ed'
-SITE = Path('/Users/vladnikulin/code/personal/zotero-summarizer/.venv/lib/python3.13/site-packages')
+SITE = Path(sysconfig.get_paths()['purelib'])
 BASE_SHA = 'a0d3cf6389798b7cd10d9aae010b13e14e06b3cccbb261d5bcd78b5e53f2659c'
 HELPERS_SHA = 'db6f151f4170d612e75d52399f856d20bd4979ecfc99e708871cb3ac9eb895b4'
 
