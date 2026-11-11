@@ -30,6 +30,30 @@ from zotero_summarizer.storage import feeds as fs
 
 ReviewLoader = Callable[[str], dict[str, Any] | None]
 LOGGER = logging.getLogger(__name__)
+PROGRESS_EVERY = 10
+
+
+class _Screening:
+    """Plain progress lines for the serial, one-remote-call-per-paper abstract screening."""
+
+    def __init__(self, emit: Callable[[str], None], total: int):
+        self.emit, self.total, self.done, self.failed, self.started = emit, total, 0, 0, time.monotonic()
+        emit(f"research-feed: screening {total} new papers with the AI model — this can take a while; "
+             "use --cached-only to skip screening.")
+
+    def step(self, failed: bool = False) -> None:
+        self.done, self.failed = self.done + 1, self.failed + failed
+        if self.done % PROGRESS_EVERY == 0:
+            self._line()
+
+    def finish(self) -> None:
+        if self.done % PROGRESS_EVERY:
+            self._line()
+
+    def _line(self) -> None:
+        seconds = round(time.monotonic() - self.started)
+        elapsed = f"{seconds // 60} min" if seconds >= 60 else f"{seconds} s"
+        self.emit(f"screened {self.done}/{self.total} ({self.failed} failed) · {elapsed}")
 
 
 def _words(value: str) -> set[str]:
@@ -137,7 +161,7 @@ def _queue_tags(
 
 def _assess(
     settings: Settings, start: datetime, end: datetime, source_limit: int, venue: str,
-    *, generate: bool = False,
+    *, generate: bool = False, progress: Callable[[str], None] | None = None,
 ) -> tuple[
     Any, list[ResearchCandidate], dict[str, dict[str, Any]], list[tuple[Any, Any]],
     list[dict[str, str]], dict[str, dict[str, Any]],
@@ -150,6 +174,8 @@ def _assess(
     accepted_rows, source_history = {}, {}
     effective, assessed, failed = [], [], []
     cursor = None
+    pending = sum(candidate.source_id not in rows for candidate in candidates)
+    screening = _Screening(progress, pending) if progress and generate and pending else None
     for original in candidates:
         row = rows.get(original.source_id)
         candidate, entry = admit_history(original, row)
@@ -168,7 +194,14 @@ def _assess(
             if not native:
                 if cursor is None:
                     cursor = CandidateCursor(settings)
-                row = cursor.row(candidate, profile, generate=generate)
+                try:
+                    row = cursor.row(candidate, profile, generate=generate)
+                except Exception:
+                    if screening:
+                        screening.step(failed=True)
+                    raise
+                if screening:
+                    screening.step()
                 if row is None:
                     raise ValueError(NOT_CACHED)
             accepted_rows[candidate.source_id] = row
@@ -191,6 +224,8 @@ def _assess(
             (LOGGER.debug if str(exc) == NOT_CACHED else LOGGER.warning)(
                 "research-feed triage failed for \"%s\": %s", candidate.title, exc)
             failed.append({"source_id": candidate.source_id, "error": f"{type(exc).__name__}: {exc}"})
+    if screening:
+        screening.finish()
     unscreened = sum(row["error"].endswith(NOT_CACHED) for row in failed)
     if unscreened:
         LOGGER.warning("research-feed: %d papers were not screened yet (no stored triage; "
@@ -364,6 +399,7 @@ def run_weekly(
     generate_reviews: bool = False,
     review_timeout_seconds: int = 3600,
     review_loader: ReviewLoader | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     try:
         if start > end:
@@ -379,13 +415,16 @@ def run_weekly(
     if review_loader is None:
         review_loader = _feed_assessment.current_review if generate_reviews else _feed_assessment.cached_reader(settings)
     profile, candidates, rows, assessed, assess_failed, source_history = _assess(
-        settings, start, end, source_limit, venue, generate=generate_reviews,
+        settings, start, end, source_limit, venue, generate=generate_reviews, progress=progress,
     )
     included, ranking, ranking_failed = rank_candidates(assessed, rows, [candidate.source_id for candidate in candidates])
     shortlist = included[:profile.shortlist_budget if shortlist_budget is None else shortlist_budget]
     reviewed = shortlist[:profile.card_budget if card_budget is None else card_budget]
     review_outcomes: dict[str, str] = {}
     if generate_reviews:
+        if progress and reviewed:
+            progress(f"research-feed: checking full-text reviews for {len(reviewed)} shortlisted paper(s); "
+                     "a missing review takes a few minutes each.")
         review_outcomes = _ensure_reviews(
             settings, [candidate for candidate, _triage in reviewed], review_timeout_seconds, profile,
         )

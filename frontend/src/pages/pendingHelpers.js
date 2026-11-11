@@ -38,11 +38,11 @@ export function localTime(value) {
 }
 
 // A regenerated note is the same change under a new body, so notes are keyed by note title, not by the summary.
-const staleKeyPart = (change) => (change.change_type === 'add_note'
+const staleKeyPart = (change) => (change.change_type === 'add_note' || change.change_type === 'upsert_note'
   ? readPayload(change).note_title || 'Triage note'
   : changeSummary(change));
 
-// Identical queued rows for one paper (same type and visible summary; add_note: same note title) are re-queued versions of the same
+// Identical queued rows for one paper (same type and visible summary; notes: same note title) are re-queued versions of the same
 // change: the newest (the API lists newest first) stays visible, older pending ones fold behind a disclosure.
 export function collapseStaleChanges(changes) {
   const rows = [];

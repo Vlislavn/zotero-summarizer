@@ -4,6 +4,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ## [Unreleased]
 
+- Code-health scan (#301): deadcode-audit now also scans `frontend/src` (JS/TS via oxlint; `make scan` gains a Python + JS/TS quality section) and `make scan-overlaps` runs the two-pass embedding overlaps; the unused `DEFAULT_SORT` import and the duplicate `fetch_trashed_guids` are gone.
+- `research-feed run` no longer looks hung (#302): it says how many new papers it is screening with the AI model and prints «screened 40/432 (2 failed) · 3 min» to stderr every 10 papers; `--cached-only` skips screening.
 - Long papers in Triage (#284): a remote provider reads the whole paper in one call (its window, as deep review); longer sources (>80k chars on local) map chunks (parallel on remote, serial on local; same map step as deep review), and a cancelling job says «Stopping after the current AI call finishes…».
 - RSS refresh counts (#285): a story served by several feeds keeps its first feed instead of flipping on every fetch, and GitHub release notes no longer change per fetch (expiring image tokens dropped), so a repeat refresh reports 0 updated; «unchanged» now counts items, not feeds.
 - Settings connections (#281): «Connect provider»/«Load models» on an address and authorization that is already saved reuses that connection (no more duplicates); provider status re-checks after a save instead of showing a stale «✓ Provider reachable»; a briefly busy settings file waits ≤2 s, then says «Settings are saving — try again in a moment».

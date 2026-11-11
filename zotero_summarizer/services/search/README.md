@@ -25,7 +25,7 @@ run_screen ─save→ ResearchSession(status=screened)                          
 |---|---|
 | `__init__.py` | `require_online()`: strict offline → `APIError strict_offline` (409) |
 | `_models.py` | `ScreenRequest`, `ConfirmedConstraints`, `Provenance`, `Candidate`, `SearchIntent`, `QueryPlan`, `ResearchSession` (JSON round-trip, `to_dict(for_storage=)`) |
-| `intent.py` | topic → `SearchIntent` → per-source `QueryPlan` (`_tight_query` quoted phrase + broad bag; `QueryPlan.display()` is the wire projection (plain source labels, e.g. «OpenAlex · keyword search», «Must mention (title/abstract)», «Filters» = AI-suggested vs confirmed-by-you, «Needs your confirmation: …»; no row for `legacy_unknown`); its `retrieval <source>` rows are plain sentences from `_accounting.describe_retrieval`, plus one «Some sources failed» row when a receipt says failed) |
+| `intent.py` | topic → `SearchIntent` → per-source `QueryPlan` (`_tight_query` quoted phrase + broad bag; `QueryPlan.display()` is the wire projection (plain source labels, e.g. «OpenAlex · keyword search», «Must mention (title/abstract)», «Filters» = AI-suggested vs confirmed-by-you, «Needs your confirmation: …» with the same plain constraint names; no row for `legacy_unknown`); its `retrieval <source>` rows are plain sentences from `_accounting.describe_retrieval`, plus one «Some sources failed» row when a receipt says failed) |
 | `_queries.py` · `_publication_types.py` · `_accounting.py` | complementary lexical passes · exact-DOI publication-type recovery (`ZS_SEARCH_TYPE_LOOKUPS`) · per-source retrieval accounting |
 | `federate.py` | channel fan-out, quotas, provenance, constraint filter, OpenReview signal channel |
 | `dedup.py` | version families; `reconcile_operation_state` |

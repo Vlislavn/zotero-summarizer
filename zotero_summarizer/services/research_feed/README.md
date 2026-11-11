@@ -170,7 +170,7 @@ rss_items → source/dedupe → prior triage → budget → existing deep_review
 
 Run weekly: `uv run zotero-summarizer research-feed run --from 2026-08-22
 --to 2026-08-29`. Add `--venue NeurIPS` for conference mode, `--cached-only`
-to avoid new model work, or `--queue-zotero` to opt into reviewable tags. A
+to avoid new model work (without it, new papers are screened serially, one remote call each; stderr shows one «screening N new papers» line, then «screened 40/432 (2 failed) · 3 min» every 10 papers and at the end, via the `progress` callback of `run_weekly`), or `--queue-zotero` to opt into reviewable tags. A
 cron/launchd entry can invoke the same command weekly. Edit the generated
 `profile.json` to add a theme/project. Each report name includes a deterministic
 fingerprint of its date window, venue, profile, and output-affecting run options,

@@ -200,6 +200,7 @@ class SearchIntent:
         return cls(**known)
 
 
+_CONSTRAINT_LABELS = {"must_include": "Must mention", "must_not_include": "Must not mention", "study_types": "Study types"}
 _FILTER_ORIGIN_LABELS = {"model_proposed": "Suggested by the AI — not confirmed by you", "user_confirmed": "Confirmed by you"}
 
 
@@ -253,7 +254,7 @@ class QueryPlan:
         rows.append(("crossref", self.crossref))
         rows.append(("Semantic Scholar", self.semantic_scholar))
         rows.append(("openreview", self.openreview))
-        for name, label in (("must_include", "Must mention"), ("must_not_include", "Must not mention"), ("study_types", "Study types")):
+        for name, label in _CONSTRAINT_LABELS.items():
             if values := getattr(self, name):
                 rows.append((f"{label} (" + ("source metadata" if name == "study_types" and self.constraint_origin != "legacy_unknown" else "title/abstract") + ")", "; ".join(values)))
         described = {s: describe_retrieval(c) for s, c in self.retrieval_accounting.items() if isinstance(c, dict) and "observations" in c}
@@ -267,7 +268,7 @@ class QueryPlan:
             rows.append(("Domain context", self.domain_note))
         for name, values in self.pending_constraints.items():
             if values:
-                rows.append((f"Needs your confirmation: {name.replace('_', ' ')}", "; ".join(values)))
+                rows.append((f"Needs your confirmation: {_CONSTRAINT_LABELS.get(name, name.replace('_', ' ')).lower()}", "; ".join(values)))
         rows.append(("Coverage", "Scholarly sources only; handbooks and official guidance may be missing. "
                      "Search the relevant official publisher separately. Missing publication-type metadata is unknown."))
         return [{"source": s, "query": q} for s, q in rows if q]

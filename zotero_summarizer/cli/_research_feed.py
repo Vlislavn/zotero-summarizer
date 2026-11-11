@@ -33,6 +33,7 @@ def _run(args: argparse.Namespace) -> int:
             shortlist_budget=args.shortlist_budget, card_budget=args.card_budget,
             dry_run=not args.queue_zotero, queue_zotero=args.queue_zotero,
             generate_reviews=not args.cached_only, review_timeout_seconds=args.review_timeout,
+            progress=lambda line: print(line, file=sys.stderr, flush=True),
         )
     print(json.dumps(result, indent=2))
     # Papers a cached-only run has no stored triage for are not failures (nothing was attempted).
