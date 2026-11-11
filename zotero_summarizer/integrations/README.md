@@ -115,6 +115,7 @@ Product behavior: [docs/features.md](../../docs/features.md); placement: [docs/a
   bytes within `max_bytes` regardless of MIME; a typed missing-PDF status needs a main-frame `application/pdf`
   response with HTTP 400+ (not 407). A declared-but-unavailable scholarly PDF never becomes a rendered paywall stub.
   Missing dependency/non-PDF → `None`; oversized bodies and unexpected acquisition errors propagate.
+  A pass-through `Fetch.continueRequest` answered `Invalid InterceptionId` (request already dropped by Chromium) is ignored; every other CDP error still fails the fetch.
 - HTML-only articles: the main-document response is capped before fulfillment; `_browser_article` walks
   `document.body` text nodes in a CDP isolated world (≤8 KiB chunks; byte/node/deadline limits) and fails closed on
   mutation, partial traversal, invalid/empty text or exhausted limits (never a prefix). `_article_pdf` writes a
