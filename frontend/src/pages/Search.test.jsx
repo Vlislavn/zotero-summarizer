@@ -413,7 +413,7 @@ it('sends only explicitly confirmed constraints, not restrictions inferred from 
     if (path === '/api/search/screen') {
       requests.push(JSON.parse(options.body));
       return new Response(JSON.stringify({ id: 'confirmed', status: 'reviewed', candidates: [], plan: { display: [
-        { source: 'confirmation required: study_types', query: 'review' },
+        { source: 'Needs your confirmation: study types', query: 'review' },
         { source: 'retrieval europepmc', query: 'no results returned' },
         { source: 'retrieval', query: 'Some sources failed — results may be incomplete.' },
       ] } }));
@@ -433,5 +433,5 @@ it('sends only explicitly confirmed constraints, not restrictions inferred from 
   fireEvent.click(screen.getByText('What was searched, by source'));
   expect(screen.getByText('Europe PMC: no results returned')).toBeTruthy();
   expect(screen.getByText('Some sources failed — results may be incomplete.')).toBeTruthy();
-  expect(screen.getByText('confirmation required: study_types')).toBeTruthy();
+  expect(screen.getByText('Needs your confirmation: study types')).toBeTruthy();
 });

@@ -200,6 +200,9 @@ class SearchIntent:
         return cls(**known)
 
 
+_FILTER_ORIGIN_LABELS = {"model_proposed": "Suggested by the AI — not confirmed by you", "user_confirmed": "Confirmed by you"}
+
+
 @dataclass(slots=True)
 class QueryPlan:
     """Per-source query strings (spec §13.1). Shown to the user AS the plan —
@@ -250,21 +253,22 @@ class QueryPlan:
         rows.append(("crossref", self.crossref))
         rows.append(("Semantic Scholar", self.semantic_scholar))
         rows.append(("openreview", self.openreview))
-        for name in ("must_include", "must_not_include", "study_types"):
+        for name, label in (("must_include", "Must mention"), ("must_not_include", "Must not mention"), ("study_types", "Study types")):
             if values := getattr(self, name):
-                rows.append((f"local {name} (" + ("source metadata" if name == "study_types" and self.constraint_origin != "legacy_unknown" else "title/abstract") + ")", "; ".join(values)))
+                rows.append((f"{label} (" + ("source metadata" if name == "study_types" and self.constraint_origin != "legacy_unknown" else "title/abstract") + ")", "; ".join(values)))
         described = {s: describe_retrieval(c) for s, c in self.retrieval_accounting.items() if isinstance(c, dict) and "observations" in c}
         for source, (text, _failed) in described.items():
             rows.append((f"retrieval {source}", text))
         if any(failed for _text, failed in described.values()):
             rows.append(("retrieval", "Some sources failed — results may be incomplete."))
-        rows.append(("constraint authority", self.constraint_origin))
+        if origin := _FILTER_ORIGIN_LABELS.get(self.constraint_origin):
+            rows.append(("Filters", origin))
         if self.domain_note:
-            rows.append(("domain context", self.domain_note))
+            rows.append(("Domain context", self.domain_note))
         for name, values in self.pending_constraints.items():
             if values:
-                rows.append((f"confirmation required: {name}", "; ".join(values)))
-        rows.append(("coverage", "Scholarly sources only; handbooks and official guidance may be missing. "
+                rows.append((f"Needs your confirmation: {name.replace('_', ' ')}", "; ".join(values)))
+        rows.append(("Coverage", "Scholarly sources only; handbooks and official guidance may be missing. "
                      "Search the relevant official publisher separately. Missing publication-type metadata is unknown."))
         return [{"source": s, "query": q} for s, q in rows if q]
 

@@ -22,6 +22,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 - Paper page and Today read plainly: «Loading today's papers…», «← Back», no raw item keys in Ask errors, one wording for verdicts, plain checklist/legend text, repeated red flags merged, bottom bar no longer covers text.
 - Search and Find similar read in plain words and fit a 390 px screen: no sideways scroll, no raw HTML in abstracts, readable source and status labels, the saved query shown.
 - Reviews you ask for no longer wait behind background work (#251): Generate/Regenerate and Add start before Today preparation, prewarm and fleet reviews (`queue_ahead` in review status); Search reviews 4 papers at a time, not 14 in a row.
+- Search and Pending clarity (#299): «What was searched» rows read «Must mention (title/abstract)», «Filters» (AI-suggested vs confirmed by you) and «Needs your confirmation: …»; Pending folds re-queued versions of one note (same title) behind «N older versions».
 
 ### Added
 

@@ -39,11 +39,7 @@
     "study_types": [],
     "display": [
       {
-        "source": "constraint authority",
-        "query": "legacy_unknown"
-      },
-      {
-        "source": "coverage",
+        "source": "Coverage",
         "query": "Scholarly sources only; handbooks and official guidance may be missing. Search the relevant official publisher separately. Missing publication-type metadata is unknown."
       }
     ]
