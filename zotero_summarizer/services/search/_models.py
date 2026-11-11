@@ -164,7 +164,7 @@ class Candidate:
 @dataclass(slots=True)
 class SearchIntent:
     """Structured parse of the raw topic (spec §13.1). ``canonical_question`` is
-    the English paragraph used for the semantic + library-expanded channels."""
+    the English restatement; ``semantic_query`` drives the semantic + library-expanded channels."""
 
     raw_query: str
     canonical_question: str = ""
@@ -181,6 +181,9 @@ class SearchIntent:
     # False when the LLM parse failed and we fell back to the raw query — so a
     # degraded plan is visible in the UI, never silently passed off as planned.
     parse_ok: bool = True
+    # Model-written retrieval queries; empty on stored intents and on parse failure (raw-topic fallback).
+    search_queries: list[str] = field(default_factory=list)
+    semantic_query: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.domain, str):

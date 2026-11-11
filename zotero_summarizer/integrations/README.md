@@ -34,7 +34,7 @@ Product behavior: [docs/features.md](../../docs/features.md); placement: [docs/a
 | `ollama_inventory.py` | read-only `/api/tags` size + `/api/ps` residency of an Ollama daemon, and a best-effort `keep_alive: 0` unload (memory-checked local Test) |
 | `openalex.py` · `openalex_cache.py` · `_rate_limiter.py` | prestige lookups (`OpenAlexClient(allow_network=False)` is cache-only) and `search_works` · SQLite cache shared with Unpaywall/PubMed/OpenReview; `_rate_limiter.RateLimiter` is the shared per-process token bucket |
 | `arxiv.py` · `europepmc.py` · `crossref.py` · `semantic_scholar.py` · `_search_http.py` | keyless search leaves (`ArxivHit`, `EuropePmcHit` + `fetch_fulltext_xml`, `CrossrefHit` with `mailto`, `SemanticScholarHit`) · shared request/owned-client lifecycle |
-| `openreview.py` | authenticated OpenReview leaf (`search_openreview` → `OpenReviewHit`) |
+| `openreview.py` | authenticated OpenReview leaf (`search_openreview` → `OpenReviewHit`; optional `outcome` receipt in the shape of the other search leaves) |
 | `unpaywall.py` · `pubmed.py` · `github.py` | DOI → OA PDF URL · PMID/DOI → PMC PDF URL (browser rung) · `check_repo` scrapes the public HTML page (not the REST API); transport error ⇒ `exists=None` |
 | `telegram.py` · `telegram_threads.py` · `telegram_reply_adapter.py` · `telegram_session.py` · `telegram_child.py` · `telegram_auth.py` | injected Telethon page client · bounded read-only conversation collector · thin adapter exposing the conversation fetch as the one-pipeline digest `reply_client.get_replies` seam (adds no capability; live-only) · dedicated macOS CLI session lifetime · `run_child` spawns the one-shot auth/digest child and verifies its receipt (services and cli import it from here) · explicit auth callback |
 

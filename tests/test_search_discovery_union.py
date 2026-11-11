@@ -56,7 +56,7 @@ def test_screen_policy_and_observation_are_independent(journey, monkeypatch, pol
     monkeypatch.setattr(pipeline, "federate", public_pool)
     monkeypatch.setattr(pipeline, "score_query_relevance", lambda *a, **kw: None)
     result = pipeline.run_screen("Synthetic topic", ["Synthetic question?"], deps=journey.deps, evidence_policy=policy)
-    assert len(calls) == 1 and "observe_outcomes" not in calls[0]
+    assert len(calls) == 1 and calls[0]["observe_outcomes"] is True
     assert result.evidence_policy == policy and result.discovery == {}
     assert session.load(result.id).to_dict() == result.to_dict()
 

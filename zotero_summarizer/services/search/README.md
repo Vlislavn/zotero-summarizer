@@ -7,7 +7,7 @@ Contract for changing this package. Behavior as users see it:
 
 ```
 topic + questions
-  │ intent.parse_intent (1 LLM call; raw-query fallback) → build_query_plan → QueryPlan (per-source strings)
+  │ intent.parse_intent (1 deep_review LLM call → search_queries + semantic_query; raw-query fallback) → build_query_plan → QueryPlan (per-source strings)
   ▼ federate.federate (thread pool, all channels at once; variants share a per-source quota)
   arxiv · europepmc · openalex lex+sem · crossref · semantic scholar · openreview · library (unwired)
   │ dedup.to_version_families (union-find on shared ids; never title-merge)
@@ -25,7 +25,7 @@ run_screen ─save→ ResearchSession(status=screened)                          
 |---|---|
 | `__init__.py` | `require_online()`: strict offline → `APIError strict_offline` (409) |
 | `_models.py` | `ScreenRequest`, `ConfirmedConstraints`, `Provenance`, `Candidate`, `SearchIntent`, `QueryPlan`, `ResearchSession` (JSON round-trip, `to_dict(for_storage=)`) |
-| `intent.py` | topic → `SearchIntent` → per-source `QueryPlan` (`_tight_query` quoted phrase + broad bag; `QueryPlan.display()` is the wire projection (plain source labels, e.g. «OpenAlex · keyword search», «Must mention (title/abstract)», «Filters» = AI-suggested vs confirmed-by-you, «Needs your confirmation: …» with the same plain constraint names; no row for `legacy_unknown`); its `retrieval <source>` rows are plain sentences from `_accounting.describe_retrieval`, plus one «Some sources failed» row when a receipt says failed) |
+| `intent.py` | topic → `SearchIntent` → per-source `QueryPlan` (model `search_queries`/`semantic_query`; fallback `_tight_query` quoted phrase + anchored bag; `QueryPlan.display()` is the wire projection (plain source labels, e.g. «OpenAlex · keyword search», «Must mention (title/abstract)», «Filters» = AI-suggested vs confirmed-by-you, «Needs your confirmation: …» with the same plain constraint names; no row for `legacy_unknown`); its `retrieval <source>` rows are plain sentences from `_accounting.describe_retrieval`, plus one «Some sources failed» row when a receipt says failed) |
 | `_queries.py` · `_publication_types.py` · `_accounting.py` | complementary lexical passes · exact-DOI publication-type recovery (`ZS_SEARCH_TYPE_LOOKUPS`) · per-source retrieval accounting |
 | `federate.py` | channel fan-out, quotas, provenance, constraint filter, OpenReview signal channel |
 | `dedup.py` | version families; `reconcile_operation_state` |
@@ -53,9 +53,14 @@ run_screen ─save→ ResearchSession(status=screened)                          
   stays serial); `screened_count` rises as each light review lands ("reviewed N of 10") and each deep review is saved as it lands. The deep-review
   pool is not involved: Search calls the stage clients directly.
 - `rank.py` never counts passes or sources; extra passes only enrich the pool.
-- Lexical sources (OpenAlex, Europe PMC, arXiv) issue a tight quoted-phrase pass plus a bag pass;
-  variants divide the source's quota, so variants never multiply the candidate budget. OpenAlex lexical is
-  capped at two passes. Semantic/library queries use the raw topic and questions, not the model's restatement.
+- The intent prompt asks the model for 2–4 short keyword `search_queries` (real terminology, tightest first) and one
+  natural-language `semantic_query`. Lexical sources (OpenAlex, Europe PMC, arXiv) issue those queries as the variants, in
+  order (arXiv as `all:"term" AND …`); variants divide the source's quota, so variants never multiply the candidate
+  budget. OpenAlex lexical is capped at two passes. Semantic channels (OpenAlex meaning, Semantic Scholar, OpenReview,
+  library) use `semantic_query`; Crossref uses the first keyword query.
+- Fallback (parse failure, a stored intent, or a reply without those fields — `SearchIntent.search_queries`/`semantic_query`
+  default empty): the quoted raw head plus one OR bag of concepts/synonyms that must co-occur with a topic word (the supplied
+  domain, else any content word of the topic; no such word → no bag), and raw topic + questions for the semantic channels.
 - OpenReview is signal-only: it resolves an OpenAlex id for family merging and sets `Candidate.peer_review`
   for one chip. It never touches `query_score` or `rank.py`, calls `search_openreview` without
   `with_ratings`, and is off when `openreview_client is None` (no credentials or `ZS_OFFLINE=1`).
@@ -96,8 +101,9 @@ run_screen ─save→ ResearchSession(status=screened)                          
   included), snapshotted before family merging. Counts are cross-source attributed, not additive. Empty
   channels are not evidence of availability or completeness.
 - `federate(observe_outcomes=True)` keeps one request-local outcome dict per scheduled arXiv, Crossref,
-  Europe PMC, Semantic Scholar and OpenAlex (lex/sem) request; ordinary calls pass no receipt keyword and a
-  silent adapter stays `unknown`. OpenReview/library are uninstrumented.
+  Europe PMC, Semantic Scholar, OpenReview and OpenAlex (lex/sem) request; ordinary calls pass no receipt keyword and a
+  silent adapter stays `unknown`. `run_screen` and Discovery both observe (receipts only: no extra request); OpenReview reports
+  the same outcome shape (disabled → `not_attempted`); library is uninstrumented.
 
 ## Persistence (`session.py`)
 

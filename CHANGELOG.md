@@ -4,6 +4,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ## [Unreleased]
 
+- Paper card (#311): the method icons and legend follow the paper's own review (yes/no) where one exists, so they no longer contradict it; the facts scan keeps appendices after the reference list; the AI card is told only the flags the scan found and never an absence it could have missed.
+- Paper review at a glance (#308): one card (paper page, Library row) leads with what the paper does, the verdict line, grade with a check bar, the key metric as a number, a strength and a weakness; Assessment opens second as a data→method→baselines map; the TL;DR `Code` line gives way to «Not found».
+- Search (#310): the AI now writes real keyword queries (2–4, with synonyms) and one natural-language query from your topic instead of sending it as typed; the OR bag needs a topic word; sources that return nothing now say why (rate limited, request error, not configured), including OpenReview.
 - Today (#309): the card title opens the full review (publisher page = quiet «Source ↗»); a regenerating card shows step, elapsed time and queue position; «New shortlist» shows a pending state and «N new papers» / «Same papers — nothing new since …».
 - Research-feed Markdown report reads like the Weekly page: near-threshold rejects show plain gate rationales and project-use notes spell out status tokens («not applicable»).
 - Code-health scan (#301): deadcode-audit now also scans `frontend/src` (JS/TS via oxlint; `make scan` gains a Python + JS/TS quality section) and `make scan-overlaps` runs the two-pass embedding overlaps; the unused `DEFAULT_SORT` import and the duplicate `fetch_trashed_guids` are gone.

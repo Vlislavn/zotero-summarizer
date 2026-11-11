@@ -142,7 +142,7 @@ def run_screen(raw_query: str, questions: list[str], *, deps: SearchDeps, constr
         plan, openalex_client=deps.openalex_client,
         openreview_client=deps.openreview_client,
         library_finder=deps.library_finder, quota=deps.quota,
-        crossref_mailto=deps.crossref_mailto,
+        crossref_mailto=deps.crossref_mailto, observe_outcomes=True,
     )
     score_query_relevance(raw_query or intent.canonical_question, candidates, reranker_model=deps.reranker_model)
     rank_candidates(candidates)

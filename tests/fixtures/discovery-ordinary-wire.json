@@ -15,7 +15,9 @@
     "must_not_include": [],
     "study_types": [],
     "questions": [],
-    "parse_ok": true
+    "parse_ok": true,
+    "search_queries": [],
+    "semantic_query": ""
   },
   "plan": {
     "retrieval_accounting": {},

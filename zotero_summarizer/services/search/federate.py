@@ -124,8 +124,9 @@ def _openreview_openalex_id(openalex_client: Any, title: str, year: int | None) 
     return work.openalex_id.rsplit("/", 1)[-1]
 
 
-def _openreview_channel(query: str, *, or_client: Any, openalex_client: Any, quota: int, at: str) -> list[Candidate]:
-    hits = search_openreview(or_client, query, limit=quota)
+def _openreview_channel(query: str, *, or_client: Any, openalex_client: Any, quota: int, at: str,
+                        outcome: dict | None = None) -> list[Candidate]:
+    hits = search_openreview(or_client, query, limit=quota, **({"outcome": outcome} if outcome is not None else {}))
     cands = [
         Candidate(
             title=h.title, abstract=h.abstract, authors=h.authors, year=h.year, venue=h.venue,
@@ -224,8 +225,8 @@ def federate(
         add_variant_tasks("semantic_scholar", [plan.semantic_scholar],
                           lambda q, n, **kw: _semantic_scholar_channel(q, n, at, **kw), channel="semantic_scholar")
     if plan.openreview and openreview_client is not None:
-        add_variant_tasks("openreview", [plan.openreview], lambda q, n: _openreview_channel(
-            q, or_client=openreview_client, openalex_client=openalex_client, quota=n, at=at))
+        add_variant_tasks("openreview", [plan.openreview], lambda q, n, **kw: _openreview_channel(
+            q, or_client=openreview_client, openalex_client=openalex_client, quota=n, at=at, **kw), channel="openreview")
     if library_finder is not None:
         lib_query = plan.library_expanded or plan.library_raw
         add_variant_tasks("library", [lib_query], lambda q, n: _stamp(

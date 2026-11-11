@@ -213,12 +213,12 @@ def test_default_false_preserves_narrow_clients_and_all_other_channels(monkeypat
 def test_opt_in_does_not_instrument_other_ordinary_channels(monkeypatch):
     monkeypatch.setattr(fed, "search_crossref", lambda query, *, rows, mailto, outcome: [])
     monkeypatch.setattr(fed, "search_semantic_scholar", lambda query, *, limit, outcome: [])
-    monkeypatch.setattr(fed, "search_openreview", lambda client, query, *, limit: [])
+    monkeypatch.setattr(fed, "search_openreview", lambda client, query, *, limit, outcome: [])
     plan = QueryPlan(crossref="c", semantic_scholar="s", openreview="or", library_raw="lib")
     assert fed.federate(plan, openreview_client=object(), library_finder=lambda query: [], observe_outcomes=True) == []
     assert {row["source"] for row in variants(plan)} == {"crossref", "semantic_scholar", "openreview", "library"}
     for row in variants(plan):
-        if row["source"] in {"crossref", "semantic_scholar"}:
+        if row["source"] in {"crossref", "semantic_scholar", "openreview"}:
             assert row["channel"] == row["source"]
             assert row["outcome"] == {"status": "unknown", "count": None, "error_code": None}
         else:

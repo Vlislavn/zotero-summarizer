@@ -150,9 +150,12 @@ class OpenReviewClient:
         self._token = (resp.json() or {}).get("token")
         return bool(self._token)
 
-    def _get(self, path: str, params: dict, *, _retry_auth: bool = True) -> dict | None:
-        """Authenticated GET. Logs in on first use; on a 401 re-logs in once + retries."""
+    def _get(self, path: str, params: dict, *, _retry_auth: bool = True, outcome: dict | None = None) -> dict | None:
+        """Authenticated GET. Logs in on first use; on a 401 re-logs in once + retries.
+        ``outcome`` (optional receipt, same shape as the other search leaves) records a failed login/request."""
         if self._token is None and not self._login():
+            if outcome is not None:
+                outcome.update(status="failed", error_code="http_error")
             return None
         _RATE_LIMITER.acquire()
         resp = self._http.get(
@@ -160,14 +163,16 @@ class OpenReviewClient:
         )
         if resp.status_code == 401 and _retry_auth:
             self._token = None
-            return self._get(path, params, _retry_auth=False)
+            return self._get(path, params, _retry_auth=False, outcome=outcome)
         if resp.status_code != 200:
             LOGGER.debug("openreview GET %s: HTTP %d", path, resp.status_code)
+            if outcome is not None:
+                outcome.update(status="failed", error_code="rate_limited" if resp.status_code == 429 else "http_error")
             return None
         return resp.json()
 
-    def search(self, query: str, *, limit: int) -> list[dict]:
-        payload = self._get("/notes/search", {"query": query, "limit": max(1, min(limit, 100))})
+    def search(self, query: str, *, limit: int, outcome: dict | None = None) -> list[dict]:
+        payload = self._get("/notes/search", {"query": query, "limit": max(1, min(limit, 100))}, outcome=outcome)
         return (payload or {}).get("notes") or []
 
     def forum_reviews(self, forum_id: str) -> tuple[float | None, int]:
@@ -233,19 +238,24 @@ def _hit_from_content(
 
 
 def search_openreview(
-    client: OpenReviewClient, query: str, *, limit: int = 25, with_ratings: bool = False
+    client: OpenReviewClient, query: str, *, limit: int = 25, with_ratings: bool = False,
+    outcome: dict | None = None,
 ) -> list[OpenReviewHit]:
     """Topic-search OpenReview → accepted papers at configured venues in the year
     window. ``with_ratings=False`` (the default) skips the per-paper ``forum_reviews``
     fan-out — production consumes only the venue+tier chip, never the rating; the two
     OpenReview benches pass ``with_ratings=True`` to exercise the rating arms. Returns
     ``[]`` when the client is disabled or on any transport/parse error — never raises
-    (leaf contract)."""
+    (leaf contract). The optional ``outcome`` receipt uses the other search leaves' shape."""
+    if outcome is not None:
+        outcome.update(status="unknown", count=None, error_code=None)
     query = (query or "").strip()
     if not client.enabled or not query:
+        if outcome is not None and not client.enabled:
+            outcome.update(status="not_attempted", error_code="client_unavailable")
         return []
     try:
-        notes = client.search(query, limit=limit)
+        notes = client.search(query, limit=limit, **({"outcome": outcome} if outcome is not None else {}))
         by_forum: dict[str, dict] = {}
         for note in notes:
             content = note.get("content") or {}
@@ -258,8 +268,13 @@ def search_openreview(
         ]
     except (httpx.HTTPError, OSError, ValueError, KeyError, TypeError) as exc:
         LOGGER.debug("openreview search failed: %s", exc)
+        if outcome is not None:
+            outcome.update(status="failed", error_code="transport_error" if isinstance(exc, (httpx.HTTPError, OSError)) else "parse_error")
         return []
-    return [h for h in hits if h is not None]
+    accepted = [h for h in hits if h is not None]
+    if outcome is not None and outcome.get("status") != "failed":
+        outcome.update(status="success_nonempty" if accepted else "success_empty", count=len(accepted))
+    return accepted
 
 
 __all__ = ["OpenReviewHit", "OpenReviewClient", "search_openreview"]
