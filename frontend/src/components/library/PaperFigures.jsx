@@ -17,7 +17,7 @@ const isTable = (fig) => /^table\b/i.test(fig.label || '');
 // with a different presentation, so the ~15 lines of query/build duplication here
 // are deliberate, not a shared-hook refactor of that 3-surface component).
 //
-// Read-mostly: it AUTO-BUILDS the render once if a local Zotero PDF exists
+// Read-mostly: it AUTO-BUILDS the render once if a local PDF is held (Zotero or acquired)
 // (figures are cropped into a local artifact next to it — no Zotero data write).
 // If a render artifact already exists for an acquired/cached PDF, it displays it
 // too; it never starts full-text acquisition on page load.

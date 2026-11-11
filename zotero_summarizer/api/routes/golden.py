@@ -30,7 +30,7 @@ from zotero_summarizer.services.golden import (
     proposal_snapshot,
     verdict_effects,
 )
-from zotero_summarizer.services.library import review_detail as review_detail_svc
+from zotero_summarizer.services.library import qa, review_detail as review_detail_svc
 from zotero_summarizer.services.sync.service import questions_for_paper
 from zotero_summarizer.services.triage import today_exposure
 from zotero_summarizer.storage import repositories
@@ -252,6 +252,10 @@ async def review_detail(item_key: str) -> dict[str, Any]:
                 message=f"item_key {safe_item_key!r}: not in any source",
                 status_code=404,
             )
+
+    if source_payload.get("source") == review_detail_svc.SOURCE_FEED:
+        # figures gate for a feed paper whose PDF the app already holds; has_pdf stays «Zotero attachment»
+        source_payload = {**source_payload, "pdf_held": await asyncio.to_thread(qa.pdf_is_held, safe_item_key)}
 
     return {
         "item_key": safe_item_key,

@@ -250,6 +250,8 @@ export default function PaperReviewPage() {
     usePaperReview(itemKey, { onVerdictAcknowledged: fenceRelatedContext,
       onVerdictStarted: fromToday ? onVerdictStarted : undefined, onVerdictSettled });
   const hasPdf = Boolean(detail?.has_pdf);
+  // A feed paper whose PDF the app already holds (no Zotero attachment) can still build figures.
+  const figuresBuildable = hasPdf || Boolean(detail?.pdf_held);
   // Paper-map one-liners are built on open, not at review time; poll only while the job runs
   // (the interval stops on unmount, on ready/unavailable and on a failed poll).
   const mapOverlay = detail?.deep_review?.section_overlay;
@@ -273,7 +275,7 @@ export default function PaperReviewPage() {
       ? { ...visit, unreviewed: visit.unreviewed.filter(row => row.stable_feed_key !== itemKey) } : null);
   }, [refreshDetail, queryClient, itemKey]);
   const runner = useDeepReviewRunner(itemKey, { deep: detail?.deep_review, onDone: onReviewDone, autoRun: hasPdf && autoRun });
-  const showFigures = runner.online && runner.serverAvailable && (hasPdf || renderCompleted || render?.status === 'running');
+  const showFigures = runner.online && runner.serverAvailable && (figuresBuildable || renderCompleted || render?.status === 'running');
 
   if (isLoading) return <div className="py-4 text-sm text-slate-500">Loading review…</div>;
   if (error) {
@@ -360,7 +362,7 @@ export default function PaperReviewPage() {
                 <button
                   type="button"
                   onClick={onAttachFigures}
-                  hidden={!renderCompleted || render.stale}
+                  hidden={!renderCompleted || render.stale || itemKey.startsWith('feed:')} // a feed paper has no Zotero item
                   disabled={attaching}
                   className="text-[13px] font-medium text-forest-800 hover:text-forest-700 disabled:opacity-50"
                   title="Attach these figures to the paper's Zotero item so they show in Zotero. Skips any already attached; needs Zotero closed (or confirm force)."
@@ -369,7 +371,7 @@ export default function PaperReviewPage() {
                 </button>
                 {attachMsg && <span className="text-[13px] text-slate-500">{attachMsg}</span>}
               </div>
-              <PaperFigures itemKey={itemKey} hasPdf={hasPdf} canBuild={hasPdf} />
+              <PaperFigures itemKey={itemKey} hasPdf={figuresBuildable} canBuild={figuresBuildable} />
             </Fold>
           )}
 

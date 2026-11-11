@@ -77,6 +77,23 @@ def require_pdf(item_key: str) -> None:
         raise needs_pdf_error(item_key, exc) from exc
 
 
+def pdf_is_held(item_key: str) -> bool:
+    """Is a PDF already held for this stable feed key (no network, no acquire)? A convenience fact for
+    the paper page: any failure reads as «no» (logged), so it can never break the page."""
+    if not is_stable_feed_key(item_key):
+        return False
+    try:
+        paper_render.held_pdf(item_key)
+    except APIError as exc:
+        if exc.error not in {"needs_pdf", "path_not_allowed"}:
+            LOGGER.warning("held-PDF lookup failed for %s: %s", item_key[:20], exc.error)
+        return False
+    except (OSError, ValueError, AttributeError, TypeError, KeyError):
+        LOGGER.warning("held-PDF lookup failed for %s", item_key[:20], exc_info=True)
+        return False
+    return True
+
+
 def ask_paper(
     item_key: str, question: str, *, mode: str = "comprehensive",
     history: list[dict[str, Any]] | None = None,
