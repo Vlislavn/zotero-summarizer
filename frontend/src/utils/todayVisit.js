@@ -228,7 +228,10 @@ export function memberPresentation(member, fresh) {
   return {
     text, unresolved, canRetry,
     selectable: fresh && available && !handled && !unresolved,
-    reviewReady: fresh && available && facts.review_ready === true,
+    // A review already seen stays ready while status refreshes (no flash after Add/verdict);
+    // reviewKnown says whether "no review" is a fact, not a refresh in flight.
+    reviewReady: available && facts.review_ready === true,
+    reviewKnown: fresh && available,
     recommendation: fresh && available ? facts.recommendation ?? null : null,
   };
 }

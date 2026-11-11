@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { submitVerdict } from '../../api/goldenApi.js';
 import { queueRejectTag } from '../../api/libraryApi.js';
+import { QUEUED_FOR_ZOTERO } from '../../hooks/useNoteDelivery.js';
 import { pretty } from '../../utils/priorityLabels.js';
 import { Chip } from '../paper/review/primitives.jsx';
 
@@ -41,7 +42,7 @@ export default function ProposedVerdictCard({ itemKey, proposal, onSaved, onOver
       setSubmitting(false);
       return;
     }
-    setSaved(result.saved_offline ? 'Saved on this device — waiting to sync.' : 'Verdict saved.');
+    setSaved(result.saved_offline ? QUEUED_FOR_ZOTERO : 'Verdict saved.');
     // Match usePaperReview: replay owns offline effects; an online tag failure
     // is a secondary warning, never a reason to submit another verdict.
     if (isRemove && !result.saved_offline) {

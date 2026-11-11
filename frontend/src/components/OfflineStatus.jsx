@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { allPapers, publishStatus, resolveConflict, syncStatusEvent } from '../offlineStore.js';
+import { allPapers, conflictResolvedEvent, publishStatus, resolveConflict, syncStatusEvent } from '../offlineStore.js';
 import { syncNow } from '../syncClient.js';
 import { pretty } from '../utils/priorityLabels.js';
 import usePendingCount from '../hooks/usePendingCount.js';
@@ -15,8 +15,11 @@ function conflictValue(field, value, operation, comment) {
 }
 
 const CONFLICT_WHAT = { review_note: 'note', verdict: 'verdict', review_question: 'question' };
-const conflictSentence = (conflict, title) =>
-  `Your ${CONFLICT_WHAT[conflict.field] || 'change'} on ${title ? `“${title}”` : 'a paper'} was changed elsewhere.`;
+// A cached title equal to the key means the title was never known: say "this paper", not the key.
+const conflictSentence = (conflict, title) => {
+  const known = title && title !== conflict.item_key;
+  return `Your ${CONFLICT_WHAT[conflict.field] || 'change'} on ${known ? `“${title}”` : 'this paper'} was changed elsewhere.`;
+};
 
 export default function OfflineStatus() {
   const [titles, setTitles] = useState({});
@@ -35,12 +38,13 @@ export default function OfflineStatus() {
     if (!conflictCount) return;
     allPapers().then(rows => setTitles(Object.fromEntries(rows.map(row => [row.item_key, row.title])))).catch(() => {});
   }, [conflictCount]);
-  async function resolve(id, keepLocal) {
-    setResolving(id);
+  async function resolve(conflict, keepLocal) {
+    setResolving(conflict.mutation_id);
     setResolutionError('');
     try {
-      await resolveConflict(id, keepLocal);
+      await resolveConflict(conflict.mutation_id, keepLocal);
       await syncNow();
+      window.dispatchEvent(new CustomEvent(conflictResolvedEvent, { detail: { item_key: conflict.item_key } }));
     } catch (error) {
       setResolutionError(`Resolution not saved: ${error.message || error}. Both versions are preserved; retry.`);
     } finally {
@@ -99,8 +103,8 @@ export default function OfflineStatus() {
             </label>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" className="min-h-11" disabled={resolving !== null} onClick={() => resolve(conflict.mutation_id, true)}>Keep mine</Button>
-            <Button size="sm" variant="secondary" className="min-h-11" disabled={resolving !== null} onClick={() => resolve(conflict.mutation_id, false)}>Use server</Button>
+            <Button size="sm" className="min-h-11" disabled={resolving !== null} onClick={() => resolve(conflict, true)}>Keep mine</Button>
+            <Button size="sm" variant="secondary" className="min-h-11" disabled={resolving !== null} onClick={() => resolve(conflict, false)}>Use server</Button>
             <NavLink className="underline self-center" to={`/paper/${encodeURIComponent(conflict.item_key)}`}>Open paper</NavLink>
           </div>
           <p className="mt-1">Either choice saves a new auditable resolution on this device, then syncs when reachable.</p>

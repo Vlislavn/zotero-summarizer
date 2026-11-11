@@ -139,8 +139,9 @@ its name or enabled state. Identity uses HTTPX URL normalization (including host
 case and default ports) without fetching; invalid legacy URLs remain literal.
 Ordinary upserts/imports keep their existing update behavior.
 
-`item_titles.titles_for_keys` is a read-only corpus-cache title lookup by item key.
+`item_titles.titles_for_keys` is a read-only corpus-cache title lookup by item key; `feed_titles_for_keys` does the same for feed keys (stable, legacy `feed:<id>`) in the triage DB.
 
+`upsert_rss_item` returns `(id, "inserted"|"updated"|"unchanged")`; an existing row is rewritten only if incoming content differs.
 `count_rss_items_by_feed` returns stored item counts per feed id (feed list UI).
 `import_zotero_feeds` returns `{imported, added}` — `added` counts feeds that were new (the UI says "Added N new feeds (M already present)").
 `rss_feeds.fetch_watermark` / `fetch_incomplete` (migration v17, nullable/defaulted) record per-feed fetch progress; `record_rss_fetch_result(watermark=, incomplete=)` only moves the watermark forward and `incomplete=None` leaves the flag untouched.
@@ -298,7 +299,7 @@ and priority-only readers retain their narrower projections.
 and materialized library keys: `alias_resolver(conn)` loads the identity graph once
 (one scan of `processed_feed_items`, ~28k rows on real data) and returns a
 `key -> sorted family` closure; `resolve_item_key_aliases` is the one-key form, and
-bulk callers (`snapshots`, `question_sync.snapshots`, `library_context.read_context`)
+question saves/reads use `question_sync.save_committed`/`list_for_paper` (the standard `_connect_to` opener, busy_timeout 10 s); bulk callers (`snapshots`, `question_sync.snapshots`, `library_context.read_context`)
 share one resolver instead of re-running a recursive scan per key (`current(conn, key, aliases)` takes the pre-resolved family; without it each library key rescanned the feed history and a related-saved read took minutes). Online reads/writes and offline canonical values,
 conflict revisions and snapshots share the latest note revision, including deletion
 tombstones. Pre-sync notes use timestamp order at revision zero. Writes update the

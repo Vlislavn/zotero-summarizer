@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
+from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
@@ -22,16 +23,36 @@ def _project_use(notes: list[str]) -> str:
                      for sentence, projects in groups.items())
 
 
+def _humanise(key: str) -> str:
+    """«dataset_provenance» → «Dataset provenance»; real sentences pass through."""
+    return key[:1].upper() + key[1:].replace("_", " ") if "_" in key and " " not in key else key
+
+
+def _range_text(start: str, end: str) -> str:
+    """«2026-10-14T00:00:00+00:00», «2026-10-20T23:59:…» → «14–20 Oct 2026» (as the Weekly page shows it)."""
+    try:
+        a, b = date.fromisoformat(str(start)[:10]), date.fromisoformat(str(end)[:10])
+    except ValueError:
+        return f"{start} → {end}"
+    if a == b:
+        return f"{a.day} {a:%b %Y}"
+    if a.year != b.year:
+        return f"{a.day} {a:%b %Y} – {b.day} {b:%b %Y}"
+    if a.month != b.month:
+        return f"{a.day} {a:%b} – {b.day} {b:%b %Y}"
+    return f"{a.day}–{b.day} {b:%b %Y}"
+
+
 def markdown(payload: dict[str, Any]) -> str:
     meta, cards = payload["metadata"], payload["cards"]
     lines = [
-        f"# Research Intelligence · {meta['from']} → {meta['to']}", "",
+        f"# Research Intelligence · {_range_text(meta['from'], meta['to'])}", "",
         f"Discovered {meta['counts']['discovered']}; shortlisted {meta['counts']['shortlisted']}; "
         f"cards {meta['counts']['cards_generated']}.", "",
     ]
     for index, record in enumerate(cards, 1):
         candidate, card = record["candidate"], record["card"]
-        missing_inputs = "; ".join(card.get("missing_reproduction_inputs") or [])
+        missing_inputs = "; ".join(_humanise(str(k)) for k in card.get("missing_reproduction_inputs") or [])
         if not missing_inputs and card.get("reproduction_assessment") is not None:
             missing_inputs = "none reported (AI assessment, unverified)"
         lines += [

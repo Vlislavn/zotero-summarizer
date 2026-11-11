@@ -198,10 +198,10 @@ it('real Search retry link returns to fresh seed admission/consent and requires 
     throw new Error(`Unexpected: ${path}`);
   });
   fireEvent.click(await screen.findByRole('button', { name: 'Find new relevant' }));
-  await screen.findByRole('link', { name: 'Try again (opens the paper)' });
+  await screen.findByRole('link', { name: 'Back to the paper' });
   expect(screen.getByLabelText('Location').textContent).toBe('/search?session=discovery-retained');
 
-  fireEvent.click(screen.getByRole('link', { name: 'Try again (opens the paper)' }));
+  fireEvent.click(screen.getByRole('link', { name: 'Back to the paper' }));
   const find = await screen.findByRole('button', { name: 'Find new relevant' });
 
   expect(requests.filter(r => r.init.method === 'POST')).toHaveLength(1);

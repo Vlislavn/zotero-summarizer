@@ -92,7 +92,7 @@ it('wraps long stable keys in both rejected drafts and conflicts on mobile', () 
     ],
   } })));
   expect(screen.getByText((_, node) => node.tagName === 'SPAN'
-    && node.textContent.startsWith('Your verdict on a paper')).className).toContain('break-words');
+    && node.textContent.startsWith('Your verdict on this paper')).className).toContain('break-words');
 });
 
 it('exposes every rejected draft for recovery without pretending refresh repairs it', () => {

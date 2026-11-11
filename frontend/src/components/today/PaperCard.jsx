@@ -227,7 +227,7 @@ export default function PaperCard({ paper, selected, onToggleSelect, llmEnabled 
                     className={`${DECISION_BTN} ${DECISION_TINT[priority]} ${DECISION_HOVER[priority]}`}>{label}</button>;
                 })}
               </div>
-              {!reviewReady && paper.stable_feed_key && <p className="mt-1.5 text-[11px] text-amber-800">
+              {!reviewReady && (!memberState || memberState.reviewKnown) && paper.stable_feed_key && <p className="mt-1.5 text-[11px] text-amber-800">
                 must/should/could need a review. {llmEnabled
                   ? <>Open the paper to generate one; skip works right away.</>
                   : <><Link className="underline" to="/settings">Enable AI</Link> for reviews; skip works right away.</>}

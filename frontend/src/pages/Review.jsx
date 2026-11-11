@@ -297,7 +297,7 @@ export default function Review() {
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
               <strong>Gate-rejected pile</strong> — papers the filter screened out before AI review
-              ({items.length} shown). Use <b>Relabel</b> to confirm the verdict
+              ({loading ? 'loading…' : `${items.length} shown`}). Use <b>Relabel</b> to confirm the verdict
               ({pretty('dont_read')}) or to correct a miss. These papers have no AI review yet, so
               only “{pretty('dont_read')}” can be set here; to rate one higher, open the paper and
               generate a review first.

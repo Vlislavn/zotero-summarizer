@@ -252,7 +252,7 @@ def test_minimal_legacy_card_keeps_existing_content_and_sections(typed_payload):
         }
     text = render.markdown(typed_payload)
     assert text.startswith(
-        "# Research Intelligence · 2026-08-20 → 2026-08-29\n\n"
+        "# Research Intelligence · 20–29 Aug 2026\n\n"
         "Discovered 4; shortlisted 3; cards 2.\n\n"
     )
     for index, key in enumerate(("A", "B"), 1):

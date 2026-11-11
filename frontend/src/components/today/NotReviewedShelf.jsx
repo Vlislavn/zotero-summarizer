@@ -12,7 +12,7 @@ export default function NotReviewedShelf({ papers, visitId }) {
   return (
     <section aria-labelledby="not-reviewed-title" className="mt-6">
       <h2 id="not-reviewed-title" className="text-sm font-medium text-slate-800">Not reviewed yet ({papers.length})</h2>
-      <p className="mt-0.5 text-xs text-slate-500">Highest-ranked papers without a review. Open one to start its full review.</p>
+      <p className="mt-0.5 text-xs text-slate-500">Highest-ranked papers without a review. Open one, then press Generate review.</p>
       <ul className="mt-2 divide-y divide-slate-200 rounded-xl border border-slate-200">
         {papers.map(paper => (
           <li key={paper.item_id}>

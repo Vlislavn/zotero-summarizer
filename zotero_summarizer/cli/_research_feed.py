@@ -42,7 +42,11 @@ def _run(args: argparse.Namespace) -> int:
 def _view(args: argparse.Namespace) -> int:
     path = Path(args.report).expanduser()
     if path.suffix != ".md":
-        raise ValueError("view requires a saved Markdown report")
+        print("error: view requires a saved Markdown report (a .md file)", file=sys.stderr)
+        return 2
+    if not path.is_file():
+        print(f"error: report not found: {path}", file=sys.stderr)
+        return 2
     print(path.read_text(encoding="utf-8"), end="")
     return 0
 

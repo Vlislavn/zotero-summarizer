@@ -187,5 +187,5 @@ def test_offline_prefetch_dispatch_keeps_check_nonloading(monkeypatch, clean_env
         assert _app._prefetch_models(args) == 0
         assert json.loads(capsys.readouterr().out) == report
     else:
-        with pytest.raises(RuntimeError, match="offline"):
-            _app._prefetch_models(args)
+        assert _app._prefetch_models(args) == 2
+        assert "offline" in capsys.readouterr().err

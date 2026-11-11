@@ -69,6 +69,8 @@ def test_http_receipts_separate_committed_question_mirror_and_qa(mirror_env, mon
 
     monkeypatch.setattr(resources, "dispatch_hook", upsert)
     monkeypatch.setattr("zotero_summarizer.api.routes.library.qa.ask_paper", qa)
+    # The paper has a PDF here; the fast no-PDF pre-check (which skips the mirror) is a separate path.
+    monkeypatch.setattr("zotero_summarizer.api.routes.library.qa.require_pdf", lambda _key: None)
     with TestClient(_app()) as client:
         response = client.post("/api/library/ask", json=payload)
         saved = client.post("/api/library/questions", json=payload)

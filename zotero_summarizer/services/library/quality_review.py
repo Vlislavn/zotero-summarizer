@@ -268,7 +268,7 @@ def assess_digest(
     is cleared before work and receives only the accepted existing checks and their
     original-source provenance, without another model call."""
     from zotero_summarizer.services.library._source_admission import admit_source
-    from zotero_summarizer.services.library._review_attempt import identity, observed_client, record
+    from zotero_summarizer.services.library._review_attempt import identity, observed_client, output_retry_stages, record
 
     if verification_audit is not None:
         verification_audit.clear()
@@ -337,6 +337,8 @@ def assess_digest(
     verify, call = _verification_tools(source_text, verifier, llm, goals, response_format)
     digest, checks = _verified_or_repaired(digest, lineage, prompt, verify, call)
     lineage[-1]['outcome'] = 'accepted'
+    if retried := output_retry_stages():  # a call hit finish_reason=length and was re-run once with a larger budget
+        lineage[-1]['output_budget_retries'] = retried
     if verification_audit is not None:
         verification_audit.update(_digest_audit.build_verification_audit(digest, checks, source, lineage))
     if feed_context is not None:

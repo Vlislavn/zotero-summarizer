@@ -46,6 +46,7 @@ export function syncNow(client = activeQueryClient) {
         boundary = 'request';
         const pushed = await request('/api/sync/push', {
           method: 'POST', body: JSON.stringify({ protocol: 1, mutations: wire, predecessors }), signal: controller.signal,
+          idempotent: true, // mutation ids make a replayed push a no-op
         });
         boundary = 'local';
         if (pushed?.protocol !== 1) throw new Error('Sync protocol changed; refresh the app');

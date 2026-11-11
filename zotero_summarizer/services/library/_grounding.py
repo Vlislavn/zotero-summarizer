@@ -56,7 +56,18 @@ _HYPHEN_SPLIT_RE = re.compile(r"(\w)-\s+(?=[a-z])")
 _LEADING_HYPHEN_RE = re.compile(r"^-\s+(?=[a-z])")
 # PDF extraction emits typographic punctuation (LLM’s, “quoted”); model quotes of
 # the same span use ASCII. Fold before matching — symmetric on both sides.
-_PUNCT_FOLD = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"'})
+# Invisible format characters (soft hyphen, zero-width space/joiners, word joiner, BOM)
+# are emitted inside words by some publishers' PDFs ("combina\xadtion", "AI-\u200benabled")
+# and survive NFKC; a model quote has none, so exact grounding failed on any span
+# crossing one (#271). Dropping them is symmetric and adds no visible content; a soft
+# hyphen at a line end ("classifica\xad\ntion") also joins the halves.
+_PUNCT_FOLD = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"',
+                             **{ord(c): None for c in "\u200b\u200c\u200d\u2060\ufeff"}})
+_SOFT_HYPHEN_RE = re.compile("\u00ad\\s*")
+
+
+def _fold(text: str) -> str:
+    return _SOFT_HYPHEN_RE.sub("", unicodedata.normalize("NFKC", text).translate(_PUNCT_FOLD))
 
 
 def _dehyphenate(text: str) -> str:
@@ -65,11 +76,11 @@ def _dehyphenate(text: str) -> str:
 
 def _match_normalize(text: str) -> str:
     """Shared pre-match normalization: whitespace-flatten + punctuation fold + dehyphenate."""
-    return _dehyphenate(" ".join(unicodedata.normalize("NFKC", text).translate(_PUNCT_FOLD).split()))
+    return _dehyphenate(" ".join(_fold(text).split()))
 
 
 def _content_tokens(text: str) -> list[str]:
-    return _TOKEN_RE.findall(_dehyphenate(unicodedata.normalize("NFKC", text).translate(_PUNCT_FOLD).lower()))
+    return _TOKEN_RE.findall(_dehyphenate(_fold(text).lower()))
 
 
 def quote_is_grounded(quote: Any, context: str, *, fuzzy: bool = False) -> bool:
@@ -86,6 +97,10 @@ def quote_is_grounded(quote: Any, context: str, *, fuzzy: bool = False) -> bool:
         return False
     normalized_context = _match_normalize(context or "")
     if normalized_quote in normalized_context:
+        return True
+    # A line-broken compound ("follow-\nup") is joined by the dehyphenation above, while the
+    # model keeps its real hyphen ("follow-up"): compare once more with hyphens dropped on both sides.
+    if normalized_quote.replace("-", "") in normalized_context.replace("-", ""):
         return True
     if not fuzzy:
         return False

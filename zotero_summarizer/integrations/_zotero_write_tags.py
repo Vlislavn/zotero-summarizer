@@ -93,7 +93,10 @@ _LEGACY_ESCAPED_HEAD = re.compile(r"<!-- ([^<>]*?) --><h2>")
 
 def _owns_legacy_escaped_note(note: str, marker: str) -> bool:
     outer = _LEGACY_ESCAPED_NOTE.fullmatch(note)
-    head = outer and _LEGACY_ESCAPED_HEAD.match(html.unescape(outer.group(1)))
+    text = html.unescape(outer.group(1)) if outer else ""
+    # The app's rendered note always ends with a closing tag; plain text a user typed into the
+    # paragraph after it ends with text, so such an edited note is never adopted.
+    head = _LEGACY_ESCAPED_HEAD.match(text) if text.rstrip().endswith(">") else None
     return bool(head) and _metadata_marker(head.group(1), footer=False) == marker
 
 
@@ -260,10 +263,11 @@ class ZoteroTagMixin:
 
         existing = conn.execute(
             "SELECT itemID, note FROM itemNotes WHERE parentItemID = ? "
-            "AND itemID NOT IN (SELECT itemID FROM deletedItems)",
+            "AND itemID NOT IN (SELECT itemID FROM deletedItems) ORDER BY itemID",
             (parent_item_id,),
         ).fetchall()
-        owned = [row for row in existing if _owns_note(row["note"], marker)]
+        # Oldest owned note survives (deterministic); NULL bodies are never owned.
+        owned = [row for row in existing if row["note"] and _owns_note(row["note"], marker)]
         existing = owned[0] if owned else None
         if existing is None:
             self._apply_note_change(

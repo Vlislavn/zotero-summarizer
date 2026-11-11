@@ -125,7 +125,7 @@ it('does not replace the selected run when an older detail request completes lat
     ? new Promise((resolve) => { resolveOld = resolve; }) : Promise.resolve(report()));
   mount('/weekly?run=weekly-old');
   await waitFor(() => expect(researchFeedApi.get).toHaveBeenCalledWith('weekly-old'));
-  await screen.findByRole('option', { name: '2 Jan 2026 – 3 Jan 2026 · 1 cards' });
+  await screen.findByRole('option', { name: '2 Jan 2026 – 3 Jan 2026 · 1 card' });
   fireEvent.change(screen.getByLabelText('Saved digest'), { target: { value: 'weekly-new' } });
   await screen.findByRole('heading', { name: 'Agent benchmark' });
   const stale = report(); stale.cards[0].candidate.title = 'Older report title';

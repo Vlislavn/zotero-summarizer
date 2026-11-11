@@ -6,7 +6,7 @@ export default function ReviewModelStatus({ runner }) {
   const { online, llm, llmAvailable, checkingModel, modelCheckPending, modelCheckError,
     retryModelCheck } = runner;
   if (!online) return <div role="status" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-800">
-    Offline — cached reviews remain readable. Reconnect to generate a review.
+    You are offline — AI review needs the Mac. Cached reviews remain readable.
   </div>;
   if (llmAvailable) return null;
 

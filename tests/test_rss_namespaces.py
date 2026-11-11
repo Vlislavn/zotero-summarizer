@@ -58,7 +58,7 @@ def test_recovers_missing_namespace_without_reparsing_items(tmp_path, monkeypatc
     assert issue.startswith('RssNamespaceWarning:')
     assert not any('urn:zotero-summarizer:rss-unresolved:' in str(row) for row in stored)
     again = reader.refresh_feeds()
-    assert again['inserted'] == 0 and again['updated'] == 3 and again['errors'] == []
+    assert again['inserted'] == 0 and again['updated'] == 0 and again['unchanged'] == 1 and again['errors'] == []
     monkeypatch.setattr(app_rss, '_fetch_public_url', lambda *a, **k: (_body().encode(), httpx.Headers()))
     reader.refresh_feeds()
     assert reader.get_feed_groups()[0]['last_check_error'] is None

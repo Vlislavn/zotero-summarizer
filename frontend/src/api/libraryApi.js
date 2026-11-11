@@ -398,6 +398,7 @@ export async function askPaper(itemKey, question, {
     method: 'POST',
     body: JSON.stringify({ item_key: itemKey, question, submission_id: submissionId,
       origin, preset_id: presetId, mode, history }),
+    idempotent: true, // the question row is keyed by submission_id; a replay re-saves nothing
   });
 }
 
@@ -412,6 +413,6 @@ export async function fetchReviewQuestions(itemKey) {
 
 export async function saveReviewQuestion(submission) {
   return request('/api/library/questions', {
-    method: 'POST', body: JSON.stringify(submission),
+    method: 'POST', body: JSON.stringify(submission), idempotent: true,
   });
 }

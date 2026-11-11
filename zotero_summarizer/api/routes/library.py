@@ -3,14 +3,19 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Query
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from zotero_summarizer.api.errors import APIError
+from zotero_summarizer.api.routes._library_question_models import (
+    AskPaperRequest,
+    QuestionSubmissionRequest,
+    SavePaperQuestionRequest,
+)
 from zotero_summarizer.models.paper_keys import validate_paper_item_key
 from zotero_summarizer.services.library import (
     deep_review,
@@ -82,56 +87,6 @@ class RejectTagRequest(BaseModel):
 class RelTagSyncRequest(BaseModel):
     # Apply even if Zotero is running (writes back up first regardless).
     force: bool = Field(default=False)
-
-
-class AskPaperHistoryTurn(BaseModel):
-    question: str = Field(..., min_length=1, max_length=2000)
-    answer: str | None = Field(default=None, max_length=5000)
-    quote: str | None = Field(default=None, max_length=5000)
-    evidence_handle: dict[str, Any] | None = None
-
-
-class QuestionSubmissionRequest(BaseModel):
-    item_key: str = Field(..., min_length=1)
-    question: str = Field(..., min_length=1, max_length=2000)
-    origin: Literal["typed", "preset"] = "typed"
-    preset_id: str | None = Field(default=None, min_length=1)
-
-    @field_validator("item_key")
-    @classmethod
-    def valid_item_key(cls, value: str) -> str:
-        return validate_paper_item_key(value)
-
-    @field_validator("question")
-    @classmethod
-    def nonblank_question(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("question must not be blank")
-        return value
-
-    @field_validator("preset_id")
-    @classmethod
-    def nonblank_preset_id(cls, value: str | None) -> str | None:
-        if value is not None and not value.strip():
-            raise ValueError("preset_id must not be blank")
-        return value
-
-    @model_validator(mode="after")
-    def require_preset_id(self):
-        if self.origin == "preset" and self.preset_id is None:
-            raise ValueError("preset_id is required for preset questions")
-        return self
-
-
-class AskPaperRequest(QuestionSubmissionRequest):
-    submission_id: UUID | None = None
-    # comprehensive (default; metadata+notes+body) | retrieval (top-k chunks) | full_text (raw body)
-    mode: Literal["comprehensive", "retrieval", "full_text"] = Field(default="comprehensive")
-    history: list[AskPaperHistoryTurn] = Field(default_factory=list, max_length=20)
-
-
-class SavePaperQuestionRequest(QuestionSubmissionRequest):
-    submission_id: UUID
 
 
 class PaperRenderBuildRequest(BaseModel):
@@ -290,11 +245,19 @@ async def _question_receipt(row: dict[str, Any]) -> dict[str, Any]:
 async def ask_paper(req: AskPaperRequest) -> dict[str, Any]:
     """Save a durable question receipt before grounded paper Q&A."""
     submission_id = req.submission_id or uuid4()
+    no_pdf = None
+    try:  # fast lookup first: a paper without a PDF must not wait behind a Zotero note delivery
+        await asyncio.to_thread(qa.require_pdf, req.item_key)
+    except APIError as exc:
+        no_pdf = exc if exc.error == "needs_pdf" else None  # anything else: the full path reports it
     row = await asyncio.to_thread(
         review_questions.save_question, _question_payload(req, submission_id)
     )
-    receipt = await _question_receipt(row)
+    # No PDF: keep the saved question but skip the slow Zotero delivery (the client's own save/sync does it).
+    receipt = {"question_saved": True, "question_submission": row} if no_pdf else await _question_receipt(row)
     try:
+        if no_pdf:
+            raise no_pdf
         result = await asyncio.to_thread(
             qa.ask_paper, req.item_key, req.question, mode=req.mode,
             history=[turn.model_dump(mode="json") for turn in req.history],

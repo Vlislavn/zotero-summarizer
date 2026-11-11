@@ -126,6 +126,8 @@ def test_real_writer_defect_after_http_save_prevents_qa(real_boundary, monkeypat
         assert conn.execute("SELECT COUNT(*) FROM review_questions").fetchone() == (0,)
     _writer_defect(real_boundary, monkeypatch, kind)
     qa_calls = []
+    # The paper has a PDF here; the fast no-PDF pre-check (which skips the mirror) is a separate path.
+    monkeypatch.setattr("zotero_summarizer.api.routes.library.qa.require_pdf", lambda _key: None)
     monkeypatch.setattr("zotero_summarizer.api.routes.library.qa.ask_paper",
                         lambda *_a, **_k: qa_calls.append("qa") or {"answer": None, "abstained": True})
     with TestClient(_app(), raise_server_exceptions=False) as client:

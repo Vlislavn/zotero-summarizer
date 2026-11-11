@@ -38,8 +38,8 @@ function submit(text) {
 
 describe('AskPaperBox durable question submission', () => {
   it.each([
-    [false, true, 'target_unavailable', null, 'Zotero note delivery: pending (revision 7) — target_unavailable.'],
-    [true, false, null, 'P1', 'Zotero note delivery: acknowledged (revision 7).'],
+    [false, true, 'target_unavailable', null, 'Saved; it will be written to Zotero when the Mac is connected.'],
+    [true, false, null, 'P1', 'Saved to Zotero.'],
   ])('forwards the composite mirror receipt to My notes instead of retaining another delivery status (%s)', async (written, pending, error, target, text) => {
     mocks.saveReviewQuestion.mockImplementation(async (submission) => ({
       question_saved: true, question_submission: submission,

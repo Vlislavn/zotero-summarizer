@@ -165,7 +165,7 @@ export default function TelegramSources({ onDirtyChange, onPendingChange }) {
             <span className="mt-0.5 block text-slate-600">{observed?.consented ? 'Allowed.' : 'Not allowed yet.'} Read-only: no joining or sending. Summaries come from the model chosen above. You can revoke this here at any time.</span>
           </span>
         </label>
-        <p className="text-sm text-slate-600">{dirty ? 'Save your channel changes, then press “Check channels” on ' : 'Press “Check channels” on '}<Link className="text-forest-800 underline underline-offset-4" to="/weekly">Weekly</Link>.</p>
+        <p className="text-sm text-slate-600">{dirty ? 'Save your channel changes, then press “' : 'Press “'}{observed?.consented ? 'Check channels' : 'Allow & check channels'}” on <Link className="text-forest-800 underline underline-offset-4" to="/weekly">Weekly</Link>.</p>
       </section>
     </>}
   </div>;

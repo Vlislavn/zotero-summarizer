@@ -87,7 +87,7 @@ it.each([
 
 it('recognizes the already-acknowledged no-op receipt without another external write', () => {
   expect(noteDeliveryText({ ...acknowledged, note_written: false }))
-    .toBe('Zotero note delivery: acknowledged (revision 7).');
+    .toBe('Saved to Zotero.');
   expect(noteDeliveryText({ ...acknowledged, note_written: false, projection_revision: 0 }))
     .toBe('Not yet saved to Zotero.');
 });
@@ -138,7 +138,7 @@ it('does not revive an old completion after navigating away and back', () => {
 
 it('keeps pending and failed composite outcomes distinct from acknowledgement', () => {
   expect(noteDeliveryText({ ...acknowledged, note_written: false, note_pending: true, note_error: 'target_unavailable' }))
-    .toBe('Zotero note delivery: pending (revision 7) — target_unavailable.');
+    .toBe('Saved; it will be written to Zotero when the Mac is connected.');
   expect(noteDeliveryText({ ...acknowledged, note_written: false, note_error: 'write_failed' }))
-    .toBe('Zotero note delivery: not confirmed (revision 7) — write_failed.');
+    .toBe('Saved in the app; Zotero did not confirm the note (write_failed).');
 });

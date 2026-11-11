@@ -57,11 +57,11 @@ export default function AuthorByline({ authors = [], source = 'library', quiet =
         </span>
       ))}
       {folded && <><span className="text-slate-400">, … </span><Author author={authors.at(-1)} /></>}
-      {foldable && (
+      {foldable && (<>{' '}
         <button type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}
-          className="ml-2 text-forest-800 underline underline-offset-2 hover:text-forest-700">
+          className="ml-1 text-forest-800 underline underline-offset-2 hover:text-forest-700">
           {expanded ? 'Show fewer' : `+${hidden} more`}
-        </button>
+        </button></>
       )}
     </span>
   );

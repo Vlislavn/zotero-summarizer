@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useBeforeUnload, useBlocker, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchCollections, fetchPaperRender, fetchSectionSummaries, attachFiguresToZotero } from '../api/libraryApi.js';
@@ -39,12 +39,33 @@ function fmt(seconds) {
   return r ? `${m}m ${r}s` : `${m}m`;
 }
 
+// The run just ended but the detail refetch has not delivered the new review: the old, outdated
+// one must not flash its "Outdated review" banner meanwhile. Clears when the review changes (or after 5 s).
+function useSettlingAfterRun(running, deep) {
+  const [settling, setSettling] = useState(false);
+  const was = useRef(false);
+  const seen = useRef(deep);
+  useEffect(() => {
+    if (running) { was.current = true; return undefined; }
+    if (was.current) { was.current = false; seen.current = deep; setSettling(true); }
+    return undefined;
+  }, [running, deep]);
+  useEffect(() => {
+    if (!settling) return undefined;
+    if (deep !== seen.current) { setSettling(false); return undefined; }
+    const timer = setTimeout(() => setSettling(false), 5000);
+    return () => clearTimeout(timer);
+  }, [settling, deep]);
+  return settling;
+}
+
 // The review zone: the cached review (flat + located findings) when present; else
 // the access banners + a prominent Generate button + a live skeleton while it
 // runs. The runner auto-fires on open for a paper with a PDF (the user opted into
 // auto-generate-on-open), so the common case renders instantly.
 function ReviewZone({ deep, runner, sectionOverlay, itemKey }) {
   const { status, error, llmAvailable, online, running } = runner;
+  const settling = useSettlingAfterRun(running, deep);
   const reviewed = deep && !deep.needs_pdf && (deep.digest || deep.quality || (deep.goal_summaries || []).length);
   const digest = deep?.digest;
   const usable = !deep?.needs_pdf && !deep?.error && [
@@ -60,7 +81,7 @@ function ReviewZone({ deep, runner, sectionOverlay, itemKey }) {
       {!running && !usable && <ReviewModelStatus runner={runner} />}
       <FullTextAccessNotice deep={deep} />
 
-      {showReview && <PaperReview deep={deep} flat sectionOverlay={sectionOverlay} facts={facts}
+      {showReview && <PaperReview deep={settling ? { ...deep, review_freshness: null } : deep} flat sectionOverlay={sectionOverlay} facts={facts}
         evidence={<EvidenceFold itemKey={itemKey} lost={deep.not_established_fields || []} />}
         onRegenerate={runner.checkingStatus ? null : () => runner.run()} />}
       {running ? (
@@ -125,7 +146,7 @@ function figuresSummary(render, completed) {
   if (render?.stale) return 'Outdated — open to rebuild';
   if (render?.status === 'running') return 'Building from the PDF…';
   const n = (render?.figures || []).filter((f) => f && f.name).length;
-  return completed && n ? `${n} figures and tables from the PDF` : 'Extracted from the PDF';
+  return completed && n ? `${n === 1 ? '1 figure or table' : `${n} figures and tables`} from the PDF` : 'Extracted from the PDF';
 }
 
 // Full-page, single-scroll deep review for one paper (opened from a Read-next row).

@@ -125,7 +125,7 @@ export default function Today() {
       <ErrorBanner error={triageStatus.error || triageStatus.rescore_error} title="Last triage run failed" />}
     {view.persistenceFailed && <StatusBanner tone="warn" message="Browser storage is unavailable. This shortlist stays open here but may not survive reload. The shortlist itself never resends actions." />}
     {view.visit?.invalid && <StatusBanner tone="warn" message="The saved shortlist could not be read. New shortlist explicitly replaces it; no saved action is replayed." />}
-    {view.carryCount > 0 && <StatusBanner tone="warn" message={`${view.carryCount} unfinished action(s) stay in the next shortlist. Only the remaining places can contain new papers; shortlist refresh does not retry writes.`} />}
+    {view.carryCount > 0 && <StatusBanner tone="warn" message={`${view.carryCount} ${view.carryCount === 1 ? 'paper is' : 'papers are'} still being added. New shortlist is available once they finish.`} />}
     {view.loading && <div role="status" aria-label="Loading today’s papers…" className="space-y-3">
       <p className="flex items-center gap-2 text-sm text-slate-600"><Spinner size="sm" color="teal" />Loading today’s papers…</p>
       {[0, 1].map(i => <div key={i} aria-hidden="true" className="space-y-3 rounded-xl border border-slate-200 p-4">

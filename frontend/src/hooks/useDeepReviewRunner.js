@@ -4,6 +4,7 @@ import { runDeepReview, fetchDeepReviewStatus } from '../api/libraryApi.js';
 import { fetchLlmReachability } from '../api/settingsApi.js';
 import { fetchPaperPrefs } from '../api/paperPrefs.js';
 import useServerAvailable from './useServerAvailable.js';
+import { transportUnavailable } from '../offlineStore.js';
 
 // One per-paper poll for both review surfaces. Query keys isolate navigation;
 // a failed status request ends the spinner and leaves an explicit retry action.
@@ -13,7 +14,10 @@ export default function useDeepReviewRunner(itemKey, { deep, onDone, autoRun = f
   const reviewServerAvailable = useServerAvailable({ allowSyncFailure: true });
   const autoRunFiredFor = useRef(null);
   const lastRunning = useRef(null);
-  const [online, setOnline] = useState(() => navigator.onLine);
+  const [browserOnline, setOnline] = useState(() => navigator.onLine);
+  // Offline = the browser says so OR the Mac is unreachable (the phone-away case).
+  // ('unchecked' at startup is not offline.)
+  const online = browserOnline && (reviewServerAvailable || !transportUnavailable());
   useEffect(() => {
     const disconnected = () => setOnline(false);
     const reconnected = () => {

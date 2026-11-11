@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from typing import Any
 
 from fastapi import FastAPI
@@ -65,6 +66,21 @@ async def zotero_write_error_handler(_, exc: ZoteroWriteError) -> JSONResponse:
     return JSONResponse(status_code=503, content=payload.model_dump())
 
 
+def is_database_busy(exc: BaseException) -> bool:
+    """True for sqlite's transient 'database is locked/busy' (a writer outlasted busy_timeout)."""
+    text = str(exc).lower()
+    return isinstance(exc, sqlite3.OperationalError) and ("database is locked" in text or "database is busy" in text)
+
+
+async def database_busy_handler(_, exc: sqlite3.OperationalError) -> JSONResponse:
+    """A lock timeout is transient, not a bug: 503 + Retry-After instead of an unhandled 500."""
+    if not is_database_busy(exc):
+        raise exc  # any other OperationalError stays an unexpected 500 (generic handler)
+    LOGGER.warning("Database busy: %s", exc)
+    payload = ErrorResponse(error="database_busy", message="The app was busy; try again in a moment.")
+    return JSONResponse(status_code=503, content=payload.model_dump(), headers={"Retry-After": "2"})
+
+
 async def validation_error_handler(_, exc: RequestValidationError) -> JSONResponse:
     errors = [{"loc": error["loc"], "type": error["type"]} for error in exc.errors()]
     LOGGER.warning("Request validation failed: %s", errors)
@@ -85,5 +101,6 @@ def install_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(LLMTimeoutError, timeout_error_handler)
     app.add_exception_handler(ZoteroReadError, zotero_read_error_handler)
     app.add_exception_handler(ZoteroWriteError, zotero_write_error_handler)
+    app.add_exception_handler(sqlite3.OperationalError, database_busy_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(Exception, generic_error_handler)

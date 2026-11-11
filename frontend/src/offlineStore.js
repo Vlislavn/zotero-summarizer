@@ -526,6 +526,9 @@ export async function applyPull(payload, sequence) {
   await publishStatus();
 }
 
+// Fired (by the conflict banner, after the resolution synced) so an open paper re-reads its note/verdict.
+export const conflictResolvedEvent = 'zs-conflict-resolved';
+
 export async function resolveConflict(mutationId, keepLocal) {
   const db = await openDb();
   await new Promise((resolve, reject) => {

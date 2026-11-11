@@ -10,7 +10,8 @@ from zotero_summarizer.runtime import request_memo
 from zotero_summarizer.services.golden import label_verdicts, verdict_effects
 from zotero_summarizer.services.library import deep_review, reading_queue
 from zotero_summarizer.services.library.review_eligibility import ReviewRequired, require_feed_review
-from zotero_summarizer.storage import question_sync, repositories
+from zotero_summarizer.services._common import settings
+from zotero_summarizer.storage import item_titles, question_sync, repositories
 from zotero_summarizer.storage.question_sync import validate_mutation as validate_question_mutation
 
 _PAPER_FIELDS = (
@@ -44,8 +45,13 @@ def _paper_snapshots(db_path: Path) -> list[dict[str, Any]]:
     }
     fields = repositories.sync_current_fields(db_path)
     reviews = deep_review.current_reviews()
-    for item_key, _field in fields:
-        papers.setdefault(item_key, {"item_key": item_key, "title": item_key})
+    missing = {item_key for item_key, _field in fields} - papers.keys()
+    titles = {
+        **item_titles.feed_titles_for_keys(db_path, list(missing)),
+        **item_titles.titles_for_keys(settings().corpus_db_path, list(missing)),
+    }
+    for item_key in missing:  # label/note rows outside the queue still need a readable title
+        papers[item_key] = {"item_key": item_key, "title": titles.get(item_key, item_key)}
     for item_key, paper in papers.items():
         verdict = fields.get((item_key, "verdict"))
         note = fields.get((item_key, "review_note"))

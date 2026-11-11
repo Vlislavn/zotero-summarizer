@@ -10,9 +10,9 @@ export const chipClass = (on) => `min-h-11 rounded-lg border px-3 text-[13px] di
 // The ids are the backend's canonical negative set (api/routes/_daily_verdict.py); the Today
 // card's skip block uses the same ids/labels (unifying them is Todo #108).
 export const NEG_CHIPS = [
-  ['not_relevant', 'off topic'], ['low_quality', 'weak quality'], ['no_code', 'no code'],
-  ['unclear_value', 'unclear value'], ['too_hard', 'too hard'],
-  ['boring', 'boring / nothing new'], ['non_credible', 'low-credibility group'],
+  ['not_relevant', 'Off topic'], ['low_quality', 'Weak quality'], ['no_code', 'No code'],
+  ['unclear_value', 'Unclear value'], ['too_hard', 'Too hard'],
+  ['boring', 'Boring / nothing new'], ['non_credible', 'Low-credibility group'],
 ];
 
 export const DECISIONS = [['must_read', 'must'], ['should_read', 'should'], ['could_read', 'could'], ['dont_read', 'skip']];

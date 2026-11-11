@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 from zotero_summarizer.settings import Settings
 
@@ -251,7 +252,8 @@ def _calibrate(args: argparse.Namespace) -> int:
         flush=True,
     )
     result = run_full_calibration(
-        settings, item_keys=item_keys, papers_limit=args.papers
+        settings, item_keys=item_keys, papers_limit=args.papers,
+        progress=lambda update: print(update["phase"], file=sys.stderr, flush=True),
     )
 
     if args.tier3:

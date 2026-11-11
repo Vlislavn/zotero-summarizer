@@ -60,5 +60,7 @@ def check(engine: str, local_url: str = jev.LOCAL_URL) -> dict[str, Any]:
     answer = jev.noul(t, {"text": "The code is available at https://github.com/example/repo."},
                       {"t": {"type": "noul", "instructions": "Does `text` give a link to code?"}}, timeout=20.0)
     if answer is None:
-        return {"ok": False, "message": "No valid answer. Check the address and that the engine is running."}
+        message = ("The cloud engine rejected the access key or could not be reached." if engine == "cloud"
+                   else "No valid answer. Check the address and that the engine is running.")
+        return {"ok": False, "message": message}
     return {"ok": True, "message": "The engine answered."}

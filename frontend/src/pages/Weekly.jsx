@@ -7,6 +7,7 @@ import { researchFeedApi } from '../api/researchFeedApi.js';
 import Async from '../components/ui/Async.jsx';
 import Button from '../components/ui/Button.jsx';
 import WeeklyDigest from '../components/WeeklyDigest.jsx';
+import { plural } from '../components/weeklyDigestText.js';
 import TelegramHistory from '../components/TelegramHistory.jsx';
 import TelegramToday from '../components/TelegramToday.jsx';
 
@@ -54,7 +55,7 @@ export default function Weekly() {
         })}>
           <option value="">Choose a saved run</option>
           {runId && !items.some((item) => item.run_id === runId) && <option value={runId}>{runLabel({ run_id: runId })}</option>}
-          {items.map((item) => <option key={item.run_id} value={item.run_id}>{item.available ? `${runLabel(item)} · ${item.counts.cards_generated} cards` : `${runLabel(item)} · unavailable — ${item.reason || 'cannot be opened'}`}</option>)}
+          {items.map((item) => <option key={item.run_id} value={item.run_id}>{item.available ? `${runLabel(item)} · ${plural(item.counts.cards_generated, 'card')}` : `${runLabel(item)} · unavailable — ${item.reason || 'cannot be opened'}`}</option>)}
         </select>
       </label><Button variant="secondary" className="min-h-11" onClick={() => { runs.refetch(); if (runId) report.refetch(); }}>Refresh saved runs</Button></div>
       <Async error={runs.error} />

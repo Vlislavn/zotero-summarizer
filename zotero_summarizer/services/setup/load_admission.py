@@ -111,7 +111,9 @@ def verification_row(results: list[dict]) -> dict:
     failed = [row for row in results if row["status"] != "operational"]
     guarded = any(row.get("reason_code") for row in failed)
     needs_approval = any(result.get('status') == 'needs_approval' for result in failed)
+    untested = bool(failed) and all(r.get("attempted") is False and "admission" in r for r in failed)
     message = ('Server approval required before verification' if needs_approval else
+               'Local model not tested (the app only tests models it started itself)' if untested else
                'Inference failed for a configured stage' if failed else 'Every LLM stage returned a real response')
     row = _row("llm_inference", "needs_action" if failed else "ready",
                message,

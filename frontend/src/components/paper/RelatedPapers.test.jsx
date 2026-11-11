@@ -183,7 +183,7 @@ it.each(['failed', 'budget_exceeded', 'interrupted', 'stale'])('keeps %s honest 
   const { client } = mount();
   fireEvent.click(screen.getByRole('button', { name: 'Show related saved papers' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Try with comments — experimental' }));
-  await screen.findByText(new RegExp(`Comment assessment: ${status}`));
+  await screen.findByText(status === 'budget_exceeded' ? /too large for the model's input limit/ : new RegExp(`Comment assessment: ${status}`));
   expect(screen.getByRole('link', { name: 'Saved read paper' })).toBeTruthy();
   expect(screen.queryByText(/the model says it used your comments/)).toBeNull();
   client.clear();

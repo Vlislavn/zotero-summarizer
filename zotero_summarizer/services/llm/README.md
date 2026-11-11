@@ -228,5 +228,5 @@ are not interchangeable. Actual local-model/hardware acceptance is unmeasured.
 
 The one seam that turns Settings → Checklist engine (`checklist_engine` off / local / cloud, `checklist_local_url`) into an
 `integrations/jev.Target`: `resolve(config)` for deep reviews, `noul_for(settings)` for Telegram's disagreement check, `check()` for
-the Settings Test. Cloud reads its saved access key from the OS keyring (legacy env fallback), is refused under `ZS_OFFLINE`, and
+the Settings Test (a failed Cloud test says the key was rejected or the service unreachable; a failed Local test points at the address). Cloud reads its saved access key from the OS keyring (legacy env fallback), is refused under `ZS_OFFLINE`, and
 the key is never returned or logged; Local sends no key. No target → callers use the language-model path.

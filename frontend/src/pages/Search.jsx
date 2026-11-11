@@ -7,6 +7,7 @@ import {
   materialize as materializeApi,
 } from '../api/searchApi.js';
 import CollectionPicker from '../components/CollectionPicker.jsx';
+import { COMMENT_CHECK_TOO_LARGE } from '../components/paper/RelatedPapers.jsx';
 import QuestionEvidence, { EvidencePolicyStatus } from '../components/search/QuestionEvidence.jsx';
 import { ErrorBanner, StatusBanner } from '../components/library/shared.jsx';
 import { cleanAbstract } from '../utils/feedText.js';
@@ -132,7 +133,7 @@ const RETRIEVAL = {
 const ASSESSMENT = {
   not_requested: 'Your comments were not used.', assessed: 'A model judged these from titles and abstracts; this is not a full-text review.',
   no_comments: 'This paper has no comments.', no_candidates: 'There were no candidates to judge.', disabled: 'Comment assessment is turned off.',
-  budget_exceeded: 'Your comments were too long to send, so they were not used.', context_unavailable: 'Your comments could not be read, so they were not used.',
+  budget_exceeded: COMMENT_CHECK_TOO_LARGE, context_unavailable: 'Your comments could not be read, so they were not used.',
   failed: 'Comment assessment failed.', interrupted: 'Comment assessment was interrupted.', stale: 'Your comments changed since the assessment.',
 };
 const STATUS_LINE = {
@@ -170,7 +171,7 @@ function DiscoveryStatus({ session, trusted }) {
       ? 'Scheduled providers successfully returned no candidates.' : 'Observed candidates were all known saved.'}</p>}
     {trusted && !discovery.retrieval.empty_reason && !discovery.recommended_ids.length && <p>No supported default recommendations; retained observations may still be available below.</p>}
     {!trusted && session.status !== 'discovery_failed' && <p>Comment details are hidden until the search is finished and up to date. Actions are unavailable meanwhile.</p>}
-    <Link className="text-forest underline" to={`/paper/${encodeURIComponent(discovery.seed_key)}?retryDiscovery=1`}>Try again (opens the paper)</Link>
+    <Link className="text-forest underline" to={`/paper/${encodeURIComponent(discovery.seed_key)}?retryDiscovery=1`}>Back to the paper</Link>
     <details><summary>Provider observations</summary>
       {discovery.retrieval.variants.map((variant, index) => <p key={index}>{variant.channel} · {variant.outcome?.status || 'unknown'} · count: {variant.outcome?.count ?? 'unknown'} · {variant.outcome?.error_code}</p>)}
     </details>

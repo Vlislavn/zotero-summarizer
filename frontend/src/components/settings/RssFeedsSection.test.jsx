@@ -162,7 +162,7 @@ it('reloads persisted feed errors even when every refresh fails, and clears the 
 
   const issue = await screen.findByText('This feed refused access (403).');
   expect(issue.classList.contains('text-rose-700')).toBe(true);
-  expect(screen.getByText('Last checked: 2026-10-08T12:00:00Z')).toBeTruthy();
+  expect(screen.getByText(/^Last checked: \d+ Oct, \d\d:\d\d$/)).toBeTruthy();
   refresh = () => {
     feeds = [{ ...feeds[0], last_error: null }];
     return response({ feeds: 1, inserted: 0, updated: 0, errors: [] });
@@ -252,7 +252,7 @@ it('keeps partial failure distinct from a clean refresh and reloads its persiste
 
   await screen.findByText('Checked 2 feeds: 1 new, 1 updated, 1 failed. Failed feeds are marked below.');
   await screen.findByText('This feed refused access (403).');
-  expect(screen.getByText('Last checked: 2026-10-22T12:00:00Z')).toBeTruthy();
+  expect(screen.getByText(/^Last checked: \d+ Oct, \d\d:\d\d$/)).toBeTruthy();
 });
 
 it('recognizes a disabled imported preset with normalized host and default port', async () => {

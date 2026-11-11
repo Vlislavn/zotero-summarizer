@@ -4,6 +4,7 @@ import { updateItemTags, fetchTags } from '../../api/libraryApi.js';
 import { isMachineTag } from '../../utils/tags.js';
 import TagsRow from '../TagsRow.jsx';
 import useServerAvailable from '../../hooks/useServerAvailable.js';
+import ServerUnavailableNote from './ServerUnavailableNote.jsx';
 
 // Quick "tags of interest" — emoji signals from services/emoji_signals.py that
 // also train the gate. Kept short (Hick's Law); free text covers the rest.
@@ -93,7 +94,7 @@ function TagEditor({ itemKey, tags = [], onChanged }) {
     await applyTags({ addTags: [t] }, '', tagText);
   }
 
-  if (!serverAvailable) return <div><TagsRow tags={shownTags} /><p className="text-xs text-slate-500">Tag changes need the Mac.</p></div>;
+  if (!serverAvailable) return <div><TagsRow tags={shownTags} /><ServerUnavailableNote what="Tag changes" /></div>;
 
   return (
     <div className="space-y-1.5">

@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchReviewDetail, submitVerdict, deleteVerdict } from '../api/goldenApi.js';
 import { queueRejectTag } from '../api/libraryApi.js';
-import { syncStatusEvent } from '../offlineStore.js';
+import { conflictResolvedEvent, syncStatusEvent } from '../offlineStore.js';
 
 // Shared wiring for one paper's review detail + verdict mutations. Lifted out of
 // InlineAnnotate so the inline row card AND the full-page review (/paper/:key)
@@ -34,6 +34,13 @@ export default function usePaperReview(itemKey, { onSaved, onVerdictAcknowledged
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
+  useEffect(() => {  // Keep mine / Use server changes the stored value under an open paper (OFF-03).
+    const resolved = (event) => {
+      if (event.detail?.item_key === itemKey) queryClient.invalidateQueries({ queryKey: ['paper-detail', itemKey] });
+    };
+    window.addEventListener(conflictResolvedEvent, resolved);
+    return () => window.removeEventListener(conflictResolvedEvent, resolved);
+  }, [itemKey, queryClient]);
   const submitMutation = useMutation({
     mutationKey: onVerdictStarted ? ['today-action'] : ['paper-verdict'],
     networkMode: 'always',

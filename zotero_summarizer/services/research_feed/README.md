@@ -165,7 +165,7 @@ rss_items → source/dedupe → prior triage → budget → existing deep_review
 | `ranking.py` | Continuous current-cohort relevance/goal/prestige ordering through the existing blend, before budgets. |
 | `runner.py` | Budgeted triage, optional missing deep reviews through `library.deep_review`, per-paper failure isolation, metrics/watermark, and dry-run/idempotent writeback. Tag idempotency looks up pending changes by target Zotero item, so unrelated older queue rows cannot push a matching writeback beyond a global scan cap. |
 | `card.py` | Base-qualified engineering-card assembly; only exact validated artifact URLs survive. No extraction or model calls. |
-| `render.py` | Canonical JSON and compact Markdown persistence (one identical project-use sentence is written once for all its projects). |
+| `render.py` | Canonical JSON and compact Markdown persistence (title shows the run range as «14–20 Oct 2026»; one identical project-use sentence is written once for all its projects). |
 | `reports.py` | Read-only list/detail/download lookup of published v1 RSS, retained v1 Telegram news and additive v2 Telegram conversation bundles, validated with existing candidate/triage/card models and present source/generation provenance references. Missing legacy provenance stays optional; malformed present references refuse. Source observations can retain an unqualified generation field; card provenance requires a valid generation hash. Listing labels unopenable runs with a one-line `reason` (old flat-file digests appear once, not openable). Reject symlink/path escapes; never generate or migrate artifacts. |
 
 Run weekly: `uv run zotero-summarizer research-feed run --from 2026-08-22

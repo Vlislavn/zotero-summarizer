@@ -203,7 +203,7 @@ it.each(['not_requested', 'assessed', 'no_comments', 'no_candidates', 'disabled'
 
     await screen.findByRole('heading', { name: 'Find new relevant · Fixture seed' });
 
-    expect(screen.getByLabelText('Assessment status').textContent).toContain({ not_requested: 'Your comments were not used.', assessed: 'A model judged these', no_comments: 'This paper has no comments.', no_candidates: 'There were no candidates to judge.', disabled: 'Comment assessment is turned off.', budget_exceeded: 'too long to send', context_unavailable: 'could not be read', failed: 'Comment assessment failed.', interrupted: 'Comment assessment was interrupted.', stale: 'Your comments changed' }[status]);
+    expect(screen.getByLabelText('Assessment status').textContent).toContain({ not_requested: 'Your comments were not used.', assessed: 'A model judged these', no_comments: 'This paper has no comments.', no_candidates: 'There were no candidates to judge.', disabled: 'Comment assessment is turned off.', budget_exceeded: 'too large for the model', context_unavailable: 'could not be read', failed: 'Comment assessment failed.', interrupted: 'Comment assessment was interrupted.', stale: 'Your comments changed' }[status]);
     expect(within(screen.getByRole('article', { name: 'Candidate 1' })).getByText('Not reviewed.')).toBeTruthy();
     expect(requests.every(r => !r.init.method)).toBe(true);
   },

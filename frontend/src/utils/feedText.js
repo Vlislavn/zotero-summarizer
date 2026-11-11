@@ -30,13 +30,17 @@ export function feedLabel(name) {
   return String(name || '').replace(/^[A-Z]\d{1,2}\s+(?=\S)/, '');
 }
 
-// Strip literal HTML (TOC lines ship a bare `<br />`) so the abstract reads as text.
+// Publisher feeds prefix the abstract with "Nature, Published online: 13 August 2026; doi:10.1038/…".
+const PUB_NOTICE_PREFIX = /^[^\n.;:]{0,80}?,?\s*published online[:;][^;]*;\s*doi:\s*\S+\s*/i;
+
+// Strip literal HTML (TOC lines ship a bare `<br />`) and the journal/DOI notice so the abstract reads as text.
 export function cleanAbstract(abstract) {
-  return String(abstract || '')
+  const text = String(abstract || '')
     .replace(/<br\s*\/?>/gi, '\n')
     // Block ends ("…-5</a></p>An agentic…") carry the only separator; keep it.
     .replace(/<\/(p|div|li|h[1-6])>/gi, ' ')
     .replace(/<[^>]+>/g, '')
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
+  return text.replace(PUB_NOTICE_PREFIX, '') || text;
 }

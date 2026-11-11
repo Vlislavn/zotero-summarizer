@@ -49,10 +49,10 @@ it('keeps one current delivery status in My notes and retires it without overwri
   const submitted = mocks.queueQuestionSubmission.mock.calls[0][0];
   rerender(<ActionRail {...props} detail={{ user_note: 'Manual note', questions: [submitted] }} />);
 
-  await waitFor(() => expect(screen.getAllByText(/Zotero note delivery: acknowledged/)).toHaveLength(1));
+  await waitFor(() => expect(screen.getAllByText('Saved to Zotero.')).toHaveLength(1));
   expect(screen.getByRole('list', { name: 'Saved review questions' }).textContent).toContain(submitted.question);
   rerender(<ActionRail {...props} detail={{ user_note: 'Concurrent saved note', questions: [submitted] }} />);
-  expect(screen.queryByText(/Zotero note delivery: acknowledged/)).toBeNull();
+  expect(screen.queryByText('Saved to Zotero.')).toBeNull();
   expect(screen.getByText('Not yet saved to Zotero.')).toBeTruthy();
   expect(screen.getByRole('textbox', { name: 'Manual notes' }).value).toBe('Unsaved draft');
 });
@@ -84,7 +84,7 @@ it('keeps the question owner through syncing and binds one held acknowledgement 
     expect(mocks.askPaper).not.toHaveBeenCalled();
     completeSave();
     await screen.findByText('Ask failed: controlled answer refusal');
-    await waitFor(() => expect(screen.getAllByText(/Zotero note delivery: acknowledged/)).toHaveLength(1));
+    await waitFor(() => expect(screen.getAllByText('Saved to Zotero.')).toHaveLength(1));
     rerender(<ActionRail {...props} serverAvailable detail={expected} />);
     expect(screen.getByRole('textbox', { name: 'Question about this paper' })).toBe(input);
     expect(screen.getByRole('textbox', { name: 'Manual notes' }).value).toBe('Dirty manual draft');

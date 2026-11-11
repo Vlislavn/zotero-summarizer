@@ -16,7 +16,7 @@ export const BAND_LABEL = {
   must_read: 'must',
   should_read: 'should',
   could_read: 'could',
-  dont_read: "don't",
+  dont_read: 'Not interested',
 };
 
 // One palette, shared in spirit with ScoreHistogram.BAND_BAR and the Annotate

@@ -102,7 +102,7 @@ it('confirms offline Remove after an earlier verdict as one ordered durable inte
 
   fireEvent.click(screen.getByRole('button', { name: 'Confirm — Remove' }));
 
-  expect(await screen.findByText('Saved on this device — waiting to sync.')).toBeTruthy();
+  expect(await screen.findByText('Saved; it will be written to Zotero when the Mac is connected.')).toBeTruthy();
   await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
   expect(screen.queryByText(/Couldn’t save/)).toBeNull();
   const rows = await outbox(key);
@@ -156,7 +156,7 @@ it('keeps a primary verdict rejection retryable without claiming a device save o
 
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Couldn’t save: HTTP 403'));
   expect(screen.getByRole('button', { name: 'Confirm — Remove' }).disabled).toBe(false);
-  expect(screen.queryByText('Saved on this device — waiting to sync.')).toBeNull();
+  expect(screen.queryByText('Saved; it will be written to Zotero when the Mac is connected.')).toBeNull();
   expect(onSaved).not.toHaveBeenCalled();
   expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/golden/verdict']);
   expect(await outbox(key)).toEqual([]);

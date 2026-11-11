@@ -91,7 +91,7 @@ it('stops only the current run and rereads unresolved ownership without acceptin
   api.fetchDoctorStatus.mockImplementation(async () => health); mount(); const stop = await screen.findByRole('button', { name: 'Stop verification' });
   api.cancelDoctor.mockImplementation(async () => { health = unresolved; return { ...running, cancellation_requested: true }; }); fireEvent.click(stop);
   await waitFor(() => expect(api.cancelDoctor).toHaveBeenCalledOnce()); expect(api.cancelDoctor.mock.calls[0][0]).toBe(running.run_id);
-  await screen.findByText('Verification stopped. Callback or remote termination is not established; no Ready result was accepted.');
+  await screen.findByText('Verification stopped before the model confirmed it had finished, so setup is not marked Ready. Run Verify setup again when the model is idle.');
   expect(client.getQueryData(['setup-doctor'])).toEqual(unresolved); expect(api.fetchDoctorStatus.mock.calls.length).toBeGreaterThan(1);
   expect(api.runDoctor).not.toHaveBeenCalled(); expect(screen.queryByText('✓ Setup verified')).toBeNull();
 });

@@ -148,9 +148,15 @@ def build_llm(
         if transport is not None:
             transport.close()
         raise
+    def rebuild(larger: int) -> InstrumentedLLMClient:
+        return build_llm(model_url, model_name, api_key, larger, temperature=temperature, extra_body=extra_body,
+                         request_timeout_seconds=request_timeout_seconds, structured_output=structured_output,
+                         local_only=local_only, no_auth=no_auth)
+
     return InstrumentedLLMClient(inner, structured_output=structured_output,
                                  verification_guard=guard if verification else None,
-                                 owned_transport=transport, before_request=before_request)
+                                 owned_transport=transport, before_request=before_request,
+                                 max_tokens=max_tokens, rebuild=None if verification else rebuild)
 
 
 def build_pdf_extractor() -> OnPremPdfExtractor:

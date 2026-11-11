@@ -143,14 +143,14 @@ function Observations({ paper, selectionPolicy }) {
   </>;
 }
 
-function evidenceView({ paper, selectionPolicy, currentStatus, statusFresh, retained = false }) {
+function evidenceView({ paper, selectionPolicy, currentStatus, retained = false }) {
   const evidence = paper.selection_evidence;
   const blinded = selectionPolicy === 'interleave' || evidence?.mode === 'interleave'
     || evidence?.basis === 'unavailable_blinded';
   const observed = retained ? { ...paper, quality: currentStatus?.quality, review_ready: currentStatus?.review_ready,
     selection_evidence: { review: currentStatus?.review_evidence } } : paper;
   const review = blinded ? { text: 'Review evidence: unavailable (blinded selection)', tone: 'slate' }
-    : retained && (!statusFresh || !currentStatus?.available)
+    : retained && !currentStatus?.available
       ? { text: 'Updating review status…', tone: 'slate', detail: 'Use Refresh status (under More) if this stays. The reasons below were recorded when the shortlist was made.' }
       : reviewPresentation(observed);
   return { blinded, review };

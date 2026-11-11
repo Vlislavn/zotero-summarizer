@@ -47,6 +47,9 @@ export default function AskPaperBox({ itemKey, variant = 'disclosure', allowRawP
   const mountedRef = useRef(true);
   const sessionRef = useRef(0);
   const busyRef = useRef(false);
+  // The question whose Ask has not produced an answer yet: asking the same text again is a retry,
+  // so it reuses its submission id instead of saving a second identical question row.
+  const unansweredRef = useRef(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -54,7 +57,7 @@ export default function AskPaperBox({ itemKey, variant = 'disclosure', allowRawP
   }, []);
   useEffect(() => {
     sessionRef.current += 1;
-    busyRef.current = false;
+    busyRef.current = false; unansweredRef.current = null;
     setQuestion(''); setBusy(false); setError(null);
     setHistory([]); setCommentStatus(''); setRetryIntent(null);
   }, [itemKey]);
@@ -76,6 +79,7 @@ export default function AskPaperBox({ itemKey, variant = 'disclosure', allowRawP
     try {
       await queueQuestionSubmission(submission);
       committed = true;
+      unansweredRef.current = submission;
       if (!current()) return;
       setRetryIntent(intent);
       setCommentStatus('Saved on this device — server comment pending.');
@@ -95,9 +99,13 @@ export default function AskPaperBox({ itemKey, variant = 'disclosure', allowRawP
       const res = await askPaper(submission.item_key, submission.question, options);
       if (!current()) return;
       setHistory((prev) => [{ ...res, id: submission.submission_id, q: submission.question }, ...prev]);
-      setQuestion(''); setRetryIntent(null);
+      setQuestion(''); setRetryIntent(null); unansweredRef.current = null;
     } catch (err) {
-      if (current()) setError(`${stage}: ${err.message || String(err)}`);
+      if (current()) {
+        setError(`${stage}: ${err.message || String(err)}`);
+        // Retrying cannot help a paper that has no PDF; the next Ask of the same text still reuses the id.
+        if (err.body?.error === 'needs_pdf') setRetryIntent(null);
+      }
     } finally {
       if (committed) {
         onSaved?.();
@@ -111,8 +119,10 @@ export default function AskPaperBox({ itemKey, variant = 'disclosure', allowRawP
     if (busyRef.current) return;
     const q = String(raw || '').trim();
     if (!q) return;
-    const submission = { submission_id: crypto.randomUUID(), item_key: itemKey,
-      question: q, origin: presetId ? 'preset' : 'typed', preset_id: presetId };
+    const fields = { item_key: itemKey, question: q, origin: presetId ? 'preset' : 'typed', preset_id: presetId };
+    const prev = unansweredRef.current;
+    const retry = prev && sameQuestion(prev, { ...fields, submission_id: prev.submission_id });
+    const submission = { submission_id: retry ? prev.submission_id : crypto.randomUUID(), ...fields };
     const invalid = questionSubmissionError(submission);
     if (invalid) { setError(invalid); return; }
     const prior = history.slice(0, 20).reverse().map((entry) => ({

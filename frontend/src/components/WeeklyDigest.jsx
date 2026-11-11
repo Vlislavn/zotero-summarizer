@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { basisText, listText, mergeProjectUse, plainReason, rangeText, rationaleText, worthText } from './weeklyDigestText.js';
+import { basisText, humanKey, listText, mergeProjectUse, plainReason, plural, rangeText, rationaleText, worthText } from './weeklyDigestText.js';
 
 function TextList({ values, empty = 'Not checked' }) {
   return values?.length ? <ul className="list-disc pl-5 space-y-1">{values.map((value, i) => <li key={i}>{value}</li>)}</ul> : <p>{empty}</p>;
@@ -39,7 +39,7 @@ function Card({ record, index }) {
     </section>
     <section><h4 className="font-medium">Reproducibility: {card.reproducibility_tier || 'unknown'}</h4>
       <p>{card.reproducibility_rationale || 'Effort not assessed'}</p>
-      <p className="font-medium mt-2">Missing reproduction inputs</p><TextList values={card.missing_reproduction_inputs} />
+      <p className="font-medium mt-2">Missing reproduction inputs</p><TextList values={(card.missing_reproduction_inputs || []).map(humanKey)} />
       <p className="font-medium mt-2">Evidence gaps</p><TextList values={(card.evidence_gaps || []).map(plainReason)} />
     </section>
     <details><summary className="cursor-pointer">Card details and provenance</summary>
@@ -60,7 +60,7 @@ export default function WeeklyDigest({ report }) {
   return <div className="space-y-6 min-w-0">
     <header><h2 className="font-display text-2xl">Research Intelligence digest</h2>
       <p className="break-words">{rangeText(metadata.from, metadata.to)}</p>
-      <p>{cards.length} cards · {metadata.counts.shortlisted} shortlisted · {metadata.counts.discovered} discovered</p>
+      <p>{plural(cards.length, 'card')} · {metadata.counts.shortlisted} shortlisted · {metadata.counts.discovered} discovered</p>
       <p className="text-sm text-slate-600">Saved snapshot, not a live queue. Generated project suggestions are unverified; unknown is not a negative result.</p>
     </header>
     {!cards.length && <p>No engineering cards in this run. Check review/full-text needs, failures and selection details below.</p>}

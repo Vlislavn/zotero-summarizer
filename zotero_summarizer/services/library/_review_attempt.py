@@ -14,8 +14,8 @@ from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
-from zotero_summarizer.integrations.llm import LOGGER
-from zotero_summarizer.integrations.llm_callbacks import observe_completions
+from zotero_summarizer.integrations.llm import LOGGER, InstrumentedLLMClient
+from zotero_summarizer.integrations.llm_callbacks import LLMOutputTruncated, observe_completions
 from zotero_summarizer.services.library import _call_guard
 
 
@@ -104,8 +104,8 @@ class Attempt:
 
             if isinstance(value, PaperDigest):
                 event['supplied_digest_fields'] = sorted(value.model_fields_set & PaperDigest.model_fields.keys())
-        if kind in {'identity', 'failure_identity'} and isinstance(decoded, dict):
-            allowed = {'sha256', 'characters', 'bytes', 'provider', 'model',
+        if kind in {'identity', 'failure_identity', 'output_budget_retry'} and isinstance(decoded, dict):
+            allowed = {'from_max_tokens', 'to_max_tokens', 'sha256', 'characters', 'bytes', 'provider', 'model',
                        'prompt_schema_version', 'strategy', 'max_chars', 'code', 'stage', 'recovery',
                        'scope', 'artifact', 'availability', 'outcome', 'counts_as_verified_review', 'http_status', 'reason_code',
                        'expected_checks', 'returned_checks', 'verifier_attempt'}
@@ -169,6 +169,15 @@ class Attempt:
         return path
 
 
+def output_retry_stages() -> list[str]:
+    """Stages of the current attempt that were re-run once with a larger output budget."""
+    attempt = _CURRENT.get()
+    if attempt is None:
+        return []
+    with attempt.lock:
+        return [event['stage'] for event in attempt.events if event['kind'] == 'output_budget_retry']
+
+
 def record(stage: str, value: Any, *, kind: str = 'source') -> None:
     attempt = _CURRENT.get()
     if attempt is not None:
@@ -207,11 +216,9 @@ class _ObservedClient:
     def __getattr__(self, name):
         return getattr(self.client, name)
 
-    def _invoke(self, call, prompt, kind):
+    def _run(self, call, client):
+        """One guarded provider call on ``client``; provider failures become typed review errors."""
         from zotero_summarizer.api.errors import APIError
-
-        if self.attempt is not None:
-            self.attempt.record(self.stage, prompt, kind='prompt')
 
         def once():
             usage: dict[str, int] = {}
@@ -220,11 +227,10 @@ class _ObservedClient:
                 usage.update(_token_counts((response.llm_output or {}).get('token_usage')))
 
             with observe_completions(observe):
-                return call(), usage
+                return call(client), usage
 
         try:
-            (value, usage), seconds = _call_guard.run(
-                once, self.stage, self.attempt.slots if self.attempt is not None else None)
+            return _call_guard.run(once, self.stage, self.attempt.slots if self.attempt is not None else None)
         except ValueError as exc:
             if self.stage.startswith('verifier'):
                 raise
@@ -244,6 +250,39 @@ class _ObservedClient:
             exc.review_stage = ('correction' if self.stage == 'correction'
                                 else 'verification' if self.stage.startswith('verifier') else 'generation')
             raise
+
+    def _run_larger(self, call):
+        """After finish_reason=length: ONE re-run of the identical call with a bounded larger output
+        budget. ``None`` when none is possible (unknown/ceiling budget, other client types, map chunks
+        — those subdivide instead)."""
+        if self.stage == 'map' or not isinstance(self.client, InstrumentedLLMClient):
+            return None
+        larger = self.client.with_larger_output()
+        if larger is None:
+            return None
+        LOGGER.warning("LLM output hit the limit stage=%s max_tokens=%s; retrying once with %s",
+                       self.stage, self.client.max_tokens, larger.max_tokens)
+        if self.attempt is not None:
+            self.attempt.record(self.stage, {'from_max_tokens': self.client.max_tokens,
+                                             'to_max_tokens': larger.max_tokens}, kind='output_budget_retry')
+        try:
+            return self._run(call, larger)
+        except LLMOutputTruncated as exc:
+            exc.output_budget_retried = True
+            raise
+        finally:
+            larger.close()
+
+    def _invoke(self, call, prompt, kind):
+        if self.attempt is not None:
+            self.attempt.record(self.stage, prompt, kind='prompt')
+        try:
+            (value, usage), seconds = self._run(call, self.client)
+        except LLMOutputTruncated:
+            retried = self._run_larger(call)
+            if retried is None:
+                raise
+            (value, usage), seconds = retried
         tok_per_s = round(usage['completion_tokens'] / seconds, 1) if usage.get('completion_tokens') and seconds > 0 else None
         if self.attempt is not None:
             self.attempt.record_call(self.stage, seconds, usage)
@@ -257,10 +296,10 @@ class _ObservedClient:
         return value
 
     def pydantic_prompt(self, *, prompt, **kwargs):
-        return self._invoke(lambda: self.client.pydantic_prompt(prompt=prompt, **kwargs), prompt, 'parsed_response')
+        return self._invoke(lambda client: client.pydantic_prompt(prompt=prompt, **kwargs), prompt, 'parsed_response')
 
     def prompt(self, prompt):
-        return self._invoke(lambda: self.client.prompt(prompt), prompt, 'returned_value')
+        return self._invoke(lambda client: client.prompt(prompt), prompt, 'returned_value')
 
 
 def current_metadata() -> dict[str, Any] | None:

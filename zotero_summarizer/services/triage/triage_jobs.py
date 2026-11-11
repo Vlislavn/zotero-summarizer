@@ -12,6 +12,7 @@ from zotero_summarizer.domain import EXPLICIT_FEEDBACK_SIGNALS, feedback_verdict
 from zotero_summarizer.models import SummarizeRequest, TriageRunRequest, TriageRunResponse
 from zotero_summarizer.services.zotero import pending
 from zotero_summarizer.services.triage import summarization
+from zotero_summarizer.services.triage._plain_error import plain_error
 from zotero_summarizer.services.triage._execution import JobStopped, check_cancelled, run_blocking
 from zotero_summarizer.services._common import (
     LOGGER, build_log_prefix, effective_llm_concurrency, now_iso, settings, state,
@@ -132,7 +133,7 @@ async def _summarize_job_item(item_key: str, ctx: _TriageJobCtx) -> dict[str, An
         ctx.active_items[item_key] = title
         pdf_path = str(detail.get("pdf_path") or "")
         if not pdf_path:
-            raise ExtractionError("No local PDF attachment available for this item")
+            raise ExtractionError("This paper has no PDF attached in Zotero.")
 
         request = SummarizeRequest(
             title=title,
@@ -171,7 +172,7 @@ async def _summarize_job_item(item_key: str, ctx: _TriageJobCtx) -> dict[str, An
         return {"item_key": item_key, "cancelled": True}
     except Exception as exc:
         LOGGER.warning("Job %s failed item=%s", ctx.job_id, item_key, exc_info=True)
-        return {"item_key": item_key, "title": title, "ok": False, "error": str(exc) or type(exc).__name__}
+        return {"item_key": item_key, "title": title, "ok": False, "error": plain_error(exc)}
     finally:
         del ctx.active_items[item_key]
 
@@ -252,7 +253,7 @@ async def _run_job(job_id: str, item_keys: list[str], queue_changes: bool, stop:
     except Exception as exc:  # background job failure is exposed through persisted status
         LOGGER.exception("Triage job %s crashed", job_id)
         job["status"] = "failed"
-        job["errors"].append({"item_key": "job", "error": str(exc)})
+        job["errors"].append({"item_key": "job", "error": plain_error(exc)})
     finally:
         job["updated_at"] = now_iso()
         await _persist_job(job)

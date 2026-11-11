@@ -43,7 +43,7 @@ it('ignores an old paper save completion after the editor changes owner', async 
   await act(async () => { finish({ saved_offline: true }); });
   expect(screen.getByRole('textbox').value).toBe('Other draft');
   expect(onSaved).not.toHaveBeenCalled();
-  expect(screen.queryByText('Saved on this device — waiting to sync.', { exact: true })).toBeNull();
+  expect(screen.queryByText('Saved; it will be written to Zotero when the Mac is connected.', { exact: true })).toBeNull();
 });
 
 it('leaves failed-save text editable and does not call it acknowledged', async () => {

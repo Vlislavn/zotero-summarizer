@@ -256,7 +256,9 @@ The `.env` writer/bootstrap exception exists because paths must resolve before
 Model prefetch requires the shared online policy before changing offline flags or
 reading configuration/loading assets. Direct service and CLI calls refuse strict
 offline without clearing those flags; `prefetch-models --check` remains a separate
-nonloading inventory operation. Explicit online prefetch keeps its existing path.
+nonloading inventory operation (a missing Hugging Face cache directory reports nothing cached, not a traceback; the CLI refuses offline prefetch with a one-line `error:` and exit 2). Explicit online prefetch keeps its existing path.
+
+Doctor's `llm_inference` row says «Local model not tested (the app only tests models it started itself)» when every non-operational stage was refused before any prompt (`attempted` false with an admission receipt); any other failure stays «Inference failed for a configured stage». `calibrate` prints one progress line per paper and budget (`paper i/N at <chars> chars: <s> s`) to stderr via the orchestrator's `progress` callback.
 
 Gate asset targets carry the same immutable base/adapter revisions as the
 classifier loader. The cheap cache report checks that revision, not merely any

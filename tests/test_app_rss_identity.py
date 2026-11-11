@@ -220,7 +220,7 @@ def test_overlapping_tag_feeds_reuse_one_guid_row() -> None:
         rss_feed_id=b,
         item={"guid": "shared-story", "title": "Concrete agent post"},
     )
-    assert first == second and inserted is True and inserted_again is False
+    assert first == second and inserted == "inserted" and inserted_again == "updated"
     assert conn.execute("SELECT COUNT(*) FROM rss_items").fetchone()[0] == 1
 
 

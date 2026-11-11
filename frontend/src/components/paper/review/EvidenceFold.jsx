@@ -23,20 +23,23 @@ const CHANGED_TEXT = ['Review changed — re-run the review', 'The review change
 const UNAVAILABLE_TEXT = ['Quotes not available', 'Supporting quotes are not available for this review.'];
 
 const WORDS = (text) => new Set((String(text).toLowerCase().match(/[a-z0-9][a-z0-9.%-]{3,}/g) || []));
+// Front matter and licence lines ("CC-BY 4.0 International licence", "bioRxiv preprint doi…", e-mails)
+// are never the sentence to show for a finding.
+const BOILERPLATE = /@|\bCC[- ]BY\b|creative commons|\ball rights reserved\b|\bcopyright\b|\(c\)|©|made available under|\bpreprint\b.*\bdoi\b|\bdoi\.org\b|\bhas not been certified by peer review\b|\bthe copyright holder\b|\bbiorxiv\b|\bmedrxiv\b/i;
 const SENTENCE_BREAK = /(?<=[.!?])\s+(?=[A-Z0-9“"[(])/;
 
 // Presentation only: the stored passage is a ~1200-char verifier chunk. Show the
-// sentence best matching the claim (word overlap, front matter with e-mails last)
+// sentence best matching the claim (word overlap, front matter / licence lines last)
 // ±1 neighbour; the whole passage stays one click away. Verbatim, deterministic.
 function bestWindow(passage, claim) {
   const sentences = passage.split(SENTENCE_BREAK);
   const want = WORDS(claim);
   const scores = sentences.map((x) => {
     const words = WORDS(x);
-    return [...want].filter((w) => words.has(w)).length - (x.includes('@') ? 100 : 0);
+    return [...want].filter((w) => words.has(w)).length - (BOILERPLATE.test(x) ? 100 : 0);
   });
   const best = scores.indexOf(Math.max(...scores));
-  const keep = (i) => i === best || !sentences[i].includes('@');  // never pull in front matter as context
+  const keep = (i) => i === best || !BOILERPLATE.test(sentences[i]);  // never pull in front matter as context
   let from = best;
   let to = best + 1;
   if (best > 0 && keep(best - 1)) from = best - 1;

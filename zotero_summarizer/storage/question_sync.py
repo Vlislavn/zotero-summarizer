@@ -45,6 +45,15 @@ def apply(conn, request):
             "previous": {"value": None if created else row}, "canonical": {"value": row}}
 
 
+def save_committed(db_path, payload):
+    """Persist or replay one immutable question in its own short writer transaction."""
+    with closing(_connect_to(db_path)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row, _created = review_questions.save(conn, payload)
+        conn.commit()
+    return row
+
+
 def list_for_paper(db_path, item_key):
     with closing(_connect_to(db_path)) as conn:
         return review_questions.list_for_paper(conn, item_key)

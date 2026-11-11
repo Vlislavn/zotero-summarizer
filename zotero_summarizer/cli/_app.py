@@ -92,6 +92,11 @@ def _prefetch_models(args: argparse.Namespace) -> int:
     if args.check:
         print(json.dumps(asset_report(settings), indent=2))
         return 0
+    from zotero_summarizer.settings import offline_requested
+
+    if offline_requested():
+        print("error: cannot prefetch models in offline mode; use --check for cache inventory", file=sys.stderr)
+        return 2
     print("Prefetching local ML assets (downloads on first run)…", flush=True)
     print(json.dumps(prefetch_assets(settings), indent=2))
     return 0

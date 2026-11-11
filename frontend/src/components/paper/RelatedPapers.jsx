@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { fetchRelatedPapers, assessRelatedPapers, fetchDiscovery, findNewRelevant } from '../../api/libraryApi.js';
 
+export const COMMENT_CHECK_TOO_LARGE = "The comment check was too large for the model's input limit; showing title/abstract matches only.";
 const COMMENTS_LABEL = { available: 'Has your comments', empty: 'No comments' };
 const SOURCE_BASIS = { abstract_only: 'Matched on abstract only', title_only: 'Matched on title only',
   metadata_only_model_judgment: 'Judged from title and abstract' };
@@ -115,8 +116,10 @@ export default function RelatedPapers({ itemKey, heading = true }) {
         : data.assessment_status === 'assessed' ? 'Found by title and abstract. The model reported no use of your comments.'
           : 'Found by title and abstract only. Comments were not used.'}</p>
       {outdated && <p role="status">Context changed; the previous assessment is stale. Showing metadata results.</p>}
-      {data.assessment_status && <p role="status">Comment assessment: {data.assessment_status}.
-        {data.assessment_status !== 'assessed' && ' Showing metadata results, not a successful comment assessment.'}</p>}
+      {data.assessment_status === 'budget_exceeded'
+        ? <p role="status">{COMMENT_CHECK_TOO_LARGE}</p>
+        : data.assessment_status && <p role="status">Comment assessment: {data.assessment_status}.
+          {data.assessment_status !== 'assessed' && ' Showing metadata results, not a successful comment assessment.'}</p>}
       {assessment.isPending && <p role="status">Assessing comments… Repeated requests share persisted work.</p>}
       {assessment.error && <p role="alert">Comment assessment unavailable: {assessment.error.message}</p>}
       <button type="button" className="mt-2 text-forest underline disabled:opacity-50" onClick={run}

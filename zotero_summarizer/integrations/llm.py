@@ -6,6 +6,10 @@ from typing import Any, Protocol
 
 LOGGER = logging.getLogger("zotero_summarizer.llm")
 
+# One-shot recovery from finish_reason=length doubles the reply budget, never above this
+# (a conservative cap every current chat provider accepts; a larger declared budget is left alone).
+OUTPUT_RETRY_CEILING = 32768
+
 
 def build_response_format(model: type) -> dict[str, Any]:
     """Decoder-level schema constraint, only for providers declaring support."""
@@ -30,8 +34,11 @@ class InstrumentedLLMClient:
 
     def __init__(self, inner: LLMClient, *, structured_output: bool = False,
                  verification_guard: Any = None, owned_transport: Any = None,
-                 before_request: Any = None) -> None:
+                 before_request: Any = None, max_tokens: int | None = None,
+                 rebuild: Any = None) -> None:
         self._inner = inner
+        self.max_tokens = max_tokens
+        self._rebuild = rebuild
         self._structured_output = structured_output
         self._verification_guard = verification_guard
         self._owned_transport = owned_transport
@@ -41,6 +48,14 @@ class InstrumentedLLMClient:
         if self._owned_transport is not None:
             self._owned_transport.close()
             self._owned_transport = None
+
+    def with_larger_output(self) -> InstrumentedLLMClient | None:
+        """Sibling client with a doubled, bounded reply budget and otherwise identical settings
+        (caller closes it); ``None`` when the budget is unknown, unrebuildable or at the ceiling."""
+        if self._rebuild is None or not self.max_tokens:
+            return None
+        larger = min(self.max_tokens * 2, OUTPUT_RETRY_CEILING)
+        return self._rebuild(larger) if larger > self.max_tokens else None
 
     @contextmanager
     def _verification(self, prompt, kwargs):

@@ -108,6 +108,7 @@ source checkout; it never guesses a developer checkout location.
 (`build_llm`: OpenAI-compatible client via OnPrem — threads the
 configured request timeout and per-provider `temperature` (default 0, deterministic);
 registers the completion guard before OnPrem discards finish reason/token usage;
+non-verification clients keep a `rebuild` closure so `with_larger_output()` can build a same-settings sibling with a doubled reply budget;
 `build_pdf_extractor`.
 All LLM clients are constructed through `services/llm/factory`, which calls
 `build_llm` for `openai`-type providers. Its `resolve_stage_client(runtime_state,

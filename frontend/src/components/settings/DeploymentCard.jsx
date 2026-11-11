@@ -128,7 +128,7 @@ export function DoctorChecklist() {
 
       {(mutation.isError || cancellation.isError) && <Banner kind="error">{humanizeError(mutation.error || cancellation.error)}</Banner>}
       {data?.attempt?.ownership === 'unresolved' && <p role="status" className="text-sm text-amber-800">
-        Verification stopped. Callback or remote termination is not established; no Ready result was accepted.
+        Verification stopped before the model confirmed it had finished, so setup is not marked Ready. Run Verify setup again when the model is idle.
       </p>}
       <div className="flex flex-wrap gap-3 items-center">
         <Button type="button" variant="secondary" onClick={() => mutation.mutate(null)} disabled={running}>

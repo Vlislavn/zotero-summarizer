@@ -10,8 +10,8 @@ beforeEach(() => { mocks.saveReviewNote.mockReset().mockResolvedValue({ saved: t
 afterEach(cleanup);
 
 it.each([
-  [true, false, null, 'P1', 'Zotero note delivery: acknowledged (revision 7).'],
-  [false, true, 'target_unavailable', null, 'Zotero note delivery: pending (revision 7) — target_unavailable.'],
+  [true, false, null, 'P1', 'Saved to Zotero.'],
+  [false, true, 'target_unavailable', null, 'Saved; it will be written to Zotero when the Mac is connected.'],
 ])('renders one composite delivery receipt for the question list (%s)', (written, pending, error, target, text) => {
   render(<ReviewNotes itemKey="P1" questions={[
     { submission_id: 'q1', question: 'First question' },
@@ -91,10 +91,10 @@ it('keeps device-save confirmation factual across refresh without owning live sy
   fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Device manual body' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-  expect(await screen.findByText('Saved on this device.', { exact: true })).toBeTruthy();
+  expect(await screen.findByText('Saved; it will be written to Zotero when the Mac is connected.', { exact: true })).toBeTruthy();
   expect(mocks.saveReviewNote).toHaveBeenCalledWith({ item_key: 'P1', note: 'Device manual body' });
   rerender(<ReviewNotes itemKey="P1" initialNote="Device manual body" />);
-  expect(screen.getByText('Saved on this device.', { exact: true })).toBeTruthy();
+  expect(screen.getByText('Saved; it will be written to Zotero when the Mac is connected.', { exact: true })).toBeTruthy();
   expect(screen.getByRole('textbox').value).toBe('Device manual body');
   expect(screen.getByRole('button', { name: 'Save' }).disabled).toBe(true);
 });

@@ -14,7 +14,7 @@ const BAND_LABEL = {
   must_read: 'must',
   should_read: 'should',
   could_read: 'could',
-  dont_read: "don't",
+  dont_read: 'Not interested',
 };
 
 export default function ScoreHistogram({ distribution, onBandClick = null, activeBands = [] }) {

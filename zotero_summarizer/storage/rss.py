@@ -165,7 +165,11 @@ def upsert_rss_item(
     *,
     rss_feed_id: int,
     item: dict[str, Any],
-) -> tuple[int, bool]:
+) -> tuple[int, str]:
+    """Store one feed item; returns ``(id, "inserted" | "updated" | "unchanged")``.
+
+    An existing row is rewritten only when the incoming content differs from what is stored
+    (a missing incoming value keeps the old one), so re-fetching an identical feed is a no-op."""
     stable = str(item.get("stable_feed_key") or stable_feed_key_from_item(item) or "").strip()
     if not stable:
         raise ValueError("rss item has no stable feed key")
@@ -174,6 +178,7 @@ def upsert_rss_item(
         "SELECT id FROM rss_items WHERE stable_feed_key = ?",
         (stable,),
     ).fetchone()
+    changes_before = conn.total_changes
     conn.execute(
         """
         INSERT INTO rss_items (
@@ -199,6 +204,20 @@ def upsert_rss_item(
             raw_json = COALESCE(excluded.raw_json, rss_items.raw_json),
             fetched_at = datetime('now'),
             updated_at = datetime('now')
+        WHERE rss_items.rss_feed_id IS NOT excluded.rss_feed_id
+           OR rss_items.title IS NOT excluded.title
+           OR rss_items.item_type IS NOT excluded.item_type
+           OR (excluded.guid IS NOT NULL AND rss_items.guid IS NOT excluded.guid)
+           OR (excluded.entry_id IS NOT NULL AND rss_items.entry_id IS NOT excluded.entry_id)
+           OR (excluded.abstract IS NOT NULL AND rss_items.abstract IS NOT excluded.abstract)
+           OR (excluded.url IS NOT NULL AND rss_items.url IS NOT excluded.url)
+           OR (excluded.canonical_url IS NOT NULL AND rss_items.canonical_url IS NOT excluded.canonical_url)
+           OR (excluded.doi IS NOT NULL AND rss_items.doi IS NOT excluded.doi)
+           OR (excluded.arxiv_id IS NOT NULL AND rss_items.arxiv_id IS NOT excluded.arxiv_id)
+           OR (excluded.publication_date IS NOT NULL AND rss_items.publication_date IS NOT excluded.publication_date)
+           OR (excluded.publication_title IS NOT NULL AND rss_items.publication_title IS NOT excluded.publication_title)
+           OR (excluded.authors IS NOT NULL AND rss_items.authors IS NOT excluded.authors)
+           OR (excluded.raw_json IS NOT NULL AND rss_items.raw_json IS NOT excluded.raw_json)
         """,
         (
             int(rss_feed_id),
@@ -224,7 +243,8 @@ def upsert_rss_item(
     ).fetchone()
     if row is None:
         raise RuntimeError(f"rss_items upsert failed for {stable!r}")
-    return int(row["id"]), before is None
+    state = "inserted" if before is None else "updated" if conn.total_changes > changes_before else "unchanged"
+    return int(row["id"]), state
 
 
 def list_rss_items(

@@ -591,6 +591,11 @@ function sharedWordFrame(prefix, texts, rubric) {
   return null;
 }
 
+// A shared opening is a heading only when each remainder reads on its own; "The judge model used"
+// + "for direct-framing…" is a sentence cut in half, so such a group is shown in full instead.
+const DANGLING_START = /^(for|of|to|in|on|at|by|as|with|from|into|and|or|but|that|which|than|the|a|an)$/i;
+const readsOnItsOwn = (prefix, text) => !DANGLING_START.test(text.slice(prefix.length).trim().split(/\s+/)[0] || '');
+
 function CritiqueViews({ flags, locations, rubric }) {
   const groups = [];
   for (const text of flags) {
@@ -600,6 +605,12 @@ function CritiqueViews({ flags, locations, rubric }) {
       previous.prefix = prefix;
       previous.texts.push(text);
     } else groups.push({ prefix: text, texts: [text] });
+  }
+  for (let i = groups.length - 1; i >= 0; i--) {
+    const { prefix, texts } = groups[i];
+    if (texts.length > 1 && !texts.every(text => readsOnItsOwn(prefix, text))) {
+      groups.splice(i, 1, ...texts.map(text => ({ prefix: text, texts: [text] })));
+    }
   }
   const link = text => {
     const section = locations?.get(text);

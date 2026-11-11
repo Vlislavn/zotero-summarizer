@@ -62,7 +62,7 @@
 | ☐ TODAY-10 ✍ | карточка | Найти карточку с «Outdated review» → **Regenerate**. | Бейдж «Outdated review · regenerating…»; после — актуальный review; при выключенном ИИ — «AI not connected (Settings)». | | |
 | ☐ TODAY-11 | меню «Today task settings» | Открыть **Article selection**, **RSS sources**, **Telegram today**. | Каждая ведёт в свою задачу (`?task=selection`/`rss`, Weekly). Неверный `?task=` → «Today task not found» + «Back to Today». | | |
 | ☐ TODAY-12 | Today (пустой/ошибка) | Пустой shortlist; недоступный статус. | «No papers in today’s shortlist yet.» + пути «New shortlist» / «Triage backlog»; ошибки читаемые, не молчаливые. | | |
-| ☐ TODAY-13 ✍ | Today → «Triage backlog» | Запустить; смотреть статус «Checking triage status…». | Идёт прогресс; можно оставить страницу; Ops → Triage jobs видит job. | | |
+| ☐ TODAY-13 ✍ | Today → «Triage backlog» | Запустить; смотреть статус «Checking triage status…». | Идёт прогресс в собственной строке статуса на Today; можно оставить страницу и вернуться (Ops → Triage jobs этот запуск не показывает). | | |
 | ☐ TODAY-14 | `data/today-exposure/` | После просмотра открыть файл дня. | Локальный `.jsonl` с показанными статьями/временем/ссылками; `ZS_TODAY_EXPOSURE_LOG=0` отключает. | | |
 
 ## 3. Страница статьи `/paper/:key`
@@ -120,7 +120,7 @@
 | ☐ WEEK-02 | «Choose a saved run» (FEATURE-09, #12) | Выбрать run, раскрыть карточку, «Download canonical JSON» / «Download Markdown». | Показан именно этот run; файлы совпадают с сохранённым; «Needs a current review / full text» явно. | | |
 | ☐ WEEK-03 | карточка digest | Раскрыть «Project use», «Why chosen», «Evidence gaps», «Missing reproduction inputs». | Совпадения с проектом — непроверенные заметки; неизвестное не превращено в сроки. | | |
 | ☐ WEEK-04 🔌 | Weekly → «Telegram sources» (`?task=telegram`) | «Add Telegram source», «Save Telegram sources»; выбрать локального провайдера. | Каналы/группы/топики сохраняются; без модели — режим «No summary»; до ~30 каналов. | | |
-| ☐ WEEK-05 🔌 | «Allow & check channels» | Один раз разрешить («Allowed.»), затем «Check channels». «Revoke permission». | Фоновая задача с этапами; новые посты появляются по окончании; согласие отзывается. | | |
+| ☐ WEEK-05 🔌 | «Allow & check channels» | Один раз разрешить («Allowed.»), затем «Check channels». Отзыв — снять флажок «Allow reading these channels when I press “Check channels”» на странице Sources. | Фоновая задача с этапами; новые посты появляются по окончании; согласие отзывается. | | |
 | ☐ WEEK-06 🔌 | страница сессии | «Copy command» → `research-feed telegram-auth` в терминале. | Команда копируется («Copied»); приложение не вступает в чаты и не пишет. | | |
 | ☐ WEEK-07 🔌 | «Trends» | Посмотреть топ-5; «Show all N trends» / «Show fewer trends». | Метка, gist, идеи/инструменты, маркер new/growing, ссылки на посты. | | |
 | ☐ WEEK-08 🔌 | карточки постов | Раскрыть строки обсуждения и **Disagreement**; «Details», «Continues …». | Строка цитирует точные комментарии; «Disagreement» только если найден; комментарии грузятся по тапу. | | |

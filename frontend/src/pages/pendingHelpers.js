@@ -2,6 +2,8 @@
 // the per-page LOC budget. No React here — only payload parsing, draft
 // construction, and presentational utilities for queued Zotero changes.
 
+import { formatWhen } from '../utils/stepModelStatus.js';
+
 export const UNBOUND_GENERATED_TARGET_MESSAGE = 'This note has no Zotero target. Reject it or regenerate the review.';
 
 export function hasUnboundGeneratedTarget(change) {
@@ -26,6 +28,31 @@ export function hasApprovalPreview(change) {
 export function approvalPreviews(changes) {
   if (!changes.length || !changes.every(hasApprovalPreview)) return null;
   return Object.fromEntries(changes.map((change) => [change.id, change.approval_preview.preview_sha256]));
+}
+
+// Server times are UTC, either ISO or SQLite's "YYYY-MM-DD HH:MM:SS"; show them in the reader's zone as "11 Nov, 05:59".
+export function localTime(value) {
+  const raw = String(value || '').trim();
+  const iso = /^\d{4}-\d\d-\d\d \d\d:\d\d(:\d\d)?$/.test(raw) ? `${raw.replace(' ', 'T')}Z` : raw;
+  return formatWhen(iso) || raw;
+}
+
+// Identical queued rows for one paper (same type and visible summary) are re-queued versions of the same
+// change: the newest (the API lists newest first) stays visible, older pending ones fold behind a disclosure.
+export function collapseStaleChanges(changes) {
+  const rows = [];
+  const byKey = new Map();
+  for (const change of changes) {
+    const key = change.status === 'pending' ? `${change.change_type}|${changeSummary(change)}` : null;
+    const head = key && byKey.get(key);
+    if (head) head.older.push(change);
+    else {
+      const row = { change, older: [] };
+      rows.push(row);
+      if (key) byKey.set(key, row);
+    }
+  }
+  return rows;
 }
 
 export const STATUS_TABS = [

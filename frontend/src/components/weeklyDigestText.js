@@ -32,13 +32,22 @@ const GAPS = {
 };
 const SNAKE = /^[a-z0-9]+(?:_[a-z0-9]+)+$/;
 
+export const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// «dataset_provenance» → «Dataset provenance»; real text passes through.
+export function humanKey(value) {
+  const text = String(value ?? '').trim();
+  if (!SNAKE.test(text)) return text;
+  const spaced = text.replace(/_/g, ' ');
+  return `${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}`;
+}
+
 // «weak_evidence» → a sentence; an unknown snake_case token is at least spelled out; real sentences pass through.
 export function plainReason(value) {
   const text = String(value ?? '').trim();
   if (GAPS[text]) return GAPS[text];
   if (!SNAKE.test(text)) return text;
-  const spaced = text.replace(/_/g, ' ');
-  return `${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}.`;
+  return `${humanKey(text)}.`;
 }
 
 const GATE = /^Predicted by classifier gate/;

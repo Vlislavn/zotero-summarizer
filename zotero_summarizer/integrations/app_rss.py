@@ -293,9 +293,9 @@ class AppRssReader:
             item = _entry_to_item(entry, feed=feed, feed_title=title)
             if not item.get("stable_feed_key"):
                 continue
-            _, was_inserted = rss_storage.upsert_rss_item(conn, rss_feed_id=int(feed["id"]), item=item)
-            inserted += int(was_inserted)
-            updated += int(not was_inserted)
+            _, state = rss_storage.upsert_rss_item(conn, rss_feed_id=int(feed["id"]), item=item)
+            inserted += state == "inserted"
+            updated += state == "updated"
             newest = max(newest, rss_paging.entry_time(entry))
         rss_storage.record_rss_fetch_result(conn, int(feed["id"]), error=warning,
                                            etag=headers.get("etag"), modified=headers.get("last-modified"),

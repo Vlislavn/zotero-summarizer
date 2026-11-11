@@ -299,13 +299,14 @@ def tier2_calibrate(
     per_budget: dict[int, dict[str, Any]] = {}
     for budget in budgets:
         comps, secs = [], []
-        for title, text in papers:
+        for index, (title, text) in enumerate(papers, 1):
             digest, elapsed = run_digest(title, text, budget)
             comps.append(digest_completeness(digest))
             secs.append(elapsed)
             done += 1
             if progress is not None:
-                progress({"phase": f"reviewed {done}/{total} (budget {budget} chars)",
+                progress({"phase": f"paper {index}/{len(papers)} at {budget} chars: {elapsed:.0f} s "
+                                   f"(step {done}/{total})",
                           "completed": done, "total": total})
         per_budget[budget] = {"completeness_mean": round(mean(comps), 3),
                               "secs_mean": round(mean(secs), 1), "n": len(papers)}

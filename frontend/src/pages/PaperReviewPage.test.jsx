@@ -33,7 +33,7 @@ it('keeps Generate disabled and does not claim a review failed on an offline rel
 
   expect((await screen.findByRole('button', { name: 'Generate review' })).disabled).toBe(true);
   expect(document.querySelector('main').parentElement.className).toContain('xl:grid-cols-[11rem_minmax(0,1fr)_20rem]');
-  await screen.findByText(/Offline — cached reviews remain readable/);
+  await screen.findByText(/You are offline — AI review needs the Mac/);
   expect(screen.queryByText(/Review failed/)).toBeNull();
   client.clear();
 });
@@ -435,7 +435,7 @@ it.each(['failed', 'abstained'])('captures a question without PDF/render through
     ]));
     expect(screen.getByRole('textbox', { name: 'Question about this paper' })).toBe(input);
     expect(notes.value).toBe('Dirty manual draft');
-    expect(screen.queryByText(/Zotero note delivery: acknowledged/)).toBeNull();
+    expect(screen.queryByText('Saved to Zotero.')).toBeNull();
     expect(unexpected).toEqual([]);
   } finally { client.clear(); router.dispose(); }
 });

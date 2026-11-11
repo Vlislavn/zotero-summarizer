@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { saveReviewNote } from '../../../api/goldenApi.js';
-import { noteDeliveryText } from '../../../hooks/useNoteDelivery.js';
+import { noteDeliveryText, QUEUED_FOR_ZOTERO } from '../../../hooks/useNoteDelivery.js';
 import { SectionLabel } from './primitives.jsx';
 
 export default function ReviewNotes({ itemKey, initialNote = '', questions = [], questionMirror, onMirrorStart, onSaved, onDirtyChange }) {
@@ -40,7 +40,7 @@ export default function ReviewNotes({ itemKey, initialNote = '', questions = [],
       setDraft((previous) => ({ ...previous, baseline: savedNote }));
       reportMirror?.(res.saved_offline ? null : res);
       if (res.saved_offline) {
-        setStatus({ tone: 'soft', text: 'Saved on this device.' });
+        setStatus({ tone: 'soft', text: QUEUED_FOR_ZOTERO });
       } else if (res.note_written) {
         setStatus({ tone: 'ok', text: 'Saved to the app and Zotero.' });
       } else if (res.note_error) {
@@ -71,10 +71,9 @@ export default function ReviewNotes({ itemKey, initialNote = '', questions = [],
             <li key={row.submission_id} className="break-words [overflow-wrap:anywhere]">
               <p>{row.question}</p>
               <span className="text-xs text-slate-500">
-                {row.saved_offline
-                  ? `Saved on this device — ${row.sync_status === 'rejected' ? 'sync rejected'
-                    : row.sync_status === 'conflict' ? 'sync conflict' : 'waiting to sync'}`
-                  : 'Saved question'}
+                {!row.saved_offline ? 'Saved question'
+                  : row.sync_status === 'rejected' ? 'Saved on this device — sync rejected'
+                    : row.sync_status === 'conflict' ? 'Saved on this device — sync conflict' : QUEUED_FOR_ZOTERO}
               </span>
             </li>
           ))}

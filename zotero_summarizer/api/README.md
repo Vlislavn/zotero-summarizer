@@ -15,7 +15,7 @@ errors.py  ── APIError -> uniform JSON error body + handlers
 | file | responsibility |
 |---|---|
 | `app.py` | `create_app()` factory — wiring, SPA/assets/PWA-public-file mount, exception handlers, lifespan (no import-time app; uvicorn uses `app:create_app` with `factory=True`). The lifespan runs `setup.bootstrap.bootstrap_phase0` (idempotent first-run seed of `goals.yaml` etc., never overwrites) **before** `lifecycle.startup`, which fails fast on a missing config. |
-| `errors.py` | `APIError` + the canonical error schema and FastAPI handlers |
+| `errors.py` | `APIError` + the canonical error schema and FastAPI handlers; sqlite «database is locked» → 503 `database_busy` + `Retry-After` (plain message; the client retries replay-safe calls quietly ≤2×) |
 | `local_access.py` / `mobile_access.py` | Whole-app local admission or explicit exact-owner/TLS-metadata gateway policy; fixed errors/canonical redirects. Private Unix refuses TCP. Opt-in `trusted_loopback_port` admits only the exact 127.0.0.1 server port and loopback peer, consciously trusting local processes. |
 | `routes/` | one module per resource (see routes/README.md) |
 

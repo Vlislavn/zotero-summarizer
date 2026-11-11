@@ -1,4 +1,8 @@
 import Button from '../ui/Button.jsx';
+import { when } from '../telegramRunText.js';
+
+// The server stores UTC as «2026-11-09 11:07:48» (SQLite) or ISO; show local «9 Nov, 11:07».
+const checkedAt = (value) => when(/[zZ]|[+-]\d\d:?\d\d$/.test(value) ? value : `${value.replace(' ', 'T')}Z`);
 
 // One compact RSS subscription row: name, where/when/how much, Edit; Delete lives
 // behind a "More" menu (never a red button on every row) and still asks to confirm.
@@ -40,7 +44,7 @@ export default function RssFeedRow({ feed, disabled, onEdit, onDelete }) {
     </div>
     <p className="text-xs text-slate-600 flex flex-wrap gap-x-3">
       {!feed.enabled && <span className="font-medium">Disabled</span>}
-      <span>{feed.last_fetched_at ? `Last checked: ${feed.last_fetched_at}` : 'Not refreshed yet'}</span>
+      <span>{feed.last_fetched_at ? `Last checked: ${checkedAt(feed.last_fetched_at)}` : 'Not refreshed yet'}</span>
       {Boolean(feed.fetch_incomplete) && <span className="font-medium text-amber-800" title="The source cut the response off before the confirmed boundary; the rest is read on the next refresh.">Incomplete fetch</span>}
       {Number.isInteger(feed.item_count) && <span>{feed.item_count} item{feed.item_count === 1 ? '' : 's'}</span>}
     </p>
