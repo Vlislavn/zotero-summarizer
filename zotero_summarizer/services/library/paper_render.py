@@ -23,6 +23,7 @@ from zotero_summarizer.services.library import (
     _paper_read_meta,
     _paper_read_pdf,
     _paper_read_tex,
+    _feed_assessment,
     deep_review,
 )
 from zotero_summarizer.services.library._paper_read_meta import qa_body_text  # re-exported
@@ -137,11 +138,10 @@ def _pdf_for_item_or_acquire(item_key: str, *, allow_acquire_missing: bool) -> t
     except APIError as exc:
         if exc.error != "needs_pdf":
             raise
-        saved = _read_state(item_key)
-        if saved and saved.get("acquired_pdf"):
-            cached = _allowed_paper_path(saved.get("pdf_path"))
-            if cached.is_file():
-                return cached, {**detail, "pdf_path": str(cached), "has_pdf": True, "acquired_pdf": True}
+        saved = _read_state(item_key) or {}  # a feed paper: the PDF its own render or full-text review read
+        cached = saved.get("pdf_path") if saved.get("acquired_pdf") else _feed_assessment.reviewed_pdf_path(item_key)
+        if cached and (cached := _allowed_paper_path(cached)).is_file():
+            return cached, {**detail, "pdf_path": str(cached), "has_pdf": True, "acquired_pdf": True}
         if not allow_acquire_missing:
             raise
 

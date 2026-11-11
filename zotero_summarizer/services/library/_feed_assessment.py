@@ -223,6 +223,17 @@ def current_review(key, *, config=None):
     return entry
 
 
+def reviewed_pdf_path(key):
+    """The acquired PDF a current feed review read (not in Zotero), or None."""
+    if not str(key or "").startswith("feed:"):
+        return None
+    try:
+        review = current_review(key)
+    except (ValueError, FileNotFoundError):
+        return None
+    return ((review or {}).get("review_identity") or {}).get("source_path")
+
+
 def _sha256(value):
     return type(value) is str and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
 

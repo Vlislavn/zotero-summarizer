@@ -17,6 +17,7 @@ export default function ActionRail({
   onNoteSaved = () => {}, onNotesDirtyChange = () => {}, serverAvailable = false,
 }) {
   const remoteAllowed = serverAvailable && !detail.offline_snapshot;
+  const inZotero = !String(itemKey || '').startsWith('feed:'); // feed papers have no Zotero item to tag or file
   const { questionMirror, beginNoteDelivery } = useNoteDelivery(itemKey, detail.user_note || '', detail.questions || []);
   return (
     <div className="space-y-5">
@@ -44,7 +45,8 @@ export default function ActionRail({
         />
       </div>
       {detail.offline_snapshot && <p className="text-xs text-slate-500">Compact synced context; collection and tag state needs the Mac.</p>}
-      {!detail.offline_snapshot && <fieldset disabled={!remoteAllowed} className="space-y-5 min-w-0">
+      {!detail.offline_snapshot && !inZotero && <p className="text-xs text-slate-500">Not in your Zotero library yet — add it to file or tag it.</p>}
+      {!detail.offline_snapshot && inZotero && <fieldset disabled={!remoteAllowed} className="space-y-5 min-w-0">
       <div className="border-t border-slate-200/60 pt-4">
         <CollectionEditor
           itemKey={itemKey}
