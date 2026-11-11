@@ -105,7 +105,7 @@ Product behavior: [docs/features.md](../../docs/features.md); placement: [docs/a
 - Browser egress (`_browser_network.public_browser_options`): a session-scoped loopback HTTP/CONNECT proxy,
   authenticated with a random ephemeral secret, reuses the public-address resolver and connects only to the validated
   numeric destination (≤32 concurrent connections; a burst beyond that queues ≤15 s for a free slot, a still-unserved
-  connection is dropped and retried by the browser, never failing the session; closes with the browser; not an app endpoint). No DIRECT fallback; implicit
+  connection is dropped and retried by the browser, never failing the session; a connection reset or broken pipe on a tunnel is not a session error (any other handler error, e.g. a refused non-public destination, still raises at session exit); closes with the browser; not an app endpoint). No DIRECT fallback; implicit
   localhost bypass, QUIC and non-proxied WebRTC UDP are disabled; CONNECT preserves origin TLS and cookies. Metadata
   PDF links are validated before navigation (non-HTTP schemes rejected). An unresolved proxy hostname returns 502 for
   that request; an initial article DNS failure raises; non-public addresses stay blocked. Only the exact session proxy

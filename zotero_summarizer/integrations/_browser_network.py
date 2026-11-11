@@ -121,8 +121,10 @@ class _Proxy(ThreadingHTTPServer):
     def handle_error(self, request, client_address):
         # socketserver dispatches on worker threads; rethrow on the calling thread
         # at session exit, before the caller can publish a successful PDF.
-        if not self.errors:
-            self.errors.append(sys.exception())
+        # A peer or the browser closing a tunnel is routine and must not discard a capture.
+        error = sys.exception()
+        if not self.errors and not isinstance(error, (ConnectionResetError, BrokenPipeError)):
+            self.errors.append(error)
 
 
 @contextmanager

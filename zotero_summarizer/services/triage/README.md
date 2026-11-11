@@ -31,7 +31,7 @@ when `university_access.headless`), then the existing `deep_review` worker (star
 was found. A failing key is not retried in the same process. It runs in whichever
 process ticks (the API's triage button or `feeds serve`); a one-shot `feeds tick`
 exits after at most the paper in flight. `status` derives `ready`/`left` from the
-cache; `running` is process-local. Ranking only orders the work; `daily_select`
+cache, skipping keys that failed in this process (not counted as «still being analyzed»); `running` is process-local. Ranking only orders the work; `daily_select`
 decides what Today shows. One `GET /api/daily` runs inside `runtime.request_memo`:
 review currentness (`deep_review.current_reviews`) and the filtered unhandled pool
 are computed once and shared by the slate, `status` and the header count.
