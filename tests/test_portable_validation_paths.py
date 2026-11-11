@@ -20,18 +20,20 @@ class PortableValidationPathsTest(unittest.TestCase):
             with patch.dict("os.environ", {"HOME": str(home)}), patch.object(
                 sysconfig, "get_paths", return_value={"purelib": str(site)}
             ):
+                mismatches = []
                 for filename, name in cases:
-                    with self.subTest(filename=filename, constant=name):
-                        path = root / "tests" / filename
-                        tree = ast.parse(path.read_text())
-                        definitions = [node for node in tree.body if isinstance(node, ast.Assign)
-                                       and any(isinstance(target, ast.Name) and target.id == name
-                                               for target in node.targets)]
-                        self.assertEqual(len(definitions), 1)
-                        actual = eval(compile(ast.Expression(definitions[0].value), str(path), "eval"),
-                                      {"Path": Path, "sysconfig": sysconfig})
-                        self.assertEqual(actual, site if name == "SITE" else transport)
-
+                    path = root / "tests" / filename
+                    tree = ast.parse(path.read_text())
+                    definitions = [node for node in tree.body if isinstance(node, ast.Assign)
+                                   and any(isinstance(target, ast.Name) and target.id == name
+                                           for target in node.targets)]
+                    self.assertEqual(len(definitions), 1, f"{filename}: {name}")
+                    actual = eval(compile(ast.Expression(definitions[0].value), str(path), "eval"),
+                                  {"Path": Path, "sysconfig": sysconfig})
+                    expected = site if name == "SITE" else transport
+                    if actual != expected:  # collected, not subTest: pytest --forked hides subtest failures
+                        mismatches.append((filename, name, str(actual), str(expected)))
+                self.assertEqual(mismatches, [])
 
 if __name__ == "__main__":
     unittest.main()
