@@ -16,6 +16,7 @@ import { ErrorBanner, StatusBanner } from '../components/library/shared.jsx';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import useTodayVisit from '../hooks/useTodayVisit.js';
 import { memberPresentation, preparationText } from '../utils/todayVisit.js';
+import { formatWhen } from '../utils/stepModelStatus.js';
 import { feedLabel } from '../utils/feedText.js';
 import { triggerTriageBacklog, getTriageStatus } from '../api/dailyApi.js';
 
@@ -50,6 +51,24 @@ export default function Today() {
   const llmEnabled = status?.llm?.enabled !== false;
   const preparation = view.visit?.preparation;
   const preparing = preparationText(preparation);
+
+  // New shortlist outcome: compare member ids before/after on the client (the call itself is a re-rank).
+  const [renewal, setRenewal] = useState(null);
+  const [renewResult, setRenewResult] = useState(null);
+  const startRenewal = () => {
+    setRenewResult(null);
+    setRenewal({ visitId: view.visit?.id, ids: new Set(members.map(member => member.paper.item_id)),
+      at: view.visit?.createdAt });
+    view.renew();
+  };
+  useEffect(() => {
+    if (!renewal) return;
+    if (view.selectionError) { setRenewal(null); return; }
+    if (!view.visit || view.visit.invalid || view.visit.id === renewal.visitId) return;
+    setRenewResult({ added: view.visit.members.filter(member => !renewal.ids.has(member.paper.item_id)).length,
+      since: formatWhen(renewal.at) });
+    setRenewal(null);
+  }, [renewal, view.visit, view.selectionError]);
 
   const triageStatusQuery = useQuery({
     queryKey: ['triage-status'], queryFn: getTriageStatus, enabled,
@@ -92,9 +111,10 @@ export default function Today() {
           : 'New papers from your feeds — decide what enters your library.'}
       </p>
       <div className="mt-3 flex items-center gap-2">
-        <button type="button" onClick={() => view.renew()} disabled={!view.canRenew}
-          className="min-h-11 flex-1 rounded-lg bg-forest-800 px-4 text-sm font-medium text-white hover:bg-forest-700 disabled:bg-slate-300 disabled:text-slate-100 sm:flex-none">
-          New shortlist
+        <button type="button" onClick={startRenewal} disabled={!view.canRenew} aria-busy={view.renewing}
+          className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-forest-800 px-4 text-sm font-medium text-white hover:bg-forest-700 disabled:bg-slate-300 disabled:text-slate-100 sm:flex-none">
+          {view.renewing && <Spinner size="xs" color="teal-on-fill" />}
+          {view.renewing ? 'Choosing papers…' : 'New shortlist'}
         </button>
         <button type="button" aria-expanded={showMore} aria-controls="today-more" onClick={() => setMoreOpen(!moreOpen)}
           className="inline-flex min-h-11 items-center gap-1 rounded-lg border border-slate-300 px-3 text-sm text-slate-700 hover:bg-slate-100">
@@ -116,6 +136,11 @@ export default function Today() {
         </nav>
       </div>
     </header>
+    {renewResult && !view.renewing && <p role="status" className="mb-3 text-xs text-slate-600">
+      {renewResult.added > 0
+        ? `New shortlist: ${renewResult.added} new ${renewResult.added === 1 ? 'paper' : 'papers'}`
+        : `Same papers — nothing new${renewResult.since ? ` since ${renewResult.since}` : ''}`}
+    </p>}
     <ErrorBanner error={view.selectionError} title="Selection failed — existing shortlist kept" />
     <ErrorBanner error={view.statusError} title="Member status unavailable — shortlist kept" />
     <ErrorBanner error={view.actionError} title="Action response unavailable — check each paper" />

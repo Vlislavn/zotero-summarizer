@@ -16,11 +16,14 @@ const withQuery = (ui) => (
 
 it('explains the no-LLM Add boundary while leaving the source readable', () => {
   render(withQuery(<MemoryRouter><PaperCard paper={{ item_id: 1, title: 'Offline paper',
-    stable_feed_key: 'feed:g:paper', composite_score: 3, review_ready: false }}
+    stable_feed_key: 'feed:g:paper', url: 'https://example.org/p', composite_score: 3, review_ready: false }}
     llmEnabled={false} selected={false} onToggleSelect={() => {}} /></MemoryRouter>));
   expect(screen.getByText(/AI review is off/)).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Enable AI' }).getAttribute('href')).toBe('/settings');
-  expect(screen.getByRole('link', { name: /Open full review/ })).toBeTruthy();
+  // The title opens the full review; the publisher page is one quiet «Source ↗» link.
+  expect(screen.getByRole('link', { name: 'Offline paper' }).getAttribute('href')).toBe('/paper/feed%3Ag%3Apaper');
+  expect(screen.getByRole('link', { name: /Source/ }).getAttribute('href')).toBe('https://example.org/p');
+  expect(screen.queryByRole('link', { name: /Open full review/ })).toBeNull();
   expect(screen.queryByText('Generate a review before adding.')).toBeNull();
 });
 

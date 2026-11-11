@@ -130,7 +130,7 @@ export function createTodayVisit(slate, previous) {
     seenKeys.add(paper.item_key);
     if (paper.stable_feed_key) seenKeys.add(paper.stable_feed_key);
   }
-  return { version: 1, id, members, preparation: slate.preparation ?? null, unreviewed: slate.unreviewed ?? [] };
+  return { version: 1, id, createdAt: new Date().toISOString(), members, preparation: slate.preparation ?? null, unreviewed: slate.unreviewed ?? [] };
 }
 
 // Preparation status captured with the shortlist; visits saved before it show none.

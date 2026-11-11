@@ -100,12 +100,16 @@ source tasks open with `?task=`; the old Settings hashes resolve through `LEGACY
   (title, source, ≤2 why chips, cached TL;DR bullets) → `/paper/<key>`; no verdict/Add controls.
 - Today page (#124): one ≤760 px reading column (the cards are a one-at-a-time cull queue, so no master/list);
   header = title + ONE Forest **New shortlist** + **More** (Refresh status, Triage backlog, Article selection,
-  RSS sources, Telegram today; it opens by itself while triage runs or fails). Card order: pills + *Open full
-  review* → headline → AI TL;DR + icons + who → ONE why line → verdict buttons → “more” (authors, venue,
+  RSS sources, Telegram today; it opens by itself while triage runs or fails). Card order: pills + quiet *Source ↗* → headline (a link to the full review at
+  `/paper/<key>`, feed or Zotero key) → AI TL;DR + icons + who → ONE why line → verdict buttons → “more” (authors, venue,
   abstract, icon legend, selection details). Verdict tints (`decisionVocab.js` `DECISION_TINT`): must Forest solid,
   should Sage, could Mint, skip hairline outline; the chosen one shows ✓ + Forest border. Buttons are compact
   content-sized pills grouped left (`DECISION_BTN`: 40 px on phones with a 44 px tap target via an invisible
   `::before`, 32 px on desktop) — the same look on the paper-page sticky bar and the rail's `VerdictPanel` edit row. Loading shows card skeletons.
+  **New shortlist** shows a pending state, then one result line under the header («N new papers» /
+  «Same papers — nothing new since <time>», client-side id compare; the visit stores `createdAt`); an outdated card's
+  *Regenerating · step · elapsed · #N in queue* reads the runner's 3 s status poll and flips to the new review when
+  the members refetch ends.
 - **Language rule (#127, supersedes #108):** the whole UI is English — chrome, buttons (`must/should/could/skip`,
   `Undo`), reason prompt + chips (`components/decisionVocab.js`; `NEG_CHIPS` and the shared chip style `chipClass` live there), the one-line “why selected”,
   tooltips, errors, empty states and the AI TL;DR itself. **Only exception: Telegram post/discussion summaries and

@@ -150,7 +150,7 @@ export default function useTodayVisit(enabled) {
   busyRef.current = busy;
   return {
     visit: effectiveVisit, fresh, busy, carryCount, persistenceFailed,
-    loading: !visit && selection.isPending,
+    loading: !visit && selection.isPending, renewing: selection.isPending,
     selectionError: selection.error, statusError: membersQuery.error,
     actionError: actionMutation.error || decisionMutation.error,
     canRenew: enabled && !busy && carryCount < VISIT_LIMIT && (!visit || visit.invalid || fresh),

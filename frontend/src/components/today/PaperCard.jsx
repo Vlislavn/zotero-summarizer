@@ -123,20 +123,22 @@ export default function PaperCard({ paper, selected, onToggleSelect, llmEnabled 
   const handleUndo = () => { setDecision(null); setChips([]); onUndo?.(paper.item_id); };
   const chipSet = decision === 'dont_read' ? NEG_CHIPS : POS_CHIPS;
 
-  const titleNode = paper.url || paper.doi
+  // The title opens the full review (the paper page accepts feed keys and Zotero keys alike);
+  // the publisher page stays one quiet «Source ↗» link.
+  const reviewKey = paper.stable_feed_key || paper.item_key;
+  const sourceUrl = paper.url || (paper.doi ? `https://doi.org/${paper.doi}` : null);
+  const titleCls = 'text-sm font-medium text-slate-900';
+  const titleNode = reviewKey
     ? (
-      <a
-        href={paper.url || `https://doi.org/${paper.doi}`}
-        target="_blank"
-        rel="noreferrer noopener"
-        onClick={() => track('open_link', 'title')}
-        onAuxClick={() => track('open_link', 'title')}
-        className="text-sm font-medium text-slate-900 hover:text-forest-800 underline-offset-2 hover:underline"
+      <Link
+        to={visitId ? todayPaperUrl(reviewKey, visitId) : `/paper/${encodeURIComponent(reviewKey)}`}
+        onClick={() => track('open_review')}
+        className={`${titleCls} hover:text-forest-800 underline-offset-2 hover:underline`}
       >
         {paper.title || '(untitled)'}
-      </a>
+      </Link>
     )
-    : <span className="text-sm font-medium text-slate-900">{paper.title || '(untitled)'}</span>;
+    : <span className={titleCls}>{paper.title || '(untitled)'}</span>;
 
   return (
     <article
@@ -172,14 +174,12 @@ export default function PaperCard({ paper, selected, onToggleSelect, llmEnabled 
                       : `Relevance: ${band ? RELEVANCE_WORD[band] : 'unscored'}`}
                 </span>
               </span>
-              {paper.stable_feed_key && (
-                <Link
-                  to={visitId ? todayPaperUrl(paper.stable_feed_key, visitId) : `/paper/${encodeURIComponent(paper.stable_feed_key)}`}
-                  onClick={() => track('open_review')}
-                  className="inline-flex min-h-11 items-center text-[12px] text-forest-800 underline-offset-2 sm:min-h-8 hover:underline"
-                >
-                  Open full review ↗
-                </Link>
+              {sourceUrl && (
+                <a href={sourceUrl} target="_blank" rel="noreferrer noopener"
+                  onClick={() => track('open_link', 'title')} onAuxClick={() => track('open_link', 'title')}
+                  className="inline-flex min-h-11 items-center text-[12px] text-slate-500 underline-offset-2 hover:text-forest-800 hover:underline sm:min-h-8">
+                  Source ↗
+                </a>
               )}
             </div>
             <div className="mt-1 break-words text-[15px] leading-snug">{titleNode}</div>

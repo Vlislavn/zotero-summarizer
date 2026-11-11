@@ -4,6 +4,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ## [Unreleased]
 
+- Today (#309): the card title opens the full review (publisher page = quiet «Source ↗»); a regenerating card shows step, elapsed time and queue position; «New shortlist» shows a pending state and «N new papers» / «Same papers — nothing new since …».
 - Research-feed Markdown report reads like the Weekly page: near-threshold rejects show plain gate rationales and project-use notes spell out status tokens («not applicable»).
 - Code-health scan (#301): deadcode-audit now also scans `frontend/src` (JS/TS via oxlint; `make scan` gains a Python + JS/TS quality section) and `make scan-overlaps` runs the two-pass embedding overlaps; the unused `DEFAULT_SORT` import and the duplicate `fetch_trashed_guids` are gone.
 - `research-feed run` no longer looks hung (#302): it says how many new papers it is screening with the AI model and prints «screened 40/432 (2 failed) · 3 min» to stderr every 10 papers; `--cached-only` skips screening.
