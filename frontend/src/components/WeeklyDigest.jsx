@@ -38,7 +38,7 @@ function Card({ record, index }) {
       </div>)}
     </section>
     <section><h4 className="font-medium">Reproducibility: {card.reproducibility_tier || 'unknown'}</h4>
-      <p>{card.reproducibility_rationale || 'Effort not assessed'}</p>
+      <p>{humanKey(card.reproducibility_rationale) || 'Effort not assessed'}</p>
       <p className="font-medium mt-2">Missing reproduction inputs</p><TextList values={(card.missing_reproduction_inputs || []).map(humanKey)} />
       <p className="font-medium mt-2">Evidence gaps</p><TextList values={(card.evidence_gaps || []).map(plainReason)} />
     </section>

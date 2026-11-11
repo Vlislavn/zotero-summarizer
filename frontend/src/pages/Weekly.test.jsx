@@ -23,7 +23,7 @@ function report() {
       card: { worth_reading: 'unknown', problem: 'Recovery', core_idea: 'Replay controlled failures', engineering_novelty: 'Frozen traces',
         project_use_notes: ['Replace the harness retry baseline, compare recovery on held-out traces.'],
         code_urls: ['https://example.test/code'], dataset_urls: [], model_urls: [],
-        reproducibility_tier: 'unknown', reproducibility_rationale: 'Effort not assessed',
+        reproducibility_tier: 'unknown', reproducibility_rationale: 'dataset_provenance',
         missing_reproduction_inputs: ['Trace release missing'], evidence_gaps: ['No clinical evaluation'] },
       provenance: { basis: 'full_text', model: null, generated_at: null } }],
     rejected_near_threshold: [{ candidate: { source_id: 'two', title: 'Attractive but irrelevant', url: 'https://example.test/reject' }, triage: { rationale: 'No declared project match' } }],
@@ -45,6 +45,8 @@ it('opens a retained CLI run with cards, paper links, downloads and honest unkno
   expect(screen.getByText(/Replace the harness retry baseline/)).toBeTruthy();
   expect(screen.getAllByText(/None verified — availability unknown/)).toHaveLength(2);
   expect(screen.getByText('Trace release missing')).toBeTruthy();
+  expect(screen.getByText('Dataset provenance')).toBeTruthy();
+  expect(screen.queryByText('dataset_provenance')).toBeNull();
   expect(screen.getByText('No clinical evaluation')).toBeTruthy();
   expect(screen.getByText(/generated at an unrecorded time/)).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Open paper review' }).getAttribute('href')).toBe('/paper/feed%3Aone?autoRun=false');

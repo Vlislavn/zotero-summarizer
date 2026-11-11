@@ -133,7 +133,7 @@ it.each([true, false])('uses one complete mixed common map, refusing a missing o
     await waitFor(() => expect(writes).toEqual([{
       change_ids: [151, 7], previews: { 151: approval().preview_sha256, 7: ordinaryApproval.preview_sha256 }, force: false, retry: false,
     }]));
-    expect(await screen.findByText('2 change(s) applied; 0 failed.')).toBeTruthy();
+    expect(await screen.findByText('2 changes applied.')).toBeTruthy();
   } else {
     fireEvent.keyDown(window, { key: 'a' });
     expect(writes).toEqual([]);

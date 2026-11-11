@@ -258,3 +258,9 @@ export function buildPayloadFromDraft(change, draftsForId, flatCollections) {
   }
   return null;
 }
+
+// «6 changes applied.» / «5 applied, 1 failed — see the Failed tab»
+export function appliedMessage(applied, failed) {
+  if (failed > 0) return `${applied} applied, ${failed} failed — see the Failed tab`;
+  return `${applied} ${applied === 1 ? 'change' : 'changes'} applied.`;
+}

@@ -241,14 +241,14 @@ class QueryPlan:
         with query variants (tight + bag) shows one row per variant; else the scalar."""
         rows: list[tuple[str, str]] = [("library", self.library_expanded or self.library_raw)]
         for q in (self.openalex_lexical_variants or [self.openalex_lexical]):
-            rows.append(("openalex (lexical)", q))
-        rows.append(("openalex (semantic)", self.openalex_semantic))
+            rows.append(("OpenAlex · keyword search", q))
+        rows.append(("OpenAlex · meaning search", self.openalex_semantic))
         for q in (self.europepmc_variants or [self.europepmc]):
             rows.append(("europepmc", q))
         for q in (self.arxiv_variants or [self.arxiv]):
             rows.append(("arxiv", q))
         rows.append(("crossref", self.crossref))
-        rows.append(("semantic scholar", self.semantic_scholar))
+        rows.append(("Semantic Scholar", self.semantic_scholar))
         rows.append(("openreview", self.openreview))
         for name in ("must_include", "must_not_include", "study_types"):
             if values := getattr(self, name):

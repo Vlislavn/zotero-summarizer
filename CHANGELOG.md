@@ -4,6 +4,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ## [Unreleased]
 
+- Plain wording (#277): digest reproducibility rationale (page and Markdown), search «What was searched» source names («OpenAlex · keyword search»), and Pending apply result («6 changes applied.»).
 - Search clarity (#274): «Reviewed N of 10» while reviewing, plain per-source «What was searched» lines (results / not available right now / «Some sources failed»), HTML entities and heading breaks in abstracts and titles, one «Published article · Crossref» chip.
 - Find new relevant no longer fails with «Seed context changed; reload discovery» (#275): the discovery fingerprint ignores the constantly written `corpus_cache.db` file marker and changes only with the seed's own data.
 - Busy database and Ask (#269): a locked database answers 503 «The app was busy; try again in a moment.» (quiet retry ×2) instead of a 500; Ask on a paper without a PDF fails at once with plain wording and no Retry; triage errors read «The model did not answer in time» / «The database was busy; run again»; editors say «The app is busy» (not «need the Mac») when the server merely errored.

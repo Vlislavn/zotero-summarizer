@@ -12,6 +12,7 @@ import {
   buildDraft,
   buildPayloadFromDraft,
   approvalPreviews,
+  appliedMessage,
 } from './pendingHelpers.js';
 import { StatusBanner, ChangeGroup } from './pendingComponents.jsx';
 import { humanizeError } from '../utils/humanizeError.js';
@@ -258,7 +259,7 @@ export default function Pending() {
         || !Number.isInteger(data?.failed) || data.failed < 0) {
         throw new Error(data?.message || 'The server did not confirm the Apply outcome.');
       }
-      setMessage(`${data.applied} change(s) applied; ${data.failed} failed.${data.failed > 0 ? ' Open the Failed tab to retry.' : ''}`);
+      setMessage(appliedMessage(data.applied, data.failed));
       setIsError(data.failed > 0);
     } catch (err) {
       // The shared client adds body only after the response text is fully read.

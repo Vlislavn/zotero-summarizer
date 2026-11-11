@@ -121,7 +121,7 @@ it('does not send pending writes while typing in the collection selector', async
   await waitFor(() => expect(writes).toEqual([{
     change_ids: [1], previews: { 1: 'a'.repeat(64) }, force: false, retry: false,
   }]));
-  expect(await screen.findByText('1 change(s) applied; 0 failed.')).toBeTruthy();
+  expect(await screen.findByText('1 change applied.')).toBeTruthy();
 });
 
 it.each(['edit', 'identical save'])('retires selection after %s, then requires the newly rendered revision', async (kind) => {
@@ -264,7 +264,7 @@ it.each(['pending', 'failed'])('preserves the captured %s map through force conf
     change_ids: [1], previews: { 1: a.approval_preview.preview_sha256 }, force, retry: status === 'failed',
   })));
   expect(window.confirm).toHaveBeenCalledTimes(1);
-  expect(await screen.findByText('1 change(s) applied; 0 failed.')).toBeTruthy();
+  expect(await screen.findByText('1 change applied.')).toBeTruthy();
 });
 
 it('does not reselect or dispatch when force is cancelled', async () => {
@@ -323,7 +323,7 @@ it('shows the full escaped ordinary failed payload and target before explicit re
   await waitFor(() => expect(writes[0]?.body).toEqual({
     change_ids: [1], previews: { 1: row.approval_preview.preview_sha256 }, force: false, retry: true,
   }));
-  expect(await screen.findByText('0 change(s) applied; 1 failed. Open the Failed tab to retry.')).toBeTruthy();
+  expect(await screen.findByText('0 applied, 1 failed — see the Failed tab')).toBeTruthy();
 });
 
 it.each([null, { preview_sha256: 'a'.repeat(64) }])('blocks Apply but not Reject without a common snapshot: %j', async (approval) => {

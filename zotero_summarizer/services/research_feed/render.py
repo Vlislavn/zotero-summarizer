@@ -66,7 +66,7 @@ def markdown(payload: dict[str, Any]) -> str:
         ]
         for label, value in (
             ("Reproducibility tier", card.get("reproducibility_tier")),
-            ("Reproducibility rationale", card.get("reproducibility_rationale")),
+            ("Reproducibility rationale", _humanise(str(card.get("reproducibility_rationale") or ""))),
             ("Missing reproduction inputs", missing_inputs),
             ("Evidence gaps", "; ".join(card.get("evidence_gaps") or [])),
         ):
