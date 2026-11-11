@@ -97,7 +97,7 @@ export function memberNeedsCarry(member) {
   if (facts?.note_delivery?.pending && facts.note_delivery.target_key) return true;
   if (action?.failure?.code === 'review_required' || action?.phase === 'refused') return false;
   if (!action) return false;
-  if (!matchesMember(member.paper, facts)) return true;
+  if (!matchesMember(member.paper, facts)) return !facts; // a status read that does not match can never resolve
   if (action.kind === 'review') {
     return action.phase !== 'replied' || Boolean(action.error)
       || (facts.user_priority || null) !== action.priority;
