@@ -148,6 +148,9 @@ def wire_pipeline(monkeypatch, config, client, source):
     app = SimpleNamespace(app_state=SimpleNamespace(config=config))
     monkeypatch.setattr(summarization.factory, "resolve_stage_client", lambda app, stage: client)
     monkeypatch.setattr(summarization, "state", lambda: app)
+    # These fixtures exercise the long-source map path: pin the direct window and the pool size to the local-provider ones.
+    monkeypatch.setattr(summarization, "text_cap", lambda *a, **k: SimpleNamespace(chars=60_000))
+    monkeypatch.setattr(summarization, "deep_review_sub_concurrency", lambda provider: 1)
     monkeypatch.setattr(summarization, "_extract_pdf_source", lambda path: PdfSource(
         source, (), hashlib.sha256(b"synthetic PDF seam fixture").hexdigest()))
     monkeypatch.setattr(corpus, "run_corpus_match", lambda *args: corpus.empty_corpus_match_result())

@@ -64,6 +64,20 @@ def _map_chunk(map_llm: Any, chunk: str, *, check_cancelled: Callable[[], None] 
     return note
 
 
+def map_chunks(
+    map_llm: Any, chunks: list[str], *, sub_concurrency: int = 1,
+    check_cancelled: Callable[[], None] | None = None,
+) -> list[str]:
+    """MAP every chunk, in order: a pool of ``sub_concurrency`` threads when above 1, else
+    sequentially. Shared by deep review and long-source Triage. A raising ``check_cancelled``
+    stops chunks not yet started; calls already in flight finish before this returns."""
+    kwargs = {"check_cancelled": check_cancelled} if check_cancelled is not None else {}
+    if sub_concurrency > 1 and len(chunks) > 1:
+        with ThreadPoolExecutor(max_workers=sub_concurrency) as pool:
+            return list(pool.map(lambda chunk: _map_chunk(map_llm, chunk, **kwargs), chunks))
+    return [_map_chunk(map_llm, chunk, **kwargs) for chunk in chunks]
+
+
 class ChunkBudget(NamedTuple):
     """The chunking budget trio for ``digest_for_strategy``: the rank/prefix output
     cap, the map_reduce per-chunk size, and its map-step parallelism."""
@@ -160,11 +174,7 @@ def map_reduce_digest(
     if not chunks:
         raise ValueError("map_reduce_digest: empty paper text")
 
-    if sub_concurrency > 1 and len(chunks) > 1:
-        with ThreadPoolExecutor(max_workers=sub_concurrency) as pool:
-            notes = list(pool.map(lambda chunk: _map_chunk(recorded_map, chunk), chunks))
-    else:
-        notes = [_map_chunk(recorded_map, chunk) for chunk in chunks]
+    notes = map_chunks(recorded_map, chunks, sub_concurrency=sub_concurrency)
 
     combined = "\n\n".join(f"[chunk {i + 1}/{len(notes)}]\n{note}" for i, note in enumerate(notes))
     extra = {"response_format": response_format} if response_format else {}

@@ -176,6 +176,7 @@ the atomic result/queue write prevent subsequent effects. An already-entered
 transaction may finish while cancelling; cancellation does not roll it back. Only after every
 item thread drains does the worker publish `cancelled`, with no late result.
 On process restart a persisted cancellation becomes cancelled, never resumed.
+The Triage page shows "Stopping after the current AI call finishes…" while a job is `cancelling`.
 
 Job detail and list APIs expose `active_items: [{item_key, title}]` instead of
 the misleading singular `current_item_key`/`current_title`. The worker-owned map
@@ -231,9 +232,14 @@ correlation is not rewritten as causation. Custom `prompts.refine` overrides
 replace this default. Prompt-contract tests check instruction presence and
 rendering only; source-grounded live review must validate actual faithfulness.
 
+A source goes to the model whole up to the feed provider's window (`_paper_body.text_cap`, as deep review: context window minus reserves, ~683k chars with the defaults on a remote provider); local/lean providers keep the 80,000-char floor, and only longer sources are mapped.
+
 Long full-text inputs reuse the library's source-safe mapper and the existing
 `quality_review.map_chunk_chars` setting instead of two unbounded halves. Maps
-run sequentially with cancellation checks; only explicit output truncation is
+run through `_map_reduce.map_chunks` (the deep-review map step) with the feed stage's
+`_common.deep_review_sub_concurrency` — parallel on a remote provider, serial on a local
+one — and a cancellation check before each chunk (a stop skips chunks not yet started; calls
+in flight finish first). Only explicit output truncation is
 subdivided down to the existing minimum work size. Empty or exhausted segments
 still fail before refinement. Generated notes remain derived context, not original
 source evidence; numerical scoring, providers and output-token limits are unchanged.

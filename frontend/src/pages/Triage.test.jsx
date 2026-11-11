@@ -114,6 +114,7 @@ it('cancels only the selected-item job through its existing API without claiming
   await waitFor(() => expect(cancelJob).toHaveBeenCalledWith('SELECTED-CANCEL'));
   expect(cancelJob).toHaveBeenCalledTimes(1);
   await waitFor(() => expect(screen.getAllByText('cancelling')).toHaveLength(2));
+  expect(screen.getByText('Stopping after the current AI call finishes…')).toBeTruthy();
   expect(screen.queryByText('cancelled')).toBeNull();
   expect(screen.queryByText('completed')).toBeNull();
   expect(triggerTriageBacklog).not.toHaveBeenCalled();

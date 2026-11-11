@@ -202,7 +202,7 @@ def test_both_review_keys_exclude_self_alias_and_preserve_filters(journey):
         assert result["seed_comments"]["records"][0]["item_key"] == "feed:42"
 
 
-@pytest.mark.parametrize("change", ["seed", "candidate", "delete", "native", "model", "corpus"])
+@pytest.mark.parametrize("change", ["seed", "candidate", "delete", "native", "model"])
 def test_same_count_edits_deletions_and_source_identity_invalidate(journey, change):
     token = semantic.model_boundary()["token"]
     first = related.assess_related("SEED0001", consent_token=token)
@@ -215,10 +215,8 @@ def test_same_count_edits_deletions_and_source_identity_invalidate(journey, chan
             conn.execute("DELETE FROM review_notes WHERE item_key='GOOD0001'")
     elif change == "native":
         journey.reader.rows["GOOD0001"]["notes"] = [{"note_key": "NOTE0001", "note": "Changed", "date_modified": "same-clock"}]
-    elif change == "model":
-        journey.config.llm_routing.default.model = "different-model"
     else:
-        journey.paths.corpus_db_path.write_bytes(b"changed public fixture")
+        journey.config.llm_routing.default.model = "different-model"
     second = related.assess_related("SEED0001", consent_token=semantic.model_boundary()["token"])
     assert first["context_fingerprint"] != second["context_fingerprint"]
     assert first["session_id"] != second["session_id"]

@@ -340,6 +340,11 @@ export default function Triage() {
             <div className="flex items-center gap-2">
               <span>Job <span className="mono">{activeJob.job_id}</span></span>
               <JobStatusPill status={activeJob.status} />
+              {activeJob.status === 'cancelling' && (
+                <span role="status" className="text-xs text-slate-500">
+                  Stopping after the current AI call finishes…
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <span>

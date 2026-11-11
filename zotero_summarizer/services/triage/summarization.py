@@ -19,7 +19,9 @@ from zotero_summarizer.models import (
     TriageResult,
 )
 from zotero_summarizer.domain import ReadingPriority
+from zotero_summarizer.models.providers import resolve_stage
 from zotero_summarizer.services import corpus
+from zotero_summarizer.services.library._paper_body import text_cap
 from zotero_summarizer.services.llm import factory
 from zotero_summarizer.services.model import scoring
 from zotero_summarizer.services.triage.prompts import DEFAULT_REFINE_PROMPT, DEFAULT_TRIAGE_PROMPT
@@ -31,6 +33,7 @@ from zotero_summarizer.services.triage._method_context import original_uri_conte
 from zotero_summarizer.services._common import (
     LOGGER,
     build_log_prefix,
+    deep_review_sub_concurrency,
     extract_json_blob,
     log_context,
     settings,
@@ -390,18 +393,23 @@ def run_pipeline(
         return _fast_reject_response(req, corpus_context, raw_text)
 
     source_context = ""
-    max_direct_chars = 80_000
+    # Same stage as ``llm`` above (resolve_stage_client(app_state, "feed")).
+    feed_provider = resolve_stage(config.llm_routing, "feed").provider
+    # A remote provider reads the whole paper in one call (its window minus reserves, as deep review);
+    # local/lean tiers keep the 80_000 floor.
+    max_direct_chars = max(80_000, text_cap(
+        config.quality_review, feed_provider, lean_tier=bool(getattr(feed_provider, "lean_deep_review", False)),
+    ).chars)
     if len(raw_text) > max_direct_chars:
-        from zotero_summarizer.services.library._map_reduce import _map_chunk, split_chunks
+        from zotero_summarizer.services.library._map_reduce import map_chunks, split_chunks
 
         chunks = split_chunks(raw_text, config.quality_review.map_chunk_chars)
-        log_context(prefix, "long source chars=%d chunks=%d", len(raw_text), len(chunks))
-        notes = []
-        for index, chunk in enumerate(chunks, 1):
-            check_cancelled(cancel_event)
-            log_context(prefix, "chunk %d/%d started chars=%d", index, len(chunks), len(chunk))
-            notes.append(_map_chunk(llm, chunk, check_cancelled=lambda: check_cancelled(cancel_event)))
-            check_cancelled(cancel_event)
+        sub_concurrency = deep_review_sub_concurrency(feed_provider)
+        log_context(prefix, "long source chars=%d chunks=%d sub_concurrency=%d",
+                    len(raw_text), len(chunks), sub_concurrency)
+        notes = map_chunks(llm, chunks, sub_concurrency=sub_concurrency,
+                           check_cancelled=lambda: check_cancelled(cancel_event))
+        check_cancelled(cancel_event)
         paper_text = "\n\n".join(f"[chunk {index}/{len(notes)}]\n{note}"
                                   for index, note in enumerate(notes, 1))
         check_cancelled(cancel_event)

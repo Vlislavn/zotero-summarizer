@@ -14,7 +14,6 @@ from zotero_summarizer.services.library.app_library_reader import AppLibraryRead
 from zotero_summarizer.services.search import dedup, session as sessions
 from zotero_summarizer.services.search._models import Candidate, QueryPlan, SearchIntent
 from zotero_summarizer.services.zotero.zotero import get_library_reader, resolve_reader_for_key
-from zotero_summarizer.storage.corpus_read import _corpus_fingerprint
 from zotero_summarizer.storage.feed_identity import is_stable_feed_key
 
 
@@ -141,15 +140,11 @@ def related_papers(item_key, *, collection="", tag=""):
 
 def _identity(snapshot, boundary):
     config = state().app_state.config
-    try:
-        corpus = _corpus_fingerprint(str(settings().corpus_db_path))
-    except FileNotFoundError:
-        corpus = None
     paths = [Path(__file__), Path(semantic.__file__), Path(dedup.__file__), Path(__file__).with_name("_related_context.py"),
              Path(__file__).with_name("_search.py"), Path(__file__).with_name("_prompt_security.py")]
     import zotero_summarizer.storage.library_context as context_owner
     paths.append(Path(context_owner.__file__))
-    return fingerprint({"snapshot": snapshot, "corpus": corpus, "boundary": boundary,
+    return fingerprint({"snapshot": snapshot, "boundary": boundary,
                         "encoder": getattr(getattr(state(), "embedding_cache", None), "_encoder_id", None),
                         "config": config.model_dump(mode="json"), "assessment": semantic.assessment_identity(),
                         "timeout": settings().summary_timeout_seconds,
