@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import tempfile
 from datetime import date
@@ -13,10 +14,26 @@ from zotero_summarizer.services.research_feed.cursor import NOT_CACHED
 from zotero_summarizer.services.research_feed.source import PLAIN_REASONS
 
 
+_SNAKE = re.compile(r"\b[a-z]+(?:_[a-z]+)+\b")
+_GATE_NO = {"dont_read", "skip"}
+
+
+def _rationale(text: str) -> str:
+    """Gate-only triage text → plain words (as the Weekly page's rationaleText)."""
+    if text.startswith("Predicted by classifier gate"):
+        return "Picked by the relevance model alone; no AI explanation was written."
+    match = re.match(r"classifier_gate:(\w+)", text)
+    if match:
+        return ("Judged not worth reading by the relevance model." if match[1] in _GATE_NO
+                else "Rated below the cut-off by the relevance model.")
+    return text
+
+
 def _project_use(notes: list[str]) -> str:
-    """«a: S; b: S» → «a, b: S» — the same sentence is said once."""
+    """«a: S; b: S» → «a, b: S» — the same sentence is said once; status tokens in plain words."""
     groups: dict[str, list[str]] = {}
     for note in notes:
+        note = _SNAKE.sub(lambda m: m[0].replace("_", " "), note)
         project, sep, sentence = note.partition(": ")
         groups.setdefault(sentence if sep else note, []).append(project if sep else "")
     return "; ".join(f"{', '.join(p for p in projects if p)}: {sentence}" if any(projects) else sentence
@@ -74,7 +91,7 @@ def markdown(payload: dict[str, Any]) -> str:
     rejected = payload.get("rejected_near_threshold") or []
     if rejected:
         lines += ["## Near-threshold rejects", ""]
-        lines += [f"- {row['candidate']['title']} — {row['triage']['rationale']}" for row in rejected]
+        lines += [f"- {row['candidate']['title']} — {_rationale(row['triage']['rationale'])}" for row in rejected]
         lines.append("")
     missing = payload.get("manual_full_text_required") or []
     if missing:
