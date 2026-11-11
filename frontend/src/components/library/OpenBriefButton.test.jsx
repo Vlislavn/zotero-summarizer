@@ -2,6 +2,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 
+const connection = vi.hoisted(() => ({ ready: true }));
+vi.mock('../../hooks/useServerAvailable.js', () => ({ default: () => connection.ready }));
+vi.mock('../../offlineStore.js', () => ({ isServerAvailable: () => connection.ready }));
+
 vi.mock('../../api/libraryApi.js', () => ({
   fetchPaperRender: vi.fn(),
   buildPaperRender: vi.fn(),
@@ -12,6 +16,7 @@ import OpenBriefButton from './OpenBriefButton.jsx';
 
 let tab;
 beforeEach(() => {
+  connection.ready = true;
   vi.clearAllMocks();
   // A fake new-tab handle: our code writes a holding page, nulls opener, then
   // navigates via location.href (plain object setter is enough to assert on).
@@ -23,6 +28,15 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const clickBtn = () => fireEvent.click(screen.getByRole('button', { name: 'Open full review' }));
 
 describe('OpenBriefButton', () => {
+  it('opens the cache-aware route without a server artifact check when the app is unavailable', () => {
+    connection.ready = false;
+    render(<OpenBriefButton itemKey="OFFLINE" label="Open full review ↗" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open full review ↗' }));
+    expect(window.open).toHaveBeenCalledWith('/paper/OFFLINE', '_blank', 'noopener');
+    expect(fetchPaperRender).not.toHaveBeenCalled();
+    expect(buildPaperRender).not.toHaveBeenCalled();
+  });
+
   it('tries full-text acquisition before opening a no-local-PDF review', async () => {
     fetchPaperRender
       .mockResolvedValueOnce({ status: 'missing', needs_pdf: true })

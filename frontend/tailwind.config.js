@@ -48,6 +48,8 @@ export default {
         sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
         display: ['Fraunces', 'Newsreader', 'Georgia', 'serif'],
       },
+      // DESIGN.md: no weight ≥600 — legacy font-semibold/font-bold utilities render as medium.
+      fontWeight: { semibold: '500', bold: '500' },
       borderRadius: {
         DEFAULT: '7px', sm: '4px', md: '7px', lg: '7px', xl: '14px', '2xl': '14px', '3xl': '18px',
       },

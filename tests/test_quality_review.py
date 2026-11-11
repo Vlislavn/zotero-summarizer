@@ -1,15 +1,20 @@
 """QualityReview grade normalization + the row_quality parse contract."""
 from __future__ import annotations
 
+import json
+
+from pydantic import ValidationError
 import pytest
 
 from zotero_summarizer.models import PaperDigest, QualityReview
+from zotero_summarizer.models.digest_generation import PaperDigestGeneration, InterpretationDigestGeneration
 from zotero_summarizer.services.triage.daily_select import _candidate as cand
 
 
 @pytest.fixture(autouse=True)
 def _isolate_digest_generation(monkeypatch):
-    from zotero_summarizer.services.library import _digest_verification
+    from zotero_summarizer.services.library import _digest_verification, interpretation  # noqa: F401
+    # interpretation from-imports verify_digest: import it before patching so the stub is not bound for good.
     monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
 
 
@@ -19,24 +24,26 @@ def test_quality_review_grade_normalization():
     assert QualityReview(grade="x").grade == ""
     old = PaperDigest.model_validate({"read_decision": "read"})
     assert old.skip_parts == [] and old.estimated_read_minutes is None and old.original_value == ""
+    assert old.writing_friction is None
     skip = PaperDigest(read_decision="skip", read_parts=["Methods"], original_value="nuance")
     assert skip.read_parts == [] and skip.original_value == ""
     with pytest.raises(ValueError, match="exact read target"):
         PaperDigest(read_decision="skim")
     friction = PaperDigest(read_decision="read", read_parts=["§2"], writing_friction="high",
                            writing_reasons=["Core construct is used before it is defined."])
-    assert friction.read_decision == "skim"
+    assert friction.read_decision == "read"  # raw model action; policy owns the cap
     with pytest.raises(ValueError, match="concrete reason"):
         PaperDigest(writing_friction="high")
 
 
-def test_digest_prompt_is_conservative_and_action_specific():
+def test_digest_prompt_formats_and_schema_retains_orthogonal_fields():
     from zotero_summarizer.services.library.quality_review import _DEFAULT_DIGEST_PROMPT
 
-    for required in ("Start at `skip`", "ONLY if all hold", '"skip_parts"',
-                     '"estimated_read_minutes"', '"original_value"', '"writing_friction"',
-                     "BEFORE choosing", "one stated axis", "weak evidence", "zero counterexamples"):
-        assert required in _DEFAULT_DIGEST_PROMPT
+    # Semantic prompt review is independent source review, not phrase matching.
+    _DEFAULT_DIGEST_PROMPT.format(research_goals="Goal", title="Study", full_text="Body")
+    properties = PaperDigest.model_json_schema()["properties"]
+    assert {"novelty", "significance", "clarity", "writing_friction", "writing_reasons",
+            "read_decision", "read_parts", "original_value"} <= properties.keys()
 
 
 def test_digest_llm_cannot_silently_default_the_writing_assessment():
@@ -46,15 +53,82 @@ def test_digest_llm_cannot_silently_default_the_writing_assessment():
         _coerce_digest('{"read_decision":"skip"}')
 
 
-def test_new_reading_action_requires_decision_evidence():
-    from zotero_summarizer.services.library.quality_review import _coerce_digest
-
-    base = {
-        "read_decision": "read", "read_why": "Changes the design decision.",
+def _complete_reading_assessment(action):
+    return {
+        **PaperDigest().model_dump(exclude={'basis'}),
+        "read_decision": action, "read_why": "Changes the design decision.",
         "read_parts": ["§4.2, Table 3"], "skip_parts": [],
         "estimated_read_minutes": 18, "original_value": "The ablation details.",
         "writing_friction": "low", "writing_reasons": [],
     }
+
+
+@pytest.mark.parametrize("field", list(_complete_reading_assessment("read")))
+@pytest.mark.parametrize("transport", ["mapping", "json"])
+def test_generation_cannot_derive_missing_assessment_presence(field, transport):
+    from zotero_summarizer.models.interpretation import InterpretationDigest
+    from zotero_summarizer.models.research_feed import FeedDigestResponse
+    from zotero_summarizer.services.library.quality_review import DigestGenerationFailed, _coerce_digest
+
+    for action in ("read", "skim", "skip"):
+        raw = _complete_reading_assessment(action)
+        del raw[field]
+        wire = json.dumps(raw) if transport == "json" else raw
+        with pytest.raises(DigestGenerationFailed):
+            _coerce_digest(wire)
+        for cls in (PaperDigest, FeedDigestResponse, InterpretationDigest):
+            construct = cls.model_validate_json if transport == "json" else cls.model_validate
+            if action == "skim" and field == "read_parts":
+                with pytest.raises(ValidationError, match="exact read target"):
+                    construct(wire)
+            else:
+                parsed = construct(wire)
+                assert field not in parsed.model_fields_set
+                with pytest.raises(DigestGenerationFailed, match="omitted required"):
+                    _coerce_digest(parsed)
+
+
+@pytest.mark.parametrize("field", ["read_parts", "original_value"])
+def test_basis_copies_and_typed_feed_promotion_preserve_omissions(field):
+    from zotero_summarizer.models.research_feed import FeedDigestResponse
+    from zotero_summarizer.services.library.quality_review import DigestGenerationFailed, _coerce_digest
+
+    raw = _complete_reading_assessment("skip")
+    del raw[field]
+    parsed = PaperDigest.model_validate(raw)
+    copies = [parsed.model_copy(update={"basis": "full_text"}, deep=deep) for deep in (False, True)]
+    copies.append(FeedDigestResponse.model_validate(parsed.model_dump(exclude_unset=True)))
+    for copied in copies:
+        assert field not in copied.model_fields_set
+        with pytest.raises(DigestGenerationFailed, match="omitted required"):
+            _coerce_digest(copied)
+
+
+@pytest.mark.parametrize("field", ["read_parts", "original_value"])
+def test_interpretation_typed_adapter_cannot_supply_a_missing_base_field(field):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from zotero_summarizer.models.interpretation import InterpretationDigest
+    from zotero_summarizer.services.library import interpretation
+    from zotero_summarizer.services.library.quality_review import DigestGenerationFailed, _coerce_digest
+
+    raw = _complete_reading_assessment("skip")
+    del raw[field]
+    trace = SimpleNamespace(invoke=Mock(return_value=InterpretationDigest.model_validate(raw)))
+    adapter = interpretation._Client(object(), "C", trace)
+    result = adapter.pydantic_prompt(prompt="Fixture request", pydantic_model=PaperDigest)
+    assert field not in result.model_fields_set
+    with pytest.raises(DigestGenerationFailed, match="omitted required"):
+        _coerce_digest(result)
+    assert adapter.draft is None
+    assert trace.invoke.call_count == 1
+    assert trace.invoke.call_args.args[3]["pydantic_model"] is InterpretationDigestGeneration
+
+
+def test_new_reading_action_requires_decision_evidence():
+    from zotero_summarizer.services.library.quality_review import _coerce_digest
+
+    base = _complete_reading_assessment("read")
     assert _coerce_digest(base).read_decision == "read"
     for missing in ("read_why", "read_parts", "estimated_read_minutes", "original_value"):
         broken = {**base, missing: [] if missing == "read_parts" else (None if missing == "estimated_read_minutes" else "")}
@@ -90,11 +164,11 @@ class _RfCaptureLLM:
 
     def pydantic_prompt(self, *, prompt, pydantic_model, **kwargs):
         self.captured_rf = kwargs.get("response_format", None)
-        return PaperDigest(
-            tldr="ok", read_decision="skip", read_why="The digest is sufficient.",
-            read_parts=[], skip_parts=[], estimated_read_minutes=None, original_value="",
-            writing_friction="low", writing_reasons=[],
-        )
+        return PaperDigest(**{
+            **_complete_reading_assessment('skip'), 'tldr': 'ok',
+            'read_why': 'The digest is sufficient.', 'read_parts': [],
+            'skip_parts': [], 'estimated_read_minutes': None, 'original_value': '',
+        })
 
 
 def test_assess_digest_threads_response_format_to_llm():
@@ -108,11 +182,13 @@ def test_assess_digest_threads_response_format_to_llm():
     llm = _RfCaptureLLM()
     assess_digest(title="T", full_text="body text " * 200, config=cfg, llm=llm,
                   max_chars=60000, response_format=rf)
-    assert llm.captured_rf is rf  # forwarded to the pydantic_prompt call
+    assert llm.captured_rf == build_response_format(PaperDigestGeneration)
+    assert rf == build_response_format(PaperDigest)  # caller-owned legacy schema is not mutated
 
 
 def _reading_reply(decision):
     return {
+        **PaperDigest().model_dump(exclude={'basis'}),
         "read_decision": decision, "read_why": "The original changes the design.",
         "read_parts": ["Section 2"], "skip_parts": [], "estimated_read_minutes": 5,
         "original_value": "Implementation details.", "writing_friction": "low", "writing_reasons": [],

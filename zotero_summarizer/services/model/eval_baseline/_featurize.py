@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from zotero_summarizer.services._common import load_golden_rows
+from zotero_summarizer.services.golden.csv_store import load_golden_rows
 from zotero_summarizer.services.model import classifier
 from zotero_summarizer.storage.corpus_types import CorpusAffinity
 

@@ -16,6 +16,15 @@ from pathlib import Path
 
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.cli._helpers import _utc_iso_now
+from zotero_summarizer.services.faithbench._constants import (
+    DEFAULT_JUDGE_MODEL,
+    DEFAULT_N_PAPERS,
+    DEFAULT_QA_PER_PAPER,
+    DEFAULT_TRAPS_PER_PAPER,
+    DEFAULT_QA_MAX_BUILDER_WINDOWS,
+    MAX_QA_BUILDER_WINDOWS,
+    QA_MAX_BUILDER_WINDOWS_ENV,
+)
 
 
 def _print_progress(message: str) -> None:
@@ -56,6 +65,12 @@ def _validate_faithbench_args(args: argparse.Namespace, parser: argparse.Argumen
                 parser.error(f"--{name.replace('_', '-')} must be at least {minimum}")
         try:
             args.max_builder_windows = _resolve_build_window_budget(args)
+        except ValueError as exc:
+            parser.error(str(exc))
+    elif args.faithbench_command == "interpretation":
+        from zotero_summarizer.cli._interpretation import validate
+        try:
+            validate(args)
         except ValueError as exc:
             parser.error(str(exc))
     elif args.faithbench_command == "run":
@@ -360,22 +375,14 @@ def _add_judge_endpoint_args(parser: argparse.ArgumentParser, *, prefix: str) ->
 
 
 def register_faithbench(subparsers) -> None:
-    from zotero_summarizer.services.faithbench._constants import (
-        DEFAULT_JUDGE_MODEL,
-        DEFAULT_N_PAPERS,
-        DEFAULT_QA_PER_PAPER,
-        DEFAULT_TRAPS_PER_PAPER,
-        DEFAULT_QA_MAX_BUILDER_WINDOWS,
-        MAX_QA_BUILDER_WINDOWS,
-        QA_MAX_BUILDER_WINDOWS_ENV,
-    )
-
     fb = subparsers.add_parser(
         "faithbench",
         help="Faithfulness mini-benchmark for the deep-review / paper-Q&A pipeline "
              "(build -> run -> judge -> report). See services/faithbench/README.md.",
     )
     fb_sub = fb.add_subparsers(dest="faithbench_command", required=True)
+    from zotero_summarizer.cli._interpretation import register
+    register(fb_sub)
 
     build = fb_sub.add_parser(
         "build",

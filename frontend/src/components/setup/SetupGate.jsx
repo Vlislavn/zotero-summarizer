@@ -19,7 +19,8 @@ export function dismissSetup() {
   }
 }
 
-const LANDING_PATHS = new Set(['/', '/library']);
+// `/` redirects to `/today`, so Today is a landing path too (first run still reaches /setup).
+const LANDING_PATHS = new Set(['/', '/today', '/library']);
 
 export default function SetupGate({ children }) {
   const { pathname } = useLocation();

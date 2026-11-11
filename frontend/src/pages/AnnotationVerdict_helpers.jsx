@@ -9,11 +9,11 @@ import { pretty } from '../utils/priorityLabels.js';
 // raw `must_read` enum never reaches the user. 'all' and '🎯 border' are not
 // priorities — they keep their own labels.
 export const PRIORITY_FILTERS = [
+  { key: '', label: 'All', cls: 'bg-slate-700 text-white border-slate-700' },
   { key: 'must_read', label: pretty('must_read'), cls: 'bg-emerald-600 text-white border-emerald-600' },
   { key: 'should_read', label: pretty('should_read'), cls: 'bg-sky-600 text-white border-sky-600' },
   { key: 'could_read', label: pretty('could_read'), cls: 'bg-amber-500 text-white border-amber-500' },
-  { key: 'dont_read', label: pretty('dont_read'), cls: 'bg-rose-600 text-white border-rose-600' },
-  { key: '', label: 'all', cls: 'bg-slate-700 text-white border-slate-700' },
+  { key: 'dont_read', label: 'Not interested', cls: 'bg-rose-600 text-white border-rose-600' },
   // NOTE: 'border' (active-learning) is intentionally NOT a chip here — it swaps
   // the data source and polls for minutes while it re-scores the library, so it
   // renders as a distinct labelled button in AnnotationVerdict, not a cheap
@@ -55,9 +55,9 @@ export const PRIORITY_BY_KEY = {
 // not the user's head (Tesler's Law).
 export const ANNOTATE_HINT_KEY = 'annotate_hint_dismissed_v1';
 export const ANNOTATE_HINT_TEXT =
-  'Annotate = label what you’ve read. Set must / should / could / don’t '
-  + '(keys 1–4 · j/k to move between papers) on papers you’ve read. Your verdict '
-  + 'becomes ground truth: it retrains the model and is mirrored to Zotero as a note.';
+  'Select & label: give papers you’ve read your own verdict — must / should / could / not interested '
+  + '(keys 1–4 · j/k to move between papers). It starts on one verdict group at a time; '
+  + 'pick another chip to see the rest. Your verdict retrains the model and is mirrored to Zotero as a note.';
 
 // Active-learning order for the border (uncertain-picks) list: surface the most
 // decision-worthy papers FIRST — the ones where the model's current label and its
@@ -84,9 +84,10 @@ export function FilterChip({ active, onClick, children, activeCls }) {
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
         active
-          ? activeCls || 'bg-slate-900 text-white border-slate-900'
+          ? `${activeCls || 'bg-slate-900 text-white border-slate-900'} ring-2 ring-offset-1 ring-slate-400 before:content-['✓'] before:mr-1`
           : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
       }`}
     >
@@ -117,9 +118,9 @@ export function GroundTruthOneLiner({ detail }) {
         className="px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-[12px] text-slate-700"
         role="note"
       >
-        Derived label:{' '}
-        <span className="font-semibold text-slate-900">{derived}</span> · this
-        is what the model uses today. Change it to overlay.
+        Model’s guess:{' '}
+        <span className="font-semibold text-slate-900">{pretty(derived)}</span> · this
+        is what the model uses today. Pick a verdict to replace it.
       </div>
     );
   }
@@ -132,7 +133,7 @@ export function GroundTruthOneLiner({ detail }) {
         role="note"
       >
         <span aria-hidden="true">★ </span>
-        Your verdict (<span className="font-semibold">{userPriority}</span>)
+        Your verdict (<span className="font-semibold">{pretty(userPriority)}</span>)
         is used as ground truth for retraining.
       </div>
     );
@@ -145,12 +146,12 @@ export function GroundTruthOneLiner({ detail }) {
       role="note"
     >
       <span aria-hidden="true">★ </span>
-      Your verdict (<span className="font-bold">{userPriority}</span>) overrides
-      the derived label
+      Your verdict (<span className="font-bold">{pretty(userPriority)}</span>) overrides
+      the model’s guess
       {derived && (
         <>
           {' '}
-          (<span className="font-semibold">{derived}</span>)
+          (<span className="font-semibold">{pretty(derived)}</span>)
         </>
       )}
       . Used as ground truth for retraining.
@@ -215,15 +216,16 @@ export function EffectiveLabelsStrip({ summary }) {
 // the user's verdict; the bar fills toward the finish line as triage proceeds,
 // and the loop is closed explicitly at 100% ("All N labeled ✓"). Distinct from
 // the "Showing X of Y" list-size readout, which is filter feedback, not progress.
-export function TriageProgress({ labeled, total }) {
+export function TriageProgress({ labeled, total, scope = '' }) {
   if (!total) return null;
   const pct = Math.min(Math.round((labeled / total) * 100), 100);
   const done = labeled >= total;
   return (
-    <div className="mb-2" role="status" aria-label={`${labeled} of ${total} labeled`}>
+    <div className="mb-2" role="status" aria-label={`${scope ? `${scope}: ` : ''}${labeled} of ${total} labeled by you`}>
       <div className="flex items-center justify-between text-[11px] mb-1">
         <span className="text-slate-600">
-          {done ? `All ${total} labeled` : `${labeled} of ${total} labeled`}
+          {scope && <strong>{scope}: </strong>}
+          {done ? `All ${total} labeled by you` : `${labeled} of ${total} labeled by you`}
         </span>
         <span className={done ? 'text-emerald-700 font-semibold' : 'text-slate-400'}>
           {done ? '✓' : `${total - labeled} to go`}

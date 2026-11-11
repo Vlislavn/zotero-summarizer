@@ -30,6 +30,8 @@ export function useSetupStatus(options = {}) {
     queryKey: ['setup-status'],
     queryFn: fetchSetupStatus,
     staleTime: 30_000,
+    // A failed check (slow server) is re-asked quietly; the gate renders children meanwhile.
+    refetchInterval: (q) => (q.state.status === 'error' ? 5_000 : false),
     ...options,
   });
   const status = query.data || null;

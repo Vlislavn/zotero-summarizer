@@ -1,4 +1,5 @@
 import json
+import platform
 import sqlite3
 import pytest
 from zotero_summarizer.api.errors import APIError
@@ -11,6 +12,24 @@ def _settings(tmp_path):
     settings = Settings.load(project_root=tmp_path)
     bootstrap_phase0(settings)
     return settings
+
+
+@pytest.mark.parametrize('system', ['Darwin', 'Linux', 'Windows', 'Unknown'])
+def test_missing_ollama_recovery_matches_platform_without_inventory(tmp_path, monkeypatch, system):
+    from zotero_summarizer.services.llm import model_list
+
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(platform, 'system', lambda: system)
+    monkeypatch.setattr(doctor.shutil, 'which', lambda _: None)
+    monkeypatch.setattr(model_list, 'list_models_for_provider', lambda _: pytest.fail('Unexpected runtime inventory'))
+    row = doctor._runtime_model(settings)
+    assert row['status'] == 'needs_action'
+    assert row['message'] == 'Ollama is not installed'
+    if system == 'Darwin':
+        assert row['recovery']['command'] == 'brew install ollama'
+    else:
+        assert 'command' not in row['recovery']
+        assert 'https://ollama.com/download' in row['detail']
 
 
 def test_doctor_persists_shared_contract_and_redacts_secrets(tmp_path, monkeypatch):
@@ -236,8 +255,9 @@ def test_inference_check_preserves_distinct_failures_and_local_recovery(
 
     assert row["detail"].count(f"{resolved.provider.name}/{resolved.model}") == 2
     assert "feed, backlog" in row["detail"] and "deep_review" in row["detail"]
-    assert row["recovery"]["label"] == "Refresh model"
-    assert row["recovery"]["command"] == f"ollama pull {resolved.model}"
+    # Model prose cannot identify a runtime; actual local probes refuse before inference.
+    assert row["recovery"]["label"] == "Retry inference"
+    assert "command" not in row["recovery"]
 
 
 def test_doctor_rejects_unknown_check_and_marks_interrupted_run(tmp_path):
@@ -258,14 +278,16 @@ def test_doctor_rejects_unknown_check_and_marks_interrupted_run(tmp_path):
 
 
 def test_optional_browser_check_uses_the_actual_runtime_package(monkeypatch):
+    from zotero_summarizer.services.setup import doctor_environment
+
     monkeypatch.setattr(
-        doctor.importlib.util,
+        doctor_environment.importlib.util,
         "find_spec",
         lambda name: object() if name == "patchright" else None,
     )
     assert doctor._optional_extras(None)["status"] == "ready"
 
-    monkeypatch.setattr(doctor.importlib.util, "find_spec", lambda _name: None)
+    monkeypatch.setattr(doctor_environment.importlib.util, "find_spec", lambda _name: None)
     missing = doctor._optional_extras(None)
     assert missing["status"] == "unavailable"
     assert missing["recovery"]["command"] == "uv sync --extra browser"
@@ -285,6 +307,16 @@ def test_rss_check_never_runs_schema_writes(tmp_path, monkeypatch):
         lambda *_a: pytest.fail("doctor must be read-only"),
     )
     assert doctor._rss_source(settings)["message"] == "1 RSS source enabled"
+
+
+def test_missing_rss_source_has_typed_settings_recovery_without_writes(tmp_path):
+    settings = _settings(tmp_path)
+    before = settings.triage_db_path.read_bytes()
+    row = doctor._rss_source(settings)
+    assert row["status"] == "needs_action"
+    assert row["recovery"]["action"] == "open_sources_settings"
+    assert row["recovery"]["label"] == "Add an RSS source"
+    assert settings.triage_db_path.read_bytes() == before
 
 
 def test_runtime_check_reports_a_stopped_ollama_service(tmp_path, monkeypatch):
@@ -403,11 +435,17 @@ def test_credential_change_during_doctor_cannot_restore_stale_ready(tmp_path, mo
         assert entered.wait(5)
         saved = pool.submit(lambda: asyncio.run(setup_route.save_ai_credential(
             setup_route.CredentialRequest(name="HOSTED_KEY", api_key="new credential"))))
-        assert not credential_written.is_set()  # key write waits for Doctor publication
-        resume.set()
+        try:
+            with pytest.raises(APIError) as error:
+                saved.result(timeout=2)
+            assert error.value.error == 'doctor_running'
+            assert not credential_written.is_set()  # Refused promptly, never queued under config locks.
+        finally:
+            resume.set()
         result = run.result(timeout=5)
-        saved.result(timeout=5)
-    assert result["ready"] is True  # certified old key before replacement
+    assert result["ready"] is True  # certified old key; refused replacement changed nothing
+    asyncio.run(setup_route.save_ai_credential(
+        setup_route.CredentialRequest(name="HOSTED_KEY", api_key="new credential")))
     assert credential_written.is_set()
     assert doctor.doctor_status(settings)["ready"] is False
 

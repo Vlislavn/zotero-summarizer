@@ -64,6 +64,20 @@ def _map_chunk(map_llm: Any, chunk: str, *, check_cancelled: Callable[[], None] 
     return note
 
 
+def map_chunks(
+    map_llm: Any, chunks: list[str], *, sub_concurrency: int = 1,
+    check_cancelled: Callable[[], None] | None = None,
+) -> list[str]:
+    """MAP every chunk, in order: a pool of ``sub_concurrency`` threads when above 1, else
+    sequentially. Shared by deep review and long-source Triage. A raising ``check_cancelled``
+    stops chunks not yet started; calls already in flight finish before this returns."""
+    kwargs = {"check_cancelled": check_cancelled} if check_cancelled is not None else {}
+    if sub_concurrency > 1 and len(chunks) > 1:
+        with ThreadPoolExecutor(max_workers=sub_concurrency) as pool:
+            return list(pool.map(lambda chunk: _map_chunk(map_llm, chunk, **kwargs), chunks))
+    return [_map_chunk(map_llm, chunk, **kwargs) for chunk in chunks]
+
+
 class ChunkBudget(NamedTuple):
     """The chunking budget trio for ``digest_for_strategy``: the rank/prefix output
     cap, the map_reduce per-chunk size, and its map-step parallelism."""
@@ -71,6 +85,7 @@ class ChunkBudget(NamedTuple):
     max_chars: int
     chunk_chars: int
     sub_concurrency: int
+    whole_body: bool = False  # remote tier: above ``max_chars`` read the WHOLE body in parts (map_reduce), never a selection
 
 
 def digest_for_strategy(
@@ -83,6 +98,8 @@ def digest_for_strategy(
     budget: ChunkBudget,
     focus_prompt: str = "",
     response_format: dict[str, Any] | None = None,
+    feed_context: Any = None, feed_out: dict | None = None,
+    verification_audit: dict[str, Any] | None = None,
 ) -> PaperDigest:
     """Dispatch ``config.quality_review.chunk_strategy`` to the right digest path.
 
@@ -95,19 +112,30 @@ def digest_for_strategy(
     propagate to deep_review's per-item boundary (never a fabricated review)."""
     from zotero_summarizer.services.library._source_admission import admit_source
 
+    extra = {}
+    if verification_audit is not None:
+        verification_audit.clear()
+        extra['verification_audit'] = verification_audit
+    if feed_context is not None:
+        from zotero_summarizer.services.library._feed_assessment import prepare_context
+        feed_context = prepare_context(feed_context, feed_out)
     admit_source(full_text)
     strategy = config.quality_review.chunk_strategy
+    if budget.whole_body and len(full_text) > budget.max_chars:
+        strategy = "map_reduce"
     if strategy == "map_reduce":
         return map_reduce_digest(
             title=title, full_text=full_text, config=config, map_llm=map_llm,
             reduce_llm=reduce_llm, chunk_chars=budget.chunk_chars,
             sub_concurrency=budget.sub_concurrency, focus_prompt=focus_prompt,
-            response_format=response_format,
+            response_format=response_format, **extra,
+            **({"feed_context": feed_context, "feed_out": feed_out} if feed_context is not None else {}),
         )
     return assess_digest(
         title=title, full_text=full_text, config=config, llm=reduce_llm,
         focus_prompt=focus_prompt, max_chars=budget.max_chars, prefix=(strategy == "prefix"),
-        response_format=response_format, verifier_llm=map_llm,
+        response_format=response_format, verifier_llm=map_llm, **extra,
+        **({"feed_context": feed_context, "feed_out": feed_out} if feed_context is not None else {}),
     )
 
 
@@ -122,6 +150,8 @@ def map_reduce_digest(
     sub_concurrency: int = 1,
     focus_prompt: str = "",
     response_format: dict[str, Any] | None = None,
+    feed_context: Any = None, feed_out: dict | None = None,
+    verification_audit: dict[str, Any] | None = None,
 ) -> PaperDigest:
     """MAP each chunk on ``map_llm`` (parallel up to ``sub_concurrency``), REDUCE the notes into
     a ``PaperDigest`` on ``reduce_llm``. The reduce reuses ``quality_review.assess_digest`` (its
@@ -133,23 +163,27 @@ def map_reduce_digest(
     from zotero_summarizer.services.library._source_admission import admit_source
     from zotero_summarizer.services.library._review_attempt import observed_client
 
+    if verification_audit is not None:
+        verification_audit.clear()
+    if feed_context is not None:
+        from zotero_summarizer.services.library._feed_assessment import prepare_context
+        feed_context = prepare_context(feed_context, feed_out)
     admit_source(full_text)
     recorded_map = observed_client(map_llm, 'map')
     chunks = split_chunks(full_text, chunk_chars)
     if not chunks:
         raise ValueError("map_reduce_digest: empty paper text")
 
-    if sub_concurrency > 1 and len(chunks) > 1:
-        with ThreadPoolExecutor(max_workers=sub_concurrency) as pool:
-            notes = list(pool.map(lambda chunk: _map_chunk(recorded_map, chunk), chunks))
-    else:
-        notes = [_map_chunk(recorded_map, chunk) for chunk in chunks]
+    notes = map_chunks(recorded_map, chunks, sub_concurrency=sub_concurrency)
 
     combined = "\n\n".join(f"[chunk {i + 1}/{len(notes)}]\n{note}" for i, note in enumerate(notes))
     extra = {"response_format": response_format} if response_format else {}
+    if verification_audit is not None:
+        extra['verification_audit'] = verification_audit
     digest = assess_digest(
         title=title, full_text=combined, config=config, llm=reduce_llm,
         max_chars=len(combined) + 1, verifier_llm=map_llm,
         focus_prompt=focus_prompt, verification_text=full_text, **extra,
+        **({"feed_context": feed_context, "feed_out": feed_out} if feed_context is not None else {}),
     )
     return digest.model_copy(update={"basis": "map_reduce"})

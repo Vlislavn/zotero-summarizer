@@ -8,6 +8,7 @@ from test_review_workflow import _insert_awaiting, patched_settings  # noqa: F40
 from tests._zotero_fixtures import add_feed_item, build_zotero_db
 from zotero_summarizer.api.routes.review import apply_all
 from zotero_summarizer.integrations import zotero_write
+from zotero_summarizer.services.golden import verdict_effects
 from zotero_summarizer.services.library import review, review_materialize
 from zotero_summarizer.services.triage import feeds as feed_service
 from zotero_summarizer.services.triage.feeds import _daily_materialize
@@ -88,14 +89,19 @@ def test_apply_all_has_no_hidden_row_cap(patched_settings, monkeypatch, availabl
                                           since_hours=None, limit=9999)) == 5000
         assert len(fs.select_by_decisions(conn, decisions=[fs.DECISION_USER_APPROVED],
                                           since_hours=None)) == 1000
-    calls = []
+    calls, mirrors = [], []
     if available:
         monkeypatch.setattr(zotero_write, "ZoteroWriter", lambda *args: object())
         monkeypatch.setattr(review_materialize, "materialize_row", lambda row, **kwargs: calls.append(row["id"]))
+        monkeypatch.setattr(verdict_effects, "mirror_review_note",
+                            lambda db_path, item_key: mirrors.append((db_path, item_key)) or {})
     result = review.apply_all_approved()
     assert result["applied" if available else "pending_sync"] == 5001
     if available:
         assert len(set(calls)) == 5001
+        assert len(mirrors) == len({key for _, key in mirrors}) == 5001
+        assert {db for db, _ in mirrors} == {path / "triage.db"}
+        assert {note["id"] for note in result["note_mirrors"]} == set(calls)
     else:
         with fs.open_triage_conn(path / "triage.db") as conn:
             assert conn.execute(

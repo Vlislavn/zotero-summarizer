@@ -81,7 +81,7 @@ def test_real_weekly_run_uses_profile_defaults_or_exact_override(tmp_path, monke
     profile.card_budget = 2
     from zotero_summarizer.services._common import write_json_atomic
     write_json_atomic(settings.data_dir / "research_feed" / "profile.json", profile.model_dump())
-    ensure = Mock()
+    ensure = Mock(return_value={})
     monkeypatch.setattr(runner, "_ensure_reviews", ensure)
     loader = Mock(side_effect=_review)
     overrides = {"shortlist_budget": 100, "card_budget": 1} if explicit else {}
@@ -133,7 +133,7 @@ def test_maximum_card_budget_bounds_actual_loader_work(tmp_path, monkeypatch):
     for index in range(21):
         _seed(settings, "x" * (index + 1), f"Agent evaluation {index}")
     loader = Mock(side_effect=_review)
-    ensure = Mock()
+    ensure = Mock(return_value={})
     monkeypatch.setattr(runner, "_ensure_reviews", ensure)
 
     result = runner.run_weekly(settings, start=START, end=END, source_limit=5000,

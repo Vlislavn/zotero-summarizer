@@ -66,6 +66,9 @@ def acquire_for_item(item_key: str, reader: Any = None) -> AcquireResult:
 def _headless_sources(app: Any, config: Any, url: str, doi: str, arxiv_id: str) -> list[tuple[str, str]]:
     """Ordered OA candidates with the resolver rung that produced each URL."""
     sources: list[tuple[str, str]] = []
+    preprint = pdf_fetch.biorxiv_pdf_url(url)
+    if preprint:
+        sources.append(("biorxiv", preprint))
     direct = pdf_fetch.resolve_pdf_url(
         doi=doi, arxiv_id=arxiv_id, url=url,
         unpaywall=None if offline_requested() else app.unpaywall_client,

@@ -202,7 +202,8 @@ def _goldenset_eval_baseline(args: argparse.Namespace) -> int:
 
 def _goldenset_tune(args: argparse.Namespace) -> int:
     """Sprint-3c — Optuna hyperparameter sweep over the LightGBM regressor."""
-    from zotero_summarizer.services._common import load_golden_rows, read_config
+    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.golden.csv_store import load_golden_rows
     from zotero_summarizer.services.golden.hybrid_gt import apply_hybrid
     from zotero_summarizer.services.model.tune import tune_lightgbm
 
@@ -288,8 +289,8 @@ def register_goldenset(subparsers) -> None:
     gs_export.add_argument(
         "--abstract-chars",
         type=int,
-        default=1000,
-        help="Truncate abstract to this many characters (0 = full).",
+        default=0,
+        help="Optional abstract character cap (default 0 = full source text).",
     )
     gs_export.add_argument("--project-root", default=None)
     gs_export.set_defaults(func=_goldenset_export)
@@ -342,6 +343,13 @@ def register_goldenset(subparsers) -> None:
     gs_train.add_argument("--project-root", default=None)
     gs_train.set_defaults(func=_goldenset_train_classifier)
 
+
+    _register_evaluation(gs_sub)
+    _register_tuning(gs_sub)
+    _register_suggestions(gs_sub)
+
+
+def _register_evaluation(gs_sub):
     gs_eval_baseline = gs_sub.add_parser(
         "eval-baseline",
         help=(
@@ -407,6 +415,9 @@ def register_goldenset(subparsers) -> None:
     gs_eval_baseline.add_argument("--project-root", default=None)
     gs_eval_baseline.set_defaults(func=_goldenset_eval_baseline)
 
+
+
+def _register_tuning(gs_sub):
     gs_tune = gs_sub.add_parser(
         "tune",
         help=(
@@ -440,6 +451,9 @@ def register_goldenset(subparsers) -> None:
     gs_tune.add_argument("--project-root", default=None)
     gs_tune.set_defaults(func=_goldenset_tune)
 
+
+
+def _register_suggestions(gs_sub):
     gs_suggest = gs_sub.add_parser(
         "suggest-labels",
         help=(
@@ -465,6 +479,8 @@ def register_goldenset(subparsers) -> None:
     gs_suggest.add_argument("--project-root", default=None)
     gs_suggest.set_defaults(func=_goldenset_suggest_labels)
 
+    from ._goldenset_feedback import register_goldenset_feedback
+    register_goldenset_feedback(gs_sub)
     register_goldenset_backup(gs_sub)
     register_goldenset_classify(gs_sub)
     register_goldenset_predict(gs_sub)

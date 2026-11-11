@@ -22,10 +22,12 @@ from zotero_summarizer.services.search import require_online
 from zotero_summarizer.services.search._models import Candidate
 
 
-def acquire_full_text(cand: Candidate, *, extractor: Any, unpaywall: Any = None) -> str:
+def acquire_full_text(cand: Candidate, *, extractor: Any, unpaywall: Any = None, outcome: dict | None = None) -> str:
     """Resolve + fetch + extract this candidate's OA full text. Returns the text,
     or ``""`` when no OA copy is resolvable / extractable (the spec §9 boundary the
     review tiers handle). ``extractor is None`` (quality disabled) → ``""``."""
+    if outcome is not None:
+        outcome.clear()
     require_online()
     if extractor is None:
         return ""
@@ -34,7 +36,7 @@ def acquire_full_text(cand: Candidate, *, extractor: Any, unpaywall: Any = None)
     # ``/pdf/`` mirror serves a bot-block HTML page, so recover the machine-readable
     # XML before falling back to a PDF fetch (derive-over-cull).
     if cand.pmcid:
-        text = europepmc.fetch_fulltext_xml(cand.pmcid)
+        text = europepmc.fetch_fulltext_xml(cand.pmcid, **({'outcome': outcome} if outcome is not None else {}))
         if text:
             return text
     url = pdf_fetch.resolve_pdf_url(
@@ -46,7 +48,10 @@ def acquire_full_text(cand: Candidate, *, extractor: Any, unpaywall: Any = None)
     path = pdf_fetch.fetch_pdf(url, cache_dir=settings().pdf_cache_dir)
     if path is None:
         return ""
-    return extractor.extract_text(path).strip()
+    text = extractor.extract_text(path).strip()
+    if text and outcome is not None:
+        outcome['source_uri'] = url
+    return text
 
 
 __all__ = ["acquire_full_text"]

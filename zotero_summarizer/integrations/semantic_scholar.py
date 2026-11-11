@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from zotero_summarizer.integrations._rate_limiter import RateLimiter
+from zotero_summarizer.integrations._search_http import json_rows, search_hits
 
 _BASE = "https://api.semanticscholar.org/graph/v1/paper/search"
 _TIMEOUT_SECS = 12.0
@@ -69,33 +70,23 @@ def _hit_from_paper(paper: dict) -> SemanticScholarHit | None:
     )
 
 
+def _search_hits(response: httpx.Response, strict: bool) -> list[SemanticScholarHit | None]:
+    return [_hit_from_paper(paper) for paper in json_rows(response, "data", strict=strict)]
+
+
 def search_semantic_scholar(
     query: str,
     *,
     limit: int = 20,
     http_client: httpx.Client | None = None,
+    outcome: dict | None = None,
 ) -> list[SemanticScholarHit]:
     """Topic search Semantic Scholar (relevance order). Returns ``[]`` on any error
     (throttling 429, network, non-200, malformed JSON) — never raises."""
     query = (query or "").strip()
-    if not query:
-        return []
     params = {"query": query, "limit": max(1, min(limit, 100)), "fields": _FIELDS}
-    _RATE_LIMITER.acquire()
-    client = http_client or httpx.Client(timeout=_TIMEOUT_SECS)
-    try:
-        resp = client.get(_BASE, params=params, headers={"User-Agent": "zotero-summarizer/1.0"})
-        if resp.status_code != 200:
-            return []
-        payload = resp.json()
-    except (httpx.HTTPError, OSError, ValueError):
-        return []
-    finally:
-        if http_client is None:
-            client.close()
-    papers = payload.get("data") or []
-    hits = [_hit_from_paper(p) for p in papers if isinstance(p, dict)]
-    return [h for h in hits if h is not None]
+    return search_hits(query, _BASE, params, _search_hits, _RATE_LIMITER,
+                       timeout=_TIMEOUT_SECS, http_client=http_client, outcome=outcome)
 
 
 __all__ = ["SemanticScholarHit", "search_semantic_scholar"]

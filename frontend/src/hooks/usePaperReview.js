@@ -1,8 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchReviewDetail, submitVerdict, deleteVerdict } from '../api/goldenApi.js';
 import { queueRejectTag } from '../api/libraryApi.js';
-import { syncStatusEvent } from '../offlineStore.js';
+import { conflictResolvedEvent, syncStatusEvent } from '../offlineStore.js';
 
 // Shared wiring for one paper's review detail + verdict mutations. Lifted out of
 // InlineAnnotate so the inline row card AND the full-page review (/paper/:key)
@@ -11,17 +11,46 @@ import { syncStatusEvent } from '../offlineStore.js';
 // the ❌ reject tag here, so there is ONE reject path wherever the verdict is set
 // (Occam's Razor). Returns the `verdict` prop object PaperDetailView expects plus
 // the tag/collection refetch handlers.
-export default function usePaperReview(itemKey, { onSaved, onQueueRefresh } = {}) {
+export default function usePaperReview(itemKey, { onSaved, onVerdictAcknowledged, onQueueRefresh,
+  onVerdictStarted, onVerdictSettled } = {}) {
   const queryClient = useQueryClient();
+  const activeItem = useRef(itemKey);
+  const callbacks = useRef({ onSaved, onQueueRefresh });
+  callbacks.current = { onSaved, onQueueRefresh };
+  activeItem.current = itemKey;
+  useEffect(() => {
+    activeItem.current = itemKey;
+    return () => { activeItem.current = null; };
+  }, [itemKey]);
   const detailQuery = useQuery({
-    queryKey: ['review-detail', itemKey],
+    // Dedicated key (not the global ['review-detail'] prefix): the paper/inline
+    // detail is fetched ONCE per open and refreshed explicitly after the user's own
+    // verdict/note. The post-sync invalidate (syncClient) and window-focus/reconnect
+    // must not re-pull it — that was the second review-detail request on every open.
+    queryKey: ['paper-detail', itemKey],
     queryFn: () => fetchReviewDetail(itemKey),
+    networkMode: 'always',
     enabled: Boolean(itemKey),
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
+  useEffect(() => {  // Keep mine / Use server changes the stored value under an open paper (OFF-03).
+    const resolved = (event) => {
+      if (event.detail?.item_key === itemKey) queryClient.invalidateQueries({ queryKey: ['paper-detail', itemKey] });
+    };
+    window.addEventListener(conflictResolvedEvent, resolved);
+    return () => window.removeEventListener(conflictResolvedEvent, resolved);
+  }, [itemKey, queryClient]);
   const submitMutation = useMutation({
+    mutationKey: onVerdictStarted ? ['today-action'] : ['paper-verdict'],
+    networkMode: 'always',
+    onMutate: variables => onVerdictStarted?.(variables.item_key, variables.user_priority),
+    onSettled: (result, error, _variables, context) => onVerdictSettled?.(context, result, error),
     mutationFn: async ({ item_key, user_priority, comment }) => {
       const result = await submitVerdict({ item_key, user_priority, comment });
-      if (user_priority !== 'dont_read') return result;
+      if (!result.saved_offline) onVerdictAcknowledged?.();
+      // A feed-only paper has no Zotero item to tag (same as a skip decided on Today).
+      if (user_priority !== 'dont_read' || result.saved_offline || item_key.startsWith('feed:')) return result;
       try {
         await queueRejectTag(item_key);
         return result;
@@ -30,27 +59,38 @@ export default function usePaperReview(itemKey, { onSaved, onQueueRefresh } = {}
       }
     },
   });
-  const deleteMutation = useMutation({ mutationFn: () => deleteVerdict(itemKey) });
+  const deleteMutation = useMutation({ networkMode: 'always',
+    mutationKey: onVerdictStarted ? ['today-action'] : ['paper-verdict'],
+    onMutate: key => onVerdictStarted?.(key, null),
+    onSettled: (result, error, _variables, context) => onVerdictSettled?.(context, result, error),
+    mutationFn: async (key) => {
+    const result = await deleteVerdict(key);
+    if (!result.saved_offline) onVerdictAcknowledged?.();
+    return result;
+  } });
   const detail = detailQuery.data;
+  const resetSubmit = submitMutation.reset;
 
   useEffect(() => {
     const reconciled = (event) => {
-      if (!submitMutation.data?.saved_offline || !event.detail?.online) return;
+      if (submitMutation.variables?.item_key !== itemKey || !submitMutation.data?.saved_offline || !event.detail?.online) return;
       const rejected = event.detail.rejected?.some(
         (row) => row.item_key === itemKey && row.field === 'verdict',
       );
-      if (rejected || event.detail.pending === 0) submitMutation.reset();
+      if (rejected || event.detail.pending === 0) resetSubmit();
     };
     window.addEventListener(syncStatusEvent, reconciled);
     return () => window.removeEventListener(syncStatusEvent, reconciled);
-  }, [itemKey, submitMutation.data?.saved_offline, submitMutation.reset]);
+  }, [itemKey, submitMutation.variables?.item_key, submitMutation.data?.saved_offline, resetSubmit]);
 
   // POST /api/golden/verdict resolves HTTP 200 even when the best-effort Zotero
   // mirror (label tag / note) failed — it reports label_error/note_error instead
   // of raising (api/routes/golden.py submit_verdict). The verdict itself is
   // already durable at that point; same soft-warning idiom as AnnotationVerdict's
   // flashStatus (data?.label_error || data?.note_error).
-  const verdictResult = submitMutation.data || null;
+  const ownsSubmit = submitMutation.variables?.item_key === itemKey;
+  const ownsDelete = deleteMutation.variables === itemKey;
+  const verdictResult = ownsSubmit ? submitMutation.data || null : null;
   // A positive verdict on a Today-feed paper now materializes it into Zotero
   // (api/routes/golden.py submit_verdict → add_feed_verdict_to_library). Surface
   // the outcome so the user KNOWS it was added — the paper appears in Zotero
@@ -74,25 +114,26 @@ export default function usePaperReview(itemKey, { onSaved, onQueueRefresh } = {}
     : null;
 
   function refreshDetail() {
-    queryClient.invalidateQueries({ queryKey: ['review-detail', itemKey] });
+    queryClient.invalidateQueries({ queryKey: ['paper-detail', itemKey] });
   }
 
   function afterVerdictChange() {
+    if (activeItem.current !== itemKey) return;
     refreshDetail();
-    onSaved?.();
+    callbacks.current.onSaved?.();
   }
 
   const verdict = {
     existing: detail?.verdict,
     onSubmit: ({ user_priority, comment }) =>
       submitMutation.mutate({ item_key: itemKey, user_priority, comment }, { onSuccess: afterVerdictChange }),
-    onDelete: () => deleteMutation.mutate(undefined, { onSuccess: afterVerdictChange }),
-    submitting: submitMutation.isPending,
-    submitError: submitMutation.error?.message || null,
+    onDelete: () => deleteMutation.mutate(itemKey, { onSuccess: afterVerdictChange }),
+    submitting: ownsSubmit && submitMutation.isPending,
+    submitError: ownsSubmit ? submitMutation.error?.message || null : null,
     submitWarning,
     submitNotice,
-    deleting: deleteMutation.isPending,
-    deleteError: deleteMutation.error?.message || null,
+    deleting: ownsDelete && deleteMutation.isPending,
+    deleteError: ownsDelete ? deleteMutation.error?.message || null : null,
   };
 
   return {
@@ -100,8 +141,8 @@ export default function usePaperReview(itemKey, { onSaved, onQueueRefresh } = {}
     isLoading: detailQuery.isLoading,
     error: detailQuery.error,
     refreshDetail,
-    onTagsChanged: () => { refreshDetail(); onQueueRefresh?.(); },
-    onCollectionsChanged: () => { refreshDetail(); onQueueRefresh?.(); },
+    onTagsChanged: () => { refreshDetail(); callbacks.current.onQueueRefresh?.(); },
+    onCollectionsChanged: () => { refreshDetail(); callbacks.current.onQueueRefresh?.(); },
     verdict,
   };
 }

@@ -23,7 +23,7 @@ export default function CollectionPicker({ value, onChange, disabled = false, cl
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
       title="Target Zotero collection"
-      className={className || 'text-xs px-2 py-1 rounded-lg border border-slate-300 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500'}
+      className={className || 'min-w-0 max-w-full text-xs px-2 py-1 rounded-lg border border-slate-300 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500'}
     >
       <option value="">Inbox (default)</option>
       {flat.map((entry) => (

@@ -24,6 +24,7 @@ spot-check now lives in its own labeled Today section + the Review page
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -33,9 +34,11 @@ from zotero_summarizer.domain import (
     normalize_arxiv_id,
     normalize_doi,
 )
+from zotero_summarizer.runtime import memoized
 from zotero_summarizer.services._common import rank_interleave_enabled, rank_quality_first_enabled
 from zotero_summarizer.services.model.team_draft import team_draft_merge
 from zotero_summarizer.services.triage.daily_select._allocation import allocate, _passes_model_floor
+from zotero_summarizer.services.triage.daily_select._analyzed import build_analyzed_slate, exploration_context
 from zotero_summarizer.services.triage.daily_select._candidate import (
     attach_quality_from_reviews,
     attach_rank_scores,
@@ -49,9 +52,9 @@ from zotero_summarizer.services.triage.daily_select._querying import (
     fetch_decided_content_keys,
     fetch_handled_keys,
     fetch_rows_by_decisions,
-    fetch_trashed_guids,
     open_ro,
 )
+from zotero_summarizer.storage.feeds_lookup import fetch_trashed_guids
 from zotero_summarizer.storage.feed_identity import row_feed_keys
 from zotero_summarizer.storage.interleave import record_interleave_slate
 
@@ -172,6 +175,33 @@ def _drop_content_dupes(
     return survivors
 
 
+def _unhandled_pool(conn) -> list[dict]:
+    """Awaiting rows minus trashed / handled / content-duplicate ones, newest kept."""
+    handled_guids, handled_label_keys = fetch_handled_keys(conn)
+    blocked_doi, blocked_arxiv = fetch_decided_content_keys(
+        conn,
+        blocking_decisions=_BLOCKING_DECISIONS,
+        blocking_outcomes=_BLOCKING_OUTCOMES,
+    )
+    trashed_guids = fetch_trashed_guids(
+        conn,
+        decisions=tuple(_TRASH_DECISIONS),
+        outcomes=tuple(_TRASH_OUTCOMES),
+    )
+
+    primary_decisions = [_DECISION_AWAITING_REVIEW, _DECISION_TRIAGED_PENDING]
+    # ponytail: read the primary backlog in memory; page only if its size warrants it.
+    rows = fetch_rows_by_decisions(conn, decisions=primary_decisions)
+    rows = _drop_trashed_guids(rows, trashed_guids=trashed_guids)
+    rows = _drop_handled(
+        rows, handled_guids=handled_guids, handled_label_keys=handled_label_keys,
+    )
+    rows = dedup_keep_newest(_drop_content_dupes(
+        rows, blocked_doi=blocked_doi, blocked_arxiv=blocked_arxiv,
+    ))
+    return rows
+
+
 def _fetch_primary_unhandled(
     conn,
     *,
@@ -191,33 +221,18 @@ def _fetch_primary_unhandled(
         raise ValueError(f"backlog_cap must be positive; got {backlog_cap}")
     if lookback_hours <= 0:
         raise ValueError(f"lookback_hours must be positive; got {lookback_hours}")
-    handled_guids, handled_label_keys = fetch_handled_keys(conn)
-    blocked_doi, blocked_arxiv = fetch_decided_content_keys(
-        conn,
-        blocking_decisions=_BLOCKING_DECISIONS,
-        blocking_outcomes=_BLOCKING_OUTCOMES,
+    # One read per ``request_memo`` scope (daily: slate, preparation status, header
+    # count); the window below is cheap. Callers get private row copies (columns are
+    # scalars) because scoring mutates rows.
+    pool = memoized(
+        ("unhandled_pool", conn.execute("PRAGMA database_list").fetchone()[2]),
+        lambda: _unhandled_pool(conn),
     )
-    trashed_guids = fetch_trashed_guids(
-        conn,
-        trashed_decisions=_TRASH_DECISIONS,
-        trashed_outcomes=_TRASH_OUTCOMES,
-    )
-
-    primary_decisions = [_DECISION_AWAITING_REVIEW, _DECISION_TRIAGED_PENDING]
-    # ponytail: read the primary backlog in memory; page only if its size warrants it.
-    rows = fetch_rows_by_decisions(conn, decisions=primary_decisions)
-    rows = _drop_trashed_guids(rows, trashed_guids=trashed_guids)
-    rows = _drop_handled(
-        rows, handled_guids=handled_guids, handled_label_keys=handled_label_keys,
-    )
-    rows = dedup_keep_newest(_drop_content_dupes(
-        rows, blocked_doi=blocked_doi, blocked_arxiv=blocked_arxiv,
-    ))
     cutoff = now.astimezone(timezone.utc) - timedelta(hours=lookback_hours)
-    recent = [row for row in rows if row_created_at(row) >= cutoff]
+    recent = [row for row in pool if row_created_at(row) >= cutoff]
     if recent:
-        return recent, False
-    return rows[:backlog_cap], bool(rows)
+        return [dict(row) for row in recent], False
+    return [dict(row) for row in pool[:backlog_cap]], bool(pool)
 
 
 def count_awaiting_unhandled(
@@ -242,6 +257,38 @@ def count_awaiting_unhandled(
     finally:
         conn.close()
     return len(rows)
+
+
+def ranked_unhandled_candidates(
+    db_path: Path, *, lookback_hours: int, now: datetime | None = None,
+) -> list[dict]:
+    """The unhandled primary pool in the window, ranked by the control blend.
+
+    Same guards as the slate (trash, handled, DOI/arXiv dedup); an empty window
+    yields ``[]`` instead of old-row filler. Shared by Today preparation and the
+    analyzed slate so both see one candidate order.
+    """
+    effective_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    conn = open_ro(db_path)
+    try:
+        rows, fellback = _fetch_primary_unhandled(
+            conn, lookback_hours=lookback_hours, backlog_cap=1, now=effective_now,
+        )
+    finally:
+        conn.close()
+    return [] if fellback else _prepare_cohort(rows, False)[0]
+
+
+def _assemble_analyzed(
+    db_path: Path, *, K: int, lookback_hours: int, now: datetime | None,
+) -> DailySlate:
+    from zotero_summarizer.services.library import deep_review  # lazy cross-domain read
+
+    candidates = ranked_unhandled_candidates(db_path, lookback_hours=lookback_hours, now=now)
+    return build_analyzed_slate(
+        candidates, deep_review.usable_reviews(), K=K, lookback_hours=lookback_hours,
+        **exploration_context(now),
+    )
 
 
 def _assemble_interleaved(
@@ -291,7 +338,9 @@ def _assemble_interleaved(
         # The drafting arm's SlatePaper carries the role label; 'both' takes A0's
         # ('a'/'both' picks are by construction in the A0 slate — KeyError = bug).
         paper = by_a2[pick.item] if pick.team == "b" else by_a0[pick.item]
-        papers.append(paper)
+        papers.append(replace(
+            paper, selection_evidence={"mode": "interleave", "basis": "unavailable_blinded"},
+        ))
         entries.append({
             "item_id": pick.item,
             "item_key": paper.item_key,
@@ -309,7 +358,22 @@ def _assemble_interleaved(
         fellback_to_recent=a0.fellback_to_recent or a2.fellback_to_recent,
         low_relevance_hidden=a0.low_relevance_hidden,
         weak_slate=a0.weak_slate,
+        selection_policy="interleave",
     )
+
+
+def _prepare_cohort(
+    primary_rows: list[dict], quality_first: bool | None,
+) -> tuple[list[dict], bool]:
+    """Join current quality, resolve the mode once, and rank the entire pool."""
+    candidates = [make_candidate(row) for row in primary_rows]
+    attach_quality_from_reviews(candidates)
+    if quality_first is None:
+        quality_first = rank_quality_first_enabled()
+    attach_rank_scores(candidates, quality_first=quality_first)
+    candidates.sort(key=lambda c: c["rank_score"], reverse=True)
+    attach_why(candidates)
+    return candidates, quality_first
 
 
 def assemble_daily_slate(
@@ -321,10 +385,12 @@ def assemble_daily_slate(
     lookback_hours: int = 168,
     now: datetime | None = None,
     quality_first: bool | None = None,
+    policy: str = "legacy",
 ) -> DailySlate:
-    """Build today's role-allocated slate.
+    """Build today's slate: ``policy="analyzed"`` (``/api/daily``) shows only
+    eligible analyzed papers (``_analyzed``); ``"legacy"`` is role-allocated.
 
-    Steps (see module docstring for the full contract):
+    Legacy steps (see module docstring for the full contract):
 
       1. Fetch ``awaiting_review`` + ``triaged_pending`` rows from the last
          ``lookback_hours``.
@@ -346,6 +412,10 @@ def assemble_daily_slate(
     """
     if K <= 0:
         raise ValueError(f"K must be positive; got {K}")
+    if policy == "analyzed":
+        return _assemble_analyzed(db_path, K=K, lookback_hours=lookback_hours, now=now)
+    if policy != "legacy":
+        raise ValueError(f"unknown slate policy {policy!r}")
     if quality_first is None and rank_interleave_enabled():
         # P3 online interleave (ADR-A9/GAP-G11): both arms compete inside one slate.
         # Only the top-level call dispatches — the two arm builds below pass an
@@ -372,28 +442,8 @@ def assemble_daily_slate(
     finally:
         conn.close()
 
-    deduped = [make_candidate(row) for row in primary_rows]
-    pool_size = len(deduped)
-
-    # Bridge the deep-review QUALITY signal onto the slate: feed-GUID-keyed
-    # candidates can't join the library-item_key-keyed deep_reviews cache directly,
-    # so resolve via each row's materialized_zotero_key. The lift is confined to the
-    # floored model role in the allocator (discovery roles stay quality-free).
-    attach_quality_from_reviews(deduped)
-
-    # Shared relevance × goal × prestige blend (rank_blend) — the same order
-    # the Library queue uses; degrades to composite-only when those signals
-    # are absent. The full pool goes to the allocator: a cap here would starve
-    # the surprise/diversity pickers of exactly the papers they exist to find.
-    # Quality-first mode (default OFF, eval-gated) swaps in the quality-led key
-    # (``rank_blend_quality``): grade leads, topicality soft-gates. An explicit
-    # ``quality_first`` argument pins the arm (the interleave builds both);
-    # ``None`` resolves from config/env as before.
-    if quality_first is None:
-        quality_first = rank_quality_first_enabled()
-    attach_rank_scores(deduped, quality_first=quality_first)
-    deduped.sort(key=lambda c: c["rank_score"], reverse=True)
-    attach_why(deduped)
+    pool_size = len(primary_rows)
+    deduped, quality_first = _prepare_cohort(primary_rows, quality_first)
 
     papers, empty_role_events = allocate(
         candidate_pool=deduped,
@@ -437,6 +487,7 @@ def assemble_daily_slate(
         fellback_to_recent=fellback_to_recent,
         low_relevance_hidden=low_relevance_hidden,
         weak_slate=weak_slate,
+        selection_policy="quality_first" if quality_first else "control",
     )
 
 
@@ -445,4 +496,5 @@ __all__ = [
     "DailySlate",
     "assemble_daily_slate",
     "count_awaiting_unhandled",
+    "ranked_unhandled_candidates",
 ]

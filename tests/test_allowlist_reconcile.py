@@ -11,8 +11,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _RECON_PATH = _REPO_ROOT / "tools" / "precommit" / "check_allowlists.py"
 _spec = importlib.util.spec_from_file_location("check_allowlists", _RECON_PATH)
@@ -62,7 +60,6 @@ def test_find_stale_empty_when_committed_subset_of_live() -> None:
 def test_committed_allowlists_have_no_stale_grandfathers() -> None:
     # Guards against allowlist rot (a grandfather whose target was deleted/fixed)
     # — exactly the failure a reverted/over-broad whitelist would introduce.
-    pytest.importorskip("vulture")  # reconcile regenerates the vulture live set
     result = subprocess.run(
         [sys.executable, str(_RECON_PATH), "reconcile"],
         cwd=_REPO_ROOT,

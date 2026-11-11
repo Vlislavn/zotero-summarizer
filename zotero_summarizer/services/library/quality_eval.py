@@ -14,18 +14,23 @@ from __future__ import annotations
 import logging
 import re
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import Any
 
+from zotero_summarizer.integrations import jev
 from zotero_summarizer.models import QualityEval
 from zotero_summarizer.services.faithbench._corpus import PaperChunkIndex
+from zotero_summarizer.services.library import _jev_checklist
 from zotero_summarizer.services.library import _paper_type_checklists as pc
 from zotero_summarizer.services.library import _quality_prompts as qp
 from zotero_summarizer.services.library._grounding import quote_is_grounded
+from zotero_summarizer.services.library._prompt_security import paper_block
 from zotero_summarizer.services.library._review_text import select_review_text
 
 LOGGER = logging.getLogger(__name__)
+_SINGLE_PASS_CONFIDENCE = 0.6
 
 # Structural signal patterns over the paper body (case-insensitive).
 _PATTERNS: dict[str, re.Pattern[str]] = {
@@ -128,7 +133,6 @@ def _run_rubric(
         for future in as_completed(futures):
             idx, result = future.result()  # raises on LLM error → propagates
             ordered[idx] = result
-            nonlocal_done = 0
             with counter_lock:
                 done_counter += 1
                 nonlocal_done = done_counter
@@ -162,8 +166,14 @@ def _dedupe_near(items: list[str], *, jaccard: float = 0.6) -> list[str]:
 
 def _aggregate_rubric(samples: list[qp.RubricLLMResponse], item_keys: list[str], body: str
                       ) -> tuple[dict[str, str], dict[str, str], list[str], set[str]]:
-    """Per-item majority verdict + a grounded evidence quote; returns
-    ``(rubric, evidence, concerns, grounded_yes_keys)``."""
+    """Per-item majority verdict + grounded evidence; reject incomplete model output."""
+    if not samples:
+        raise ValueError("quality rubric returned no samples")
+    for sample in samples:
+        invalid = [key for key in item_keys
+                   if str(sample.checks.get(key, "")).strip().lower() not in {"yes", "no", "na"}]
+        if invalid:
+            raise ValueError("incomplete or invalid rubric criteria: " + ", ".join(invalid))
     rubric: dict[str, str] = {}
     evidence: dict[str, str] = {}
     grounded_yes: set[str] = set()
@@ -220,13 +230,13 @@ def _shadow_claim_scores(claims: list[str], index: PaperChunkIndex, model_name: 
 
 
 def _self_verify(llm: Any, *, spec: pc.ChecklistSpec, rubric: dict[str, str],
-                 evidence: dict[str, str], grounded_yes: set[str]) -> set[str]:
-    """Second pass (AI-Scientist-style self-reflection): re-check the CRITICAL items a
-    first pass marked MET — does the grounding quote ACTUALLY establish the criterion,
-    or did the rubric LLM over-claim (positivity bias)? Returns the set of critical
-    keys to DEMOTE. ONE LLM call over (criterion, quote) pairs; empty when there is
-    nothing critical+met to verify. A key the verifier omits is NOT demoted (we only
-    overturn an explicit ``reject`` — conservative)."""
+                 evidence: dict[str, str], grounded_yes: set[str], body: str) -> set[str]:
+    """Re-check critical MET items against the same source body as the rubric.
+
+    A short quote is a locator, not the whole evidence for a compound criterion.
+    One existing verification call returns keys to demote; omitted keys retain
+    their first-pass verdict (only explicit ``reject`` overturns it).
+    """
     critical_met = [it for it in spec.items
                     if it.critical and rubric.get(it.key) == "yes"
                     and it.key in grounded_yes and (evidence.get(it.key) or "").strip()]
@@ -237,7 +247,7 @@ def _self_verify(llm: Any, *, spec: pc.ChecklistSpec, rubric: dict[str, str],
         for it in critical_met
     )
     resp = llm.pydantic_prompt(
-        prompt=qp.SELF_VERIFY_PROMPT.format(items=items_block),
+        prompt=paper_block(body) + qp.SELF_VERIFY_PROMPT.format(items=items_block),
         pydantic_model=qp.SelfVerifyResponse,
     )
     return {it.key for it in critical_met
@@ -245,25 +255,27 @@ def _self_verify(llm: Any, *, spec: pc.ChecklistSpec, rubric: dict[str, str],
 
 
 def evaluate_quality(
-    *, title: str, full_text: str, sections: list[dict[str, Any]], digest: dict[str, Any],
-    llm: Any, max_chars: int, paper_type: str | None = None,
+    *, title: str, full_text: str, sections: list[dict[str, Any]], digest: dict[str, Any] | Callable[[], dict[str, Any]],
+    llm: Any, max_chars: int, paper_type: str | None = pc.PaperType.GENERIC_EMPIRICAL.value,
     prestige_score: float | None = None, prestige_known: bool = False,
     prestige_floor: float | None = None, self_consistency_runs: int = 3, exemplars: str = "",
     shadow_claim_check: bool = False, claim_check_model: str = "flan-t5-large",
     self_verification: bool = False, reporter: Any = None, sub_concurrency: int = 1,
+    jev_target: jev.Target | None = None,
 ) -> QualityEval:
     """Compute the reference-free quality verdict, judging the paper against the
     recognized reporting/appraisal standard for its ``paper_type`` (a review is NOT
     judged on ablations/leakage). The band is derived from CHECKLIST COVERAGE, not an
     LLM number. ``prestige_*`` are accepted for call-site compatibility but no longer
     affect the quality band — prestige is a ranking signal, not a reporting-quality
-    one. Errors propagate — the caller wraps this layer."""
-    # Resolve the type (unknown / None → safe GENERIC_EMPIRICAL supertype) and its
-    # checklist; ``resolved`` is what we record so the UI shows the standard applied.
+    one. Omitted type retains the legacy ASSUMED generic-empirical mode; it is not
+    a verified type finding. Explicit None/invalid type stays ungraded unknown.
+    Errors propagate — the caller wraps this layer."""
+    # A missing/failed type assessment cannot license an empirical checklist.
     try:
         resolved = pc.PaperType(paper_type or "").value
     except ValueError:
-        resolved = pc.PaperType.GENERIC_EMPIRICAL.value
+        return QualityEval(quality_band="uncertain", basis="not_assessed")
 
     # Non-paper (web article / blog / news): no scientific reporting standard applies,
     # so SHORT-CIRCUIT the rubric — no A–D grade, no red flags, zero LLM calls. The
@@ -286,17 +298,26 @@ def evaluate_quality(
     # on any EMP-family type" gate that leaked the clinical flag onto technical ML papers.
     red_flags = [msg for fam, msg in structural_flags if fam in spec.families]
     item_keys = [it.key for it in spec.items]
-    items_block = "\n".join(f"- {it.key}: {it.question}" for it in spec.items)
+    settled, jev_evidence, jev_grounded, jev_audit = (
+        _jev_checklist.settle(jev_target, [k for k in item_keys if not (k == "baselines" and resolved == pc.PaperType.DATASET_BENCHMARK.value)], body, title) if jev_target is not None else ({}, {}, set(), None))
+    llm_items = [it for it in spec.items if it.key not in settled] or list(spec.items)  # never an empty LLM rubric
+    if len(llm_items) == len(spec.items):
+        settled, jev_evidence, jev_grounded = {}, {}, set()
+    llm_keys = [it.key for it in llm_items]
+    items_block = "\n".join(f"- {it.key}: {it.question}" for it in llm_items)
     if reporter is not None:
         reporter.phase("quality_rubric", total=max(1, self_consistency_runs))
-    rubric_prompt = qp.QUALITY_RUBRIC_PROMPT.format(
-        title=title or "(hidden)", full_text=body,
+    rubric_prompt = paper_block(body) + qp.QUALITY_RUBRIC_PROMPT.format(
+        title=title or "(hidden)",
         structural=", ".join(k for k, v in signals.items() if v) or "none detected",
         items=items_block, exemplars=(exemplars + "\n\n") if exemplars else "",
     )
     samples = _run_rubric(llm, rubric_prompt, runs=self_consistency_runs, reporter=reporter,
                           sub_concurrency=sub_concurrency)
-    rubric, evidence, concerns, grounded_yes = _aggregate_rubric(samples, item_keys, body)
+    rubric, evidence, concerns, grounded_yes = _aggregate_rubric(samples, llm_keys, body)
+    rubric.update(settled)
+    evidence.update(jev_evidence)
+    grounded_yes |= jev_grounded
 
     # Self-verification (second pass): overturn over-claimed CRITICAL "met" items so a
     # rejected one becomes a missing critical (demotes the band). Runs BEFORE the
@@ -305,11 +326,15 @@ def evaluate_quality(
     if self_verification:
         if reporter is not None:
             reporter.phase("quality_verify", is_call=True)
-        demoted = _self_verify(llm, spec=spec, rubric=rubric, evidence=evidence, grounded_yes=grounded_yes)
+        demoted = _self_verify(llm, spec=spec, rubric=rubric, evidence=evidence,
+                               grounded_yes=grounded_yes, body=body)
         for k in demoted:
             rubric[k] = "no"
             grounded_yes.discard(k)
 
+    if reporter is not None:
+        reporter.finish("quality_rubric")  # the wait for the digest below is not rubric work
+    digest = digest() if callable(digest) else digest  # the review runs this layer alongside the digest; wait for it only here
     claims = [str(digest.get("tldr") or "")] + [str(x) for x in (digest.get("key_findings") or [])]
     chunk_index = PaperChunkIndex(body)
     if reporter is not None:
@@ -317,16 +342,15 @@ def evaluate_quality(
     overstatements = _overstatements(llm, claims=claims, index=chunk_index)
     claim_support = _shadow_claim_scores(claims, chunk_index, claim_check_model) if shadow_claim_check else {}
 
-    # Structural leakage red_flags (EMP-only) are HARD. Abstract-vs-body overstatements are
-    # a SOFT signal: 1-2 of them (often false-positives on a faithful paper) must not alone
-    # drag a well-covered paper to `flag` — require a cluster (>=3). ponytail: count gate;
-    # upgrade to coverage-aware gating (overstatements cap only when coverage is weak) if needed.
-    has_red_flag = bool(red_flags) or len(overstatements) >= 3
+    # Structural leakage red_flags (EMP-only) are HARD. Overstatements are advisory only
+    # (#189/#194: stored flags precision 0.03 on 132 hand-labelled claims), so they never
+    # move the band, the grade or any decision.
+    has_red_flag = bool(red_flags)
     # Per-sample band agreement → "uncertain" reflects VERDICT variance across runs
     # (grounding is resolved at the aggregate level via the shared `grounded_yes`).
     per_sample = [
         pc.coverage_grade(
-            spec, {k: str(s.checks.get(k, "")).strip().lower() for k in item_keys},
+            spec, {k: settled.get(k) or str(s.checks.get(k, "")).strip().lower() for k in item_keys},
             grounded_yes, has_red_flag=has_red_flag,
         ).band
         for s in samples
@@ -336,6 +360,8 @@ def evaluate_quality(
     band = coverage.band if agreed else "uncertain"
     agreement = per_sample.count(coverage.band) / len(per_sample) if per_sample else 0.0
     confidence = round(agreement * (0.7 if overstatements else 1.0), 2)
+    if len(per_sample) < 2:  # one pass cannot show agreement: never report full confidence
+        confidence = min(confidence, _SINGLE_PASS_CONFIDENCE)
     domain = "clinical_bio" if _CLINICAL.search(full_text or "") else ("agentic" if _AGENTIC.search(full_text or "") else "general")
 
     return QualityEval(
@@ -348,5 +374,5 @@ def evaluate_quality(
         coverage_standard=" / ".join(name for name, _ in spec.standards),
         coverage_met=coverage.met, coverage_applicable=coverage.applicable,
         coverage_fraction=coverage.fraction, missing_critical=coverage.missing_critical,
-        self_verification_demoted=sorted(demoted),
+        self_verification_demoted=sorted(demoted), jev=jev_audit,
     )

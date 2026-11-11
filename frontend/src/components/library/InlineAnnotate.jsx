@@ -11,7 +11,7 @@ import usePaperReview from '../../hooks/usePaperReview.js';
 // is ONE reject path (Occam's Razor). onSaved collapses + refetches (a
 // verdicted/engagement-tagged paper drops out); onQueueRefresh refetches without
 // collapsing.
-export default function InlineAnnotate({ itemKey, collections = [], onSaved, onQueueRefresh }) {
+export default function InlineAnnotate({ itemKey, collections = [], onSaved, onQueueRefresh, onNotesDirtyChange }) {
   const { detail, isLoading, error, refreshDetail, onTagsChanged, onCollectionsChanged, verdict } =
     usePaperReview(itemKey, { onSaved, onQueueRefresh });
 
@@ -37,6 +37,7 @@ export default function InlineAnnotate({ itemKey, collections = [], onSaved, onQ
           onDeepReviewDone={refreshDetail}
           onTagsChanged={onTagsChanged}
           onCollectionsChanged={onCollectionsChanged}
+          onNotesDirtyChange={onNotesDirtyChange}
           verdict={verdict}
         />
       )}

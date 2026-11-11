@@ -1,115 +1,111 @@
-.PHONY: ui api iphone dev ui-build test lint scan scan-diff
+.PHONY: help install run iphone dev test lint check scan scan-diff deadcode-update deadcode-refresh deadcode-gates scan-overlaps
+.DEFAULT_GOAL := help
 
-# Prefer the project venv binary so targets work without activating it; fall
-# back to PATH if there's no venv.
-ZS := $(if $(wildcard .venv/bin/zotero-summarizer),.venv/bin/zotero-summarizer,zotero-summarizer)
+# Prefer project-venv tools so targets work without activating it; fall back to PATH.
+tool = $(if $(wildcard .venv/bin/$(1)),.venv/bin/$(1),$(1))
+ZS := $(call tool,zotero-summarizer)
+PY := $(call tool,python3)
+
+# Project folder the app reads goals.yaml/.env/data from (Settings.load): ZOTERO_SUMMARIZER_HOME, else this checkout.
+HOME_DIR = $(or $(ZOTERO_SUMMARIZER_HOME),$(CURDIR))
+
+# Built UI served by `run`/`iphone`; rebuilt only when frontend sources change.
+DIST := frontend/dist/index.html
+UI_SOURCES := $(shell find frontend/src frontend/public -type f 2>/dev/null) \
+  $(wildcard frontend/index.html frontend/package-lock.json frontend/*.config.js)
 
 # --- code-health scan knobs (system-owned defaults; override only when needed) ---
-# Base branch for `scan-diff` (what "changed" is measured against).
-BASE ?= main
-# The function-overlap pass is deterministic + offline by default (fast, no model).
-# `make scan EMBED=1` / `make scan-diff EMBED=1` adds the semantic code-embedding signal
-# (downloads a local code model on first run; `ZS_OFFLINE=1` runs offline afterwards).
-OVERLAP_FLAGS := --no-embed
-ifeq ($(EMBED),1)
-OVERLAP_FLAGS :=
-endif
+# Base for the diff gates and `scan-diff` (what "changed" is measured against).
+BASE ?= origin/main
+DEADCODE := .venv/bin/deadcode
 
-# Frontend dev server (Vite). Proxies /api/* to the backend on :8000, so the
-# backend MUST also be running — use `make dev` to start both at once.
-ui:
-	cd frontend && npm run dev
+help: ## Show these commands
+	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  make %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-# Backend API server (FastAPI/uvicorn) on :8000.
-api:
+install: ## Install Python (with dev tools) and frontend dependencies
+	uv sync --inexact --extra dev
+	npm ci --prefix frontend
+	@$(MAKE) --no-print-directory deadcode-refresh
+
+run: $(DIST) ## Start the app on this Mac: http://127.0.0.1:8000
+	@echo "Settings and data: $(HOME_DIR)"
 	$(ZS) serve --host 127.0.0.1 --port 8000
 
-# Serve to your phone on the same WiFi: binds all interfaces (0.0.0.0) so other
-# LAN devices can reach it, and prints the URL to open. Serves the BUILT SPA —
-# run `make ui-build` first if you changed the frontend. Remote access: use
-# Tailscale (http://<tailscale-ip>:8000), never port-forward (the API has no auth).
-iphone:
-	@ip=$$(ipconfig getifaddr en0 || ipconfig getifaddr en1); \
-	  echo "Open on your phone (same WiFi):  http://$$ip:8000"; \
-	  $(ZS) serve --host 0.0.0.0 --port 8000
+iphone: $(DIST) ## Start the app for iPhone via Tailscale HTTPS (Ctrl+C stops)
+	@echo "Settings and data: $(HOME_DIR)"
+	@ZS="$(ZS)" PY="$(PY)" tools/serve-iphone.sh
 
-# Run backend + frontend together (Ctrl+C stops both). This is what you want
-# for local UI work: the Vite proxy has a live backend to talk to.
-dev:
+dev: ## Develop: backend :8000 + hot-reload UI :5173 (Ctrl+C stops both)
 	@echo "Starting backend (:8000) + frontend (:5173). Ctrl+C stops both."
 	@trap 'kill 0' INT TERM EXIT; \
 	  $(ZS) serve --host 127.0.0.1 --port 8000 & \
 	  cd frontend && npm run dev; \
 	  wait
 
-# Production build (what CI / CLAUDE.md verify step uses)
-ui-build:
-	cd frontend && npm run build
+$(DIST): $(UI_SOURCES)
+	@test -d frontend/node_modules || { echo "Frontend dependencies missing: run make install" >&2; exit 2; }
+	npm run build --prefix frontend
 
-# Run Python tests (forked, per CLAUDE.md)
-test:
-	pytest -q --forked
+test: ## Python tests (forked; see tests/README.md)
+	$(call tool,pytest) -q --forked
 
-# Pre-commit checks (LOC, layering, README freshness)
-lint:
-	pre-commit run --all-files
+lint: deadcode-refresh ## Repository guardrails (pre-commit hooks + deadcode-audit diff gates vs BASE)
+	$(call tool,pre-commit) run --all-files
+	@if [ -x $(DEADCODE) ]; then $(MAKE) --no-print-directory deadcode-gates; \
+	else echo "warning: $(DEADCODE) not installed (run make install); deadcode-audit gates skipped" >&2; fi
 
-# ┌──────────────────────────────────────────────────────────────────────────────┐
-# │ CODE-HEALTH SCAN — two commands, one choice (scope). Both are advisory REPORTS │
-# │ (always exit 0, never block); enforcement of NEW findings is `make lint`.      │
-# │   make scan          every detector across the WHOLE tree                       │
-# │   make scan-diff      the same, scoped to what changed vs the base branch        │
-# │ Knobs: EMBED=1 (add the semantic code-model overlap pass) · BASE=<branch>.       │
-# └──────────────────────────────────────────────────────────────────────────────┘
-#
-# Detectors: Tier 1 dead-code orphans · Tier 2 vulture · Tier 6 redundancy+clones ·
-# Tier 7 AI-slop · all-pairs function-overlap audit.
-#
-# Hardened to exit 0 under any shell: `set +e` defeats an inherited errexit, vulture's
-# exit-3-on-findings is neutralized with `|| true` (it propagates through `| sed` under
-# `pipefail`), and the recipe ends on `true`.
+# deadcode-audit tracks its main branch (no pin). Refresh = re-lock the git dependency and sync.
+# Offline or GitHub unreachable: warn and keep the installed commit; never fail.
+deadcode-refresh:
+	@if uv lock --upgrade-package deadcode-audit >/dev/null 2>&1 && uv sync --inexact --extra dev >/dev/null 2>&1; then :; \
+	else echo "warning: deadcode-audit refresh failed (offline?); using the installed version" >&2; fi
+	@$(PY) -c "import importlib.metadata as m,json;d=json.loads(m.distribution('deadcode-audit').read_text('direct_url.json'));print('deadcode-audit @', d['vcs_info']['commit_id'][:12], '(main)')" 2>/dev/null \
+	  || echo "warning: deadcode-audit is not installed (run make install)" >&2
 
-# FULL: every finding (frozen or not) across the whole runtime package — the backlog.
-scan:
+# The diff gates see committed changes only (staged/untracked files are invisible to them).
+deadcode-gates: ## deadcode-audit diff gates vs BASE (blocking)
+	DEADCODE_BASE=$(BASE) $(call tool,pre-commit) run --hook-stage pre-push --all-files deadcode-gates
+
+deadcode-update: deadcode-refresh deadcode-gates ## Update deadcode-audit to latest main, then run its gates
+
+# Recipe lines stay serial even with `make -j check`. The build goes to a disposable
+# directory, leaving an existing frontend/dist untouched.
+check: ## Full local check before a PR (lint, tests, frontend, smoke test)
+	$(MAKE) lint
+	KMP_DUPLICATE_LIB_OK=TRUE $(MAKE) test
+	cd frontend && npm run lint
+	cd frontend && npm test
+	@build=$$(mktemp -d "$${TMPDIR:-/tmp}/zs-pr-build.XXXXXX") || exit $$?; \
+	  trap 'rm -rf "$$build"' EXIT; \
+	  cd frontend && npm run build -- --outDir "$$build"
+	PYTHONPATH="$(CURDIR)$${PYTHONPATH:+:$$PYTHONPATH}" $(ZS) smoke-test --project-root .
+
+# Advisory reports (always exit 0, never block); enforcement is `make lint`.
+#   make scan        whole tree: deadcode-audit reachability/cycles/overlaps(pass 1)/vulture/redundancy + slop + JS/TS quality scan
+#   make scan-overlaps  two-pass (embedding) overlaps over Python + JS/TS; slow and heavy
+#   make scan-diff   changed files vs BASE
+scan: ## Advisory code-health report, whole tree
 	@set +e; \
-	echo "═══ Code-health scan · WHOLE TREE (advisory — never blocks) ═══"; \
-	echo "── Dead-code orphans · Tier 1 ──"; \
-	python3 tools/precommit/check_dead_code.py dump-orphans | sed 's/^/  /'; \
-	echo "── Unused code · Tier 2 (vulture) ──"; \
-	if python3 -c "import vulture" 2>/dev/null; then \
-	  python3 tools/precommit/check_dead_code.py vulture-scan 2>&1 | sed 's/^/  /' || true; \
-	else echo "  ⚠ SKIPPED — vulture not installed in this env (it runs in the gate: 'make lint')"; fi; \
-	echo "── Redundant transforms + near-duplicate functions · Tier 6 ──"; \
-	python3 tools/precommit/check_redundancy.py dump | sed 's/^/  /'; \
-	echo "── AI-slop · Tier 7 ──"; \
-	python3 tools/precommit/check_slop.py dump | sed 's/^/  /'; \
-	echo "── Function overlaps · all-pairs semantic ($(if $(filter 1,$(EMBED)),code-model,deterministic)) ──"; \
-	python3 tools/precommit/check_overlaps.py audit $(OVERLAP_FLAGS) 2>&1 | sed 's/^/  /'; \
-	echo "── Stale allowlist entries (grandfathers with no live finding) ──"; \
-	python3 tools/precommit/check_allowlists.py reconcile 2>&1 | sed 's/^/  /'; \
-	echo "── Totals (all findings, frozen or not — goal: shrink to empty) ──"; \
-	echo "  orphans=$$(python3 tools/precommit/check_dead_code.py dump-orphans | wc -l | tr -d ' ')" \
-	     "redundancy=$$(python3 tools/precommit/check_redundancy.py dump | wc -l | tr -d ' ')" \
-	     "slop=$$(python3 tools/precommit/check_slop.py dump | wc -l | tr -d ' ')" \
-	     "vulture=$$(python3 -c 'import vulture' 2>/dev/null && echo OK || echo SKIPPED-not-installed)"; \
-	echo "  Enforce new findings: make lint   ·   semantic overlaps: make scan EMBED=1"; \
+	echo "── Dead symbols (reachability) ──"; $(DEADCODE) reachability-scan | sed 's/^/  /'; \
+	echo "── Import cycles ──"; $(DEADCODE) cycles --advisory | sed 's/^/  /'; \
+	echo "── Function overlaps ──"; $(DEADCODE) overlaps --no-embed 2>&1 | sed 's/^/  /'; \
+	echo "── Redundant transforms ──"; $(DEADCODE) redundancy $$(git ls-files 'zotero_summarizer/*.py') 2>&1 | sed 's/^/  /'; \
+	echo "── Vulture (60%+) ──"; .venv/bin/vulture zotero_summarizer scripts/vulture_whitelist.py 2>&1 | sed 's/^/  /'; \
+	echo "── AI-slop ──"; $(PY) tools/precommit/check_slop.py dump | sed 's/^/  /'; \
+	echo "── Quality scan (Python + JS/TS) ──"; \
+	if [ -x frontend/node_modules/.bin/oxlint ]; then \
+	  DEADCODE_OXLINT=$(CURDIR)/frontend/node_modules/.bin/oxlint $(DEADCODE) scan --no-history 2>&1 | sed 's/^/  /'; \
+	else echo "  oxlint missing: run 'cd frontend && npm install' to scan JS/TS"; fi; \
 	true
 
-# VS BASE BRANCH: the same detectors, scoped to the .py you changed off $(BASE). Fast.
-scan-diff:
+scan-overlaps: ## Two-pass overlaps, Python + JS/TS (~12 min, ~1.8 GB RSS; run alone)
+	OMP_NUM_THREADS=2 TOKENIZERS_PARALLELISM=false $(DEADCODE) overlaps --top 0 --json
+
+scan-diff: ## Advisory code-health report, changes vs BASE
 	@set +e; \
-	base="$$(git merge-base $(BASE) HEAD 2>/dev/null || echo $(BASE))"; \
-	files="$$(git diff --name-only --diff-filter=d "$$base" -- '*.py' | sed -n 's#^\(zotero_summarizer/.*\)#\1#p')"; \
-	if [ -z "$$files" ]; then echo "No changed Python files vs $(BASE) ($$base) — nothing to scan."; exit 0; fi; \
-	n=$$(echo "$$files" | wc -l | tr -d ' '); \
-	echo "═══ Code-health scan · $$n changed file(s) vs $(BASE) (advisory — never blocks) ═══"; \
-	echo "── Dead-code orphans · Tier 1 ──"; \
-	python3 tools/precommit/check_dead_code.py consumer-check $$files 2>&1 | sed 's/^/  /'; \
-	echo "── Redundant transforms · Tier 6 ──"; \
-	python3 tools/precommit/check_redundancy.py transforms-check $$files 2>&1 | sed 's/^/  /'; \
-	echo "── AI-slop · Tier 7 ──"; \
-	python3 tools/precommit/check_slop.py slop-check $$files 2>&1 | sed 's/^/  /'; \
-	echo "── Function overlaps · your changed functions vs the whole codebase ($(if $(filter 1,$(EMBED)),code-model,deterministic)) ──"; \
-	python3 tools/precommit/check_overlaps.py audit --changed $$files $(OVERLAP_FLAGS) 2>&1 | sed 's/^/  /'; \
-	echo "  Knobs: EMBED=1 (semantic overlap) · BASE=<branch> (default main) · enforce: make lint"; \
+	$(DEADCODE) runtime-consumer-check --compare-branch $(BASE) 2>&1; \
+	$(DEADCODE) vulture-changed --compare-branch $(BASE) 2>&1; \
+	$(DEADCODE) redundancy --compare-branch $(BASE) 2>&1; \
+	files="$$(git diff --name-only --diff-filter=d "$$(git merge-base $(BASE) HEAD)" -- 'zotero_summarizer/*.py')"; \
+	[ -z "$$files" ] || $(PY) tools/precommit/check_slop.py slop-check $$files 2>&1; \
 	true

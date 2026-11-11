@@ -16,8 +16,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from zotero_summarizer.services.library import _quality_prompts as qp
-from zotero_summarizer.services.library._paper_read_html import _h
+from zotero_summarizer.services.library import _paper_type_checklists as pc, _quality_prompts as qp
+from zotero_summarizer.services.library._paper_read_html import _h, _reading_plan_html
 
 _BAND_LABEL = {"flag": "FLAG", "neutral": "NEUTRAL", "highlight": "HIGHLIGHT", "uncertain": "UNCERTAIN", "": "—"}
 _STATE_LABEL = {"hit": "● addressed", "miss": "○ not addressed", "not_retrieved": "⚠ not retrieved"}
@@ -27,25 +27,28 @@ _GAUGE_POS = {"flag": 18, "uncertain": 38, "neutral": 58, "highlight": 85, "": 5
 
 # The reference-free band, in one plain-language line (trusted constants → HTML).
 _BAND_GLOSS = {
-    "highlight": "<b>Rigorous enough to act on.</b> Passed our independent checks for evidence and reporting — read with confidence.",
-    "flag": "<b>Read critically.</b> We found rigor problems that could make the headline result unreliable — see below.",
-    "neutral": "<b>Sound but unremarkable.</b> No red flags, but it doesn't clear the bar for a confident highlight — judge it on relevance.",
-    "uncertain": "<b>Needs your eyes.</b> Our independent passes disagreed on the verdict — don't trust the band alone.",
+    "highlight": "<b>Strong checklist coverage.</b> Applicable evidence/reporting checks were met; this is not scientific certification.",
+    "flag": "<b>Read critically.</b> Applicable checks or material concerns warrant checking the claims below.",
+    "neutral": "<b>Mixed checklist coverage.</b> Judge the applicable evidence and remaining gaps on relevance, not writing polish.",
+    "uncertain": "<b>Needs your eyes.</b> Assessment is unavailable or model passes disagreed; this is not a scientific failure.",
     "": "",
 }
 # The literal answer to "what did we apply?" — appended with "· N/M passes agree".
 _METHOD_CLAUSE = (
-    "How we judged it: a reference-free rubric + red-flag scan — no citation counts, "
-    "authors hidden, scored only from what the paper itself shows. Agreement is "
-    "self-consistency across runs, not yet human-validated"
+    "How we judged it: a general checklist plus a scan for red flags — no citation counts, "
+    "authors hidden, scored only from what the paper itself shows. We run the check several "
+    "times; agreement is how often the runs gave the same answer, not a human check"
 )
 _LEGEND = (
-    "<b>FLAG</b> a rigor red-flag fired · <b>NEUTRAL</b> sound, unremarkable · "
-    "<b>HIGHLIGHT</b> ≥6 grounded checks, zero flags"
+    "<b>FLAG</b> serious concerns or missing checks · <b>NEUTRAL</b> mixed results · "
+    "<b>HIGHLIGHT</b> most applicable checks met"
 )
 # Short plain-English labels for the decisive-signal list (the full prompt
 # questions live in _quality_prompts and drive the collapsed checklist).
 _RUBRIC_LABEL = {
+    "thesis": "States a clear thesis / position",
+    "evidence_cited": "Supports premises with cited evidence",
+    "scope_match": "Matches claim scope to the evidence offered",
     "external_validation": "Validated on independent / held-out data",
     "uncertainty": "Reports uncertainty (CIs, error bars, seeds)",
     "ablation": "Ablations isolate what drives the result",
@@ -57,18 +60,18 @@ _RUBRIC_LABEL = {
     "clinical_calibration": "Calibration / multi-site validation",
     "determinism": "Reports run-to-run determinism",
     "eval_contamination": "Addresses eval contamination",
+    "motivation": "Dataset motivation and intended use documented",
+    "composition": "Dataset contents (instances, labels, splits) described",
+    "collection": "Data collection process described",
+    "known_biases": "Known biases and limits of the data disclosed",
 }
-# The rigor floor: a paper FLAGs if all three are absent (mirrors quality_eval._band_for).
-_TRIAD = ("external_validation", "uncertainty", "ablation")
 
 
 def _gloss(band: str, has_red_flags: bool) -> str:
-    """Band gloss, DERIVED from the actual red-flag list so it never contradicts it.
-    The plain ``neutral``/``highlight`` glosses say "No red flags" — only honest when
-    none fired; when some did, say so instead (the user's contradiction bug)."""
+    """Keep material caveats visible even when checklist coverage is strong."""
     if has_red_flags and band in ("neutral", "highlight"):
-        return ("<b>Mostly sound, with caveats.</b> It clears the bar overall, but our "
-                "independent checks flagged the issues below — weigh them before relying on it.")
+        return ("<b>Checklist coverage with caveats.</b> Model-generated concerns below "
+                "need checking before relying on the claims.")
     return _BAND_GLOSS.get(band, "")
 
 
@@ -94,6 +97,7 @@ def brief_html(
     digest: dict[str, Any] | None = None,
     quality: dict[str, Any] | None,
     goal_summaries: list[dict[str, Any]] | None,
+    saved_read_estimate: bool = False,
 ) -> str:
     """Verdict (loudest) → ARR spine → goal board. '' when no decision data
     exists (the brief silently degrades to the plain digest)."""
@@ -111,25 +115,17 @@ def brief_html(
     # The verdict is the loudest line — the "diagnosis". For a flagged-but-relevant
     # paper, inline the actual red flag so the warning is readable without scrolling.
     decision = str((digest or {}).get("read_decision") or "").lower()
-    weak_evidence = band == "flag" or any((quality or {}).get("overstatements") or [])
-    high_friction = str((digest or {}).get("writing_friction") or "") == "high"
-    capped = decision == "read" and (weak_evidence or high_friction)
-    if capped:
-        decision = "skim"
     if decision in {"read", "skim", "skip"}:
         vkey = "deep" if decision == "read" else decision
         vlabel = {"read": "READ", "skim": "SKIM", "skip": "DIGEST IS ENOUGH"}[decision]
         minutes = (digest or {}).get("estimated_read_minutes")
-        if minutes is not None:
-            vlabel += f" · {int(minutes)} MIN"
+        hint = ' title="Saved reading-time estimate"' if saved_read_estimate else ""
+        vtime = (f' · <span{hint}>{int(minutes)} MIN</span>' if minutes is not None
+                 else ' · <span>Time not estimated</span>')
         vreason = str((digest or {}).get("read_why") or "")
-        if capped:
-            rf = [str(x).strip() for x in ((quality or {}).get("red_flags") or []) if str(x).strip()]
-            warning = f"Concept interesting; evidence weak{f' — {rf[0]}' if rf else ''}." if weak_evidence else "Idea preserved; writing friction is high."
-            vreason = f"{warning} {vreason}"
     else:
-        vkey, vlabel = "skip", "REVIEW"
-        vreason = str((digest or {}).get("read_why") or "Reading decision unavailable; review the evidence.")
+        vkey, vlabel, vtime = "skip", "REVIEW", ""
+        vreason = "Reading decision unavailable; review the evidence."
     # Relevance folds INTO the diagnosis reason line (the separate chip is gone).
     rel_verdict = _relevance_verdict(n_fired, max_score)
     rel_line = (
@@ -138,14 +134,15 @@ def brief_html(
     ) if fired else ""
     idea_score = max(int((digest or {}).get("novelty") or 0), int((digest or {}).get("significance") or 0))
     idea = "not assessed" if not idea_score else "high" if idea_score >= 4 else "low" if idea_score <= 2 else "moderate"
-    axes = f'<div class="v-rel">Idea: {idea} · Evidence: {_h(_BAND_LABEL.get(band, "not assessed"))} · Writing: {_h((digest or {}).get("writing_friction") or "not assessed")}</div>'
+    evidence_label = "not applicable" if (quality or {}).get("basis") == "non_paper" else _BAND_LABEL.get(band) if band else "not assessed"
+    axes = f'<div class="v-rel">Idea: {idea} · Evidence: {_h(evidence_label)} · Writing: {_h((digest or {}).get("writing_friction") or "not assessed")}</div>'
     verdict = (
         f'<div class="verdict v-{vkey}"><div class="v-eyebrow">Diagnosis</div>'
-        f'<div class="v-word">{_h(vlabel)}</div>'
-        f'<div class="v-why">{_h(vreason)}</div>{rel_line}{axes}</div>'
+        f'<div class="v-word">{_h(vlabel)}{vtime}</div>'
+        f'<div class="v-why">{_h(vreason)}</div>{rel_line}{axes}{_reading_plan_html(digest)}</div>'
     ) if (goals or quality or digest) else ""
 
-    gauge = _gauge_html(band, agreed, total) if quality else ""
+    gauge = _gauge_html(band, agreed, total) if band else ""
     board = _goal_board_html(goals) if goals else ""
     return (
         '\n  <section class="brief fade-in focus-in">\n'
@@ -163,7 +160,7 @@ def _gauge_html(band: str, agreed: int, total: int) -> str:
     with a teal needle placed by band, the band label, and the N/M passes. It OWNS
     the band interpretation (a position on a scale) so the reader doesn't decode it."""
     pct = _GAUGE_POS.get(band, 50)
-    passes = f"{agreed}/{total} passes agree" if total else ""
+    passes = f"{agreed}/{total} passes agree" if total > 1 else "1 pass" if total == 1 else ""
     passes_html = f'<span class="gauge-passes">{_h(passes)}</span>' if passes else ""
     return (
         '<div class="gauge"><div class="gauge-h">Evidence grade</div>'
@@ -171,7 +168,7 @@ def _gauge_html(band: str, agreed: int, total: int) -> str:
         '<div class="gauge-scale"><span>Tentative</span><span>Moderate</span><span>Strong</span></div>'
         f'<div class="gauge-read"><span class="gauge-band">{_h(_BAND_LABEL.get(band, "—"))}</span>'
         f'{passes_html}</div>'
-        '<div class="gauge-method">reference-free · author-blind · self-consistency</div></div>'
+        '<div class="gauge-method">no citation counts · authors hidden · repeated runs</div></div>'
     )
 
 
@@ -267,10 +264,15 @@ def _goal_summaries_html(summaries: dict[str, dict[str, Any]]) -> str:
     return '<details><summary>Goal findings</summary>' + result + '</details>'
 
 
-def _question_lookup() -> dict[str, str]:
+def _question_lookup(paper_type: str = "") -> dict[str, str]:
     lookup = dict(qp.RUBRIC_ITEMS)
     for items in qp.DOMAIN_ITEMS.values():
         lookup.update(dict(items))
+    for spec in pc.CHECKLISTS.values():
+        lookup.update((item.key, item.question) for item in spec.items)
+    selected = next((spec for kind, spec in pc.CHECKLISTS.items() if kind.value == paper_type), None)
+    if selected:
+        lookup.update((item.key, item.question) for item in selected.items)
     return lookup
 
 
@@ -279,29 +281,23 @@ def _label(key: str) -> str:
 
 
 def _decisive_rows(rubric: dict[str, str], band: str) -> tuple[str, list[tuple[bool, str]], str]:
-    """(heading, [(passed, label)...], caption) — only the 2-3 items that moved
-    the band, in plain English. Empty list ⇒ caller renders no decisive block."""
-    core = [k for k, _ in qp.RUBRIC_ITEMS]
-    val = {k: str(rubric.get(k) or "na").lower() for k in set(core) | set(_TRIAD) | set(rubric)}
-    yes_count = sum(1 for k in core if val.get(k) == "yes")
-    if band == "highlight":
-        ordered = list(_TRIAD) + [k for k in core if k not in _TRIAD]
-        earned = [k for k in ordered if val.get(k) == "yes"][:3]
-        return "What earned it", [(True, _label(k)) for k in earned], f"{yes_count}/{len(core)} rigor checks met"
-    if band == "flag":
-        failed = [k for k in _TRIAD if val.get(k) != "yes"][:3]
-        return "Why it sank", [(False, _label(k)) for k in failed], ""
-    if band == "uncertain":
-        return "Split decision", [(val.get(k) == "yes", _label(k)) for k in _TRIAD], ""
-    gaps = [k for k in core if val.get(k) == "no"][:3]
-    return "What's missing", [(False, _label(k)) for k in gaps], ""
+    """Summarize supplied applicable checks, never invented empirical failures."""
+    val = {key: str(value or "na").lower() for key, value in rubric.items()}
+    applicable = [key for key in val if val[key] in {"yes", "no"}]
+    met = [key for key in applicable if val[key] == "yes"]
+    selected = (met if band == "highlight" else applicable if band == "uncertain"
+                else [key for key in applicable if val[key] == "no"])
+    heading = {"highlight": "What earned it", "uncertain": "Assessment uncertain",
+               "flag": "Checks to inspect"}.get(band, "What's missing")
+    caption = f"{len(met)}/{len(applicable)} applicable checks met" if applicable else ""
+    return heading, [(val[key] == "yes", _label(key)) for key in selected[:3]], caption
 
 
-def _full_checklist_html(rubric: dict[str, str], evidence: dict[str, Any]) -> str:
+def _full_checklist_html(rubric: dict[str, str], evidence: dict[str, Any], paper_type: str = "") -> str:
     """The complete rubric behind one disclosure — real questions, grounded quotes."""
     if not rubric:
         return ""
-    lookup = _question_lookup()
+    lookup = _question_lookup(paper_type)
     # Core rubric items first (prompt order), then domain items, then any leftovers.
     domain_keys = [k for items in qp.DOMAIN_ITEMS.values() for k, _ in items]
     ordered = [k for k, _ in qp.RUBRIC_ITEMS] + domain_keys + list(rubric)
@@ -330,6 +326,8 @@ def quality_panel_html(quality: dict[str, Any] | None) -> str:
     the decisive signals (red flags first), then the full rubric on demand."""
     if not quality:
         return ""
+    if quality.get("basis") == "non_paper":
+        return '<section id="quality"><p>Not a research paper — scientific quality not applicable; relevance only.</p></section>'
     band = str(quality.get("quality_band") or "")
     rubric = quality.get("rubric") or {}
     evidence = quality.get("evidence") or {}
@@ -339,7 +337,16 @@ def quality_panel_html(quality: dict[str, Any] | None) -> str:
     total = int(quality.get("passes_total") or 0)
     passes = f" · {agreed}/{total} passes agree" if total else ""
 
-    signals = ""
+    standard = str(quality.get("coverage_standard") or "")
+    applicable = int(quality.get("coverage_applicable") or 0)
+    coverage = (f'{int(quality.get("coverage_met") or 0)}/{applicable} applicable items met'
+                if applicable else "Checklist coverage unavailable")
+    type_label = next((spec.label for ptype, spec in pc.CHECKLISTS.items()
+                       if ptype.value == quality.get("paper_type")), "")
+    signals = f'<p>{_h(" · ".join(filter(None, [type_label, standard, coverage])))}</p>'
+    missing = quality.get("missing_critical") or []
+    if missing:
+        signals += f'<p>Missing (critical): {_h(", ".join(_label(key) for key in missing))}</p>'
     if red_flags:
         items = "".join(f"<li>{_h(x)}</li>" for x in red_flags[:3])
         signals += f'<div class="q-redflags"><div class="q-sig-h">⚠ Red flags</div><ul>{items}</ul></div>'
@@ -363,7 +370,7 @@ def quality_panel_html(quality: dict[str, Any] | None) -> str:
         f'      <div class="q-method">{_h(_METHOD_CLAUSE)}{_h(passes)}</div>\n'
         f'      <div class="q-legend">{_LEGEND}</div>\n'
         f'      {signals}\n'
-        f'      {_full_checklist_html(rubric, evidence)}\n'
+        f'      {_full_checklist_html(rubric, evidence, str(quality.get("paper_type") or ""))}\n'
         '    </div>\n  </section>'
     )
 

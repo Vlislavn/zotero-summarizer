@@ -1,0 +1,2824 @@
+{
+  "schema_version": 2,
+  "pr": 208,
+  "goal_id": "ab14a74b-6eff-48d2-94e2-6783b9950662",
+  "status": "BOUNDED_SOURCE_AND_MACHINE_FIXES_VERIFIED_HUMAN_NOT_RUN",
+  "base_head": "bd5e26741dd70f3a359b984f759d68b32ac1eab9",
+  "audit_head": "67ec2fac410e97593f4081535352af1de2d0e79e",
+  "human_acceptance": "NOT_RUN",
+  "scope": {
+    "checklist_revision": 3,
+    "features": 18,
+    "originating_issues": 15,
+    "initial_checklist_sha256": "953f2dfc7047b34cbeb3c156b43dba77832c2d199bc4a93ff94eddeb92814779",
+    "current_checklist_sha256": "c1da31932bfb4863a36e56119af1eb9bc8eb1aa0e248ccc6a27730689f5e29b2",
+    "issue_scope_sha256": "eb5a55c338ac58950951060f5cb8437b0d4030ec13de554026d06265cf341fe2",
+    "novelty_note": "Preserve all18rows/15origins; distinguish added cold offline context/presets from preexisting queue/conflict/practitioner routing controls."
+  },
+  "workflow_id": "27ab1399-c0d6-4f41-bc22-fd3d936b900b",
+  "repair_groups": [
+    {
+      "lane": "07-policy-authority",
+      "feature": "FEATURE-04",
+      "correction": "Strict verifier indices/booleans; reject coercible false authority",
+      "acceptance": "parent-qualified-RED/GREEN-and-current-regression-controls",
+      "production_files": [
+        "zotero_summarizer/services/library/_digest_verification.py"
+      ],
+      "red_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-verifier-red/pytest-poh74vis",
+        "counts": {
+          "passed": 28,
+          "failed": 2
+        },
+        "returncode": 1,
+        "guard_stop": null,
+        "junit_sha256": "cb763b89c7977f9870fec699bab76f611b2bdf9f5ab04f038f2f79790c2c77b1",
+        "guard_sha256": "6f20336010d1d0c52d92f78687899bde57ebd1e22ae6c61696206e23aad1d5d8"
+      },
+      "green_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-verifier-green/pytest-5dupv8nf",
+        "counts": {
+          "passed": 8
+        },
+        "returncode": 0,
+        "guard_stop": null,
+        "junit_sha256": "fdb963a53e3b7e9da3634738c80d4c873ddea3b522e6ad5f8a99cacb8aaf18a7",
+        "guard_sha256": "1344af0d112995a72b46cbbc02af7e48e8704af5f929ede890eee4caf95b52b7"
+      }
+    },
+    {
+      "lane": "08-signals-view",
+      "feature": "FEATURE-04",
+      "correction": "Visible SKIM cap/reasons and server weak-evidence flag",
+      "acceptance": "parent-qualified-RED/GREEN-and-current-regression-controls",
+      "production_files": [
+        "frontend/src/components/paper/review/OrthogonalSignals.jsx"
+      ],
+      "red_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-ui-red/vitest-cm7prafp",
+        "tests": 12,
+        "passed": 9,
+        "failed": 3,
+        "returncode": 1,
+        "guard_stop": null,
+        "vitest_sha256": "7e35c77177e9ac35e4731cef706ece2a55edfaa118ce52e72954f29f84ad51ae",
+        "guard_sha256": "4c11c50469c1e5027c77d844b9496db9dd1f5b3bc3c4c487627bf2c4490e3f6e"
+      },
+      "green_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-ui-green/vitest-ohraj2zv",
+        "tests": 63,
+        "passed": 63,
+        "failed": 0,
+        "returncode": 0,
+        "guard_stop": null,
+        "vitest_sha256": "ef6c100f3ca808c39b4b5a94e411270e8684aca21d69b29864fc90389fdd14a4",
+        "guard_sha256": "f24d5f8b738fc7c98191ab7946d439d6ee56816af8de8c260991c94ba1870e16"
+      }
+    },
+    {
+      "lane": "13-related-identity",
+      "feature": "FEATURE-06",
+      "correction": "Rank versions before identity closure; overfetch within existing retrieval ceiling",
+      "acceptance": "parent-qualified-RED/GREEN-and-current-regression-controls",
+      "production_files": [
+        "zotero_summarizer/services/library/related.py"
+      ],
+      "red_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-related-cli-red/pytest-ndrjbvwq",
+        "counts": {
+          "failed": 6
+        },
+        "returncode": 1,
+        "guard_stop": null,
+        "junit_sha256": "2aeca0beabb25b533924b19fbbc7628d1f224c513f81bb6a2ac32abede27acd9",
+        "guard_sha256": "7e5950e63318ea3bba7c6b2592f7883e997f6a2506f3083dcca504775eda7aa6"
+      },
+      "green_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-related-cli-green/pytest-d28mpkpq",
+        "counts": {
+          "passed": 82
+        },
+        "returncode": 0,
+        "guard_stop": null,
+        "junit_sha256": "37eeeae25f3b27d8253d0d13f407d21834c03ef37404b5af936b438ff98e5fa5",
+        "guard_sha256": "4f80633bb07b6d248119bac82b458d320ab00a0ba2d6b3c2076a8b18b7d97128"
+      }
+    },
+    {
+      "lane": "15-related-view",
+      "feature": "FEATURE-06",
+      "correction": "Separate cited comment records from submitted-but-uncited context",
+      "acceptance": "parent-qualified-RED/GREEN-and-current-regression-controls",
+      "production_files": [
+        "frontend/src/components/paper/RelatedPapers.jsx"
+      ],
+      "red_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-ui-red/vitest-cm7prafp",
+        "tests": 12,
+        "passed": 9,
+        "failed": 3,
+        "returncode": 1,
+        "guard_stop": null,
+        "vitest_sha256": "7e35c77177e9ac35e4731cef706ece2a55edfaa118ce52e72954f29f84ad51ae",
+        "guard_sha256": "4c11c50469c1e5027c77d844b9496db9dd1f5b3bc3c4c487627bf2c4490e3f6e"
+      },
+      "green_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-ui-green/vitest-ohraj2zv",
+        "tests": 63,
+        "passed": 63,
+        "failed": 0,
+        "returncode": 0,
+        "guard_stop": null,
+        "vitest_sha256": "ef6c100f3ca808c39b4b5a94e411270e8684aca21d69b29864fc90389fdd14a4",
+        "guard_sha256": "f24d5f8b738fc7c98191ab7946d439d6ee56816af8de8c260991c94ba1870e16"
+      }
+    },
+    {
+      "lane": "20-question-evidence",
+      "feature": "FEATURE-08",
+      "correction": "Invalidate malformed persisted question evidence instead of crashing/promoting",
+      "acceptance": "parent-qualified-RED/GREEN-and-current-regression-controls",
+      "production_files": [
+        "zotero_summarizer/services/search/_question_policy.py"
+      ],
+      "red_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-question-red/pytest-jdg2lts_",
+        "counts": {
+          "passed": 6,
+          "failed": 2
+        },
+        "returncode": 1,
+        "guard_stop": null,
+        "junit_sha256": "360b1e3fafd202ddf9a6a5099ef42e0154d01b55786daea1ccf5c74ad3aadf8d",
+        "guard_sha256": "6a6c3379ff7f3cbf801702edb816746a97f4b308b90a750040c434bbd8edb980"
+      },
+      "green_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-question-green/pytest-5s_x3qyl",
+        "counts": {
+          "passed": 57
+        },
+        "returncode": 0,
+        "guard_stop": null,
+        "junit_sha256": "2add74f7139a2be8c4d423b43a0b6418a738fd2116d471b9ac7b9f426c561a3b",
+        "guard_sha256": "49d2d0e28325ff3d91171757d393ff88d489535690d4c27c92f0f84ed6563b8b"
+      }
+    },
+    {
+      "lane": "23-weekly-download",
+      "feature": "FEATURE-09",
+      "correction": "Capture selected download bytes before response streaming",
+      "acceptance": "parent-qualified-RED/GREEN-and-current-regression-controls",
+      "production_files": [
+        "zotero_summarizer/api/routes/research_feed.py",
+        "zotero_summarizer/services/research_feed/reports.py"
+      ],
+      "red_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-transfer-sync-red/pytest-xlz5ajjf",
+        "counts": {
+          "failed": 5
+        },
+        "returncode": 1,
+        "guard_stop": null,
+        "junit_sha256": "e35e4b406810dfa916be54dd67c75afbffded9ee9fce2fbf48a317fd21b093f3",
+        "guard_sha256": "3985573eb6a7195e2ecf5908dec909d24c046c77a4faeeb6b63818ca66dda860"
+      },
+      "green_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-transfer-sync-green/pytest-6ekn20yv",
+        "counts": {
+          "passed": 113
+        },
+        "returncode": 0,
+        "guard_stop": null,
+        "junit_sha256": "f4f88ca17a28a8c20758a2ff65f76801ef4b5aa6dfef90e2c40986b918c549a6",
+        "guard_sha256": "30f900b6dfb75f543596381c71581dd25fdbd1edd9ae83c48fb3583f9b6faea0"
+      }
+    },
+    {
+      "lane": "26-offline-server",
+      "feature": "FEATURE-10",
+      "correction": "Monotone sync continuation; any current/base mismatch conflicts",
+      "acceptance": "parent-qualified-RED/GREEN-and-current-regression-controls",
+      "production_files": [
+        "zotero_summarizer/services/sync/service.py",
+        "zotero_summarizer/storage/_repo_sync.py"
+      ],
+      "red_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-transfer-sync-red/pytest-xlz5ajjf",
+        "counts": {
+          "failed": 5
+        },
+        "returncode": 1,
+        "guard_stop": null,
+        "junit_sha256": "e35e4b406810dfa916be54dd67c75afbffded9ee9fce2fbf48a317fd21b093f3",
+        "guard_sha256": "3985573eb6a7195e2ecf5908dec909d24c046c77a4faeeb6b63818ca66dda860"
+      },
+      "green_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-transfer-sync-green/pytest-6ekn20yv",
+        "counts": {
+          "passed": 113
+        },
+        "returncode": 0,
+        "guard_stop": null,
+        "junit_sha256": "f4f88ca17a28a8c20758a2ff65f76801ef4b5aa6dfef90e2c40986b918c549a6",
+        "guard_sha256": "30f900b6dfb75f543596381c71581dd25fdbd1edd9ae83c48fb3583f9b6faea0"
+      }
+    },
+    {
+      "lane": "29-feed-card",
+      "feature": "FEATURE-12",
+      "correction": "Assessed empty reproduction inputs are not unassessed",
+      "acceptance": "parent-qualified-RED/GREEN-and-current-regression-controls",
+      "production_files": [
+        "zotero_summarizer/services/research_feed/render.py"
+      ],
+      "red_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-transfer-sync-red/pytest-xlz5ajjf",
+        "counts": {
+          "failed": 5
+        },
+        "returncode": 1,
+        "guard_stop": null,
+        "junit_sha256": "e35e4b406810dfa916be54dd67c75afbffded9ee9fce2fbf48a317fd21b093f3",
+        "guard_sha256": "3985573eb6a7195e2ecf5908dec909d24c046c77a4faeeb6b63818ca66dda860"
+      },
+      "green_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-transfer-sync-green/pytest-6ekn20yv",
+        "counts": {
+          "passed": 113
+        },
+        "returncode": 0,
+        "guard_stop": null,
+        "junit_sha256": "f4f88ca17a28a8c20758a2ff65f76801ef4b5aa6dfef90e2c40986b918c549a6",
+        "guard_sha256": "30f900b6dfb75f543596381c71581dd25fdbd1edd9ae83c48fb3583f9b6faea0"
+      }
+    },
+    {
+      "lane": "31-feed-publication",
+      "feature": "FEATURE-12",
+      "correction": "Validate present saved provenance; preserve unqualified source observations",
+      "acceptance": "parent-qualified-RED/GREEN-and-current-regression-controls",
+      "production_files": [
+        "zotero_summarizer/services/research_feed/reports.py"
+      ],
+      "red_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-feed-weekly-comparator-red/pytest-1_a6ovo4",
+        "counts": {
+          "failed": 9,
+          "passed": 1
+        },
+        "returncode": 1,
+        "guard_stop": null,
+        "junit_sha256": "e1f5d7636920622371ed46ef22975893e5631f9112e7baddbb731edb149a64d3",
+        "guard_sha256": "5e1c1eeb6008cdeb1de4b572541d0863140bf6379a5d43fad1438af3d258dfc4"
+      },
+      "green_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-feed-weekly-comparator-green/pytest-jra5xgtx",
+        "counts": {
+          "passed": 185
+        },
+        "returncode": 0,
+        "guard_stop": null,
+        "junit_sha256": "cd09ecfb25486306cb94023b1af044e55ebf4d804a53aea48c401427c77f6d5d",
+        "guard_sha256": "37e37cf485d90605c4884cff30932f28a0f5da7dad53e7452e7b9cf38042154b"
+      }
+    },
+    {
+      "lane": "34-telegram-cli",
+      "feature": "FEATURE-13",
+      "correction": "Reject ignored RSS-only Telegram options before Settings",
+      "acceptance": "parent-qualified-RED/GREEN-and-current-regression-controls",
+      "production_files": [
+        "zotero_summarizer/cli/_research_feed.py"
+      ],
+      "red_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-related-cli-red/pytest-ndrjbvwq",
+        "counts": {
+          "failed": 6
+        },
+        "returncode": 1,
+        "guard_stop": null,
+        "junit_sha256": "2aeca0beabb25b533924b19fbbc7628d1f224c513f81bb6a2ac32abede27acd9",
+        "guard_sha256": "7e5950e63318ea3bba7c6b2592f7883e997f6a2506f3083dcca504775eda7aa6"
+      },
+      "green_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-related-cli-green/pytest-d28mpkpq",
+        "counts": {
+          "passed": 82
+        },
+        "returncode": 0,
+        "guard_stop": null,
+        "junit_sha256": "37eeeae25f3b27d8253d0d13f407d21834c03ef37404b5af936b438ff98e5fa5",
+        "guard_sha256": "4f80633bb07b6d248119bac82b458d320ab00a0ba2d6b3c2076a8b18b7d97128"
+      }
+    },
+    {
+      "lane": "36-feedback-schedule",
+      "feature": "FEATURE-14",
+      "correction": "Retry proven prelaunch admission failure; hold ambiguous child evidence",
+      "acceptance": "parent-qualified-RED/GREEN-and-current-regression-controls",
+      "production_files": [
+        "zotero_summarizer/services/golden/feedback_analysis/schedule_state.py"
+      ],
+      "red_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-feed-weekly-comparator-red/pytest-1_a6ovo4",
+        "counts": {
+          "failed": 9,
+          "passed": 1
+        },
+        "returncode": 1,
+        "guard_stop": null,
+        "junit_sha256": "e1f5d7636920622371ed46ef22975893e5631f9112e7baddbb731edb149a64d3",
+        "guard_sha256": "5e1c1eeb6008cdeb1de4b572541d0863140bf6379a5d43fad1438af3d258dfc4"
+      },
+      "green_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-feed-weekly-comparator-green/pytest-jra5xgtx",
+        "counts": {
+          "passed": 185
+        },
+        "returncode": 0,
+        "guard_stop": null,
+        "junit_sha256": "cd09ecfb25486306cb94023b1af044e55ebf4d804a53aea48c401427c77f6d5d",
+        "guard_sha256": "37e37cf485d90605c4884cff30932f28a0f5da7dad53e7452e7b9cf38042154b"
+      }
+    },
+    {
+      "lane": "41-priority-admission",
+      "feature": "FEATURE-16",
+      "correction": "Development observations cannot postdate their frozen split",
+      "acceptance": "parent-qualified-RED/GREEN-and-current-regression-controls",
+      "production_files": [
+        "tools/method_validation/priority.py"
+      ],
+      "red_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-priority-cutoff-red/pytest-de7civtc",
+        "counts": {
+          "passed": 3,
+          "failed": 1
+        },
+        "returncode": 1,
+        "guard_stop": null,
+        "junit_sha256": "bbf750144229c6fd067144c6c252be46fa32f4e597ee8161fc2df56d460a92c0",
+        "guard_sha256": "633a3c53e53a6b9f64589deb1848e2cb3d0a6a45cbc93a5993af21c873662efb"
+      },
+      "green_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-priority-cutoff-green/pytest-rpictv3z",
+        "counts": {
+          "passed": 203
+        },
+        "returncode": 0,
+        "guard_stop": null,
+        "junit_sha256": "be005f4d3d9552dd3a8250f45db1a325df23ee7dfa80ec49b6c8db70730b1878",
+        "guard_sha256": "b5241e169758337404cc1778150b4e5af71d427c9eda9e03ded4ead9403a1b87"
+      }
+    },
+    {
+      "lane": "46-collection-report",
+      "feature": "FEATURE-17",
+      "correction": "Empty retrieval counts original suggestions, not filtered workflow labels",
+      "acceptance": "parent-qualified-RED/GREEN-and-current-regression-controls",
+      "production_files": [
+        "tools/method_validation/collections_report.py"
+      ],
+      "red_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-feed-weekly-comparator-red/pytest-1_a6ovo4",
+        "counts": {
+          "failed": 9,
+          "passed": 1
+        },
+        "returncode": 1,
+        "guard_stop": null,
+        "junit_sha256": "e1f5d7636920622371ed46ef22975893e5631f9112e7baddbb731edb149a64d3",
+        "guard_sha256": "5e1c1eeb6008cdeb1de4b572541d0863140bf6379a5d43fad1438af3d258dfc4"
+      },
+      "green_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-feed-weekly-comparator-green/pytest-jra5xgtx",
+        "counts": {
+          "passed": 185
+        },
+        "returncode": 0,
+        "guard_stop": null,
+        "junit_sha256": "cd09ecfb25486306cb94023b1af044e55ebf4d804a53aea48c401427c77f6d5d",
+        "guard_sha256": "37e37cf485d90605c4884cff30932f28a0f5da7dad53e7452e7b9cf38042154b"
+      }
+    },
+    {
+      "lane": "49-interpretation-report",
+      "feature": "FEATURE-18",
+      "correction": "No independent human scores means INCONCLUSIVE, including execution errors",
+      "acceptance": "parent-qualified-RED/GREEN-and-current-regression-controls",
+      "production_files": [
+        "zotero_summarizer/services/faithbench/_interpretation_report.py"
+      ],
+      "red_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-feed-weekly-comparator-red/pytest-1_a6ovo4",
+        "counts": {
+          "failed": 9,
+          "passed": 1
+        },
+        "returncode": 1,
+        "guard_stop": null,
+        "junit_sha256": "e1f5d7636920622371ed46ef22975893e5631f9112e7baddbb731edb149a64d3",
+        "guard_sha256": "5e1c1eeb6008cdeb1de4b572541d0863140bf6379a5d43fad1438af3d258dfc4"
+      },
+      "green_receipt": {
+        "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-feed-weekly-comparator-green/pytest-jra5xgtx",
+        "counts": {
+          "passed": 185
+        },
+        "returncode": 0,
+        "guard_stop": null,
+        "junit_sha256": "cd09ecfb25486306cb94023b1af044e55ebf4d804a53aea48c401427c77f6d5d",
+        "guard_sha256": "37e37cf485d90605c4884cff30932f28a0f5da7dad53e7452e7b9cf38042154b"
+      }
+    }
+  ],
+  "current": {
+    "python": {
+      "passed": 10764,
+      "skipped": 166,
+      "failed": 0,
+      "errors": 0,
+      "unique_records": 10930,
+      "files": 577,
+      "serialized_partitions": 8,
+      "identity_file": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/final-python-identities.json",
+      "identity_sha256": "6546f9539de7e039908e5626150d1cfac8f71c8d6c0f2098c8ad3cbbf6bcdbf0"
+    },
+    "frontend": {
+      "passed": 1000,
+      "failed": 0,
+      "suites": 144,
+      "vitest_sha256": "96d516fefc8e344088ab1e0e6d23273547d0d7881874f22931b931ca92fe50c8",
+      "guard_sha256": "b6bc897186c8445a427dcfa79179c5724ad85e93984cfcb269dad2f30c3b2c36"
+    },
+    "browser": {
+      "unique_passed": 98,
+      "initial_passed": 94,
+      "initial_failed": 4,
+      "updated_function_passed": 12,
+      "overlapping_passes": 8,
+      "subset_of_default_python_skips": true,
+      "identity_file": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/final-browser-identities.json",
+      "identity_sha256": "ec6461451fb5bf60ec3a7c689cea223accd872c8aef26cad6988ea9e7316c963",
+      "build_reuse": {
+        "source_phase": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-browser",
+        "frontend_source_identical": true,
+        "bundle_identical": true,
+        "build_returncode": 0
+      }
+    },
+    "frontend_lint": {
+      "errors": 0,
+      "existing_warnings": 13,
+      "log_sha256": "a736d430e67432ca21c68203938eb315ff8e6a39474c4a41456787f45be9af19",
+      "guard_sha256": "9e08b57c759d1dfd3f8b1949dc5530d70d60b0911157889fd66854cfcb31c406"
+    },
+    "build": {
+      "passed": true,
+      "phase": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-browser",
+      "bundle_pin_sha256": "c221d52fc618e42f1f751ec2f5c5767c5149a67ece53acc157fd942523776c45"
+    },
+    "static": {
+      "precommit_all_nine_hooks": "passed",
+      "untracked_frontend_test_explicit_hook": "passed",
+      "final_documentation_gate": "passed",
+      "receipts": [
+        {
+          "kind": "pre-commit-all",
+          "passed": true,
+          "receipt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-final-hooks/all.json",
+          "receipt_sha256": "0490ad7710ffada1010d7cf632beca2170581530836f039b7a7e042d545030c4",
+          "log_sha256": "469da26058e8ac930b7515bab0a9f61fca1dc0e5289948a9263b03bbb10da10d"
+        },
+        {
+          "kind": "pre-commit-new-test",
+          "passed": true,
+          "receipt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-final-hooks/new-test.json",
+          "receipt_sha256": "4544ff8969a63ea6d06ab3755958cba4c8d91e1cb044ad15130337180f3ccdd4",
+          "log_sha256": "968e226ac02a488b73b1d45ecda68f92059b8e379ce40628ccc65d191523bfa4"
+        },
+        {
+          "kind": "final-documentation",
+          "passed": 3,
+          "receipt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-final-documentation/lab/lanes/preparation/attempt-01-pytest-86633f14/junit.xml",
+          "junit_sha256": "035211a5666b2d0e38b15a1b9cbf8627887c703493feb15ffd365de18d50b593",
+          "guard_sha256": "a1f03f5d5c35f6269cca58bff8075cd1a2928adf1993eab5ddd9e8a34333b882"
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "kind": "python-partition",
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a2/lab/lanes/preparation/attempt-01-pytest-6a25bc67",
+      "counts": {
+        "passed": 1145,
+        "skipped": 21
+      },
+      "junit_sha256": "431c1b9e646ea1269b312b78b10a7c6671ec8222f8c40cd52a575ff28a7d3bd7",
+      "guard_sha256": "0456e44cec430da32ff53b09a984a3b1be26d860a9e1ae77a4ac93803274a314",
+      "source_manifest_sha256": "da97a09352c3533ff1453b986f9a9ee1e39c98d728e5448f7c7a60c1e5f9ea3c",
+      "command": [
+        "/Users/vladnikulin/code/personal/zotero-summarizer/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-p",
+        "fleet_plugin",
+        "-q",
+        "-s",
+        "-o",
+        "cache_dir=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a2/lab/lanes/preparation/attempt-01-pytest-6a25bc67/pytest-cache",
+        "--basetemp=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a2/lab/lanes/preparation/attempt-01-pytest-6a25bc67/tmp",
+        "--junitxml=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a2/lab/lanes/preparation/attempt-01-pytest-6a25bc67/junit.xml",
+        "--forked",
+        "tests/test_abstract_backfill.py",
+        "tests/test_abstract_reading_boundary.py",
+        "tests/test_active_learning_ground_truth.py",
+        "tests/test_adapters_openai.py",
+        "tests/test_add_attachment.py",
+        "tests/test_admin_model_card.py",
+        "tests/test_admin_retrain.py",
+        "tests/test_allowlist_reconcile.py",
+        "tests/test_api_contracts.py",
+        "tests/test_api_routes.py",
+        "tests/test_app_logger_isolation.py",
+        "tests/test_app_rss_identity.py",
+        "tests/test_application_browser_live.py",
+        "tests/test_article_acquire_contract.py",
+        "tests/test_article_budget_acceptance.py",
+        "tests/test_article_pdf.py",
+        "tests/test_arxiv_source_transaction.py",
+        "tests/test_assess_digest_retry.py",
+        "tests/test_attach_figures.py",
+        "tests/test_audit_cache_compatibility.py",
+        "tests/test_audit_digest_subtypes.py",
+        "tests/test_audit_evidence_acceptance.py",
+        "tests/test_audit_read_boundary.py",
+        "tests/test_audit_session_atomicity.py",
+        "tests/test_auto_render_slate.py",
+        "tests/test_band_calibration.py",
+        "tests/test_bench_paper_quality.py",
+        "tests/test_border_cache.py",
+        "tests/test_browser_article_collector.py",
+        "tests/test_browser_article_live.py",
+        "tests/test_browser_body_limits.py",
+        "tests/test_browser_egress_live.py",
+        "tests/test_browser_fetch_degrade.py",
+        "tests/test_browser_pdf_cache.py",
+        "tests/test_browser_proxy.py",
+        "tests/test_browser_public_egress.py",
+        "tests/test_calibration.py",
+        "tests/test_calibration_load_admission.py",
+        "tests/test_checked_pr.py",
+        "tests/test_claim_checker.py",
+        "tests/test_classifier.py",
+        "tests/test_classifier_embed_batch.py",
+        "tests/test_classifier_evaluation_truth.py",
+        "tests/test_classifier_input_snapshot.py",
+        "tests/test_classifier_persistence.py",
+        "tests/test_cli_hybrid_training.py",
+        "tests/test_cli_selected_environment.py",
+        "tests/test_code_link.py",
+        "tests/test_collection_boundaries.py",
+        "tests/test_collection_comparison.py",
+        "tests/test_collection_decision_contract.py",
+        "tests/test_collection_dependencies.py",
+        "tests/test_collection_fixtures.py",
+        "tests/test_collection_lineage.py",
+        "tests/test_collection_native.py",
+        "tests/test_collection_replay.py",
+        "tests/test_collection_reservations.py",
+        "tests/test_collection_review_findings.py",
+        "tests/test_collection_review_regressions.py",
+        "tests/test_combined_schema_lineages.py",
+        "tests/test_composite_scoring.py",
+        "tests/test_compute_composite_with_prestige.py",
+        "tests/test_config_overrides.py",
+        "tests/test_context_budgets.py",
+        "tests/test_corpus_bm25.py",
+        "tests/test_corpus_embedding_identity.py",
+        "tests/test_corpus_engagement.py",
+        "tests/test_corpus_off_boundary.py",
+        "tests/test_corpus_prefilter_authority.py",
+        "tests/test_corpus_prefilter_metadata.py",
+        "tests/test_corpus_reconciliation.py",
+        "tests/test_corpus_self_exclusion.py",
+        "tests/test_create_item_from_feed.py",
+        "tests/test_cross_library_scope.py",
+        "tests/test_daemon_loop.py",
+        "tests/test_daemon_training_ledger.py",
+        "tests/test_daily_actions.py",
+        "tests/test_daily_batch_boundary.py",
+        "tests/test_daily_no_auto_add.py",
+        "tests/test_daily_select.py"
+      ],
+      "elapsed_seconds": 91.98
+    },
+    {
+      "kind": "python-partition",
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a2/lab/lanes/preparation/attempt-02-pytest-1f92f7e4",
+      "counts": {
+        "passed": 1592,
+        "skipped": 4
+      },
+      "junit_sha256": "57411ffe0e5a21be2e2e5081b579d8b739451b0dc1ef267111263550961f7fc8",
+      "guard_sha256": "99b42d7484c1fb57cc3605b882b409567bd346acbda10bc625292080f0f63b61",
+      "source_manifest_sha256": "da97a09352c3533ff1453b986f9a9ee1e39c98d728e5448f7c7a60c1e5f9ea3c",
+      "command": [
+        "/Users/vladnikulin/code/personal/zotero-summarizer/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-p",
+        "fleet_plugin",
+        "-q",
+        "-s",
+        "-o",
+        "cache_dir=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a2/lab/lanes/preparation/attempt-02-pytest-1f92f7e4/pytest-cache",
+        "--basetemp=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a2/lab/lanes/preparation/attempt-02-pytest-1f92f7e4/tmp",
+        "--junitxml=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a2/lab/lanes/preparation/attempt-02-pytest-1f92f7e4/junit.xml",
+        "--forked",
+        "tests/test_daily_select_handled_why.py",
+        "tests/test_daily_select_interleave.py",
+        "tests/test_daily_selection_evidence.py",
+        "tests/test_daily_selection_pickers.py",
+        "tests/test_db_lock_retry.py",
+        "tests/test_dead_code_guard.py",
+        "tests/test_decision_native_adapter.py",
+        "tests/test_dedup_content.py",
+        "tests/test_deep_review.py",
+        "tests/test_deep_review_concurrency.py",
+        "tests/test_deep_review_context.py",
+        "tests/test_deep_review_context_resolution.py",
+        "tests/test_deep_review_empty_extraction.py",
+        "tests/test_deep_review_fanout.py",
+        "tests/test_deep_review_note_target.py",
+        "tests/test_deep_review_pdf_override.py",
+        "tests/test_deep_review_prewarm.py",
+        "tests/test_deep_review_status.py",
+        "tests/test_deep_review_tiering.py",
+        "tests/test_delayed_materialization.py",
+        "tests/test_dependency_ignore.py",
+        "tests/test_digest_contract_payload.py",
+        "tests/test_digest_verification.py",
+        "tests/test_direct_write_actions.py",
+        "tests/test_direct_write_isolation.py",
+        "tests/test_discovery_browser.py",
+        "tests/test_discovery_existing_only.py",
+        "tests/test_discovery_integration_regressions.py",
+        "tests/test_discovery_provider_federation.py",
+        "tests/test_discovery_provider_leaves.py",
+        "tests/test_discovery_recovery_joint.py",
+        "tests/test_discovery_server.py",
+        "tests/test_discovery_server_races.py",
+        "tests/test_documentation.py",
+        "tests/test_domain_contracts.py",
+        "tests/test_edge_cases_production.py",
+        "tests/test_embedding_cache.py",
+        "tests/test_embedding_cache_reuse.py",
+        "tests/test_encoder_identity.py",
+        "tests/test_eval_baseline.py",
+        "tests/test_eval_blend.py",
+        "tests/test_eval_chunking.py",
+        "tests/test_eval_prestige_weight.py",
+        "tests/test_eval_prompt_variant.py",
+        "tests/test_eval_rigor.py",
+        "tests/test_eval_self_consistency.py",
+        "tests/test_eval_small_models.py",
+        "tests/test_eval_triage_threshold.py",
+        "tests/test_explicit_label_provenance.py",
+        "tests/test_faithbench_artifacts.py",
+        "tests/test_faithbench_build.py",
+        "tests/test_faithbench_claim_coverage.py",
+        "tests/test_faithbench_input_boundaries.py",
+        "tests/test_faithbench_integrity.py",
+        "tests/test_faithbench_judge.py",
+        "tests/test_faithbench_qa_coverage.py",
+        "tests/test_faithbench_report_atomicity.py",
+        "tests/test_faithbench_resume_identity.py",
+        "tests/test_faithbench_runner.py",
+        "tests/test_faithbench_stats.py",
+        "tests/test_feed_assessment_cache.py",
+        "tests/test_feed_assessment_producer.py",
+        "tests/test_feed_assessment_publication.py",
+        "tests/test_feed_cached_qualification.py",
+        "tests/test_feed_engineering.py",
+        "tests/test_feed_exclusion.py",
+        "tests/test_feed_items_read.py",
+        "tests/test_feed_original_spans.py",
+        "tests/test_feed_prompt_boundary.py",
+        "tests/test_feed_read_backup_boundary.py",
+        "tests/test_feed_review_regressions.py",
+        "tests/test_feed_runtime_contracts.py",
+        "tests/test_feed_tick_audit.py",
+        "tests/test_feedback_analysis_analysis.py",
+        "tests/test_feedback_analysis_cli.py",
+        "tests/test_feedback_analysis_conflicting_cohorts.py",
+        "tests/test_feedback_analysis_history.py",
+        "tests/test_feedback_analysis_inputs.py",
+        "tests/test_feedback_analysis_inputs_capture.py",
+        "tests/test_feedback_analysis_inputs_failures.py"
+      ],
+      "elapsed_seconds": 89.97
+    },
+    {
+      "kind": "python-partition",
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a2/lab/lanes/preparation/attempt-03-pytest-03c35e2c",
+      "counts": {
+        "passed": 1608,
+        "skipped": 8
+      },
+      "junit_sha256": "19503b30b3595cf536e7d40a69be204fb071b3ed5e45d69d231cfa849e9b3797",
+      "guard_sha256": "9b785dc88154bf85d534880cefb07edc58bcb78a06c8751c7c2696f78ed6c8b8",
+      "source_manifest_sha256": "da97a09352c3533ff1453b986f9a9ee1e39c98d728e5448f7c7a60c1e5f9ea3c",
+      "command": [
+        "/Users/vladnikulin/code/personal/zotero-summarizer/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-p",
+        "fleet_plugin",
+        "-q",
+        "-s",
+        "-o",
+        "cache_dir=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a2/lab/lanes/preparation/attempt-03-pytest-03c35e2c/pytest-cache",
+        "--basetemp=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a2/lab/lanes/preparation/attempt-03-pytest-03c35e2c/tmp",
+        "--junitxml=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a2/lab/lanes/preparation/attempt-03-pytest-03c35e2c/junit.xml",
+        "--forked",
+        "tests/test_feedback_analysis_metrics.py",
+        "tests/test_feedback_analysis_operation.py",
+        "tests/test_feedback_analysis_report_primitives.py",
+        "tests/test_feedback_analysis_scheduler.py",
+        "tests/test_feedback_analysis_sync_sources.py",
+        "tests/test_feedback_atomicity.py",
+        "tests/test_feedback_cli_root_handoff.py",
+        "tests/test_feedback_metrics_truth.py",
+        "tests/test_feedback_operation_lifecycle.py",
+        "tests/test_feedback_scheduler_corrections.py",
+        "tests/test_feedback_scheduler_lifecycle.py",
+        "tests/test_feedback_scheduler_recovery_regressions.py",
+        "tests/test_feedback_weekly_operation_lifecycle.py",
+        "tests/test_feeds_hybrid_gate.py",
+        "tests/test_feeds_run_full.py",
+        "tests/test_feeds_run_unlimited.py",
+        "tests/test_fetch_fulltext.py",
+        "tests/test_file_loc.py",
+        "tests/test_fold_corpus_context.py",
+        "tests/test_fulltext_batch_contract.py",
+        "tests/test_gate_install.py",
+        "tests/test_gateway_app_surface.py",
+        "tests/test_gateway_owned_paths.py",
+        "tests/test_gateway_real_transport.py",
+        "tests/test_gateway_signal_control.py",
+        "tests/test_gateway_vite_proxy.py",
+        "tests/test_generated_write_review.py",
+        "tests/test_generated_write_target.py",
+        "tests/test_get_item_membership.py",
+        "tests/test_goal_rerank.py",
+        "tests/test_golden_csv_concurrency.py",
+        "tests/test_golden_input_boundaries.py",
+        "tests/test_golden_metrics.py",
+        "tests/test_goldenset_cli_boundaries.py",
+        "tests/test_goldenset_export_preserves_ui_rows.py",
+        "tests/test_goldenset_labels.py",
+        "tests/test_grounding.py",
+        "tests/test_hybrid_gt.py",
+        "tests/test_idempotency.py",
+        "tests/test_import_policy.py",
+        "tests/test_interaction_log.py",
+        "tests/test_interpretation_binding.py",
+        "tests/test_interpretation_dependency_retention.py",
+        "tests/test_interpretation_experiment_cli.py",
+        "tests/test_interpretation_experiment_consumers.py",
+        "tests/test_interpretation_experiment_core.py",
+        "tests/test_interpretation_experiment_inputs.py",
+        "tests/test_interpretation_experiment_report.py",
+        "tests/test_interpretation_experiment_review_fleet.py",
+        "tests/test_interpretation_experiment_review_v15.py",
+        "tests/test_interpretation_experiment_run.py",
+        "tests/test_interpretation_experiment_trace.py",
+        "tests/test_interpretation_experiment_visual.py",
+        "tests/test_interpretation_html.py",
+        "tests/test_interpretation_identity.py",
+        "tests/test_interpretation_producer.py",
+        "tests/test_interpretation_qa.py",
+        "tests/test_interpretation_review_one.py",
+        "tests/test_interpretation_strategy.py",
+        "tests/test_interpretation_verification.py",
+        "tests/test_interpretation_view.py",
+        "tests/test_interpretation_worker_prior.py",
+        "tests/test_issue31_32_final_boundaries.py",
+        "tests/test_label_drift.py",
+        "tests/test_label_provenance_io.py",
+        "tests/test_label_provenance_scoring.py",
+        "tests/test_label_retraction.py",
+        "tests/test_label_tag_retraction.py",
+        "tests/test_label_weights.py",
+        "tests/test_library_detail_scoring.py",
+        "tests/test_library_features.py",
+        "tests/test_library_policy_contract.py",
+        "tests/test_library_qa.py",
+        "tests/test_library_reader_resolver.py",
+        "tests/test_library_search.py",
+        "tests/test_llm_classification_failures.py",
+        "tests/test_llm_classifier.py",
+        "tests/test_llm_completion_guard.py",
+        "tests/test_local_access_boundary.py",
+        "tests/test_logging_isolation.py"
+      ],
+      "elapsed_seconds": 204.39
+    },
+    {
+      "kind": "python-partition",
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a2/lab/lanes/preparation/attempt-04-pytest-d8212163",
+      "counts": {
+        "passed": 2113,
+        "skipped": 9
+      },
+      "junit_sha256": "39c3dcddcda765e899fca7469fe42332b71f7f7dd62fe28be76493dd7162fa34",
+      "guard_sha256": "a7c23fbd1d90f49d447fbcc988aa7f115f30cb125dc3a380850edc8b77c3ef4b",
+      "source_manifest_sha256": "da97a09352c3533ff1453b986f9a9ee1e39c98d728e5448f7c7a60c1e5f9ea3c",
+      "command": [
+        "/Users/vladnikulin/code/personal/zotero-summarizer/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-p",
+        "fleet_plugin",
+        "-q",
+        "-s",
+        "-o",
+        "cache_dir=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a2/lab/lanes/preparation/attempt-04-pytest-d8212163/pytest-cache",
+        "--basetemp=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a2/lab/lanes/preparation/attempt-04-pytest-d8212163/tmp",
+        "--junitxml=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a2/lab/lanes/preparation/attempt-04-pytest-d8212163/junit.xml",
+        "--forked",
+        "tests/test_make_launchers.py",
+        "tests/test_manual_controls.py",
+        "tests/test_manual_precedence.py",
+        "tests/test_map_reduce.py",
+        "tests/test_map_truncation_recovery.py",
+        "tests/test_mark_feed_item_read.py",
+        "tests/test_materialization_recovery.py",
+        "tests/test_mcp_audit_regressions.py",
+        "tests/test_mcp_isolation.py",
+        "tests/test_mcp_search_contract.py",
+        "tests/test_mcp_server.py",
+        "tests/test_mcp_write_boundaries.py",
+        "tests/test_method_and_code.py",
+        "tests/test_method_candidate_identity.py",
+        "tests/test_method_context_selection.py",
+        "tests/test_method_lexical_preservation.py",
+        "tests/test_method_original_context.py",
+        "tests/test_method_pdf_authority.py",
+        "tests/test_method_persistence.py",
+        "tests/test_method_source_admission.py",
+        "tests/test_method_validation_client.py",
+        "tests/test_mobile_access_boundary.py",
+        "tests/test_mobile_server_lifetime.py",
+        "tests/test_model_archive.py",
+        "tests/test_model_backup_rollback.py",
+        "tests/test_model_identity.py",
+        "tests/test_model_listing.py",
+        "tests/test_model_override.py",
+        "tests/test_modular_services.py",
+        "tests/test_native_decision_cli.py",
+        "tests/test_native_decision_import.py",
+        "tests/test_note_analyzer.py",
+        "tests/test_note_headline_fallback.py",
+        "tests/test_note_ownership.py",
+        "tests/test_note_render.py",
+        "tests/test_offline.py",
+        "tests/test_offline_library_browser.py",
+        "tests/test_offline_review_browser.py",
+        "tests/test_offline_sync.py",
+        "tests/test_onprem_configuration.py",
+        "tests/test_openalex_client.py",
+        "tests/test_openreview.py",
+        "tests/test_outcome_atomicity.py",
+        "tests/test_outcome_detection.py",
+        "tests/test_overlap_audit.py",
+        "tests/test_paper_artifact_ownership.py",
+        "tests/test_paper_audit_gate.py",
+        "tests/test_paper_extract.py",
+        "tests/test_paper_freshness.py",
+        "tests/test_paper_goal_summaries.py",
+        "tests/test_paper_output_paths.py",
+        "tests/test_paper_parameters.py",
+        "tests/test_paper_parser_config.py",
+        "tests/test_paper_read_brief.py",
+        "tests/test_paper_read_plan.py",
+        "tests/test_paper_render.py",
+        "tests/test_paper_section_summaries.py",
+        "tests/test_paper_state_paths.py",
+        "tests/test_paper_type.py",
+        "tests/test_paper_type_checklists.py",
+        "tests/test_pdf_acquire_chain.py",
+        "tests/test_pdf_analysis_text.py",
+        "tests/test_pdf_fetch_safety.py",
+        "tests/test_pdf_source_authority.py",
+        "tests/test_pending_approval_snapshot.py",
+        "tests/test_pending_changes.py",
+        "tests/test_pending_confirmation.py",
+        "tests/test_pending_rejection_atomic.py",
+        "tests/test_pending_retry.py",
+        "tests/test_plateau_select.py",
+        "tests/test_portable_validation_paths.py",
+        "tests/test_practitioner_parser16.py",
+        "tests/test_practitioner_rss.py",
+        "tests/test_practitioner_runtime16.py",
+        "tests/test_prestige_floor.py",
+        "tests/test_prestige_score.py",
+        "tests/test_priority_boundaries.py",
+        "tests/test_priority_comparison.py",
+        "tests/test_priority_decision_contract.py",
+        "tests/test_priority_dependencies.py"
+      ],
+      "elapsed_seconds": 127.8
+    },
+    {
+      "kind": "python-partition",
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b2/lab/lanes/preparation/attempt-01-pytest-9ffa3d65",
+      "counts": {
+        "passed": 1736,
+        "skipped": 1
+      },
+      "junit_sha256": "ff85a5430fba94f3157c7a3f6bc2f1a469f598f4cbb56f0f3eae9e2490807a8d",
+      "guard_sha256": "3f90dcb38c5729b324959cdf37a90189681e144a275b6e7acecb61db0650a683",
+      "source_manifest_sha256": "1620850e0a8ebe67e313cc6c3dd2f648c29bf5bd7c9158294cb1d17432a5cd4c",
+      "command": [
+        "/Users/vladnikulin/code/personal/zotero-summarizer/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-p",
+        "fleet_plugin",
+        "-q",
+        "-s",
+        "-o",
+        "cache_dir=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b2/lab/lanes/preparation/attempt-01-pytest-9ffa3d65/pytest-cache",
+        "--basetemp=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b2/lab/lanes/preparation/attempt-01-pytest-9ffa3d65/tmp",
+        "--junitxml=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b2/lab/lanes/preparation/attempt-01-pytest-9ffa3d65/junit.xml",
+        "--forked",
+        "tests/test_priority_fixtures.py",
+        "tests/test_priority_metrics.py",
+        "tests/test_priority_replay.py",
+        "tests/test_priority_replay_states.py",
+        "tests/test_priority_review_findings.py",
+        "tests/test_profiles.py",
+        "tests/test_project_state_paths.py",
+        "tests/test_prompt_injection_defense.py",
+        "tests/test_prompt_security.py",
+        "tests/test_provenance_tag.py",
+        "tests/test_provider_capabilities.py",
+        "tests/test_provider_capability_hold.py",
+        "tests/test_provider_routing.py",
+        "tests/test_public_benchmark_config.py",
+        "tests/test_pubmed_pmc.py",
+        "tests/test_qa_checkpoint_contract.py",
+        "tests/test_qa_checkpoint_legacy.py",
+        "tests/test_qa_context.py",
+        "tests/test_qa_history_prompt_boundary.py",
+        "tests/test_quality_assumed_mode.py",
+        "tests/test_quality_band_order.py",
+        "tests/test_quality_bridge.py",
+        "tests/test_quality_calibration.py",
+        "tests/test_quality_eval.py",
+        "tests/test_quality_gate.py",
+        "tests/test_quality_promote.py",
+        "tests/test_quality_reading_policy.py",
+        "tests/test_quality_review.py",
+        "tests/test_quality_rubric_admission.py",
+        "tests/test_quality_scientific_authority.py",
+        "tests/test_query_affinity.py",
+        "tests/test_queue_changes.py",
+        "tests/test_rank_blend.py",
+        "tests/test_rank_blend_quality.py",
+        "tests/test_ranking_audit_math.py",
+        "tests/test_rate_limiter.py",
+        "tests/test_raw_feed_backup.py",
+        "tests/test_readiness.py",
+        "tests/test_reading_contract.py",
+        "tests/test_reading_policy_eval.py",
+        "tests/test_reading_queue.py",
+        "tests/test_reading_queue_epoch.py",
+        "tests/test_reading_queue_freshness.py",
+        "tests/test_reading_queue_rebuild.py",
+        "tests/test_reading_queue_semantic.py",
+        "tests/test_real_paper_eval.py",
+        "tests/test_recorded_support_binding.py",
+        "tests/test_recover_abstractless.py",
+        "tests/test_recover_abstractless_l1.py",
+        "tests/test_redundancy_lint.py",
+        "tests/test_refine_prompt_source_status.py",
+        "tests/test_relabel_audit.py",
+        "tests/test_relabel_routes.py",
+        "tests/test_related_client_consent.py",
+        "tests/test_related_discovery.py",
+        "tests/test_related_library.py",
+        "tests/test_related_saved_papers.py",
+        "tests/test_related_session_projection.py",
+        "tests/test_relevance_why.py",
+        "tests/test_render_source_admission.py",
+        "tests/test_reproduction_uncertainty.py",
+        "tests/test_reranker_readiness.py",
+        "tests/test_rescore_slate.py",
+        "tests/test_research_feed.py",
+        "tests/test_research_feed_boundaries.py",
+        "tests/test_research_feed_browser.py",
+        "tests/test_research_feed_cursor.py",
+        "tests/test_research_feed_cursor_inputs.py",
+        "tests/test_research_feed_eval.py",
+        "tests/test_research_feed_eval_inputs.py",
+        "tests/test_research_feed_eval_v2.py",
+        "tests/test_research_feed_history_source.py",
+        "tests/test_research_feed_markdown_evidence.py",
+        "tests/test_research_feed_native_admission.py",
+        "tests/test_research_feed_numeric_admission.py",
+        "tests/test_research_feed_projection_evidence.py",
+        "tests/test_research_feed_ranking.py",
+        "tests/test_research_feed_reproduction_evidence.py",
+        "tests/test_research_feed_startup.py",
+        "tests/test_research_feed_telegram.py"
+      ],
+      "elapsed_seconds": 74.77
+    },
+    {
+      "kind": "python-partition",
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b2/lab/lanes/preparation/attempt-02-pytest-f50b7567",
+      "counts": {
+        "passed": 1306,
+        "skipped": 60
+      },
+      "junit_sha256": "eaf7436ee0af1628690bf59df457452d2f254bb22963b54c1fc3c52ee40a72a2",
+      "guard_sha256": "9704ac561ba3d3039654814159bb06df70b43043b480bbf2c0d95d4afc0a37e5",
+      "source_manifest_sha256": "1620850e0a8ebe67e313cc6c3dd2f648c29bf5bd7c9158294cb1d17432a5cd4c",
+      "command": [
+        "/Users/vladnikulin/code/personal/zotero-summarizer/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-p",
+        "fleet_plugin",
+        "-q",
+        "-s",
+        "-o",
+        "cache_dir=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b2/lab/lanes/preparation/attempt-02-pytest-f50b7567/pytest-cache",
+        "--basetemp=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b2/lab/lanes/preparation/attempt-02-pytest-f50b7567/tmp",
+        "--junitxml=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b2/lab/lanes/preparation/attempt-02-pytest-f50b7567/junit.xml",
+        "--forked",
+        "tests/test_research_feed_telegram_cold_start.py",
+        "tests/test_research_feed_telegram_pages.py",
+        "tests/test_research_feed_web.py",
+        "tests/test_review_apply.py",
+        "tests/test_review_attempt.py",
+        "tests/test_review_cache.py",
+        "tests/test_review_commit.py",
+        "tests/test_review_confirm.py",
+        "tests/test_review_detail.py",
+        "tests/test_review_durable_sample.py",
+        "tests/test_review_eligibility.py",
+        "tests/test_review_error_identity.py",
+        "tests/test_review_evidence.py",
+        "tests/test_review_fleet.py",
+        "tests/test_review_fleet_job.py",
+        "tests/test_review_fleet_prewarm.py",
+        "tests/test_review_fleet_propose.py",
+        "tests/test_review_fleet_routes.py",
+        "tests/test_review_fleet_store.py",
+        "tests/test_review_grade_authority.py",
+        "tests/test_review_identity.py",
+        "tests/test_review_note_admission.py",
+        "tests/test_review_note_identity.py",
+        "tests/test_review_note_mirror.py",
+        "tests/test_review_note_projection.py",
+        "tests/test_review_note_real_boundary.py",
+        "tests/test_review_note_receipts.py",
+        "tests/test_review_notes_layout_browser.py",
+        "tests/test_review_payload_integrity.py",
+        "tests/test_review_publication_lock.py",
+        "tests/test_review_question_add_browser.py",
+        "tests/test_review_question_browser.py",
+        "tests/test_review_question_lost_response_browser.py",
+        "tests/test_review_question_migration.py",
+        "tests/test_review_question_mirror.py",
+        "tests/test_review_question_storage.py",
+        "tests/test_review_question_sync.py",
+        "tests/test_review_questions.py",
+        "tests/test_review_queue_order.py",
+        "tests/test_review_reading_browser.py",
+        "tests/test_review_real_contract.py",
+        "tests/test_review_section_overlay.py",
+        "tests/test_review_selection.py",
+        "tests/test_review_source_boundary.py",
+        "tests/test_review_text.py",
+        "tests/test_review_workflow.py",
+        "tests/test_role_value_verdicts.py",
+        "tests/test_rss_api_routes.py",
+        "tests/test_rss_audit_boundaries.py",
+        "tests/test_run_log.py",
+        "tests/test_runtime_stage_client_cache.py",
+        "tests/test_score_tags.py",
+        "tests/test_search.py",
+        "tests/test_search_audit_regressions.py",
+        "tests/test_search_authority.py",
+        "tests/test_search_boundaries.py",
+        "tests/test_search_constraints.py",
+        "tests/test_search_discovery_surfaces_browser.py",
+        "tests/test_search_discovery_union.py",
+        "tests/test_search_evidence_current_binding.py",
+        "tests/test_search_evidence_encoding.py",
+        "tests/test_search_evidence_invalidation.py",
+        "tests/test_search_evidence_pass.py",
+        "tests/test_search_failure_contract.py",
+        "tests/test_search_family_identifier_contract.py",
+        "tests/test_search_family_identifiers.py",
+        "tests/test_search_family_refinement_unknown.py",
+        "tests/test_search_federation.py",
+        "tests/test_search_library_coverage.py",
+        "tests/test_search_materialize.py",
+        "tests/test_search_materialize_recovery.py",
+        "tests/test_search_original_retrieval.py",
+        "tests/test_search_planned_identity.py",
+        "tests/test_search_question_evidence.py",
+        "tests/test_search_question_policy.py",
+        "tests/test_search_recall.py",
+        "tests/test_search_refinement_coverage.py",
+        "tests/test_search_remaining.py",
+        "tests/test_search_type_recovery_priority.py",
+        "tests/test_serve_free_port.py"
+      ],
+      "elapsed_seconds": 77.89
+    },
+    {
+      "kind": "python-partition",
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b2/lab/lanes/preparation/attempt-03-pytest-88955851",
+      "counts": {
+        "skipped": 59,
+        "passed": 1041
+      },
+      "junit_sha256": "0408a5699fad1948433f5e7a173ad1c5ed270a4ef79441b35db3f8d4de15dbe4",
+      "guard_sha256": "0d41f7536b7638943b599f98fb20ec56a929e9e08c4c53b792d7f5d7904586be",
+      "source_manifest_sha256": "1620850e0a8ebe67e313cc6c3dd2f648c29bf5bd7c9158294cb1d17432a5cd4c",
+      "command": [
+        "/Users/vladnikulin/code/personal/zotero-summarizer/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-p",
+        "fleet_plugin",
+        "-q",
+        "-s",
+        "-o",
+        "cache_dir=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b2/lab/lanes/preparation/attempt-03-pytest-88955851/pytest-cache",
+        "--basetemp=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b2/lab/lanes/preparation/attempt-03-pytest-88955851/tmp",
+        "--junitxml=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b2/lab/lanes/preparation/attempt-03-pytest-88955851/junit.xml",
+        "--forked",
+        "tests/test_set_field.py",
+        "tests/test_settings_and_migrations.py",
+        "tests/test_setup_attempt_regressions.py",
+        "tests/test_setup_bootstrap.py",
+        "tests/test_setup_cli.py",
+        "tests/test_setup_cli_consent.py",
+        "tests/test_setup_detect.py",
+        "tests/test_setup_doctor.py",
+        "tests/test_setup_doctor_runtime_identity.py",
+        "tests/test_setup_env_writer.py",
+        "tests/test_setup_load_admission16.py",
+        "tests/test_setup_load_ownership16.py",
+        "tests/test_setup_load_policy_io.py",
+        "tests/test_setup_request_finality.py",
+        "tests/test_setup_request_transport.py",
+        "tests/test_setup_request_transport_budget.py",
+        "tests/test_setup_runtime_recovery.py",
+        "tests/test_setup_source_write_browser.py",
+        "tests/test_setup_status.py",
+        "tests/test_setup_surface_browser.py",
+        "tests/test_setup_tag_colors.py",
+        "tests/test_setup_validate.py",
+        "tests/test_setup_verification_boundary.py",
+        "tests/test_shap_attribution.py",
+        "tests/test_silent_bug_fixes.py",
+        "tests/test_slop_lint.py",
+        "tests/test_source_admission.py",
+        "tests/test_stale_feed_effects.py",
+        "tests/test_startup_boundaries.py",
+        "tests/test_storage_rows.py",
+        "tests/test_strong_negative_feedback.py",
+        "tests/test_summarization_repair.py",
+        "tests/test_support_boundaries.py",
+        "tests/test_support_comparison.py",
+        "tests/test_support_decision_contract.py",
+        "tests/test_support_fixtures.py",
+        "tests/test_support_metrics.py",
+        "tests/test_support_replay_states.py",
+        "tests/test_surprise_score.py",
+        "tests/test_sync_audit_regressions.py",
+        "tests/test_sync_batch_continuation.py",
+        "tests/test_sync_keep_server.py",
+        "tests/test_sync_schema_migration.py",
+        "tests/test_tabpfn_device.py",
+        "tests/test_team_draft.py",
+        "tests/test_telegram_adapter.py",
+        "tests/test_telegram_adapter_collect.py",
+        "tests/test_telegram_child_import_roots.py",
+        "tests/test_telegram_cli_lifetime.py",
+        "tests/test_telegram_collect_admission.py",
+        "tests/test_telegram_collect_pages.py",
+        "tests/test_telegram_identity.py",
+        "tests/test_telegram_public_auth.py",
+        "tests/test_telegram_public_cli.py",
+        "tests/test_telegram_runtime.py",
+        "tests/test_temporal_split.py",
+        "tests/test_thinking_effort.py",
+        "tests/test_today_backlog.py",
+        "tests/test_today_candidates.py",
+        "tests/test_today_selection_browser.py",
+        "tests/test_today_verdict_hydration.py",
+        "tests/test_training_fit_consistency.py",
+        "tests/test_training_fold_library.py",
+        "tests/test_training_identity.py",
+        "tests/test_training_spearman.py",
+        "tests/test_triage_concurrency.py",
+        "tests/test_triage_job_atomic_result.py",
+        "tests/test_triage_job_cancellation.py",
+        "tests/test_triage_job_controls.py",
+        "tests/test_triage_job_persistence.py",
+        "tests/test_triage_job_progress.py",
+        "tests/test_triage_long_source.py",
+        "tests/test_triage_prompt_evidence.py",
+        "tests/test_trickle_audit.py",
+        "tests/test_tune_fold_truth.py",
+        "tests/test_ui_audit_fixes.py",
+        "tests/test_university_access_status.py",
+        "tests/test_unpaywall_pdf_resolution.py",
+        "tests/test_unread_only_filter.py",
+        "tests/test_user_labels.py"
+      ],
+      "elapsed_seconds": 127.1
+    },
+    {
+      "kind": "python-partition",
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b2/lab/lanes/preparation/attempt-04-pytest-d4427eb6",
+      "counts": {
+        "passed": 223,
+        "skipped": 4
+      },
+      "junit_sha256": "45a221ab53aa9ca82a7d877b6d0ffdd6c75cb26c4fd627929194a663280a28ff",
+      "guard_sha256": "dfee54d4a5dd0de5ded0c522db431222dcdf74fcf5c31167a8cdb2227387ebae",
+      "source_manifest_sha256": "1620850e0a8ebe67e313cc6c3dd2f648c29bf5bd7c9158294cb1d17432a5cd4c",
+      "command": [
+        "/Users/vladnikulin/code/personal/zotero-summarizer/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-p",
+        "fleet_plugin",
+        "-q",
+        "-s",
+        "-o",
+        "cache_dir=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b2/lab/lanes/preparation/attempt-04-pytest-d4427eb6/pytest-cache",
+        "--basetemp=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b2/lab/lanes/preparation/attempt-04-pytest-d4427eb6/tmp",
+        "--junitxml=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b2/lab/lanes/preparation/attempt-04-pytest-d4427eb6/junit.xml",
+        "--forked",
+        "tests/test_verdict_comment_replay.py",
+        "tests/test_verdict_delivery_boundaries.py",
+        "tests/test_verdict_listing.py",
+        "tests/test_verdict_mirror_receipts.py",
+        "tests/test_verdict_mirror_retraction.py",
+        "tests/test_verdict_note.py",
+        "tests/test_verdict_training.py",
+        "tests/test_verification_audit_export.py",
+        "tests/test_verify_review_capture_cli.py",
+        "tests/test_vite_proxy_contract.py",
+        "tests/test_weekly_ab.py",
+        "tests/test_zotero_annotation_identity.py",
+        "tests/test_zotero_audit_boundaries.py",
+        "tests/test_zotero_note_envelope.py",
+        "tests/test_zotero_read_items.py",
+        "tests/test_zotero_reader.py",
+        "tests/test_zotero_readsync.py"
+      ],
+      "elapsed_seconds": 16.37
+    },
+    {
+      "kind": "browser",
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-browser/lab/lanes/preparation/attempt-02-browser-908bd621",
+      "counts": {
+        "passed": 94,
+        "failed": 4
+      },
+      "junit_sha256": "83190b35fdbf8b2fbd61c4283ff809d4857965745270bee4d5e82b34f5db53e8",
+      "guard_sha256": "4c3b082681566f1cc2fd8bdd787f33df5bb2f0703ee2fd1a2081e0d7b475cca7",
+      "command": [
+        "/Users/vladnikulin/code/personal/zotero-summarizer/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-p",
+        "fleet_plugin",
+        "-q",
+        "-s",
+        "-o",
+        "cache_dir=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-browser/lab/lanes/preparation/attempt-02-browser-908bd621/pytest-cache",
+        "--basetemp=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-browser/lab/lanes/preparation/attempt-02-browser-908bd621/tmp",
+        "--junitxml=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-browser/lab/lanes/preparation/attempt-02-browser-908bd621/junit.xml",
+        "tests/test_application_browser_live.py",
+        "tests/test_setup_surface_browser.py",
+        "tests/test_research_feed_browser.py",
+        "tests/test_search_discovery_surfaces_browser.py",
+        "tests/test_review_question_browser.py",
+        "tests/test_review_question_add_browser.py",
+        "tests/test_review_question_lost_response_browser.py",
+        "tests/test_review_notes_layout_browser.py",
+        "tests/test_offline_review_browser.py",
+        "tests/test_review_reading_browser.py",
+        "tests/test_discovery_browser.py",
+        "tests/test_offline_library_browser.py",
+        "tests/test_setup_source_write_browser.py",
+        "tests/test_today_selection_browser.py"
+      ],
+      "elapsed_seconds": 110.72
+    },
+    {
+      "kind": "browser",
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-browser-contrast/lab/lanes/preparation/attempt-01-browser-18f31f3f",
+      "counts": {
+        "passed": 12
+      },
+      "junit_sha256": "fba488de0923cb6bea8257ea75b5910a7e5d6e96674928942e14d6982c3fa853",
+      "guard_sha256": "c7f0eb31b485c122aaefdceedba8bdc9a106a3ff1860eb17e9de0c3574d1f117",
+      "command": [
+        "/Users/vladnikulin/code/personal/zotero-summarizer/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-p",
+        "fleet_plugin",
+        "-q",
+        "-s",
+        "-o",
+        "cache_dir=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-browser-contrast/lab/lanes/preparation/attempt-01-browser-18f31f3f/pytest-cache",
+        "--basetemp=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-browser-contrast/lab/lanes/preparation/attempt-01-browser-18f31f3f/tmp",
+        "--junitxml=/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-browser-contrast/lab/lanes/preparation/attempt-01-browser-18f31f3f/junit.xml",
+        "tests/test_review_reading_browser.py::test_three_signal_contrast_outside_full_reader"
+      ],
+      "elapsed_seconds": 18.52
+    }
+  ],
+  "parent_red_green_checks_not_additive": [
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-collection-reseal-green/pytest-j5loq4ko",
+      "counts": {
+        "passed": 17
+      },
+      "returncode": 0,
+      "guard_stop": null,
+      "junit_sha256": "d0c20d6a2c5370e09828c686b589fa84e72e11319dffe6962972937f790cb49f",
+      "guard_sha256": "ca3cfa23e4134725cf804d6a5aa9a45e8428a4416b39cfd599b54baa03044422"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-feed-proposal-countercontrol/pytest-ikvge0dw",
+      "counts": {
+        "passed": 2,
+        "failed": 2
+      },
+      "returncode": 1,
+      "guard_stop": null,
+      "junit_sha256": "9ea4c9ee64388e2285c8ef697bfa78dabe45d03f5110e248a62a62ddcb62e5f9",
+      "guard_sha256": "5e79b85b3e51c3983d85170ebf446a7ca658e146c4a105b4791127a30c62f5fd"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-feed-weekly-comparator-green/pytest-jra5xgtx",
+      "counts": {
+        "passed": 185
+      },
+      "returncode": 0,
+      "guard_stop": null,
+      "junit_sha256": "cd09ecfb25486306cb94023b1af044e55ebf4d804a53aea48c401427c77f6d5d",
+      "guard_sha256": "37e37cf485d90605c4884cff30932f28a0f5da7dad53e7452e7b9cf38042154b"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-feed-weekly-comparator-red/pytest-1_a6ovo4",
+      "counts": {
+        "failed": 9,
+        "passed": 1
+      },
+      "returncode": 1,
+      "guard_stop": null,
+      "junit_sha256": "e1f5d7636920622371ed46ef22975893e5631f9112e7baddbb731edb149a64d3",
+      "guard_sha256": "5e1c1eeb6008cdeb1de4b572541d0863140bf6379a5d43fad1438af3d258dfc4"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-frontend-full/vitest-vgemzvpj",
+      "tests": 1000,
+      "passed": 1000,
+      "failed": 0,
+      "returncode": 0,
+      "guard_stop": null,
+      "vitest_sha256": "96d516fefc8e344088ab1e0e6d23273547d0d7881874f22931b931ca92fe50c8",
+      "guard_sha256": "b6bc897186c8445a427dcfa79179c5724ad85e93984cfcb269dad2f30c3b2c36"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-priority-cutoff-green/pytest-rpictv3z",
+      "counts": {
+        "passed": 203
+      },
+      "returncode": 0,
+      "guard_stop": null,
+      "junit_sha256": "be005f4d3d9552dd3a8250f45db1a325df23ee7dfa80ec49b6c8db70730b1878",
+      "guard_sha256": "b5241e169758337404cc1778150b4e5af71d427c9eda9e03ded4ead9403a1b87"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-priority-cutoff-red/pytest-de7civtc",
+      "counts": {
+        "passed": 3,
+        "failed": 1
+      },
+      "returncode": 1,
+      "guard_stop": null,
+      "junit_sha256": "bbf750144229c6fd067144c6c252be46fa32f4e597ee8161fc2df56d460a92c0",
+      "guard_sha256": "633a3c53e53a6b9f64589deb1848e2cb3d0a6a45cbc93a5993af21c873662efb"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-question-green/pytest-5s_x3qyl",
+      "counts": {
+        "passed": 57
+      },
+      "returncode": 0,
+      "guard_stop": null,
+      "junit_sha256": "2add74f7139a2be8c4d423b43a0b6418a738fd2116d471b9ac7b9f426c561a3b",
+      "guard_sha256": "49d2d0e28325ff3d91171757d393ff88d489535690d4c27c92f0f84ed6563b8b"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-question-red/pytest-jdg2lts_",
+      "counts": {
+        "passed": 6,
+        "failed": 2
+      },
+      "returncode": 1,
+      "guard_stop": null,
+      "junit_sha256": "360b1e3fafd202ddf9a6a5099ef42e0154d01b55786daea1ccf5c74ad3aadf8d",
+      "guard_sha256": "6a6c3379ff7f3cbf801702edb816746a97f4b308b90a750040c434bbd8edb980"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-related-cli-green/pytest-d28mpkpq",
+      "counts": {
+        "passed": 82
+      },
+      "returncode": 0,
+      "guard_stop": null,
+      "junit_sha256": "37eeeae25f3b27d8253d0d13f407d21834c03ef37404b5af936b438ff98e5fa5",
+      "guard_sha256": "4f80633bb07b6d248119bac82b458d320ab00a0ba2d6b3c2076a8b18b7d97128"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-related-cli-red/pytest-ndrjbvwq",
+      "counts": {
+        "failed": 6
+      },
+      "returncode": 1,
+      "guard_stop": null,
+      "junit_sha256": "2aeca0beabb25b533924b19fbbc7628d1f224c513f81bb6a2ac32abede27acd9",
+      "guard_sha256": "7e5950e63318ea3bba7c6b2592f7883e997f6a2506f3083dcca504775eda7aa6"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-telegram-positive-fixture-green/pytest-jenvo91i",
+      "counts": {
+        "passed": 23
+      },
+      "returncode": 0,
+      "guard_stop": null,
+      "junit_sha256": "80e97c27841b347439676f2729bb82664fd954c7a8ea2c3f73923594319f9e3a",
+      "guard_sha256": "6ce639b920317c81e8c5c9087fdf366db5ec4a15298164d6eb6af2dce0c1fb96"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-transfer-sync-green/pytest-6ekn20yv",
+      "counts": {
+        "passed": 113
+      },
+      "returncode": 0,
+      "guard_stop": null,
+      "junit_sha256": "f4f88ca17a28a8c20758a2ff65f76801ef4b5aa6dfef90e2c40986b918c549a6",
+      "guard_sha256": "30f900b6dfb75f543596381c71581dd25fdbd1edd9ae83c48fb3583f9b6faea0"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-transfer-sync-red/pytest-xlz5ajjf",
+      "counts": {
+        "failed": 5
+      },
+      "returncode": 1,
+      "guard_stop": null,
+      "junit_sha256": "e35e4b406810dfa916be54dd67c75afbffded9ee9fce2fbf48a317fd21b093f3",
+      "guard_sha256": "3985573eb6a7195e2ecf5908dec909d24c046c77a4faeeb6b63818ca66dda860"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-ui-green/vitest-ohraj2zv",
+      "tests": 63,
+      "passed": 63,
+      "failed": 0,
+      "returncode": 0,
+      "guard_stop": null,
+      "vitest_sha256": "ef6c100f3ca808c39b4b5a94e411270e8684aca21d69b29864fc90389fdd14a4",
+      "guard_sha256": "f24d5f8b738fc7c98191ab7946d439d6ee56816af8de8c260991c94ba1870e16"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-ui-red/vitest-cm7prafp",
+      "tests": 12,
+      "passed": 9,
+      "failed": 3,
+      "returncode": 1,
+      "guard_stop": null,
+      "vitest_sha256": "7e35c77177e9ac35e4731cef706ece2a55edfaa118ce52e72954f29f84ad51ae",
+      "guard_sha256": "4c11c50469c1e5027c77d844b9496db9dd1f5b3bc3c4c487627bf2c4490e3f6e"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-verifier-green/pytest-5dupv8nf",
+      "counts": {
+        "passed": 8
+      },
+      "returncode": 0,
+      "guard_stop": null,
+      "junit_sha256": "fdb963a53e3b7e9da3634738c80d4c873ddea3b522e6ad5f8a99cacb8aaf18a7",
+      "guard_sha256": "1344af0d112995a72b46cbbc02af7e48e8704af5f929ede890eee4caf95b52b7"
+    },
+    {
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-verifier-red/pytest-poh74vis",
+      "counts": {
+        "passed": 28,
+        "failed": 2
+      },
+      "returncode": 1,
+      "guard_stop": null,
+      "junit_sha256": "cb763b89c7977f9870fec699bab76f611b2bdf9f5ab04f038f2f79790c2c77b1",
+      "guard_sha256": "6f20336010d1d0c52d92f78687899bde57ebd1e22ae6c61696206e23aad1d5d8"
+    }
+  ],
+  "source_manifest": {
+    "path": "source-manifest.json",
+    "sha256": "e3f25591bc149989aeea2c570978368cbc8d312b2c6e920227609daa7b82868c",
+    "runtime_test_config_files": 1360,
+    "scope": "Every present non-Markdown/non-docs file in the fresh pinned tracked+untracked source snapshot; no tombstones",
+    "working_tree_not_commit": true,
+    "integration_and_main_bytes_identical": true,
+    "all1360main_and_integration_fingerprints_verified": true
+  },
+  "source_review": {
+    "logical_agent": 50,
+    "run_id": "c0083fb5-5592-43b3-9e53-2493213ee929",
+    "report_sha256": "bbe9346f36127f9cefb77ed5e3be5e7eeb267562b3b95718bb62a13fc6db1a95",
+    "owners": 15,
+    "production_bytes_still_identical_to_review_snapshot": true,
+    "tests_executed_by_reviewer": false,
+    "same_readonly_agent_followup_not_new_independent_agent": true
+  },
+  "transfer": {
+    "receipt_path": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/transfer.json",
+    "receipt_sha256": "68262eec2e98f9b7182712423c1fface4004e6a278b6006a9996f025b61e5986",
+    "files": 51,
+    "staged_committed_pushed": false,
+    "root_dist_replaced": false
+  },
+  "rejected_options": [
+    {
+      "option": "One required generation schema for source observations and card authority",
+      "measured_countercontrol": {
+        "passed": 2,
+        "failed": 2
+      },
+      "resolution": "Split observation shape from required card-generation authority in the existing report boundary."
+    },
+    {
+      "option": "Restore ignored RSS options or swallow malformed report fields",
+      "resolution": "Rejected: would undo qualified public/authority refusals."
+    },
+    {
+      "option": "Strictly reject equal Collection taxonomy/split timestamps",
+      "resolution": "No primary contract or demonstrated leakage established; retain equality and record ambiguity."
+    },
+    {
+      "option": "Require raw/effective priority configs to be equal",
+      "resolution": "Legitimate path/default/override differences; no substantiated false-provenance defect."
+    },
+    {
+      "option": "Duplicate manifest provenance into every stdout/Markdown field",
+      "resolution": "Withdrawn; immutable machine manifests and useful human pointers already carry the required contract."
+    }
+  ],
+  "safety": {
+    "initial_workflow_concurrency_limit": 6,
+    "retained_recoveries": "separate lifecycle; not a claim of an overall measured peak6",
+    "heavy_checks": "one kernel lock",
+    "limits": {
+      "available_ram_floor_percent": 20,
+      "owned_tree_rss_mib": 4096,
+      "swap_growth_mib": 2048,
+      "guard_wall_seconds": 900,
+      "poll_seconds": 1,
+      "termination_grace_seconds": 2
+    }
+  },
+  "limitations": [
+    "No human/manual acceptance; all18checkboxes remain unchecked. Machine/source checks are not18live-UAT PASS results.",
+    "Synthetic owned fixtures, scripted providers and no private library/accounts, live LLMs, real Telegram session, deployed HTTPS or physical-device/scientific study acceptance.",
+    "166default Python skips stay skips;98exact identities were executed separately in owned built-browser fixtures;68remain unexecuted.",
+    "Telethon optional adapter is absent; real SDK/server pagination remains unverified. No dependency/account installation to manufacture coverage.",
+    "Forty original native runs completed and ten failed; all ten have completed retained recovery. Failed originals and one rejected lane13follow-up remain NOT_PASS.",
+    "Browser initially94PASS/4FAIL; the intended visible SKIM label required an exact DOM assertion update.12function cases then passed;8overlap;98unique final passes. Initial failure remains NOT_PASS.",
+    "Collection reseal and Telegram positive-fixture failures were corrected without production fallback or relaxed refusal/contrast assertions. Failed full-suite attempts remain retained.",
+    "Read six current PNGs only:four SKIM surfaces and two isolated Related component captures. This is not all-images/full-styled-app/human visual acceptance.",
+    "Source code transferred byte-for-byte to the existing main checkout without staging/commit/push; isolated build not deployed and existing root dist not replaced."
+  ],
+  "historical_v1": {
+    "classification": "Historical revision1/eight-agent evidence plus pre-fleet revision2 scope metadata; not credited to this fifty-agent run",
+    "pinned_commit": "67ec2fac410e97593f4081535352af1de2d0e79e",
+    "source_manifest_sha256": "485009557a91d761228740dbd3d18a41b1c9e51c8b3a7afd87adb9525cbd9229",
+    "source_manifest_url": "https://github.com/Vlislavn/zotero-summarizer/blob/67ec2fac410e97593f4081535352af1de2d0e79e/docs/validation/pr208/source-manifest.json",
+    "historical_absent_entries": [
+      "frontend/src/components/paper/RelatedLibrary.test.jsx"
+    ],
+    "current_scope_refresh_note": "Fresh current snapshot also covers CSS, HTML, webmanifest, test harness/config and other present runtime/config assets omitted from the inherited map; historical scope is not current coverage.",
+    "artifact": {
+      "pr": 208,
+      "baseline_head": "6e909596593b1ab0a89f3d54e0ee22ad9a5639c7",
+      "status": "HISTORICAL_CODE_TEST_RESULTS_WITH_REVISED_FEATURE_CHECKLIST",
+      "human_acceptance": "NOT_RUN",
+      "confirmed_product_mechanisms_fixed": 7,
+      "red": {
+        "frontend": {
+          "cases": 85,
+          "passed": 62,
+          "failed": 23
+        },
+        "python": {
+          "cases": 48,
+          "passed": 35,
+          "failed": 13
+        }
+      },
+      "same_cohort_green": {
+        "frontend": 85,
+        "python": 48
+      },
+      "current": {
+        "frontend": {
+          "numTotalTests": 997,
+          "numPassedTests": 997,
+          "numFailedTests": 0,
+          "numPendingTests": 0
+        },
+        "python": {
+          "cases": 10893,
+          "unique": 10893,
+          "passed": 10727,
+          "skipped": 166,
+          "failed": 0,
+          "errors": 0,
+          "execution": "all577test files in8serialized fresh-process batches, <=80files/batch, unchanged guard"
+        },
+        "built_browser": {
+          "passed": 98,
+          "failed": 0,
+          "skipped": 0,
+          "baseline_skip_identities": 98
+        },
+        "remaining_main_skips_not_executed_this_goal": 68,
+        "lint": {
+          "errors": 0,
+          "warnings": 13
+        },
+        "source_code_test_config_paths": 1345
+      },
+      "guard_stopped_attempt": {
+        "scope": "single-process whole-suite rerun",
+        "guard_stop": "free_percent",
+        "returncode": -15,
+        "elapsed_seconds": 527.5,
+        "receipt_sha256": "680668138a82df50e3ead0a54157739ad7581728675ec403b84a736e3df247e4",
+        "disposition": "NOT_PASS; all cases rerun in finite serialized batches without lowering20%floor or killing unrelated processes"
+      },
+      "prior_whole_failure": {
+        "scope": "first post-fix whole run10891",
+        "failures": 1,
+        "cause": "stale docs inventory rejects5previously published validation files",
+        "disposition": "closed exact inventory and recursive links; all3current documentation cases passed in batch01"
+      },
+      "checks": [
+        {
+          "phase": "validation-final-full",
+          "attempt": "attempt-01-vitest-eab4ea32",
+          "guard_sha256": "42d9c3cdd610dfe0b2ac068eee8f327b4cacebe64172dccf91a026d407151f36",
+          "source_snapshot_sha256": "8c75d7c6515a42245205a4a4edcb431c88913616d0a497201e345504aa2f80c6",
+          "returncode": 0,
+          "guard_stop": null,
+          "cleanup_leftovers": [],
+          "peak_tree_rss_mib": 466.67,
+          "kind": "frontend",
+          "receipt_sha256": "c101fcfb83007ff23dc53461e35805aa7854e059f086409c98996d1484dcd233",
+          "counts": {
+            "numTotalTests": 997,
+            "numPassedTests": 997,
+            "numFailedTests": 0,
+            "numPendingTests": 0
+          },
+          "command_scope": {
+            "runner": "vitest",
+            "forked": false,
+            "cohort_sha256": "57ecf3c954b790b18e45259453b0856d53d0861419ad52555da7324ba259d73b"
+          }
+        },
+        {
+          "phase": "validation-final-full",
+          "attempt": "attempt-02-build-2f8d518b",
+          "guard_sha256": "92ca813157eb4bb623435e077720cdfc69a32ed9f33f20893fb6c1db2310c4de",
+          "source_snapshot_sha256": "8c75d7c6515a42245205a4a4edcb431c88913616d0a497201e345504aa2f80c6",
+          "returncode": 0,
+          "guard_stop": null,
+          "cleanup_leftovers": [],
+          "peak_tree_rss_mib": 484.78,
+          "kind": "build",
+          "command_scope": {
+            "runner": "build",
+            "forked": false,
+            "cohort_sha256": "57ecf3c954b790b18e45259453b0856d53d0861419ad52555da7324ba259d73b"
+          }
+        },
+        {
+          "phase": "validation-final-python-batches",
+          "attempt": "attempt-01-pytest-c14ba08f",
+          "guard_sha256": "6b82e6ebdaa038984c96b1a775446dd3cf6fe546ea4ed85ac91ea0818c14d2f9",
+          "source_snapshot_sha256": "8c75d7c6515a42245205a4a4edcb431c88913616d0a497201e345504aa2f80c6",
+          "returncode": 0,
+          "guard_stop": null,
+          "cleanup_leftovers": [],
+          "peak_tree_rss_mib": 1209.08,
+          "kind": "pytest",
+          "receipt_sha256": "924ee8bc4578b85ba74d068dd88dd065e444e1ecd21db87fa21fdbc41a6113ce",
+          "counts": {
+            "passed": 1142,
+            "skipped": 21,
+            "failed": 0,
+            "error": 0
+          },
+          "command_scope": {
+            "runner": "pytest",
+            "forked": true,
+            "cohort_sha256": "cc6014e196bf7282fb1436ccfbae25ea5ddd6ff4b54e9bd1ea05d8759d24fa52"
+          }
+        },
+        {
+          "phase": "validation-final-python-batches",
+          "attempt": "attempt-02-pytest-b4fd99fe",
+          "guard_sha256": "4ea1db0bb23613a8b4d73728fd6bd459119981c5cc1865ea7888fb59847f6807",
+          "source_snapshot_sha256": "8c75d7c6515a42245205a4a4edcb431c88913616d0a497201e345504aa2f80c6",
+          "returncode": 0,
+          "guard_stop": null,
+          "cleanup_leftovers": [],
+          "peak_tree_rss_mib": 2484.92,
+          "kind": "pytest",
+          "receipt_sha256": "ca940e777b2e35055b28eea1b710194c72a56dd7412e04e97e94ff002468b1fa",
+          "counts": {
+            "passed": 1590,
+            "skipped": 4,
+            "failed": 0,
+            "error": 0
+          },
+          "command_scope": {
+            "runner": "pytest",
+            "forked": true,
+            "cohort_sha256": "cc6014e196bf7282fb1436ccfbae25ea5ddd6ff4b54e9bd1ea05d8759d24fa52"
+          }
+        },
+        {
+          "phase": "validation-final-python-batches",
+          "attempt": "attempt-03-pytest-a099e3c6",
+          "guard_sha256": "5c37c41deb3070653fb751d43c796d4c6b9da8e022fe8cde30efc378edf0db9a",
+          "source_snapshot_sha256": "8c75d7c6515a42245205a4a4edcb431c88913616d0a497201e345504aa2f80c6",
+          "returncode": 0,
+          "guard_stop": null,
+          "cleanup_leftovers": [],
+          "peak_tree_rss_mib": 1162.38,
+          "kind": "pytest",
+          "receipt_sha256": "3c7bcdb21f207a0e5ba775d9b1d05f6e196f85e0ae82006e6e8f1f8cce987d3b",
+          "counts": {
+            "passed": 1604,
+            "skipped": 8,
+            "failed": 0,
+            "error": 0
+          },
+          "command_scope": {
+            "runner": "pytest",
+            "forked": true,
+            "cohort_sha256": "cc6014e196bf7282fb1436ccfbae25ea5ddd6ff4b54e9bd1ea05d8759d24fa52"
+          }
+        },
+        {
+          "phase": "validation-final-python-batches",
+          "attempt": "attempt-04-pytest-1b281238",
+          "guard_sha256": "6704d82a335cf697493965f92e6d842f5d7d75e4edc65bf538a1801ff888f5c4",
+          "source_snapshot_sha256": "8c75d7c6515a42245205a4a4edcb431c88913616d0a497201e345504aa2f80c6",
+          "returncode": 0,
+          "guard_stop": null,
+          "cleanup_leftovers": [],
+          "peak_tree_rss_mib": 1085.42,
+          "kind": "pytest",
+          "receipt_sha256": "bfa0921e900f6de482c281be3d90658ef9df9381413f061d29596576522a598e",
+          "counts": {
+            "passed": 2108,
+            "skipped": 9,
+            "failed": 0,
+            "error": 0
+          },
+          "command_scope": {
+            "runner": "pytest",
+            "forked": true,
+            "cohort_sha256": "cc6014e196bf7282fb1436ccfbae25ea5ddd6ff4b54e9bd1ea05d8759d24fa52"
+          }
+        },
+        {
+          "phase": "validation-final-python-batches",
+          "attempt": "attempt-05-pytest-c1b24a4b",
+          "guard_sha256": "81c291de39218effb5ac43ea7f5aefe17e0c633a15e26261461015666d20a5b6",
+          "source_snapshot_sha256": "8c75d7c6515a42245205a4a4edcb431c88913616d0a497201e345504aa2f80c6",
+          "returncode": 0,
+          "guard_stop": null,
+          "cleanup_leftovers": [],
+          "peak_tree_rss_mib": 1168.78,
+          "kind": "pytest",
+          "receipt_sha256": "40b4aaeea053319851317468d27fdfeed48d7528000d2e09f43e896bf68ffcdd",
+          "counts": {
+            "passed": 1732,
+            "skipped": 1,
+            "failed": 0,
+            "error": 0
+          },
+          "command_scope": {
+            "runner": "pytest",
+            "forked": true,
+            "cohort_sha256": "cc6014e196bf7282fb1436ccfbae25ea5ddd6ff4b54e9bd1ea05d8759d24fa52"
+          }
+        },
+        {
+          "phase": "validation-final-python-batches",
+          "attempt": "attempt-06-pytest-67fd4548",
+          "guard_sha256": "da342ad5c9830854774f69d6c7ecd54d55862c24c2a282858281e627255e0365",
+          "source_snapshot_sha256": "8c75d7c6515a42245205a4a4edcb431c88913616d0a497201e345504aa2f80c6",
+          "returncode": 0,
+          "guard_stop": null,
+          "cleanup_leftovers": [],
+          "peak_tree_rss_mib": 1024.42,
+          "kind": "pytest",
+          "receipt_sha256": "4aeb5a46696d40c4ea3063323f17ab21039f892f7abe8fb41b558e465fc66e6f",
+          "counts": {
+            "passed": 1292,
+            "skipped": 60,
+            "failed": 0,
+            "error": 0
+          },
+          "command_scope": {
+            "runner": "pytest",
+            "forked": true,
+            "cohort_sha256": "cc6014e196bf7282fb1436ccfbae25ea5ddd6ff4b54e9bd1ea05d8759d24fa52"
+          }
+        },
+        {
+          "phase": "validation-final-python-batches",
+          "attempt": "attempt-07-pytest-749b6ee3",
+          "guard_sha256": "86c3f26b4ffb8f1fd14242502649fdda6b12031996c020fad42467d367c8f40e",
+          "source_snapshot_sha256": "8c75d7c6515a42245205a4a4edcb431c88913616d0a497201e345504aa2f80c6",
+          "returncode": 0,
+          "guard_stop": null,
+          "cleanup_leftovers": [],
+          "peak_tree_rss_mib": 1037.86,
+          "kind": "pytest",
+          "receipt_sha256": "3875d78c8c502500c26043ca63c93f6f75272f631a806dcfdb2e9c1fdcf74676",
+          "counts": {
+            "passed": 1036,
+            "skipped": 59,
+            "failed": 0,
+            "error": 0
+          },
+          "command_scope": {
+            "runner": "pytest",
+            "forked": true,
+            "cohort_sha256": "cc6014e196bf7282fb1436ccfbae25ea5ddd6ff4b54e9bd1ea05d8759d24fa52"
+          }
+        },
+        {
+          "phase": "validation-final-python-batches",
+          "attempt": "attempt-08-pytest-4b73964c",
+          "guard_sha256": "3dbacbc12da7d762b8b34862b227f4319f45fc329526e4f459f630ad7f288fe7",
+          "source_snapshot_sha256": "8c75d7c6515a42245205a4a4edcb431c88913616d0a497201e345504aa2f80c6",
+          "returncode": 0,
+          "guard_stop": null,
+          "cleanup_leftovers": [],
+          "peak_tree_rss_mib": 634.41,
+          "kind": "pytest",
+          "receipt_sha256": "7d5c4ff7745b46c391d9bebaabe861bf28cdcc4eee60a048de31ffc7a4939262",
+          "counts": {
+            "passed": 223,
+            "skipped": 4,
+            "failed": 0,
+            "error": 0
+          },
+          "command_scope": {
+            "runner": "pytest",
+            "forked": true,
+            "cohort_sha256": "cc6014e196bf7282fb1436ccfbae25ea5ddd6ff4b54e9bd1ea05d8759d24fa52"
+          }
+        },
+        {
+          "phase": "validation-final-browser",
+          "attempt": "attempt-01-build-cda1ad5e",
+          "guard_sha256": "3563486a75f493e757397af143ca42e8b230605435517d39037318a56a86be8c",
+          "source_snapshot_sha256": "8c75d7c6515a42245205a4a4edcb431c88913616d0a497201e345504aa2f80c6",
+          "returncode": 0,
+          "guard_stop": null,
+          "cleanup_leftovers": [],
+          "peak_tree_rss_mib": 410.88,
+          "kind": "build",
+          "command_scope": {
+            "runner": "build",
+            "forked": false,
+            "cohort_sha256": "8a63d3bafb18b7ca985696dea12bdac653640e74aa25595d19176dadf69552c9"
+          }
+        },
+        {
+          "phase": "validation-final-browser",
+          "attempt": "attempt-02-browser-bd1629e6",
+          "guard_sha256": "82d13fd2fbfd948df4c5e63405a89ee24bd3914ff57ce95fc904d076fc38abdb",
+          "source_snapshot_sha256": "8c75d7c6515a42245205a4a4edcb431c88913616d0a497201e345504aa2f80c6",
+          "returncode": 0,
+          "guard_stop": null,
+          "cleanup_leftovers": [],
+          "peak_tree_rss_mib": 2239.81,
+          "kind": "browser",
+          "receipt_sha256": "55b3e1ba8486ad484f6b9d01992ebf9d4937f0bc5220c565f285fa8086ae10fb",
+          "counts": {
+            "passed": 98,
+            "skipped": 0,
+            "failed": 0,
+            "error": 0
+          },
+          "command_scope": {
+            "runner": "browser",
+            "forked": false,
+            "cohort_sha256": "8a63d3bafb18b7ca985696dea12bdac653640e74aa25595d19176dadf69552c9"
+          }
+        },
+        {
+          "phase": "validation-final-docs",
+          "attempt": "attempt-01-pytest-0e476985",
+          "guard_sha256": "5a5ec727c2f6e6435e96099e35ee294a4df5e00fd44ef38c2479f87eecf256da",
+          "source_snapshot_sha256": "367090829ac20b3e00a43194040229cc92251d5bb0985290bfee2a4ee2806f04",
+          "returncode": 0,
+          "guard_stop": null,
+          "cleanup_leftovers": [],
+          "peak_tree_rss_mib": 555.67,
+          "kind": "documentation_final",
+          "passed": 3,
+          "receipt_sha256": "a322785d0723d1463e5512747c8f4714291d398a7518d4cd3e2b58b441b5660f"
+        }
+      ],
+      "static": [
+        {
+          "check": "hooks-all",
+          "returncode": 0,
+          "guard_stop": null,
+          "receipt_sha256": "1c6e480cbb6a933c6b67c2b2816355d50a0b0ad0ecd3647273115e8a3a568897",
+          "log_sha256": "469da26058e8ac930b7515bab0a9f61fca1dc0e5289948a9263b03bbb10da10d"
+        },
+        {
+          "check": "hooks-extra",
+          "returncode": 0,
+          "guard_stop": null,
+          "receipt_sha256": "12bf7980e76a21d98c78b4a29beb371d6fc4e8d441c07ecf55f842877474fece",
+          "log_sha256": "968e226ac02a488b73b1d45ecda68f92059b8e379ce40628ccc65d191523bfa4"
+        },
+        {
+          "check": "frontend-lint",
+          "returncode": 0,
+          "guard_stop": null,
+          "receipt_sha256": "149bcc63ca6edc977324b71861072bfd4125f44b4820683e13e139c98d9eb4e8",
+          "log_sha256": "fb2b8c63b4f0f8466eb8d2da1e97a4f0758dd709e99a4a08e67d8b30f4ad9c73"
+        },
+        {
+          "check": "staged-lint",
+          "returncode": 0,
+          "guard_stop": null,
+          "receipt_sha256": "04077bd712bd87a12c54448c21fc935f19744c485d611b7772f8b8326183ff04",
+          "log_sha256": "a7290c7541f0d6603c043b66ca45ae8e4cd557bfedab48ea40002de58dc621f0"
+        }
+      ],
+      "skips": [
+        {
+          "module": "",
+          "name": "tests.test_telegram_adapter"
+        },
+        {
+          "module": "",
+          "name": "tests.test_telegram_adapter_collect"
+        },
+        {
+          "module": "tests.test_application_browser_live",
+          "name": "test_built_application_mobile_verdict_survives_reload"
+        },
+        {
+          "module": "tests.test_application_browser_live",
+          "name": "test_built_application_setup_routes_and_filtered_pending"
+        },
+        {
+          "module": "tests.test_application_browser_live",
+          "name": "test_built_search_plan_and_same_title_adds_survive_reload"
+        },
+        {
+          "module": "tests.test_browser_article_live",
+          "name": "test_benign_article_over_source_cap_is_rejected_before_controlled_writer"
+        },
+        {
+          "module": "tests.test_browser_article_live",
+          "name": "test_captured_pdf_magic_bypasses_small_text_budget_and_uses_raw_cache"
+        },
+        {
+          "module": "tests.test_browser_article_live",
+          "name": "test_chrome_channel_persistent_text_fallback_preserves_full_unicode_article"
+        },
+        {
+          "module": "tests.test_browser_article_live",
+          "name": "test_javascript_article_text_and_unicode_are_in_rendered_pdf"
+        },
+        {
+          "module": "tests.test_browser_egress_live",
+          "name": "test_authenticated_pdf_download_keeps_redirect_cookies"
+        },
+        {
+          "module": "tests.test_browser_egress_live",
+          "name": "test_chrome_channel_persistent_pdf_download_keeps_redirect_cookies"
+        },
+        {
+          "module": "tests.test_browser_egress_live",
+          "name": "test_declared_missing_pdf_does_not_render_paywall"
+        },
+        {
+          "module": "tests.test_browser_egress_live",
+          "name": "test_real_browser_egress[/cookie-False]"
+        },
+        {
+          "module": "tests.test_browser_egress_live",
+          "name": "test_real_browser_egress[/embedded-True]"
+        },
+        {
+          "module": "tests.test_browser_egress_live",
+          "name": "test_real_browser_egress[/meta-False]"
+        },
+        {
+          "module": "tests.test_browser_egress_live",
+          "name": "test_real_browser_egress[/public-True]"
+        },
+        {
+          "module": "tests.test_browser_egress_live",
+          "name": "test_real_browser_egress[/redirect-False]"
+        },
+        {
+          "module": "tests.test_browser_egress_live",
+          "name": "test_real_browser_egress[/redirect-True]"
+        },
+        {
+          "module": "tests.test_browser_egress_live",
+          "name": "test_real_browser_stream_limits_and_html[/auth-4096]"
+        },
+        {
+          "module": "tests.test_browser_egress_live",
+          "name": "test_real_browser_stream_limits_and_html[/gzip_html-50000]"
+        },
+        {
+          "module": "tests.test_browser_egress_live",
+          "name": "test_real_browser_stream_limits_and_html[/gzip_pdf-4095]"
+        },
+        {
+          "module": "tests.test_browser_egress_live",
+          "name": "test_real_browser_stream_limits_and_html[/gzip_pdf-4096]"
+        },
+        {
+          "module": "tests.test_browser_egress_live",
+          "name": "test_real_browser_stream_limits_and_html[/stream-4096]"
+        },
+        {
+          "module": "tests.test_discovery_browser",
+          "name": "test_built_expanded_discovery_evidence_wraps_without_losing_text[1440]"
+        },
+        {
+          "module": "tests.test_discovery_browser",
+          "name": "test_built_expanded_discovery_evidence_wraps_without_losing_text[390]"
+        },
+        {
+          "module": "tests.test_discovery_browser",
+          "name": "test_built_find_partial_stale_and_real_ordinary_search[1440]"
+        },
+        {
+          "module": "tests.test_discovery_browser",
+          "name": "test_built_find_partial_stale_and_real_ordinary_search[390]"
+        },
+        {
+          "module": "tests.test_interpretation_experiment_visual",
+          "name": "test_actual_qualified_interpretation_html_geometry[brief-accepted-1440]"
+        },
+        {
+          "module": "tests.test_interpretation_experiment_visual",
+          "name": "test_actual_qualified_interpretation_html_geometry[brief-accepted-390]"
+        },
+        {
+          "module": "tests.test_interpretation_experiment_visual",
+          "name": "test_actual_qualified_interpretation_html_geometry[brief-malformed_optional-1440]"
+        },
+        {
+          "module": "tests.test_interpretation_experiment_visual",
+          "name": "test_actual_qualified_interpretation_html_geometry[brief-malformed_optional-390]"
+        },
+        {
+          "module": "tests.test_interpretation_experiment_visual",
+          "name": "test_actual_qualified_interpretation_html_geometry[note-accepted-1440]"
+        },
+        {
+          "module": "tests.test_interpretation_experiment_visual",
+          "name": "test_actual_qualified_interpretation_html_geometry[note-accepted-390]"
+        },
+        {
+          "module": "tests.test_interpretation_experiment_visual",
+          "name": "test_actual_qualified_interpretation_html_geometry[note-malformed_optional-1440]"
+        },
+        {
+          "module": "tests.test_interpretation_experiment_visual",
+          "name": "test_actual_qualified_interpretation_html_geometry[note-malformed_optional-390]"
+        },
+        {
+          "module": "tests.test_offline_library_browser",
+          "name": "test_cold_offline_library_popup_ordered_verdict_note_restart_and_uuid_replay"
+        },
+        {
+          "module": "tests.test_offline_library_browser",
+          "name": "test_real_sync_conflict_compares_both_sides_and_other_field_survives[keep-device]"
+        },
+        {
+          "module": "tests.test_offline_library_browser",
+          "name": "test_real_sync_conflict_compares_both_sides_and_other_field_survives[use-server]"
+        },
+        {
+          "module": "tests.test_offline_review_browser",
+          "name": "test_cold_offline_library_popup_ordered_verdict_note_restart_and_uuid_replay[viewport1440]"
+        },
+        {
+          "module": "tests.test_offline_review_browser",
+          "name": "test_cold_offline_library_popup_ordered_verdict_note_restart_and_uuid_replay[viewport390]"
+        },
+        {
+          "module": "tests.test_offline_review_browser",
+          "name": "test_real_sync_conflict_compares_both_sides_and_other_field_survives[viewport1440-keep-device]"
+        },
+        {
+          "module": "tests.test_offline_review_browser",
+          "name": "test_real_sync_conflict_compares_both_sides_and_other_field_survives[viewport1440-use-server]"
+        },
+        {
+          "module": "tests.test_offline_review_browser",
+          "name": "test_real_sync_conflict_compares_both_sides_and_other_field_survives[viewport390-keep-device]"
+        },
+        {
+          "module": "tests.test_offline_review_browser",
+          "name": "test_real_sync_conflict_compares_both_sides_and_other_field_survives[viewport390-use-server]"
+        },
+        {
+          "module": "tests.test_research_feed_browser",
+          "name": "test_built_weekly_saved_cards_downloads_errors_and_paper_navigation"
+        },
+        {
+          "module": "tests.test_review_notes_layout_browser",
+          "name": "test_today_notes_save_label_has_one_rendered_line"
+        },
+        {
+          "module": "tests.test_review_question_add_browser",
+          "name": "test_changed_source_after_extraction_rejects_before_cache_publication"
+        },
+        {
+          "module": "tests.test_review_question_add_browser",
+          "name": "test_source_receipt_uses_current_checkout"
+        },
+        {
+          "module": "tests.test_review_question_add_browser",
+          "name": "test_today_explicit_add_preserves_question_uuid_manual_body_and_native_note"
+        },
+        {
+          "module": "tests.test_review_question_browser",
+          "name": "test_acknowledged_retry_preserves_the_composite_delivery_receipt"
+        },
+        {
+          "module": "tests.test_review_question_browser",
+          "name": "test_local_storage_rejection_and_invalid_input_never_start_http"
+        },
+        {
+          "module": "tests.test_review_question_browser",
+          "name": "test_sync_first_receipt_is_acknowledged_without_another_native_write"
+        },
+        {
+          "module": "tests.test_review_question_browser",
+          "name": "test_today_library_questions_offline_restart_and_real_sync"
+        },
+        {
+          "module": "tests.test_review_question_lost_response_browser",
+          "name": "test_lost_postcommit_push_reply_replays_once_after_offline_browser_api_restart"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_contrast_probe_covers_default_and_explicit_scope_and_refuses_empty"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_incomplete_saved_targets_withhold_plan_without_rewriting_or_starting_work[1440-compact]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_incomplete_saved_targets_withhold_plan_without_rewriting_or_starting_work[1440-full]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_incomplete_saved_targets_withhold_plan_without_rewriting_or_starting_work[390-compact]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_incomplete_saved_targets_withhold_plan_without_rewriting_or_starting_work[390-full]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_reading_plan_is_visible_once_and_readable_before_opening_original[1440-compact]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_reading_plan_is_visible_once_and_readable_before_opening_original[1440-full]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_reading_plan_is_visible_once_and_readable_before_opening_original[390-compact]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_reading_plan_is_visible_once_and_readable_before_opening_original[390-full]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_real_built_review_reading[1024-full]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_real_built_review_reading[1024-legacy]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_real_built_review_reading[1024-long-incomplete]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_real_built_review_reading[1440-full]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_real_built_review_reading[1440-legacy]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_real_built_review_reading[1440-long-incomplete]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_real_built_review_reading[390-full]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_real_built_review_reading[390-legacy]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_real_built_review_reading[390-long-incomplete]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_retained_review_flag_does_not_claim_native_note_delivery[1440]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_retained_review_flag_does_not_claim_native_note_delivery[390]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signal_contrast_outside_full_reader[1440-read-compact]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signal_contrast_outside_full_reader[1440-read-nonflat]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signal_contrast_outside_full_reader[1440-skim-compact]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signal_contrast_outside_full_reader[1440-skim-nonflat]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signal_contrast_outside_full_reader[1440-skip-compact]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signal_contrast_outside_full_reader[1440-skip-nonflat]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signal_contrast_outside_full_reader[390-read-compact]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signal_contrast_outside_full_reader[390-read-nonflat]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signal_contrast_outside_full_reader[390-skim-compact]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signal_contrast_outside_full_reader[390-skim-nonflat]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signal_contrast_outside_full_reader[390-skip-compact]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signal_contrast_outside_full_reader[390-skip-nonflat]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signals_in_built_review[1440-high-friction]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signals_in_built_review[1440-legacy-unknown]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signals_in_built_review[1440-weak-evidence]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signals_in_built_review[390-high-friction]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signals_in_built_review[390-legacy-unknown]"
+        },
+        {
+          "module": "tests.test_review_reading_browser",
+          "name": "test_three_signals_in_built_review[390-weak-evidence]"
+        },
+        {
+          "module": "tests.test_review_real_contract",
+          "name": "test_frozen_real_review_retention[1024-0]"
+        },
+        {
+          "module": "tests.test_review_real_contract",
+          "name": "test_frozen_real_review_retention[1024-1]"
+        },
+        {
+          "module": "tests.test_review_real_contract",
+          "name": "test_frozen_real_review_retention[1024-2]"
+        },
+        {
+          "module": "tests.test_review_real_contract",
+          "name": "test_frozen_real_review_retention[1440-0]"
+        },
+        {
+          "module": "tests.test_review_real_contract",
+          "name": "test_frozen_real_review_retention[1440-1]"
+        },
+        {
+          "module": "tests.test_review_real_contract",
+          "name": "test_frozen_real_review_retention[1440-2]"
+        },
+        {
+          "module": "tests.test_review_real_contract",
+          "name": "test_frozen_real_review_retention[390-0]"
+        },
+        {
+          "module": "tests.test_review_real_contract",
+          "name": "test_frozen_real_review_retention[390-1]"
+        },
+        {
+          "module": "tests.test_review_real_contract",
+          "name": "test_frozen_real_review_retention[390-2]"
+        },
+        {
+          "module": "tests.test_search_discovery_surfaces_browser",
+          "name": "test_built_related_positive_context_and_explicit_discovery[1440]"
+        },
+        {
+          "module": "tests.test_search_discovery_surfaces_browser",
+          "name": "test_built_related_positive_context_and_explicit_discovery[390]"
+        },
+        {
+          "module": "tests.test_search_discovery_surfaces_browser",
+          "name": "test_built_search_explicit_policy_and_positive_evidence[1440]"
+        },
+        {
+          "module": "tests.test_search_discovery_surfaces_browser",
+          "name": "test_built_search_explicit_policy_and_positive_evidence[390]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_concurrent_abandonment_keeps_hold_and_prevents_next_actual_send"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_generation_redirect_is_one_post_and_cannot_authorize_readiness"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_inline_start_observer_exception_prevents_installed_sdk_send"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_installed_sdk_5xx_is_one_send_not_hidden_transport_retry"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_native_anthropic_endpoint_identity_matches_installed_sdk_prefix_semantics[/proxy]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_native_anthropic_endpoint_identity_matches_installed_sdk_prefix_semantics[/v1]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_native_anthropic_endpoint_identity_matches_installed_sdk_prefix_semantics[]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_observed_installed_client_has_one_send_terminal_receipt_and_no_cache"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_observed_weight_url_refused_before_onprem_constructor"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_ordinary_client_defaults_and_uninstrumented_hold_are_preserved"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_owned_tcp_installed_anthropic_completion_and_uncertainty[complete]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_owned_tcp_installed_anthropic_completion_and_uncertainty[disconnect]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_owned_tcp_installed_native_completion_and_uncertainty[complete]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_owned_tcp_installed_native_completion_and_uncertainty[disconnect]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_owned_tcp_waiter_deadline_and_native_read_timeout_are_distinct[sdk_timeout]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_owned_tcp_waiter_deadline_and_native_read_timeout_are_distinct[waiter_late]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_real_dry_refine_repair_triage_all_use_the_same_observed_client[False]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_real_dry_refine_repair_triage_all_use_the_same_observed_client[True]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_terminal_metadata_and_output_contracts_remain_distinct[None-ok]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_terminal_metadata_and_output_contracts_remain_distinct[length-{]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_terminal_metadata_and_output_contracts_remain_distinct[stop-]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_terminal_metadata_and_output_contracts_remain_distinct[unknown-ok]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_unsupported_implicit_paths_refused_before_dispatch[Synthetic-kwargs1-True]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_unsupported_implicit_paths_refused_before_dispatch[Synthetic-kwargs2-True]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_unsupported_implicit_paths_refused_before_dispatch[Synthetic-kwargs3-False]"
+        },
+        {
+          "module": "tests.test_setup_request_transport",
+          "name": "test_unsupported_implicit_paths_refused_before_dispatch[prompt0-kwargs0-False]"
+        },
+        {
+          "module": "tests.test_setup_source_write_browser",
+          "name": "test_rss_write_uncertainty_does_not_reuse_verified_health[committed_reply_lost]"
+        },
+        {
+          "module": "tests.test_setup_source_write_browser",
+          "name": "test_rss_write_uncertainty_does_not_reuse_verified_health[rejected]"
+        },
+        {
+          "module": "tests.test_setup_surface_browser",
+          "name": "test_setup_health_states_reflow_and_keyboard_recovery[1024-ai]"
+        },
+        {
+          "module": "tests.test_setup_surface_browser",
+          "name": "test_setup_health_states_reflow_and_keyboard_recovery[1024-sources]"
+        },
+        {
+          "module": "tests.test_setup_surface_browser",
+          "name": "test_setup_health_states_reflow_and_keyboard_recovery[1440-ai]"
+        },
+        {
+          "module": "tests.test_setup_surface_browser",
+          "name": "test_setup_health_states_reflow_and_keyboard_recovery[1440-sources]"
+        },
+        {
+          "module": "tests.test_setup_surface_browser",
+          "name": "test_setup_health_states_reflow_and_keyboard_recovery[390-ai]"
+        },
+        {
+          "module": "tests.test_setup_surface_browser",
+          "name": "test_setup_health_states_reflow_and_keyboard_recovery[390-sources]"
+        },
+        {
+          "module": "tests.test_setup_surface_browser",
+          "name": "test_setup_progress_reflows_with_accessible_states[320]"
+        },
+        {
+          "module": "tests.test_setup_surface_browser",
+          "name": "test_setup_progress_reflows_with_accessible_states[390]"
+        },
+        {
+          "module": "tests.test_telegram_runtime",
+          "name": "test_optional_actual_m2a_leaf_through_m3_and_sqlite"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[1440-blinded]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[1440-current-A]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[1440-current-D]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[1440-failed]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[1440-legacy]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[1440-needs-pdf]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[1440-not-ready]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[1440-stale]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[1440-unknown]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[1440-unscored]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[390-blinded]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[390-current-A]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[390-current-D]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[390-failed]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[390-legacy]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[390-needs-pdf]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[390-not-ready]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[390-stale]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[390-unknown]"
+        },
+        {
+          "module": "tests.test_today_selection_browser",
+          "name": "test_real_today_selection_evidence[390-unscored]"
+        },
+        {
+          "module": "tests.test_vite_proxy_contract",
+          "name": "test_installed_vite_proxy_preserves_browser_boundary[default-cross-origin]"
+        },
+        {
+          "module": "tests.test_vite_proxy_contract",
+          "name": "test_installed_vite_proxy_preserves_browser_boundary[default-write]"
+        },
+        {
+          "module": "tests.test_vite_proxy_contract",
+          "name": "test_installed_vite_proxy_preserves_browser_boundary[override-cross-origin]"
+        },
+        {
+          "module": "tests.test_vite_proxy_contract",
+          "name": "test_installed_vite_proxy_preserves_browser_boundary[override-write]"
+        }
+      ],
+      "not_claimed": [
+        "human usability acceptance",
+        "full issue closure",
+        "positive usable Full-local runtime readiness",
+        "scientific/model-quality benefit",
+        "live accounts/native GUI",
+        "physical device or deployed trusted HTTPS acceptance"
+      ],
+      "artifact_policy": "Primary JUnit/Vitest/guard logs retained locally; hashes are pointers, not downloadable raw attachments. No personal paths, raw PDFs, secrets, profiles or account/model artifacts published.",
+      "red_green_receipts": [
+        {
+          "phase": "validation-qualified-red",
+          "attempt": "attempt-01-vitest-2636b117",
+          "runner": "vitest",
+          "returncode": 1,
+          "primary_sha256": "e86d6d3c90185b1462a404000e0928ec850eecdd18a1cedf8eff83340df34c4f",
+          "source_snapshot_sha256": "ee899bd7081d95e5e08e7cdd99110f0e5ebf982e0df4e6437924a71e1f3825bb"
+        },
+        {
+          "phase": "validation-qualified-red",
+          "attempt": "attempt-02-pytest-f9ba5414",
+          "runner": "pytest",
+          "returncode": 1,
+          "primary_sha256": "bd2d589db0f0f2c39dd5169f1274bec61b23cf73f7cc4b5124cbbf736b76906a",
+          "source_snapshot_sha256": "ee899bd7081d95e5e08e7cdd99110f0e5ebf982e0df4e6437924a71e1f3825bb"
+        },
+        {
+          "phase": "validation-green",
+          "attempt": "attempt-01-vitest-4a50cabc",
+          "runner": "vitest",
+          "returncode": 0,
+          "primary_sha256": "a01edf01c7b1fccbf16a6ce1d3caf2e576dd4846b8b97b85418adb644e5afbc6",
+          "source_snapshot_sha256": "f1f1ff14ef453bc41e7496a6b86ea02f7d6ffb4abde0db62f57c796e833e0f47"
+        },
+        {
+          "phase": "validation-green",
+          "attempt": "attempt-02-pytest-edcc4d12",
+          "runner": "pytest",
+          "returncode": 0,
+          "primary_sha256": "7b3dc4d1fae7fada84cbf3b11beaf3f2aad2b9e9ed93bed58bfa4f3b7406f546",
+          "source_snapshot_sha256": "f1f1ff14ef453bc41e7496a6b86ea02f7d6ffb4abde0db62f57c796e833e0f47"
+        }
+      ],
+      "checklist": {
+        "revision": 2,
+        "scope": "only functions added in PR208; originating GitHub issues, not related regression/backlog issues",
+        "function_count": 18,
+        "originating_issue_count": 15,
+        "function_ids": [
+          "FEATURE-01",
+          "FEATURE-02",
+          "FEATURE-03",
+          "FEATURE-04",
+          "FEATURE-05",
+          "FEATURE-06",
+          "FEATURE-07",
+          "FEATURE-08",
+          "FEATURE-09",
+          "FEATURE-10",
+          "FEATURE-11",
+          "FEATURE-12",
+          "FEATURE-13",
+          "FEATURE-14",
+          "FEATURE-15",
+          "FEATURE-16",
+          "FEATURE-17",
+          "FEATURE-18"
+        ],
+        "originating_issues": [
+          9,
+          12,
+          15,
+          16,
+          19,
+          27,
+          30,
+          33,
+          37,
+          38,
+          42,
+          46,
+          47,
+          48,
+          49
+        ],
+        "application_code_changed": false,
+        "previous_swarm_scope": "revision1 mixed33scenario draft",
+        "new_swarm_run": false,
+        "human_execution": "NOT_RUN",
+        "scope_evidence": "Primary issue/subPR bodies + actual base diff; existing Setup/Pending, #8rich notes and #21proposal excluded; no bugfix/developer/backlog rows",
+        "documentation_verification": {
+          "cases": 3,
+          "passed": 3,
+          "failed": 0,
+          "guard_stop": null,
+          "primary_sha256": "f70a07b92beb55c4377f7584ec45004f12ac87b98ceaad1ee68e77aab8a9299a",
+          "scope": "documentation inventory and links, not human acceptance or a new swarm"
+        }
+      }
+    }
+  },
+  "artifact_policy": "Raw receipts remain local with hashes/paths, not pretended public attachments. Parent qualified fixes and checks are not live/scientific acceptance.",
+  "failed_validation_attempts": [
+    {
+      "kind": "baseline-outer-safety-stop",
+      "status": "NOT_PASS",
+      "receipt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/baseline-python-driver.json",
+      "sha256": "7811ea19a9a8142f75604aa694f4d7833884d46d9aa90b28398009f13e30a030",
+      "guard_stop": "safety_wall_seconds",
+      "elapsed_seconds": 900.95,
+      "resolution": "Finite remaining baseline partitions completed separately; current changed-source suite has eight distinct successful partitions."
+    },
+    {
+      "kind": "validation-integrated-python-a",
+      "status": "NOT_PASS",
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-a/lab/lanes/preparation/attempt-01-pytest-e60183cf",
+      "returncode": 1,
+      "guard_stop": null,
+      "junit_sha256": "3b77b33ba58b19477d30470685f7800bf036db2b7b21f2d304f2d9416f8d042a",
+      "disposition": "Structurally invalid attacker reseal fixture"
+    },
+    {
+      "kind": "validation-integrated-python-b",
+      "status": "NOT_PASS",
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-python-b/lab/lanes/preparation/attempt-01-pytest-eafd55f5",
+      "returncode": 1,
+      "guard_stop": null,
+      "junit_sha256": "6c8fe44f7f165283e8aa37d2bdc14ce7e4d5439e9a9780186c937d66598292d2",
+      "disposition": "Positive Telegram fixture used now-forbidden RSS dates"
+    },
+    {
+      "kind": "validation-integrated-browser",
+      "status": "NOT_PASS",
+      "attempt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/validation-integrated-browser/lab/lanes/preparation/attempt-02-browser-908bd621",
+      "returncode": 1,
+      "guard_stop": null,
+      "junit_sha256": "83190b35fdbf8b2fbd61c4283ff809d4857965745270bee4d5e82b34f5db53e8",
+      "disposition": "Old collapsed-DOM assertion excluded the intentionally visible SKIM label"
+    },
+    {
+      "kind": "initial-precommit-LOC",
+      "status": "NOT_PASS",
+      "receipt": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/checks/parent-precommit-01/guard.json",
+      "sha256": "a06cc17566184cdda00079ac4e1536ac761f50848c3f9aa2f9886876dfa78d94",
+      "resolution": "Move unchanged test function to existing Related cohort; no thresholds or assertions weakened.",
+      "relocation_proof": "/private/tmp/zotero-pr208-feature-fleet50.86dQ6f/test-cohort-relocation.json",
+      "relocation_sha256": "680bfa47ef3856dae9d38bb004e628822003d1f0e6aed7dcb45849cb3ae8afad"
+    }
+  ],
+  "knowledge_replenishment": {
+    "card": "/Users/vladnikulin/.pi/agent/skills/sota-pattern-index/knowledge/tools/tool-contract/pattern.md",
+    "card_sha256": "9c4af613cdfa5f6b66faf60ade50b29471b4d3d427e3cc01d6cd0a4c2212054d",
+    "catalog_check": "Checked12documents;148patterns",
+    "limits": "Mechanism/primary pointers, not a scientific efficacy claim."
+  }
+}

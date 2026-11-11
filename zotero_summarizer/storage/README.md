@@ -1,5 +1,35 @@
 # storage — SQLite persistence
 
+`feeds_lookup.materialized_key_for` resolves the row or its stable-key sibling's
+recorded Zotero key; `has_pending_materialization` observes pending siblings even
+when the retained Today member is older. Both use the caller's connection and
+perform no writes. Native intent/rejection checks remain in `feeds_history`.
+
+Migration 14 adds `research_feed_conversations.py`: content-addressed append-only
+Telegram conversation snapshots, with update/delete refusal triggers. `research_feed_conversations.latest_messages` returns a post's comments merged over all its snapshots by message id (newest wins; a later snapshot may be empty or cursor-limited) (served lazily by `GET /telegram/thread/{source_id}`). Peer/message
+and thread/root context plus coverage participate in content identity; refreshed
+edits retain the previous snapshot rather than overwriting it. Duplicate unchanged
+content keeps its first stored observation; each published report retains its own
+actual observation time. Existing v1 Telegram rows/evaluations/cursors stay intact;
+the corpus receives only a named v14 alignment marker. This is bounded-window
+refresh, not historical edit/deletion monitoring or a second report store.
+
+`research_feed_telegram.list_posts` retains the global newest window for
+cached/live use; the gated digest pipeline reads it directly. Posts carry
+`schema_version` 1 or 2; v2 adds `fwd_from`/`reply_to_id`/`replies_count` inside `post_json` (`reply_to_id=None` is omitted from the content hash, so rows stored before it keep their hash)
+(no SQL migration), feeding forward-dedup and comment gating. Migration 16 adds the
+nullable `reasons_json` (owner's 'не подошло' chips) via `set_reasons`/`read_reasons`; upserts keep it.
+
+`configuration_lock.py` provides a nonwaiting (unless a sync worker-thread caller opts into a bounded `wait`), no-follow cross-process file lock
+under the selected `Settings.data_dir`. It is reentrant only within the same
+synchronous thread owner; that ownership is not inherited by another worker.
+`shared=True` takes `LOCK_SH` for read-only snapshots: readers never block each other and
+only an in-progress save makes them fail with `configuration_busy`.
+Config/connection/credential/source owners
+share it for short publication boundaries; it never blocks waiting on an event
+loop. `file_revision` binds the runtime's loaded/published config bytes. External
+uninstrumented writers and keyring effects are not a filesystem transaction.
+
 Owns the two local databases under `data/` and all SQL. Services call these
 functions; nothing here reaches up into `services/` or `api/`.
 `sync_mutation_exists(db_path, uuid)` lets the feed-review gate skip a previously
@@ -34,17 +64,33 @@ services/ ─call→ storage/
 | `repositories.py` | triage-DB core: `DB_PATH` (set once at startup) + `with_db_path()` for a concurrency-safe per-context override, schema, connection hardening, shared query helpers (re-exports the `_repo_*` groups below) incl. the public `table_columns(conn, table)` PRAGMA reader the `_repo_*` modules and `integrations._zotero_write_tags` share |
 | `_repo_results.py` · `_repo_jobs.py` | batch/result rows + queries · triage-job upserts/listing |
 | `_repo_pending.py` · `_repo_feedback.py` | pending-change queue with source-aware status transitions (including retry `failed → applied`) and a per-paper open-sibling check for safe Inbox removal · feedback signals |
-| `_repo_verdicts.py` · `_repo_labels.py` | role-value + weekly-A/B verdicts · label verdicts (with `source` provenance: `user` vs `machine_add` — the provisional "Add to library" verdict that the training overlay may outcome-correct; UPSERT propagates it so a deliberate relabel flips a machine add back to `user`). `list_label_verdict_keys` (keys only — golden-CSV preservation) and `list_label_verdict_priorities` (`{item_key: user_priority}` — the reading-queue handled-filter needs the priority so `dont_read` hides but a positive label stays visible + pins to top) are both **uncapped** (a paged fetch silently drops rows once the table outgrows the cap). Also owns the `review_notes` table (one editable free-text note per paper, jotted during a review — decoupled from a verdict): `upsert_review_note` / `get_review_note`, same UPSERT shape as `label_verdicts` |
+| `_repo_verdicts.py` · `_repo_labels.py` | role-value + weekly-A/B verdicts · label verdicts (with `source` provenance: `user` vs `machine_add` — the provisional "Add to library" verdict that the training overlay may outcome-correct; UPSERT propagates it so a deliberate relabel flips a machine add back to `user`). `list_label_verdict_keys` (keys only — golden-CSV preservation) and `list_label_verdict_priorities` (`{item_key: user_priority}` — the reading-queue handled-filter needs the priority so `dont_read` hides but a positive label stays visible) and `list_user_verdict_keys` (keys with the owner's own `source='user'` verdict — the queue's `decided` flag) are both **uncapped** (a paged fetch silently drops rows once the table outgrows the cap). Also owns the `review_notes` table (one editable free-text note per paper, jotted during a review — decoupled from a verdict): `upsert_review_note` / `get_review_note`, same UPSERT shape as `label_verdicts` |
 | `_repo_sync.py` | v2 offline-sync persistence: triggers turn every verdict/note write (including delete tombstones) into a monotonic field revision; `BEGIN IMMEDIATE` applies typed UUID mutations idempotently and records applied/conflict/resolution results in `sync_mutations`. Device and item identities are trimmed and blank values rejected at both API/service and storage boundaries. Replaying a stored conflict returns that same conflict, while a stored applied write returns `already_applied`. No service imports and no SQLite-file replication |
 | `rows.py` | typed row models for the read boundary — `from_row` fails loud on schema drift, `to_dict` keeps the legacy contract. First adopter: `_repo_pending`. Add a model + route its reader to type more tables. |
 | `corpus.py` | `EmbeddingCache` — embeddings/upserts + the math helpers; exports `open_corpus_conn(db_path)` (timeout + WAL pragma), the single corpus-DB opener `corpus_bm25` now shares so both readers of the same file run the same journal mode; caches a normalized corpus matrix (version-invalidated on write) for the fast affinity path. The default `all-MiniLM-L6-v2` was shoot-out-validated and deliberately KEPT (2026-06-12, `tools/eval_goal_embedder.py` on 491 real kept/trashed decisions): goal_sim AUC 0.714 vs bge-m3's 0.712 (25× larger, MPS-OOM risk without a 512-token cap) and SPECTER2+proximity's 0.684 (paper-paper model, poor on short goal queries) — don't "upgrade" it without re-measuring |
 | `corpus_read.py` · `corpus_types.py` | `EmbeddingCache` read/match methods (mixin): full `match_candidate` (UI) + `affinity_and_goals` (ONE candidate embed → engagement pos−neg affinity AND per-goal `{goal: cosine}` — the single computational definition of both per-candidate corpus signals) + `goal_affinity_for_items` (cached-item cosine to the research-goal embeddings) + `query_affinity_for_items` (cosine to an ad-hoc QUERY string — the dense leg of Library hybrid search); the item-side reads share one `_affinity_to_targets` matmul, no model load. That matmul looks items up in a PROCESS-WIDE normalized-embedding matrix (`_normalized_corpus_matrix`) cached by a `_corpus_fingerprint` (main + `-wal` mtime/size, so a WAL-resident write still invalidates it) — the reading queue builds a fresh `EmbeddingCache` per open, so the instance `_affinity_cache` can't help there; without this every open re-parsed ~2k embeddings from JSON (~0.5s) · shared value types |
+| `corpus_nearest.py` | `CorpusNearestMixin.nearest_kept_titles(item_ids)` — title of the most similar KEPT paper (positive engagement weight; never the item itself or a same-title copy) over the process-cached normalized matrix; feeds the Read-next "close to: …" reason |
 | `corpus_bm25.py` | `CorpusBM25` — in-memory `rank_bm25` (Okapi) index over corpus title+abstract+tags; the LEXICAL leg of Library hybrid search. Reuses the main/WAL fingerprint from `corpus_read`, so same-timestamp updates invalidate the index; process-level singleton (`get_corpus_bm25`); `texts_for` feeds the rerank stage. No DB migration. Also exports the public `tokenize` (lowercase alphanumeric words) — the single tokenizer reused by `faithbench._build_qa` and `library._paper_goal_summaries` |
 | `feeds.py` | facade for `processed_feed_items` decision/materialization writes (re-exports below); stores `abstract` and `pub_year` from feed item at insert time; `update_scores` rewrites only the gate-derived fields by PK without touching decision/read status |
 | `feeds_history.py` | selection + outcome/history queries (re-exported by `feeds`). `reserve_materialization_key` atomically commits the existing/materialized or proposed key before external Zotero writes. `select_by_decisions`'s `since_hours` accepts `None` to disable the time window entirely (returns rows of any age) — used by `apply_all_approved` so a `user_approved` row (an explicit user instruction) can never age out of reach; every other caller keeps its windowed default |
-| `feeds_schema.py` · `feeds_constants.py` · `feeds_lookup.py` | schema init/migrations + the shared `open_triage_conn` / decision+outcome enums / single-row lookups, including `get_processed_feed_item_by_stable_key` for the Zotero-optional app library reader + `fetch_processed_content_pairs` (raw `(doi, arxiv_id)` for content dedup — the same paper under a different GUID; callers normalize via `domain`) + `fetch_trashed_guids` (stable GUIDs of papers the user threw away — rows whose `decision`/`final_outcome` is in the caller-passed trashing taxonomies, e.g. `user_rejected` / `trashed` / `deleted_all`; the durable "never show again" key that survives feed-item-id reassignment and catches id-less items DOI/arXiv can't) + `fetch_resolved_outcomes_by_key` (`{stable_feed_key|legacy_key: final_outcome}` for the caller-passed outcome taxonomy — feeds the training-label outcome correction in `services/golden/hybrid_gt`). Constants also own `BEHAVIORAL_OUTCOMES` and `relevance_from_signal_weight` |
+| `feeds_schema.py` · `feeds_constants.py` · `feeds_lookup.py` | schema init/migrations + the shared `open_triage_conn` / decision+outcome enums / single-row lookups, including `get_processed_feed_item_by_stable_key` for the Zotero-optional app library reader + `fetch_processed_content_pairs` (raw `(doi, arxiv_id)` for content dedup — the same paper under a different GUID; callers normalize via `domain`) + `fetch_trashed_guids` (stable GUIDs of papers the user threw away — rows whose `decision`/`final_outcome` is in the caller-passed trashing taxonomies, e.g. `user_rejected` / `trashed` / `deleted_all`; empty taxonomy → `ValueError`; the single implementation, also used by `services/triage/daily_select`; the durable "never show again" key that survives feed-item-id reassignment and catches id-less items DOI/arXiv can't) + `fetch_resolved_outcomes_by_key` (`{stable_feed_key|legacy_key: final_outcome}` for the caller-passed outcome taxonomy — feeds the training-label outcome correction in `services/golden/hybrid_gt`). Constants also own `BEHAVIORAL_OUTCOMES` and `relevance_from_signal_weight` |
 | `interleave.py` | `interleave_log` sidecar for the P3 quality-first online experiment: per-day, per-slot arm attribution (`team` ∈ `a0`/`a2`/`both` + competitive `pair_id`) written by the Today slate when `ZS_RANK_INTERLEAVE` is on. `record_interleave_slate` is DAY-level write-once (`BEGIN IMMEDIATE` existence check → first recorded slate of a day is the ONLY write; later same-day assemblies are complete no-ops) — row-level `INSERT OR IGNORE` alone would let intra-day pool drift mix two merges' per-merge `pair_id`s into one corrupt `(day, pair_id)` group and crash the scorer (adversarial review 2026-07-08). Attribution therefore never changes after the user may have seen the slate. `fetch_interleave_log` opens read-only and returns `[]` only when the table doesn't exist yet (experiment never ran — explicit `sqlite_master` check, not a swallowed error). Table is self-creating (sidecar, additive; no `migrations.py` step needed). Sole consumer: `tools/eval_interleave.py` |
 | `migrations.py` | `migrate_existing()` + `run_migrations()` — ordered, version-gated steps recorded in `schema_migrations`. Add a schema change as a new numbered `Migration`, never an inline ALTER. v3 reconciles databases whose old v1 marker predates later baseline/feed columns; routine feed connections skip those O(N) legacy backfills. |
+
+The v2 sync schema executes complete SQL statements, including intact trigger
+bodies, on the runner's connection without committing. Schema, data changes and
+the version marker therefore share the runner's transaction; a failed callback
+or marker write restores the populated v1 state. Successful upgrades and replays
+retain the existing verdict/note revision and tombstone behavior.
+
+`set_pending_changes_status(..., require_all=True)` validates all selected IDs and
+source statuses under BEGIN IMMEDIATE, then verifies the complete affected count
+before commit. A stale/missing row or trigger-shortened update raises and rolls
+back everything. Pending Reject now uses `pending_actions.reject_pending_selection`:
+one transaction validates the complete selection and direct/mirror history, audits
+generated rejection and updates ordinary rows; failures roll back both families.
+Other status callers retain their existing default behavior. No new queue/schema
+or native write is involved.
 
 **Boundaries:** must NOT import `services/` or `api/` (enforced). Connection
 hardening (WAL once per process/path + busy_timeout=10s + 0600) is shared by
@@ -87,6 +133,19 @@ Already-resolved/missing/unmaterialized rows return false without writing a sign
 Outcome type and relevance come from the known outcome taxonomy/weight mapping;
 the independent weight override and service mapping-wrapper exports are gone.
 
+RSS subscription upserts accept opt-in `create_only`: URL lookup and creation
+share SQLite's writer transaction, preserving any existing row without changing
+its name or enabled state. Identity uses HTTPX URL normalization (including host
+case and default ports) without fetching; invalid legacy URLs remain literal.
+Ordinary upserts/imports keep their existing update behavior.
+
+`item_titles.titles_for_keys` is a read-only corpus-cache title lookup by item key; `feed_titles_for_keys` does the same for feed keys (stable, legacy `feed:<id>`) in the triage DB.
+
+`upsert_rss_item` returns `(id, "inserted"|"updated"|"unchanged")`; an existing row is rewritten only if incoming content differs; it keeps its first feed (`rss_feed_id`, `publication_title`), so the same key from another feed is `unchanged`.
+`count_rss_items_by_feed` returns stored item counts per feed id (feed list UI).
+`import_zotero_feeds` returns `{imported, added}` — `added` counts feeds that were new (the UI says "Added N new feeds (M already present)").
+`rss_feeds.fetch_watermark` / `fetch_incomplete` (migration v17, nullable/defaulted) record per-feed fetch progress; `record_rss_fetch_result(watermark=, incomplete=)` only moves the watermark forward and `incomplete=None` leaves the flag untouched.
+
 RSS item reads accept `limit=None` for an uncapped whole-feed pass (`LIMIT -1`);
 finite callers keep their bounded result contract. Feed-tick exclusion uses a
 separate empty SQLite lock file beside the Settings-provided triage store, not
@@ -103,12 +162,39 @@ existing 1–5000 bounds and other callers retain their defaults.
 transaction, returning the row ID and previous snapshot for transition logging.
 The existing path-based `insert_or_update_label_verdict` delegates to it and
 commits; feed review uses it in the same transaction as its terminal decision.
+
+When a `source='user'` write replaces a machine-sourced row (`machine_add`, `auto_quality`) and
+resubmits that row's own comment (the verdict panel prefills it; Zotero reconcile carries it),
+the comment is cleared — the owner took over, and `auto quality gate: …` text must not
+masquerade as theirs. The sync `_write_value` upsert applies the same rule in SQL.
 Migration v7 adds nullable `label_verdicts.training_sample_json`: Review stores
 its metadata on that same connection, ordinary relabels retain it, and deletion
 removes it with the verdict. No separate sample table, journal or worker exists.
 `list_all_label_verdicts(include_training=True)` supplies labels and metadata in
 one SQL snapshot to hybrid training; the default HTTP/transfer projection stays
 unchanged. The corpus namespace advances through a no-op v7 for version parity.
+
+Migration **v15** adds nullable `label_verdicts.reasons_json` (same shape as v7):
+the optional Today reason-chip payload `{chips[], surface, v}` is written on the
+SAME verdict commit (`upsert_label_verdict(..., reasons_json=…)`), so a fresh
+verdict without chips re-writes it to NULL — the decision owns its reasons. NULL
+means "no reason given", never "stale". The corpus namespace advances through a
+no-op v15 for parity. **Before the first serve after upgrading, back up
+`data/triage_history.db`** (e.g. `cp data/triage_history.db data/triage_history.db.bak`):
+the ALTER is additive and version-gated, but the owner wants a restore point.
+**Manual rollback** (only if needed): restore that backup, OR, keeping the data,
+`ALTER TABLE label_verdicts DROP COLUMN reasons_json;` (SQLite ≥ 3.35) and
+`DELETE FROM schema_migrations WHERE namespace IN ('triage','corpus') AND version = 15;`
+so the runner does not re-skip the step.
+
+Migration **v18** (#224) adds nullable `label_verdicts.proposal_json` — the app's
+proposal at decision time (`services/golden/proposal_snapshot.py`: proposed priority,
+composite/surprise/affinity scores, review grade/band/read_decision/freshness,
+review provider+model, surface). Written on the same commit as the verdict
+(`upsert_label_verdict(..., proposal_json=…)`; NULL clears a superseded snapshot);
+NULL for old rows, Zotero reconcile and machine writes. `training_sample_json` is
+the training contract and is not reused. Additive; rollback =
+`ALTER TABLE label_verdicts DROP COLUMN proposal_json;` + delete version 18 rows.
 
 Corpus and goal vectors carry `encoder_id` (SentenceTransformer backend, installed
 package version and configured model name); item content hashes include it too.
@@ -174,9 +260,14 @@ routine sync; goals, model-input embeddings and historical feedback are untouche
 
 `label_mirrors.py` reuses `sync_changes` as label intent. Migration v5 adds only
 `label_mirror_receipts`, keyed by the acknowledged deletion revision. `current_label`
-holds `BEGIN IMMEDIATE` over mirror delivery and records a receipt only after a
-successful exit with a resolved target; failures and unmaterialized feed keys leave
-the already-committed deletion retryable. Feed,
+yields its caller-owned transaction and current snapshot without acknowledging
+on normal exit. `snapshot` includes stored provenance; `acknowledge` accepts only
+an unchanged target-bearing current intent and records deletion revisions only.
+Original invocation lookup and selected source identity remain distinct, so alias
+remapping is re-resolved at admission and ACK. Closed mirror history validates
+lifecycle metadata before display or any Pending decision; verdict HTML must equal
+its canonical declared intent, and removal labels use native case-folded semantics.
+Failures and unmaterialized feed keys leave the already-committed deletion retryable. Feed,
 legacy and materialized library identities resolve to their newest shared revision.
 `states` supplies an uncapped snapshot per Zotero target, including pending deletion.
 Reconciliation UPSERTs and deletes pass `expected_revision`; the existing label
@@ -192,8 +283,12 @@ No new queue/worker or reviewed-pending-change behavior is involved.
 
 The same current-label snapshot includes the rationale. `current_label` yields
 the target and a separate `label_pending` flag: an acknowledged label deletion
-does not suppress clearing its old verdict note. Both mirrors run under the
-existing writer lock before the deletion receipt commits; no new receipt exists.
+does not suppress clearing its old verdict note. Both effects share the existing system-mirror claim owner. Positive action IDs,
+closed source/target/backup history commit before native dispatch; the caller then
+reacquires the writer lock and revalidates current intent and every unchanged claim.
+Native terminal history and explicit deletion ACK are separate commits. Unknown
+completion remains applying and blocks replay. The existing Pending table is reused;
+no new queue, migration or approval capability is introduced.
 
 `list_all_label_verdicts` is the sole full-row verdict-list reader: newest first,
 uncapped, shared by HTTP, training and the one-time Zotero transfer. The duplicate
@@ -201,13 +296,28 @@ uncapped, shared by HTTP, training and the one-time Zotero transfer. The duplica
 and priority-only readers retain their narrower projections.
 
 `review_notes.py` resolves a note family through stored/unambiguous legacy aliases
-and materialized library keys. Online reads/writes and offline canonical values,
+and materialized library keys: `alias_resolver(conn)` loads the identity graph once
+(one scan of `processed_feed_items`, ~28k rows on real data) and returns a
+`key -> sorted family` closure; `resolve_item_key_aliases` is the one-key form, and
+question saves/reads use `question_sync.save_committed`/`list_for_paper` (the standard `_connect_to` opener, busy_timeout 10 s); bulk callers (`snapshots`, `question_sync.snapshots`, `library_context.read_context`)
+share one resolver instead of re-running a recursive scan per key (`current(conn, key, aliases)` takes the pre-resolved family; without it each library key rescanned the feed history and a related-saved read took minutes). Online reads/writes and offline canonical values,
 conflict revisions and snapshots share the latest note revision, including deletion
 tombstones. Pre-sync notes use timestamp order at revision zero. Writes update the
 current winning row under the caller's writer transaction; materialization needs
 no body copy or migration, and reads do not rewrite historical data. Ambiguous
 legacy IDs are not guessed. This changes local note identity, not Zotero mirror
 delivery. Snapshot identity resolution is per note family, not one batched join.
+
+`library_context.read_discovery_membership` reads uncapped latest rows per durable
+key before retention filtering, with timestamp/ID ties. It exposes decisions and
+existing identifiers for saved admission/exclusion; browsing policy is unchanged.
+
+`library_context.read_context` obtains one read-only SQLite transaction for the
+related-paper surface. It reuses `review_notes.alias_resolver/current` and the label mirror's
+current-change query, retaining original keys, revisions and deletion authority.
+It never creates a database, writes a note or acknowledges a mirror. Services
+separately label expected I/O failures; schema/corruption errors remain errors.
+No new table, migration, comment index or secondary note owner is introduced.
 
 `review_notes.current_for_mirror` holds SQLite's writer lock over delivery of the
 current note body, reusing the same alias/revision reader. Closing the connection
@@ -218,8 +328,9 @@ transaction or a guard against direct edits in an independently opened Zotero.
 
 `sync_applied_revisions` reads immutable applied receipts from `sync_mutations`
 for bounded push continuation. Revisions are keyed by device, item and field;
-unknown/conflict UUIDs cannot supply a base. Existing compare-and-write still
-checks the latest canonical revision inside its writer transaction. Receipt
+unknown/conflict UUIDs cannot supply a base. Existing compare-and-write requires
+exact equality with the latest canonical field revision inside its writer
+transaction; an unobserved future base conflicts rather than overwriting state. Receipt
 lookup never repeats Zotero/CSV effects and requires no new table.
 
 `get_pending_changes(..., item_key=...)` filters by item key in SQLite before
@@ -231,6 +342,14 @@ make an idempotent queue decision, `insert_pending_change_if_absent(item_key,
 item_title, change_type, payload)` performs that check and insert under one
 `BEGIN IMMEDIATE` transaction, so concurrent callers cannot both queue the same
 change. The read-only existence helper is for reporting, not check-then-insert.
+
+`keep_server` is a reference-only sync resolution, not a disguised set/delete.
+The existing writer transaction requires a stored conflict for the same item/field
+and exactly its compared revision. It records/replays the actual invocation's UUID
+without changing value, origin or field history; a changed current version returns
+a new conflict. It cannot acknowledge a missing reference or carry new content.
+The existing TEXT operation column suffices; no migration/table/worker is added.
+This app-field receipt does not confirm any past native delivery.
 
 Sync snapshot pulls read only the maximum `sync_changes.revision` as their cursor;
 the legacy `changes` response field stays empty. Conflict status uses the indexed

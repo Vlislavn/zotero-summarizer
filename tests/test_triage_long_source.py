@@ -3,6 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from zotero_summarizer.integrations.pdf import PdfSource
 from zotero_summarizer.models import RefinedSummary, SummarizeRequest, TriageResult
 from zotero_summarizer.services import corpus
 from zotero_summarizer.services.library import _map_reduce
@@ -16,10 +17,11 @@ def test_long_source_reuses_configured_bounded_maps_without_losing_tail(monkeypa
     config.quality_review.map_chunk_chars = size
     llm = Mock()
     llm.prompt.return_value = 'Source evidence note.'
-    monkeypatch.setattr(summarization, 'state', lambda: SimpleNamespace(
-        app_state=SimpleNamespace(config=config), resolve_stage_client=lambda stage: llm))
+    monkeypatch.setattr(summarization, 'state', lambda: SimpleNamespace(app_state=SimpleNamespace(config=config)))
+    monkeypatch.setattr(summarization.factory, 'resolve_stage_client', lambda app, stage: llm)
     text = ('A source paragraph with methods and conditional results.\n' * 1700) + 'Unique final limitation.'
-    monkeypatch.setattr(summarization, '_extract_pdf_text', lambda path: text)
+    source = PdfSource(text, (), 'a' * 64)
+    monkeypatch.setattr(summarization, '_extract_pdf_source', lambda path: source)
     monkeypatch.setattr(corpus, 'run_corpus_match', lambda *args: corpus.empty_corpus_match_result())
     observed = []
     original_map = _map_reduce._map_chunk
@@ -40,6 +42,8 @@ def test_long_source_reuses_configured_bounded_maps_without_losing_tail(monkeypa
     assert llm.prompt.call_count == len(observed)
     assert all('untrusted_input' in call.args[0] for call in llm.prompt.call_args_list)
     context = refined.call_args.args[3]
+    assert refined.call_args.kwargs['original_text'] == text
+    assert refined.call_args.kwargs['original_pdf'] is source
     assert f'[chunk {len(observed)}/{len(observed)}]' in context
     assert context.count('Source evidence note.') == len(observed)
 
@@ -47,9 +51,10 @@ def test_long_source_reuses_configured_bounded_maps_without_losing_tail(monkeypa
 def test_short_source_keeps_direct_refinement_without_map_calls(monkeypatch):
     config = _default_goals_config()
     llm = Mock()
-    monkeypatch.setattr(summarization, 'state', lambda: SimpleNamespace(
-        app_state=SimpleNamespace(config=config), resolve_stage_client=lambda stage: llm))
-    monkeypatch.setattr(summarization, '_extract_pdf_text', lambda path: 'Short original source.')
+    monkeypatch.setattr(summarization, 'state', lambda: SimpleNamespace(app_state=SimpleNamespace(config=config)))
+    monkeypatch.setattr(summarization.factory, 'resolve_stage_client', lambda app, stage: llm)
+    source = PdfSource('Short original source.', (), 'a' * 64)
+    monkeypatch.setattr(summarization, '_extract_pdf_source', lambda path: source)
     monkeypatch.setattr(corpus, 'run_corpus_match', lambda *args: corpus.empty_corpus_match_result())
     refined = Mock(return_value=RefinedSummary(executive_summary='Result.'))
     monkeypatch.setattr(summarization, '_refine_with_retry', refined)
@@ -58,3 +63,5 @@ def test_short_source_keeps_direct_refinement_without_map_calls(monkeypatch):
     summarization.run_pipeline(SummarizeRequest(title='Short source', pdf_path='/owned.pdf'))
     llm.prompt.assert_not_called()
     assert refined.call_args.args[3] == 'Short original source.'
+    assert refined.call_args.kwargs['original_text'] == source.text
+    assert refined.call_args.kwargs['original_pdf'] is source

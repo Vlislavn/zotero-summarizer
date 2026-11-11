@@ -214,22 +214,34 @@ def test_user_owned_keys_never_in_env_registry_still_holds() -> None:
         assert ov.path.split(".", 1)[0] not in USER_OWNED_KEYS
 
 
+@pytest.fixture
+def enabled_calibration_settings(tmp_path):
+    from zotero_summarizer.settings import Settings
+    from zotero_summarizer.services._common import write_user_config
+
+    selected = Settings.load(project_root=tmp_path)
+    config = _default_goals_config()
+    config.llm_enabled = True
+    write_user_config(selected.config_path, config)
+    return selected
+
+
 @pytest.mark.parametrize("key", ["../../secret", "/tmp/secret", ".", "..", "", " ", "a/b", "a\\b", "a\0b", "escape"])
-def test_calibration_rejects_unsafe_paths_before_model_calls(tmp_path, key):
+def test_calibration_rejects_unsafe_paths_before_model_calls(tmp_path, key, enabled_calibration_settings):
     from zotero_summarizer.api.errors import APIError
     from zotero_summarizer.services.setup.calibration import run_full_calibration
 
-    root = tmp_path / "render"
-    root.mkdir()
+    root = enabled_calibration_settings.paper_render_dir
+    root.mkdir(parents=True)
     (root / "escape").symlink_to(tmp_path, target_is_directory=True)
     (tmp_path / "paper_read.json").write_text('{"qa_text":"private text"}')
     with pytest.raises(APIError) as exc:
-        run_full_calibration(SimpleNamespace(paper_render_dir=root), item_keys=[key])
+        run_full_calibration(enabled_calibration_settings, item_keys=[key])
     assert exc.value.status_code == 422
 
 
 @pytest.mark.parametrize("limit", [-1, 0, 11, 1000000])
-def test_calibration_bounds_apply_to_http_cli_and_service(tmp_path, limit):
+def test_calibration_bounds_apply_to_http_cli_and_service(tmp_path, limit, enabled_calibration_settings):
     from pydantic import ValidationError
     from zotero_summarizer.api.errors import APIError
     from zotero_summarizer.api.routes.setup import CalibrateRequest
@@ -241,7 +253,7 @@ def test_calibration_bounds_apply_to_http_cli_and_service(tmp_path, limit):
     with pytest.raises(SystemExit):
         build_parser().parse_args(["calibrate", "--papers", str(limit)])
     with pytest.raises(APIError):
-        run_full_calibration(SimpleNamespace(paper_render_dir=tmp_path), papers_limit=limit)
+        run_full_calibration(enabled_calibration_settings, papers_limit=limit)
 
 
 def test_calibration_reads_unique_papers_with_a_total_limit(tmp_path):

@@ -10,6 +10,7 @@ JSON dir; move to SQLite only if sessions ever number in the thousands.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import uuid
 from collections.abc import Callable
@@ -24,6 +25,8 @@ from zotero_summarizer.services.search._models import (
     ScreenRequest,
     SearchIntent,
 )
+
+from zotero_summarizer.services.search.dedup import reconcile_operation_state
 
 # Per-session-id locks so the background review worker (whole-session saves) and a
 # concurrent "Add to library" (stamps one candidate's materialized key) never
@@ -44,7 +47,8 @@ def _lock_for(session_id: str) -> threading.Lock:
 
 def _dir() -> Path:
     d = settings().search_dir
-    d.mkdir(parents=True, exist_ok=True)
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    d.chmod(0o700)
     return d
 
 
@@ -75,28 +79,23 @@ def save(session: ResearchSession) -> None:
             return
         path = _path(session.id)
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(session.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+        with tmp.open("w", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), 0o600)
+            json.dump(session.to_dict(for_storage=True), handle, indent=2, ensure_ascii=False)
         tmp.replace(path)
 
 
 def save_merge(session: ResearchSession) -> ResearchSession:
-    """Persist under the session lock, preserving any ``materialized_zotero_key`` that
-    a concurrent "Add to library" stamped since this in-memory copy was loaded. The
-    key is add-only/monotonic, so the review worker's whole-session saves must never
-    drop it. Everything else (order, quality, reviews) is owned by the worker."""
+    """Preserve operation keys across saved/current exact families under the lock.
+
+    Selection, order, metadata, quality and reviews remain worker-owned.
+    """
     with _lock_for(session.id):
         with _locks_guard:
             if session.id in _deleted:
                 return session
         persisted = load(session.id)
-        keyed = {
-            c.candidate_id: c.materialized_zotero_key
-            for c in persisted.candidates
-            if c.materialized_zotero_key
-        }
-        for cand in session.candidates:
-            if not cand.materialized_zotero_key and keyed.get(cand.candidate_id):
-                cand.materialized_zotero_key = keyed[cand.candidate_id]
+        reconcile_operation_state(session.candidates, persisted.candidates)
         save(session)
     return session
 
@@ -133,6 +132,13 @@ def materialize_once(
         cand = next((c for c in sess.candidates if c.candidate_id == candidate_id), None)
         if cand is None:
             return None
+        if (cand.existing_zotero_key and cand.planned_zotero_key
+                and cand.planned_zotero_key != cand.existing_zotero_key):
+            raise APIError(
+                error="search_write_conflict", status_code=409,
+                message="Saved library coverage conflicts with the retained Add identity. "
+                        "Reconcile the library before retrying.",
+            )
         if cand.materialized_zotero_key:
             return (False, cand.materialized_zotero_key)
         key = do_write(cand, sess)
@@ -150,7 +156,7 @@ def claim(session_id: str, *, expect: str, to: str) -> bool:
         sess = load(session_id)
         if sess.status != expect:
             return False
-        ScreenRequest(query=sess.raw_query, questions=sess.questions)
+        ScreenRequest(query=sess.raw_query, questions=sess.questions, evidence_policy=sess.evidence_policy)
         sess.status = to
         save(sess)
     return True
@@ -162,12 +168,45 @@ def load(session_id: str) -> ResearchSession:
     return ResearchSession.from_dict(json.loads(_path(session_id).read_text(encoding="utf-8")))
 
 
+def find_discovery(context_fingerprint: str) -> ResearchSession | None:
+    """Strict namespace lookup; corrupt/ambiguous matches are never cache misses."""
+    if len(context_fingerprint) != 64 or any(c not in "0123456789abcdef" for c in context_fingerprint):
+        raise ValueError("Invalid discovery fingerprint")
+    matches = []
+    for path in _dir().glob(f"discovery_{context_fingerprint}_*.json"):
+        with _lock_for(path.stem):
+            if is_deleted(path.stem):
+                continue
+            try:
+                sess = load(path.stem)
+            except FileNotFoundError:
+                if is_deleted(path.stem):
+                    continue
+                raise
+            discovery = sess.discovery
+            suffix = path.stem[len(f"discovery_{context_fingerprint}_"):]
+            if (sess.id != path.stem or len(suffix) != 12 or any(c not in "0123456789abcdef" for c in suffix)
+                    or type(discovery.get("version")) is not int or discovery["version"] != 1
+                    or discovery.get("context_fingerprint") != context_fingerprint
+                    or not {"seed_key", "seed_title", "snapshot", "boundary", "retrieval", "assessment",
+                            "candidate_fingerprint", "membership_digest", "phase", "attempts", "error"} <= discovery.keys()
+                    or sess.status not in {"discovery_pending", "discovery_running", "discovery_ready",
+                                           "discovery_failed", "discovery_interrupted", "reviewing", "reviewed", "error"}):
+                raise ValueError("Invalid persisted discovery identity/state")
+            matches.append(sess)
+    if len(matches) > 1:
+        raise APIError("discovery_identity_conflict", "Multiple discovery sessions match this context", status_code=409)
+    return matches[0] if matches else None
+
+
 def list_sessions() -> list[dict[str, object]]:
     """Newest-first summaries (id, created_at, raw_query, counts) for the sidebar."""
     rows: list[dict[str, object]] = []
     for path in _dir().glob("*.json"):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("related"):
+                continue  # Related assessments have their own paper surface, never auto-review.
             rows.append({
                 "id": data["id"],
                 "created_at": data["created_at"],

@@ -81,7 +81,7 @@ def test_connection_probe_runs_when_requested(monkeypatch):
     monkeypatch.setattr(
         validate_mod.operational_check,
         "probe_provider",
-        lambda provider, model: {"status": "operational", "detail": ""},
+        lambda provider, model, **_kwargs: {"status": "operational", "detail": ""},
     )
     monkeypatch.setattr(
         validate_mod.model_list,
@@ -89,6 +89,7 @@ def test_connection_probe_runs_when_requested(monkeypatch):
         lambda provider: ["m1", "m2", "m3"],
     )
     good = _valid_config_dict()
+    good["llm"]["api_base"] = "https://synthetic.invalid/v1"
     req = ValidateConfigRequest(config=good, test_connection=True)
     resp = _run(validate_config_draft(req))
     assert resp.valid is True
@@ -107,7 +108,7 @@ def test_connection_reports_fail_without_raising(monkeypatch):
     monkeypatch.setattr(
         validate_mod.operational_check,
         "probe_provider",
-        lambda provider, model: {
+        lambda provider, model, **_kwargs: {
             "status": "fail",
             "detail": "ConnectionError: refused",
         },
@@ -118,6 +119,7 @@ def test_connection_reports_fail_without_raising(monkeypatch):
 
     monkeypatch.setattr(validate_mod.model_list, "list_models_for_provider", _boom)
     good = _valid_config_dict()
+    good["llm"]["api_base"] = "https://synthetic.invalid/v1"
     req = ValidateConfigRequest(config=good, test_connection=True)
     resp = _run(validate_config_draft(req))
     assert resp.connection.status == "fail"

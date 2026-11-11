@@ -25,6 +25,19 @@ export const CHIP_TONE = {
 const GRADE_TONE = { A: 'emerald', B: 'sky', C: 'amber', D: 'rose' };
 export const gradeTone = (grade) => GRADE_TONE[grade] || 'slate';
 
+// What the letter rests on: "3 of 5 checks". Stored numbers only; an old review
+// without them yields '' (letter alone).
+export function gradeBasis(met, applicable) {
+  const k = Number(met);
+  const n = Number(applicable);
+  if (met == null || applicable == null || !Number.isInteger(k) || !Number.isInteger(n) || n <= 0) return '';
+  return `${k} of ${n} checks`;
+}
+// A type the review could not decide is graded on the generic checklist — say so in words.
+export const qualityBasis = (q) => (q
+  ? [gradeBasis(q.coverage_met, q.coverage_applicable), q.type_uncertain ? 'type uncertain' : ''].filter(Boolean).join(' · ')
+  : '');
+
 // read / skim / skip digest recommendation.
 const DECISION_TONE = { read: 'emerald', skim: 'amber', skip: 'slate' };
 export const decisionTone = (d) => DECISION_TONE[String(d || '').toLowerCase()] || 'slate';

@@ -25,7 +25,7 @@ it('confirms the visible IDs and removes acknowledged rows from the queue', asyn
 
 it('does not send an individually relabelled row in a later bulk confirmation', async () => {
   fetchReview.mockResolvedValue({ items: [{ id: 9, title: 'Already reviewed', reading_priority: 'dont_read', review_ready: true }] });
-  reviewAction.mockResolvedValue({ state: 'user_approved' });
+  reviewAction.mockResolvedValue({ processed_id: 9, state: 'user_approved' });
   render(<MemoryRouter initialEntries={['/?state=gate_rejected']}><Review /></MemoryRouter>);
   await screen.findByText('Already reviewed');
   fireEvent.click(screen.getByRole('button', { name: /Must read/i }));
@@ -54,6 +54,91 @@ it('keeps rows available for retry when bulk confirmation fails', async () => {
   expect(await screen.findByText(/Bulk-confirm failed/)).toBeTruthy();
   expect(screen.getByText('Retry me')).toBeTruthy();
   expect(screen.getByRole('button', { name: /Confirm remaining/ }).disabled).toBe(false);
+});
+
+it.each([
+  ['must_read', /Must read/i, 'user_approved', 'approved'],
+  ['should_read', /Should read/i, 'user_approved', 'approved'],
+  ['could_read', /Could read/i, 'user_approved', 'approved'],
+  ['dont_read', /Remove/i, 'user_rejected', 'rejected'],
+])('acknowledges an exact item/state receipt for %s', async (priority, button, state, localState) => {
+  fetchReview.mockResolvedValue({ items: [{ id: 9, title: 'Receipt control', review_ready: true }] });
+  reviewAction.mockResolvedValue({ processed_id: 9, state });
+  render(<MemoryRouter><Review /></MemoryRouter>);
+  await screen.findByText('Receipt control');
+
+  fireEvent.click(screen.getByRole('button', { name: button }));
+
+  expect(await screen.findByText(`→ ${localState}`)).toBeTruthy();
+  expect(reviewAction).toHaveBeenCalledWith(9, 'relabel', priority);
+  expect(reviewAction).toHaveBeenCalledTimes(1);
+  expect(screen.getByText(/Item 9: relabel .* OK/)).toBeTruthy();
+  expect(screen.getByRole('button', { name: button }).disabled).toBe(true);
+});
+
+it.each([
+  ['wrong ID', /Must read/i, { processed_id: 9001, state: 'user_approved' }],
+  ['string ID', /Must read/i, { processed_id: '9', state: 'user_approved' }],
+  ['missing ID', /Must read/i, { state: 'user_approved' }],
+  ['missing state', /Must read/i, { processed_id: 9 }],
+  ['opposite positive state', /Must read/i, { processed_id: 9, state: 'user_rejected' }],
+  ['opposite rejection state', /Remove/i, { processed_id: 9, state: 'user_approved' }],
+  ['unknown state', /Must read/i, { processed_id: 9, state: 'awaiting_review' }],
+  ['empty receipt', /Must read/i, {}],
+  ['null receipt', /Must read/i, null],
+  ['array receipt', /Must read/i, []],
+])('keeps a %s receipt unconfirmed without replaying the verdict', async (_case, button, receipt) => {
+  fetchReview.mockResolvedValue({ items: [{ id: 9, title: 'Unconfirmed decision', review_ready: true }] });
+  reviewAction.mockResolvedValue(receipt);
+  render(<MemoryRouter><Review /></MemoryRouter>);
+  await screen.findByText('Unconfirmed decision');
+
+  fireEvent.click(screen.getByRole('button', { name: button }));
+
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('unconfirmed'));
+  expect(screen.getByRole('alert').textContent).toContain('Refresh the queue before another action.');
+  expect(screen.queryByText(/Item 9: .* OK/)).toBeNull();
+  expect(screen.queryByText(/^→ /)).toBeNull();
+  expect(screen.getByRole('button', { name: button }).disabled).toBe(false);
+  expect(screen.getByRole('button', { name: 'Apply approved → Zotero' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+  await waitFor(() => expect(fetchReview).toHaveBeenCalledTimes(2));
+  expect(reviewAction).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  new Error('Connection lost'), new SyntaxError('Invalid JSON'),
+  Object.assign(new Error('Server unavailable'), { status: 503 }),
+])(
+  'keeps a rejected request unconfirmed and does not automatically repeat it: %s', async (error) => {
+    fetchReview.mockResolvedValue({ items: [{ id: 9, title: 'Unknown write outcome', review_ready: true }] });
+    reviewAction.mockRejectedValue(error);
+    render(<MemoryRouter><Review /></MemoryRouter>);
+    await screen.findByText('Unknown write outcome');
+
+    fireEvent.click(screen.getByRole('button', { name: /Must read/i }));
+
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('unconfirmed'));
+    expect(screen.queryByText(/ OK$/)).toBeNull();
+    expect(screen.queryByText(/^→ /)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(fetchReview).toHaveBeenCalledTimes(2));
+    expect(reviewAction).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each([404, 422])('preserves a definite HTTP %s refusal without acknowledging or replaying it', async (status) => {
+  fetchReview.mockResolvedValue({ items: [{ id: 9, title: 'Refused decision', review_ready: true }] });
+  reviewAction.mockRejectedValue(Object.assign(new Error('Request refused'), { status }));
+  render(<MemoryRouter><Review /></MemoryRouter>);
+  await screen.findByText('Refused decision');
+
+  fireEvent.click(screen.getByRole('button', { name: /Must read/i }));
+
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Item 9: relabel failed — Request refused');
+  expect(screen.queryByText(/ OK$/)).toBeNull();
+  expect(screen.queryByText(/^→ /)).toBeNull();
+  expect(reviewAction).toHaveBeenCalledTimes(1);
 });
 
 function CurrentSearch() {

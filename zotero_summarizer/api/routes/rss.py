@@ -24,6 +24,7 @@ class RssFeedRequest(BaseModel):
     name: str = Field(..., min_length=1)
     url: str = Field(..., min_length=1)
     enabled: bool = True
+    create_only: bool = False
 
 
 class RssFeedUpdateRequest(BaseModel):
@@ -34,7 +35,8 @@ class RssFeedUpdateRequest(BaseModel):
 
 class RssRefreshRequest(BaseModel):
     max_feeds: int = Field(default=10, ge=1, le=100)
-    max_new_items_per_feed: int = Field(default=25, ge=1, le=500)
+    backfill_days: int = Field(default=7, ge=1, le=60)
+    max_pages_per_feed: int = Field(default=10, ge=1, le=50)
     per_feed_timeout_secs: float = Field(default=10.0, ge=1.0, le=60.0)
 
 
@@ -47,7 +49,11 @@ def _clean_feed(row: dict[str, Any]) -> dict[str, Any]:
 async def list_feeds() -> dict[str, Any]:
     def _read() -> list[dict[str, Any]]:
         with feeds_storage.open_triage_conn(get_settings().triage_db_path) as conn:
-            return [_clean_feed(row) for row in rss_storage.list_rss_feeds(conn, include_disabled=True)]
+            counts = rss_storage.count_rss_items_by_feed(conn)
+            return [
+                {**_clean_feed(row), "item_count": counts.get(int(row["id"]), 0)}
+                for row in rss_storage.list_rss_feeds(conn, include_disabled=True)
+            ]
 
     feeds = await asyncio.to_thread(_read)
     return {"feeds": feeds, "total": len(feeds)}
@@ -63,6 +69,7 @@ async def add_feed(req: RssFeedRequest) -> dict[str, Any]:
         with feeds_storage.open_triage_conn(get_settings().triage_db_path) as conn:
             feed_id = rss_storage.upsert_rss_feed(
                 conn, name=req.name, url=safe_url, enabled=req.enabled, source="app",
+                create_only=req.create_only,
             )
             conn.commit()
             row = conn.execute("SELECT * FROM rss_feeds WHERE id = ?", (feed_id,)).fetchone()
@@ -133,7 +140,8 @@ async def refresh_feeds(req: RssRefreshRequest) -> dict[str, Any]:
         return await asyncio.to_thread(
             reader.refresh_feeds,
             max_feeds=req.max_feeds,
-            max_new_items_per_feed=req.max_new_items_per_feed,
+            backfill_days=req.backfill_days,
+            max_pages_per_feed=req.max_pages_per_feed,
             per_feed_timeout=req.per_feed_timeout_secs,
         )
     except (RssUrlRejected, httpx.HTTPError) as exc:

@@ -112,6 +112,32 @@ def get_processed_feed_item_by_pk(
     return _fetch_one_processed(conn, pk, "pk", "id = ?")
 
 
+def materialized_key_for(conn: sqlite3.Connection, row: dict[str, Any]) -> str | None:
+    """Existing Zotero identity on this row or a stable-key sibling; no writes."""
+    direct = str(row.get("materialized_zotero_key") or "").strip()
+    if direct:
+        return direct
+    stable = str(row.get("stable_feed_key") or "").strip()
+    if not stable:
+        return None
+    sibling = conn.execute(
+        "SELECT materialized_zotero_key FROM processed_feed_items "
+        "WHERE stable_feed_key = ? AND materialized_zotero_key IS NOT NULL "
+        "AND materialized_zotero_key <> '' LIMIT 1", (stable,),
+    ).fetchone()
+    return str(sibling["materialized_zotero_key"]) if sibling else None
+
+
+def has_pending_materialization(conn: sqlite3.Connection, row: dict[str, Any]) -> bool:
+    """A retained older row can share a later sibling's accepted pending Add."""
+    stable = str(row.get("stable_feed_key") or "").strip()
+    return conn.execute(
+        "SELECT 1 FROM processed_feed_items WHERE zotero_sync_status = 'pending' "
+        "AND (id = ? OR (? <> '' AND stable_feed_key = ?)) LIMIT 1",
+        (row["id"], stable, stable),
+    ).fetchone() is not None
+
+
 def fetch_processed_content_pairs(
     conn: sqlite3.Connection,
     *,
@@ -163,24 +189,22 @@ def fetch_trashed_guids(
     (e.g. ``user_rejected`` — trashed from Today) OR a trashing ``final_outcome``
     (e.g. ``trashed`` / ``deleted_all`` — thrown away inside Zotero). Both
     taxonomies are passed in by the caller so this stays pure SQL with no import
-    of the constants module.
+    of the constants module. Raises ``ValueError`` when either taxonomy is
+    empty (caller bug).
     """
-    clauses: list[str] = []
-    params: list[Any] = []
-    if decisions:
-        placeholders = ",".join("?" * len(decisions))
-        clauses.append(f"decision IN ({placeholders})")
-        params.extend(decisions)
-    if outcomes:
-        placeholders = ",".join("?" * len(outcomes))
-        clauses.append(f"final_outcome IN ({placeholders})")
-        params.extend(outcomes)
-    if not clauses:
-        return set()
-    where = " OR ".join(clauses)
+    if not decisions:
+        raise ValueError("decisions must be non-empty")
+    if not outcomes:
+        raise ValueError("outcomes must be non-empty")
+    dec_ph = ",".join("?" * len(decisions))
+    out_ph = ",".join("?" * len(outcomes))
     rows = conn.execute(
-        f"SELECT DISTINCT guid FROM processed_feed_items WHERE {where}",
-        params,
+        f"""
+        SELECT DISTINCT guid
+        FROM processed_feed_items
+        WHERE decision IN ({dec_ph}) OR final_outcome IN ({out_ph})
+        """,
+        (*decisions, *outcomes),
     ).fetchall()
     return {str(r[0]).strip() for r in rows if str(r[0] or "").strip()}
 

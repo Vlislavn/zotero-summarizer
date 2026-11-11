@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from zotero_summarizer.integrations._rate_limiter import RateLimiter
+from zotero_summarizer.integrations._search_http import json_rows, search_hits
 
 _BASE = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 _REST = "https://www.ebi.ac.uk/europepmc/webservices/rest"
@@ -76,38 +77,28 @@ def _hit_from_result(res: dict) -> EuropePmcHit | None:
     )
 
 
+def _search_hits(response: httpx.Response, strict: bool) -> list[EuropePmcHit | None]:
+    return [_hit_from_result(result) for result in json_rows(response, "resultList", "result", strict=strict)]
+
+
 def search_europepmc(
     query: str,
     *,
     page_size: int = 20,
     http_client: httpx.Client | None = None,
+    outcome: dict | None = None,
 ) -> list[EuropePmcHit]:
     """Topic search Europe PMC (relevance order). Returns ``[]`` on any error
     (network, non-200, malformed JSON) — never raises."""
     query = (query or "").strip()
-    if not query:
-        return []
     params = {
         "query": query,
         "format": "json",
         "resultType": "core",
         "pageSize": max(1, min(page_size, 100)),
     }
-    _RATE_LIMITER.acquire()
-    client = http_client or httpx.Client(timeout=_TIMEOUT_SECS)
-    try:
-        resp = client.get(_BASE, params=params, headers={"User-Agent": "zotero-summarizer/1.0"})
-        if resp.status_code != 200:
-            return []
-        payload = resp.json()
-    except (httpx.HTTPError, OSError, ValueError):
-        return []
-    finally:
-        if http_client is None:
-            client.close()
-    results = ((payload.get("resultList") or {}).get("result")) or []
-    hits = [_hit_from_result(r) for r in results if isinstance(r, dict)]
-    return [h for h in hits if h is not None]
+    return search_hits(query, _BASE, params, _search_hits, _RATE_LIMITER,
+                       timeout=_TIMEOUT_SECS, http_client=http_client, outcome=outcome)
 
 
 def _xml_to_text(xml: str) -> str:
@@ -120,7 +111,7 @@ def _xml_to_text(xml: str) -> str:
     return _WS_RE.sub(" ", text).strip()
 
 
-def fetch_fulltext_xml(pmcid: str, *, http_client: httpx.Client | None = None) -> str:
+def fetch_fulltext_xml(pmcid: str, *, http_client: httpx.Client | None = None, outcome: dict | None = None) -> str:
     """Fetch + plain-text the JATS full text of a PMC open-access article via the
     Europe PMC REST full-text endpoint (keyless, machine-readable — the reliable
     OA path where the ``?pdf=render`` link 404s and NCBI's mirror bot-blocks).
@@ -128,6 +119,8 @@ def fetch_fulltext_xml(pmcid: str, *, http_client: httpx.Client | None = None) -
     Returns ``""`` when no OA full text exists (many hits are abstract-only — an
     expected state, spec §9) or on any transport/parse error — the same
     never-raises leaf contract as ``search_europepmc`` (see module docstring)."""
+    if outcome is not None:
+        outcome.clear()
     pmcid = (pmcid or "").strip().upper()
     if not pmcid:
         return ""
@@ -135,9 +128,10 @@ def fetch_fulltext_xml(pmcid: str, *, http_client: httpx.Client | None = None) -
         pmcid = "PMC" + pmcid
     _RATE_LIMITER.acquire()
     client = http_client or httpx.Client(timeout=_TIMEOUT_SECS)
+    url = f"{_REST}/{pmcid}/fullTextXML"
     try:
         resp = client.get(
-            f"{_REST}/{pmcid}/fullTextXML",
+            url,
             headers={"User-Agent": "zotero-summarizer/1.0"},
         )
         if resp.status_code != 200:
@@ -148,7 +142,10 @@ def fetch_fulltext_xml(pmcid: str, *, http_client: httpx.Client | None = None) -
     finally:
         if http_client is None:
             client.close()
-    return _xml_to_text(xml)
+    text = _xml_to_text(xml)
+    if text and outcome is not None:
+        outcome['source_uri'] = url
+    return text
 
 
 __all__ = ["EuropePmcHit", "search_europepmc", "fetch_fulltext_xml"]

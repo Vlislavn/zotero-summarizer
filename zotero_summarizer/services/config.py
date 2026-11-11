@@ -2,21 +2,27 @@ from __future__ import annotations
 
 import asyncio
 
-from zotero_summarizer.models import AppState, GoalsConfig
+from zotero_summarizer.models import GoalsConfig
 from zotero_summarizer.services import corpus
-from zotero_summarizer.services._common import LOGGER, settings, state, write_user_config
+from zotero_summarizer.services._common import LOGGER, settings, state
 from zotero_summarizer.services.config_overrides import apply_calibration, apply_env_overrides
 from zotero_summarizer.storage.corpus import EmbeddingCache
+from zotero_summarizer.services.llm import connection_state
 
 
 async def get_runtime_config() -> dict:
-    config: GoalsConfig = state().app_state.config
-    # JSON mode: coerces enums (e.g. ProviderType) to their string values so the
-    # shape matches what PUT persists and what the frontend round-trips back.
-    return config.model_dump(mode="json")
+    with connection_state.reading():
+        connection_state.require_disk_current()
+        if state().app_state is None:
+            from zotero_summarizer.api.errors import APIError
+
+            raise APIError('config_unavailable', 'No valid runtime configuration. Use the explicit first-connection task or repair the full config.', status_code=409)
+        config: GoalsConfig = state().app_state.config
+        # Payload and revision belong to the same publication snapshot.
+        return {**config.model_dump(mode="json"), '_revision': connection_state.revision()}
 
 
-async def update_runtime_config(new_config: GoalsConfig) -> dict:
+async def update_runtime_config(new_config: GoalsConfig, *, expected_revision: str | None = None) -> dict:
     """Persist + hot-swap the config. LLM clients are NOT rebuilt here: each
     stage rebuilds lazily on next use (``invalidate_stage_clients`` clears the
     cache). Provider availability is no longer validated on save — the app must
@@ -24,6 +30,8 @@ async def update_runtime_config(new_config: GoalsConfig) -> dict:
     via ``POST /api/admin/llm-check`` to verify). Only the embedding cache, which
     is local and load-bearing for corpus matching, is rebuilt eagerly.
     """
+    expected_revision = expected_revision or connection_state.revision()
+    connection_state.require_revision(expected_revision)
     current_settings = settings()
     # Re-apply per-user calibration THEN ``ZS_*`` env so both survive a UI save (the
     # request body carries only user-owned keys; calibration + env stay authoritative
@@ -57,14 +65,16 @@ async def update_runtime_config(new_config: GoalsConfig) -> dict:
         app_state.corpus_write_lock = corpus_lock
 
     async with corpus_lock:
+        connection_state.require_revision(expected_revision)
         if model_changed:
             cleared = await asyncio.to_thread(new_embedding_cache.clear_corpus_embeddings)
             LOGGER.info("Embedding model changed; cleared %s corpus embeddings", cleared)
 
-        write_user_config(current_settings.config_path, new_config)
-        app_state.app_state = AppState(config=new_config)
-        app_state.invalidate_stage_clients()
-        app_state.embedding_cache = new_embedding_cache
+        with connection_state.editing():
+            connection_state.require_revision(expected_revision)
+            connection_state.publish(new_config)
+            app_state.embedding_cache = new_embedding_cache
+            payload['_revision'] = connection_state.revision()
 
     if model_changed and new_config.corpus.enabled and getattr(app_state, "zotero_reader", None) is not None:
         asyncio.create_task(corpus.auto_import_corpus_from_zotero())

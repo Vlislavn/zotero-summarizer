@@ -1,239 +1,203 @@
-# services/search — Targeted Search (the query-driven pull surface)
+# services/search — Targeted Search (query-driven pull)
 
-The library/triage domains are *push*: papers arrive from feeds and you cull them.
-This domain is *pull*: you give a research topic, and it federates the open
-literature + (later) your library, ranks by real relevance, and deep-reads a few —
-a query-scoped research session, not a standing feed.
-
-Intent parsing and agentic refinement wrap user queries, questions and retrieved
-metadata with the shared escaped untrusted-input boundary before any LLM call.
+Contract for changing this package. Behavior as users see it:
+[docs/features.md](../../../docs/features.md) (search, [question evidence](../../../docs/features.md#search-question-evidence),
+[discovery](../../../docs/features.md#saved-paper-discovery),
+[related saved papers](../../../docs/features.md#related-saved-papers)).
 
 ```
 topic + questions
-   │  intent.parse_intent (1 LLM call; raw-query fallback if garbled — spec §7)
-   ▼
-SearchIntent ─ intent.build_query_plan ─> QueryPlan (per-source strings, NOT one universal query;
-   │                                        each lexical source = tight "quoted phrase" + broad bag)
-   ▼  federate.federate  (ThreadPoolExecutor — all channels at once; variants share a per-source quota)
- ┌─────────┬───────────┬──────────────────┬──────────┬───────────────────┬────────────┬──────────────┐
- │ arxiv   │ europepmc │ openalex lex+sem │ crossref │ semantic scholar  │ openreview │ library(TODO)│  → Candidate + Provenance
- └─────────┴───────────┴──────────────────┴──────────┴───────────────────┴────────────┴──────────────┘
-   │  dedup.to_version_families  (union-find on shared ids; never title-merge; OR integrity flags)
-   ▼
-[Candidate]  ── rank.score_query_relevance ──> query_score  (OUR bge cross-encoder over the union;
-   │                                                          source rank is candidate-gen ONLY)
-   ▼  rank.rank_candidates — CONSTRAINED contract (spec §8):
-   │     (relevance_bucket = ⌊query_score/EPSILON⌋) desc, quality_evidence desc, exact query_score desc
-   │     → quality can only reorder WITHIN a relevance bucket; retracted → hard-sink
-   ▼  pipeline._annotate_library_coverage (one ZoteroReader over the batch; tri-state, fail-open)
-   │     in_library True/+key on a hit · False only on a confirmed id-miss · None when unknown
-   ▼
-   ▼  _relevance.attach_relevance — pool-relative band (strong/on_topic/weak) + ≤3 why chips
-run_screen ──persist──> ResearchSession (status=screened)         [FAST: seconds]
-   │  /screen then AUTO-claims screened→reviewing + spawns run_review (single-flight
-   │  via session.claim); client polls GET to watch reviews fill in incrementally
-   ▼  run_review  (auto-started; save_merge after light band + each deep read)   [SLOW: minutes]
- top-N ─ _fulltext.acquire_full_text ─> review.light_review (quality checklist; no text → uncertain, §9)
-   │  rank_candidates again (quality now populated → re-rank the band)
-   │  review.select_deep_set (2 highest-relevance + 1 quality + 1 exploration)
-   ▼  _targeted_review.targeted_review — composes READ-ONLY library layers:
-        assess_digest (focus=query)  +  summarize_for_goals (goals=[query]+questions)
-        → brief + grounded query-lens + one grounded answer per question
+  │ intent.parse_intent (1 deep_review LLM call → search_queries + semantic_query; raw-query fallback) → build_query_plan → QueryPlan (per-source strings)
+  ▼ federate.federate (thread pool, all channels at once; variants share a per-source quota)
+  arxiv · europepmc · openalex lex+sem · crossref · semantic scholar · openreview · library (unwired)
+  │ dedup.to_version_families (union-find on shared ids; never title-merge)
+  ▼ rank.score_query_relevance (our cross-encoder over the union; source rank is candidate-gen only)
+  ▼ rank.rank_candidates (constrained contract) → pipeline._annotate_library_coverage → _relevance.attach_relevance
+run_screen ─save→ ResearchSession(status=screened)                                   [fast]
+  │ /screen claims screened→reviewing (session.claim) and spawns run_review          [slow]
+  ▼ run_review: _fulltext → review.light_review → re-rank → review.select_deep_set
+    → _targeted_review (read-only library layers: assess_digest + summarize_for_goals)
 ```
-
-## Why this shape
-
-- **Per-source query plan, not one universal query** (`intent.build_query_plan`): a
-  MeSH-style Europe PMC string, a concept-join for OpenAlex lexical, an English
-  paragraph for the semantic/library channels. The plan is shown to the user *as*
-  the plan (`QueryPlan.display`).
-- **Wide-recall bag + one precise quoted phrase per lexical source** (`intent._tight_query`):
-  the concept "bag" gives recall, but OpenAlex `search=` is citation-weighted, so a
-  specific/new low-citation paper sinks under broad high-citation surveys. Each lexical
-  source (OpenAlex/EuropePMC/arXiv) *also* issues ONE exact-match quoted phrase — the
-  user's own leading clause — because it matches the paper's **title**, where a bag of
-  LLM-paraphrased concepts does not (the parser turns "LLM-based agents" into "autonomous
-  agents", so the literal span never survives to be quoted). `federate` unions the passes
-  and `rank.py` never counts passes, so an extra pass can only enrich the pool. Measured
-  (`tools/bench_search_recall.py`): the bag misses "A Survey on Evaluation of LLM-based
-  Agents", the phrase `"evaluation of llm-based agents"` lands it #2 in OpenAlex. The tight
-  pass is the *deterministic* recall lever; the OpenAlex semantic endpoint is flaky under
-  load, so the quoted-phrase hits are the ones to trust.
-- **Quality is measured BEFORE the deep set is chosen** (`review.light_review` runs
-  over the top band, then `rank_candidates` re-runs, then `select_deep_set`). This
-  is the expert review's core fix — a rigorous paper ranked 6th can be pulled into
-  the deep read. The old additive `blend + quality_bonus` could not *guarantee* a
-  high-relevance paper stays above a low-relevance one; the constrained contract does.
-- **Version families, not one external id** (`dedup`): arXiv preprint + OpenAlex DOI
-  + Europe PMC PMID are one work with a preferred version; provenance from every
-  source is kept for a missed-paper analysis. Never title-merged (`dedup_doi_arxiv_only`).
-  The merge also carries DERIVED state (query score, quality, review, verdict,
-  relevance band, materialized key) off the member that holds it, so an agentic round
-  re-fetching a bibliographically richer version can't silently drop a completed review.
-- **Agentic refinement is opt-in and gates the review** (`refine`, `ZS_SEARCH_AGENTIC`):
-  when on, PRF rounds refine the pool BEFORE the deep set is chosen — so review budget
-  isn't spent on a first-round ranking. Off by default (an extra LLM call + federation
-  per round). Transparent: each round's added/dropped concepts + new-paper count persist
-  on the session (`refinements`) and render in the plan panel.
-- **Targeted review reuses read-only layers, not `deep_review.start`**: no Zotero
-  note write to suppress, no corpus-membership requirement, and the query is the lens.
-- **Library coverage is annotated, not filtered** (`_annotate_library_coverage`):
-  each candidate gets `in_library` (tri-state) + `existing_zotero_key` + OpenAlex
-  `cited_by_count`. It's advisory — a paper already in Zotero still ranks; the
-  weekly paper-gap review (`.claude/commands/weekly-review.md`) reads `in_library`
-  to flag which top results are *missing*. Fail-open: a failed/absent lookup stays
-  `None` (unknown), never a false "not in library" that would re-surface a paper
-  you already have.
-- **OpenReview is SIGNAL-ONLY, never ranking** (`federate._openreview_channel`): a
-  dual-judge eval refuted prestige-boost ranking, so a hit only resolves its
-  OpenAlex id (title+year lookup, best-effort) to merge into the right version
-  family and attaches `Candidate.peer_review` (tier/venue/rating) for one `why`
-  chip (e.g. `ICLR'25 Oral`) in `_relevance.py`. Never touches `query_score` or
-  `rank.py`. Off (`openreview_client=None`) when creds are unset or `ZS_OFFLINE=1`.
-  The channel calls `search_openreview(...)` WITHOUT `with_ratings`, so production
-  skips the per-paper rating fan-out (only the venue+tier chip is read); the rating
-  field stays at its `None`/`0` default.
-- **Zotero-optional**: candidates come from the open web; `_fulltext` recovers a
-  PMC hit's machine-readable full text from Europe PMC's `fullTextXML` endpoint,
-  else resolves an OA PDF by identifier (arXiv → Unpaywall(DOI) → direct url). The
-  ONE Zotero write in this domain is `materialize.py` — the per-result "Add to
-  library" button, an explicit user action, never triggered by ingested content. It
-  validates the picker's collection key → a user-library name (unknown key → 400,
-  never a junk auto-create), builds a create-item payload FROM the Candidate (a LIST
-  of authors + `publication_date`, NOT the ranker's `to_scoring_dict` shape), writes
-  atomically via `apply_feed_materialization` (a locked DB after retries → 503, no
-  fake success). A coverage hit reuses `existing_zotero_key` instead of creating a
-  duplicate; either path then stamps `materialized_zotero_key` back. The whole
-  check-write-stamp runs under the session lock (`session.materialize_once`), so a
-  concurrent auto-review can't lose the key AND two simultaneous Add clicks on one
-  candidate write exactly once. Idempotent (re-add returns the existing key).
 
 ## Files
 
-| file | role |
-|------|------|
-| `_models.py` | `Candidate` / `Provenance` / `SearchIntent` / `QueryPlan` / `ResearchSession` (JSON round-trip) |
-| `intent.py` | topic → `SearchIntent` → per-source `QueryPlan` |
-| `federate.py` | concurrent channel fan-out + quotas + provenance → `to_version_families`. Channels: arXiv, Europe PMC, OpenAlex (lex+sem), Crossref (broad metadata, `mailto` polite pool), Semantic Scholar (relevance-ranked, throttled), OpenReview (peer-review signal, SIGNAL-ONLY — see below). Lexical sources issue a tight+bag variant pair; the new leaves issue one scalar pass each |
-| `dedup.py` | union-find version-family resolution |
-| `rank.py` | cross-encoder `query_score` + the constrained re-rank contract |
-| `_relevance.py` | pool-relative `relevance_band` (strong/on_topic/weak — cohort terciles of `query_score` + an absolute floor so an all-bad pool gets no "strong") + ≤3 `why` chips (relevance, cross-source agreement, quality grade/band, version standing). Mirrors `daily_select/_relevance`; attached in `run_screen` and re-derived after the review re-rank |
-| `review.py` | `light_review` (quality tier) + `select_deep_set` |
-| `_targeted_review.py` | query-lensed deep read (composes library read-only layers; sections are currently empty, so that unused parameter is not exposed) |
-| `_fulltext.py` | OA full-text acquisition for a federated (non-Zotero) candidate: PMC → Europe PMC `fullTextXML` (a PMCID hit), else identifier → OA PDF |
-| `pipeline.py` | `run_screen` (fast) + `run_review` (slow) + dependencies; strict offline rejects before external search |
-| `materialize.py` | the one Search→Zotero write: `materialize_candidate(session_id, candidate_id, collection_key)` — resolve+validate collection (pre-lock 400), reuse a coverage hit or adapt Candidate→feed_payload, then check-write-stamp under the session lock via `session.materialize_once` (concurrent Adds write once) |
-| `refine.py` | bounded opt-in agentic PRF before auto-review; no-ops under strict offline |
-| `session.py` | one-JSON-per-session persistence under `settings().search_dir` + per-session lock: `claim` (status CAS, single-flights the worker), `save_merge` (whole-session save that preserves a concurrent Add's `materialized_zotero_key`), `update` (read-modify-write), `materialize_once` (Add's check-write-stamp under the lock, single-write). Malformed id → `APIError(400)` |
+| file | responsibility |
+|---|---|
+| `__init__.py` | `require_online()`: strict offline → `APIError strict_offline` (409) |
+| `_models.py` | `ScreenRequest`, `ConfirmedConstraints`, `Provenance`, `Candidate`, `SearchIntent`, `QueryPlan`, `ResearchSession` (JSON round-trip, `to_dict(for_storage=)`) |
+| `intent.py` | topic → `SearchIntent` → per-source `QueryPlan` (model `search_queries`/`semantic_query`; fallback `_tight_query` quoted phrase + anchored bag; `QueryPlan.display()` is the wire projection (plain source labels, e.g. «OpenAlex · keyword search», «Must mention (title/abstract)», «Filters» = AI-suggested vs confirmed-by-you, «Needs your confirmation: …» with the same plain constraint names; no row for `legacy_unknown`); its `retrieval <source>` rows are plain sentences from `_accounting.describe_retrieval`, plus one «Some sources failed» row when a receipt says failed) |
+| `_queries.py` · `_publication_types.py` · `_accounting.py` | complementary lexical passes · exact-DOI publication-type recovery (`ZS_SEARCH_TYPE_LOOKUPS`) · per-source retrieval accounting |
+| `federate.py` | channel fan-out, quotas, provenance, constraint filter, OpenReview signal channel |
+| `dedup.py` | version families; `reconcile_operation_state` |
+| `rank.py` | `score_query_relevance` + `rank_candidates` (`ZS_SEARCH_RANK_EPSILON`) |
+| `_relevance.py` | pool-relative band (strong/on_topic/weak; `ZS_SEARCH_STRONG_FLOOR`/`ZS_SEARCH_MILD_FLOOR`) + ≤3 `why` chips |
+| `review.py` | `light_review` (quality tier), `select_deep_set` |
+| `_targeted_review.py` | query-lensed brief + one grounded answer per nonblank question |
+| `_fulltext.py` | OA full text for non-Zotero candidates: PMC → Europe PMC `fullTextXML`, else arXiv/Unpaywall/direct OA PDF; optional request-local `outcome` |
+| `_question_evidence.py` · `_question_policy.py` | opt-in original-text question evidence · receipt validity (`current_receipt`) and promotion |
+| `refine.py` | opt-in agentic PRF rounds before deep-set selection (`ZS_SEARCH_AGENTIC`) |
+| `pipeline.py` | `SearchDeps`/`default_deps`, `run_screen`, `run_review`, `_annotate_library_coverage` |
+| `materialize.py` | the only Search→Zotero write: `materialize_candidate` |
+| `discovery.py` | saved-seed discovery: public retrieval + optional consent-bound assessment |
+| `session.py` | one JSON per session under `Settings.search_dir`: `save`, `save_merge`, `update`, `claim`, `materialize_once`, `find_discovery`, `list_sessions`, `delete`/`is_deleted` |
 
-## Execution and identity boundaries
+## Ranking and review invariants
 
-Screening accepts a nonblank topic of at most 4,000 characters and up to ten
-nonblank questions of at most 1,000 characters each. The existing `ScreenRequest`
-now lives in `_models`; HTTP, direct screening and persisted review/claim reuse
-it. Surrounding whitespace is trimmed; invalid entries are rejected, not dropped.
-These are interactive work ceilings, not estimates of model capacity.
+- Sort key (`rank.constrained_key`): `(⌊query_score/ε⌋, quality_evidence, query_score + goal tiebreak)` descending.
+  Quality reorders only within a relevance bucket; retracted candidates sink. ε is finite and positive; an
+  invalid environment value falls back to the default, an invalid direct override raises `ValueError`.
+- Quality is measured before the deep set: `light_review` over the top band → `rank_candidates` again →
+  `select_deep_set` (2 highest-relevance, 1 quality, 1 exploration). Missing text yields `uncertain`.
+  A review failure is recorded on that paper and later candidates continue. Papers are light-/deep-reviewed
+  `SearchDeps.paper_concurrency` at a time (`pipeline.MAX_PAPER_CONCURRENCY` = 4, bounded by each review stage's provider cap; a local model
+  stays serial); `screened_count` rises as each light review lands ("reviewed N of 10") and each deep review is saved as it lands. The deep-review
+  pool is not involved: Search calls the stage clients directly.
+- `rank.py` never counts passes or sources; extra passes only enrich the pool.
+- The intent prompt asks the model for 2–4 short keyword `search_queries` (real terminology, tightest first) and one
+  natural-language `semantic_query`. Lexical sources (OpenAlex, Europe PMC, arXiv) issue those queries as the variants, in
+  order (arXiv as `all:"term" AND …`); variants divide the source's quota, so variants never multiply the candidate
+  budget. OpenAlex lexical is capped at two passes. Semantic channels (OpenAlex meaning, Semantic Scholar, OpenReview,
+  library) use `semantic_query`; Crossref uses the first keyword query.
+- Fallback (parse failure, a stored intent, or a reply without those fields — `SearchIntent.search_queries`/`semantic_query`
+  default empty): the quoted raw head plus one OR bag of concepts/synonyms that must co-occur with a topic word (the supplied
+  domain, else any content word of the topic; no such word → no bag), and raw topic + questions for the semantic channels.
+- OpenReview is signal-only: it resolves an OpenAlex id for family merging and sets `Candidate.peer_review`
+  for one chip. It never touches `query_score` or `rank.py`, calls `search_openreview` without
+  `with_ratings`, and is off when `openreview_client is None` (no credentials or `ZS_OFFLINE=1`).
+- Agentic refinement (`refine`) runs before the deep set; per-round concepts/counts persist in `refinements`;
+  dropped terms are advisory, never exclusions. It no-ops under strict offline.
+- Targeted review composes read-only layers (no `deep_review.start`, no Zotero note write). Answers pair only
+  with nonblank questions. `review.brief` actions/grades use the shared reading projection over the light
+  quality result; absent quality never restores a self-grade; `reading_policy_flags` explains caps.
+- `score_query_relevance(reranker_enabled=False)` scores lexically without loading the cross-encoder; Discovery
+  passes `config.corpus.reranker_enabled` (`ZS_CORPUS_RERANKER_ENABLED`, see [overrides](../../../docs/overrides.md)).
 
-Strict offline rejects screening, review claims, dependency construction and
-full-text acquisition with `strict_offline` before model/source work. A saved
-online session cannot bypass the rule by being reviewed after restart offline.
-Reading saved results and explicitly filing a result locally remain available.
+## Identity and dedup
 
-Every candidate carries a persisted `candidate_id`, included in HTTP JSON.
-Unidentified observations get UUIDs, never title hashes; metadata enrichment
-keeps the existing family's first address while selecting the richest metadata.
-Legacy unidentified rows derive stable session/slot addresses on read, persisted
-by the next ordinary save. Duplicate/invalid persisted addresses fail before
-targeting or publication. Previously misattributed historical Zotero keys cannot
-be inferred or repaired automatically; existing saved values are preserved.
+- Families are union-find over every normalized DOI/arXiv/PMID/alias key (`Candidate.identifier_keys()`;
+  `family_identifier_keys` retains the full union and survives JSON). Titles never merge. Merging carries
+  derived state (query score, quality, review, verdict, band, materialized/planned key, evidence receipts)
+  off whichever member holds it.
+- Coverage (`_annotate_library_coverage`) is advisory and tri-state: `in_library` True + key on any actual
+  identifier hit; False only when every retained DOI/arXiv alternative is a confirmed miss; `None` when
+  unknown. Arxiv values containing SQL-LIKE wildcards are withheld from the reader. Merges keep unknown
+  members unknown and let a genuine positive key dominate stale misses. Fail-open: never a false
+  "not in library".
+- `candidate_id` is persisted and in HTTP JSON; unidentified observations get UUIDs, never title hashes.
+  Legacy rows derive stable session/slot ids on read. Duplicate/invalid persisted ids fail before targeting.
+- Request bounds (`ScreenRequest`): topic 1–4,000 chars, ≤10 questions of 1–1,000 chars, whitespace trimmed,
+  invalid entries rejected (not dropped), UTF-8-encodable. `claim` revalidates them.
+- Publication types come from Europe PMC `pubTypeList.pubType` and OpenAlex `type` only, never from prose.
+  Under an explicit type filter, inadequate metadata is recovered by exact DOI (online only; budget
+  `ZS_SEARCH_TYPE_LOOKUPS` default 5, 0–15, invalid → error). Remaining unknowns are disclosed, not inferred.
 
-`QueryPlan.display()` is now the server's actual wire projection: React renders
-its ordered `{source, query}` rows, including repeated source variants and
-OpenReview. It is recomputed from the raw plan when loaded; a saved display copy
-is not authoritative. The unused taxonomy constant, scoring adapter and
-`version_family_id` field are removed (old extra JSON fields remain ignored).
-Search notes reuse the existing provenance marker plus escaped title/query/text;
-they no longer pass a string to the structured triage-summary renderer.
+## Constraint authority and accounting
 
-Variant passes divide a lexical source's quota across its query variants, so
-adding tight/bag queries does not multiply that source's candidate budget.
-Ranking epsilon must be finite and positive; invalid environment values fall
-back to the default and invalid direct overrides raise `ValueError`. Targeted
-review pairs answers only with nonblank questions. Review failures are recorded
-on the affected paper and do not stop later candidates. The session list skips
-individual unreadable/corrupt files; deleting a session locks its store entry,
-marks it cancelled, and prevents in-flight review saves from recreating it.
+- `SearchIntent.constraint_origin` is `legacy_unknown` (literal filtering retained), `model_proposed`
+  (shown as pending plan rows, not gates) or `user_confirmed` (`ScreenRequest.constraints`:
+  `must_include`, `must_not_include`, `study_types`; exact phrase gates apply).
+- `QueryPlan.retrieval_accounting` records per-source observations, contributing/accepted families, duplicate
+  observations, constraint and unknown-type rejections, and each variant's query/allocation/state (zero hits
+  included), snapshotted before family merging. Counts are cross-source attributed, not additive. Empty
+  channels are not evidence of availability or completeness.
+- `federate(observe_outcomes=True)` keeps one request-local outcome dict per scheduled arXiv, Crossref,
+  Europe PMC, Semantic Scholar, OpenReview and OpenAlex (lex/sem) request; ordinary calls pass no receipt keyword and a
+  silent adapter stays `unknown`. `run_screen` and Discovery both observe (receipts only: no extra request); OpenReview reports
+  the same outcome shape (disabled → `not_attempted`); library is uninstrumented.
 
-## Deferred (ponytail seams, known ceilings)
+## Persistence (`session.py`)
 
-Only user-confirmed restrictions gate new searches. Model-proposed restrictions
-remain visible suggestions, not filters; unknown-origin legacy plans retain their
-old literal behavior until explicitly replaced. Semantic queries describe the
-information need without appended filter instructions. Refinement retains domain,
-optional terms and authority; dropped concepts remain advisory.
+- Directory is 0700 (also re-chmodded when it exists); the temp file is chmod 0600 before bytes are written;
+  `save` is temp + atomic replace under a process-wide guard. A malformed id → `APIError(400)`.
+- `claim` is the status compare-and-set that single-flights the review worker. `save_merge` saves a whole
+  session while preserving concurrent Add keys; `update` is read-modify-write; locks are per-process,
+  non-reentrant — never call `update`/`save_merge`/`claim` from a `materialize_once` writer.
+- `delete` unlinks the file and records the id; `save`/`save_merge` then refuse to recreate it and workers stop
+  at their next boundary. `list_sessions` skips unreadable files and omits `related` sessions.
+- Strict offline rejects screening, review claims, `default_deps` and full-text acquisition before any
+  source/model work; reading saved sessions and local Add stay available.
+- Prompts: intent parsing, refinement and retrieved metadata pass through the shared escaped untrusted-input
+  boundary. `default_deps` resolves clients through `services.llm.factory` with the `RuntimeState` cache and
+  consent fences; the Search OpenAlex client takes its cache from `RuntimeState`, independent of prestige.
+- Related-paper sessions reuse `ResearchSession`, `claim`, locks and atomic `save`; `related` status never
+  qualifies for Search's review claim. Default/wire serialization exposes `related` as `{}`; only
+  `for_storage=True` retains it. That flow starts no federation, review or materialization.
+  Ordinary HTTP projections omit an empty Discovery key; storage keeps `{}`.
 
-OA PDF acquisition explicitly passes the selected `Settings.pdf_cache_dir`
-(`data/pdfs/`), shared with Library acquisition only within the same project.
+## Explicit Add (`materialize.py`)
 
-- **Library channel**: `federate` already accepts a `LibraryFinder`; wiring it needs
-  DOI/arXiv identifier columns on `corpus_embeddings` so a library hit can
-  cross-source dedup against externals. Until then `default_deps` passes `None`.
-- **OpenAlex quota**: the keyless polite pool has a tiny per-request budget (verified
-  live: "insufficient budget"). arXiv + Europe PMC + Crossref carry a run on their own;
-  OpenAlex fills in when a mailto/key is configured. OpenAlex is now wired
-  INDEPENDENTLY of the prestige feature (`pipeline._search_openalex_client`) — a
-  Search-dedicated keyless client is built when the app's prestige client is absent,
-  so the broadest source contributes regardless of the prestige toggle.
-- **bioRxiv/medRxiv**: not a dedicated channel — OpenAlex + Europe PMC both index
-  bioRxiv/medRxiv preprints, and Crossref carries their DOIs, so the coverage is
-  already federated. Add a dedicated leaf only if a gap shows up in a real run.
+- The only Zotero write in this package; an explicit user action, never triggered by ingested content.
+  Collection key → user-library name is validated first (unknown → 400, never a junk collection).
+- The payload is built from the `Candidate` (list of authors + `publication_date`, not `to_scoring_dict`).
+  The write is `ZoteroWriter.apply_feed_materialization` (locked DB → 503; no fake success).
+- Check-write-stamp runs under the session lock via `session.materialize_once`, so concurrent Adds write once.
+  An existing coverage hit reuses `existing_zotero_key` (no writer, no plan); either path stamps
+  `materialized_zotero_key`. Re-add returns `already_added`.
+- A new item first saves `planned_zotero_key` (eight ASCII uppercase letters/digits) in the session before
+  backup/native work; a failed prewrite save dispatches nothing. Native or finalization failure retains the
+  plan and the retry reuses the writer's existing-key no-op. A plan is not coverage or a success receipt.
+- Confirmed coverage that disagrees with a retained plan → 409 `search_write_conflict` before any write or
+  stamp. Stale discovery plans use `existing_only=True` (exact key, empty steps, no backup, else 409).
+  Add preflights discovery currency before effects.
+- Family merges, enrichment and stale background saves preserve planned/materialized keys; conflicting
+  selected-family identities fail before any update. Not claimed: distributed exactly-once, cross-library
+  replay, repair of later user edits, or one transaction spanning session JSON and native SQLite.
 
-## Constraint authority
+## Question evidence (opt-in)
 
-New parsed restrictions are `model_proposed`, shown as confirmation-required plan
-rows, not eligibility gates. The screen request may supply `constraints` with
-`must_include`, `must_not_include`, and `study_types` arrays; these are explicitly
-`user_confirmed`. Exact phrase gates still apply for includes/excludes. Confirmed
-types require `Candidate.publication_types`. Europe PMC's `pubTypeList.pubType`
-and OpenAlex's `type` are retained and merged across identifier families. Broad
-`article`/`Journal Article` metadata does not establish a review. Under an explicit
-type filter, inadequate metadata is recovered by exact DOI via Europe PMC before
-filtering (online only). `ZS_SEARCH_TYPE_LOOKUPS` defaults to 5, accepts 0–15, and
-fails on invalid configuration. Requested-type whole-token phrases in titles
-(case/space/hyphen normalized) prioritize this bounded exact-DOI lookup only;
-they never establish eligibility. Both priority groups retain original order.
-Adequate requested-type metadata skips lookup. Recovery accounting records
-`unattempted` eligible unknowns and `confirmed` newly established requested types;
-empty hits remain unknown, not evidence of HTTP failure. Remaining unknowns are disclosed, not inferred
-from titles/abstracts. Existing saved plans without origin remain `legacy_unknown` and retain
-literal filtering; they are not automatically migrated. Refinement drop terms
-are advisory and never become exclusions. Semantic payloads state the information
-need without Boolean/filter instructions.
+- `ScreenRequest.evidence_policy` is `baseline` (default) or `question_evidence`. The existing review worker
+  runs `_question_evidence` before top-ten light review; `_question_policy.apply_question_policy` promotes
+  sufficient answers after quality ranking. No questions, disabled budgets or missing prerequisites keep
+  baseline order.
+- Reuses `_fulltext.acquire_full_text`, Library hybrid retrieval, faithbench `ANSWER_PROMPT`/`parse_answer` and
+  strict quote guards, plus an independent configured Deep-review verifier. Only exactly located, unambiguous
+  original quotes count; generated summaries never supply offsets. Over-budget originals are unknown, not
+  truncated.
+- Limits: 8 chunks/question, 12 candidates, 24 attempted model invocations (generation/verifier pairs; failures
+  count), floor 0.35; `ZS_SEARCH_EVIDENCE_{CANDIDATES,CALLS,TOPIC_FLOOR}` override within 0–30 / 0–120 / finite 0–1.
+  Identical question lines share one assessment per candidate.
+- `_question_policy.current_receipt` is the single validity authority for display, invalidation and promotion:
+  source/input fingerprints, generator/verifier provider+model IDs, provider settings and prompt/schema/protocol
+  (`_EVIDENCE_PROTOCOL`) must match the loaded runtime configuration (`_evaluators` builds identities without
+  clients, credentials or requests). Absent/invalid metadata is unknown, not trust in stored IDs. Malformed
+  retained hashes, bounds, passages or spans invalidate the receipt (baseline order restored), never become
+  a checked negative.
+- Receipts keep unknown/partial/sufficient/not-found-in-checked-text; only sufficient promotes, not-found never
+  asserts whole-document absence, and missing capability never penalizes. Invalidation changes only the
+  in-memory view: raw storage keeps historical receipts, HTTP projection suppresses stale ones.
+- `ResearchSession.evidence_baseline_order` retains pre-promotion order; restoration seeds the stable
+  constrained ranker with it. Promotion fills only topic-eligible, nonretracted slots. Legacy receipts without
+  order/binding cannot certify current evidence; nothing reruns automatically. `save_merge` keeps concurrent
+  Adds; deletion stops work between boundaries.
 
-The plan persists observed per-source accounting before constraint removal:
-observations, contributing families, duplicate observations, accepted families,
-constraint rejections and unknown-type rejections. A cross-source family counts
-once under each contributing source, so source totals are not globally additive.
-Empty channels are not evidence of provider availability or a complete search.
-The plan discloses scholarly-source limits for handbooks/official guidance.
+## Discovery (`discovery.py`)
 
-## Complementary retrieval and receipts
+- Retrieval sends only public seed metadata (title, abstract, identifiers; bounded to the Search request ceiling)
+  and schedules only OpenAlex lexical (≤2 variants) + semantic; ordinary Search stays all-source. The seed's
+  private comments reach a model only through the consent-bound assessment (`consent_required` 409 on a
+  changed model boundary).
+- A seed need not be saved: feed-only papers search from public metadata too (`admission.state` stays informational). Candidates sharing the seed's identifier or normalized title (the seed itself) are dropped.
+- Saved-family identifiers are excluded; app-known identifiers still exclude when no native reader exists, but
+  remaining membership stays unknown (`in_library=None`) and is never a default new-paper recommendation.
+- Whole-library membership (kept app decisions + every Zotero item/identifier, identity families, digest) is one
+  process-wide entry in `discovery._membership`, keyed by the size/mtime of `triage_history.db` and `zotero.sqlite`
+  (+ `-wal`); any write (Add, sync, label) changes the key and the next call rebuilds it. Requests copy the shared
+  family map and add their seed; nothing seed-specific is cached.
+- Raw session snapshots serialize only for storage. `discovery_view` is the HTTP projection: while
+  pending/running/failed, stale or interrupted it hides seed comments, assessment items/IDs and
+  recommendations; public retained metadata stays visible. The context fingerprint hashes content only (seed
+  context, content digest of kept/native membership, model boundary, config, source files) — never file
+  size/mtime markers such as `corpus_cache.db` (also the OpenAlex cache, written constantly by Today preparation
+  and by Find itself), which made unchanged seeds 409 `discovery_stale` (#275). Freshness fingerprints (`_freshness`) must be
+  `current` before work, publication and Add.
+- Only explicit Review may claim a discovery session (`explicit_review_required` 409).
 
-New plans keep one raw/tight pass and bounded domain-anchored concept groups.
-Aliases and optional `related_terms` are separate from core concepts and mandatory
-constraints; `domain` is a model proposal, never a claim of regulatory validity.
-OpenAlex receives lexical text, Europe PMC grouped Boolean alternatives, arXiv
-field-scoped terms. Each source's variants divide its existing quota; OpenAlex's
-existing two-lexical-pass cap remains. No additional provider framework.
+## Extension points and deferred seams
 
-Accounting snapshots observations before mutable family merging. Every scheduled
-variant records its query, allocation, observations and state, including zero hits.
-Best-effort leaves do not distinguish transport failure from a genuine empty
-result: those states stay `unknown`, never successful. Source family counts are
-cross-source attributed (not globally additive); type-unknown and other rejection
-counts survive persistence. Refinement stores its round's accounting separately.
-
-Simplification check: reuse provider search leaves, identifier dedup, session
-serialization and existing plan display; no competing retrieval/ranking loop.
-
-Fresh semantic/library queries use the raw user topic and questions, not the model's expanded canonical restatement. The executable two-pass lexical plan covers all bounded concepts/acronyms in its broad OR pass. A model-proposed domain absent from the raw topic is disclosed, not a mandatory anchor; unspecified context asks the user to refine the existing topic. Metadata for a broad Review does not certify a Systematic Review: request-relative exact-DOI recovery runs before unconfirmed-type exclusion.
+- New source: add a `_<name>_channel` in `federate.py` plus a `QueryPlan` field in `intent`; every hit becomes a
+  `Candidate` with `Provenance`. Parsers/HTTP stay in `integrations/`.
+- Library channel: `federate` accepts a `LibraryFinder`, but `default_deps` passes `None` until
+  `corpus_embeddings` carries DOI/arXiv columns for cross-source dedup.
+- No dedicated bioRxiv/medRxiv leaf (OpenAlex, Europe PMC and Crossref index them).
+- Reuse provider leaves, identifier dedup, session serialization and `QueryPlan.display()`; add no
+  competing retrieval/ranking loop.

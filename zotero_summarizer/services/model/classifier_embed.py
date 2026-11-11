@@ -13,6 +13,7 @@ from typing import Any, Callable  # noqa: F401
 import numpy as np  # noqa: F401
 
 from zotero_summarizer.services.model import classifier_const as const
+from zotero_summarizer.services.model._text import paper_text
 from zotero_summarizer.services.model.classifier_const import EMBEDDING_DIM, LOGGER, _SCHEMA
 
 # Process-wide cache of the loaded SPECTER2 model/tokenizer (lazy, first call).
@@ -29,9 +30,9 @@ _PREDICT_LOCK = threading.Lock()
 
 
 def _content_hash(title: str, abstract: str, authors: str = "", venue: str = "") -> str:
-    """Content plus exact base/adapter revisions; authors/venue are not encoded."""
+    """Encoded plain text plus revisions; raw HTML vectors cannot be reused."""
     blob = json.dumps([
-        title, abstract, const.SPECTER2_MODEL_NAME, const.SPECTER2_MODEL_REVISION,
+        paper_text(title), paper_text(abstract), const.SPECTER2_MODEL_NAME, const.SPECTER2_MODEL_REVISION,
         const.SPECTER2_ADAPTER_NAME, const.SPECTER2_ADAPTER_REVISION,
     ])
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -108,7 +109,7 @@ def _pair_to_text(tok: Any, title: str, abstract: str) -> str:
     """``title [SEP] abstract`` — the layout SPECTER2 was trained on (Cohan 2020).
     Authors/venue are deliberately excluded (they pushed the first tokens
     off-distribution); that signal lives in the tabular library features."""
-    parts = [p for p in [(title or "Untitled").strip(), (abstract or "").strip()] if p]
+    parts = [p for p in [paper_text(title) or "Untitled", paper_text(abstract)] if p]
     return tok.sep_token.join(parts)
 
 

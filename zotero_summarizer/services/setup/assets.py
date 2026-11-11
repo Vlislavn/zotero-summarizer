@@ -10,6 +10,7 @@ from typing import Any
 from unittest.mock import patch
 
 from zotero_summarizer.services._common import read_config
+from zotero_summarizer.settings import offline_requested
 
 
 def model_targets(config: Any) -> list[tuple[str, str, str | None]]:
@@ -36,8 +37,14 @@ def model_targets(config: Any) -> list[tuple[str, str, str | None]]:
 def cache_report(targets: list[tuple[str, str, str | None]]) -> list[dict[str, Any]]:
     from huggingface_hub import scan_cache_dir
 
+    from huggingface_hub.errors import CacheNotFound
+
     sizes = {}
-    for repo in scan_cache_dir().repos:
+    try:
+        repos = scan_cache_dir().repos
+    except CacheNotFound:  # no cache directory yet: nothing is cached
+        repos = []
+    for repo in repos:
         sizes[repo.repo_id, None] = int(repo.size_on_disk)
         for revision in repo.revisions:
             sizes[repo.repo_id, revision.commit_hash] = int(revision.size_on_disk)
@@ -82,6 +89,8 @@ def asset_report(settings: Any, *, load: bool = False) -> dict[str, Any]:
 
 
 def prefetch_assets(settings: Any) -> dict[str, Any]:
+    if offline_requested():
+        raise RuntimeError("Cannot prefetch models in offline mode; use --check for cache inventory.")
     for key in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
         os.environ.pop(key, None)
     config = read_config(settings.config_path, settings.calibration_path)

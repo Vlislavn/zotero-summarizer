@@ -80,6 +80,106 @@ def _migration_sync_resolution_index(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_review_questions(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE review_questions (
+            submission_id TEXT NOT NULL PRIMARY KEY,
+            item_key TEXT NOT NULL,
+            question TEXT NOT NULL,
+            origin TEXT NOT NULL CHECK(origin IN ('typed', 'preset')),
+            preset_id TEXT,
+            submitted_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX idx_review_questions_paper_time "
+        "ON review_questions(item_key, submitted_at, submission_id)"
+    )
+    conn.execute(
+        """CREATE TRIGGER review_questions_immutable
+           BEFORE UPDATE ON review_questions
+           BEGIN SELECT RAISE(ABORT, 'review questions are immutable'); END"""
+    )
+
+def _migration_review_note_projection(conn: sqlite3.Connection) -> None:
+    from zotero_summarizer.storage.review_note_projection_schema import apply
+
+    apply(conn)
+
+
+def _migration_saved_telegram_news(conn: sqlite3.Connection) -> None:
+    from zotero_summarizer.storage.research_feed_telegram import apply_schema
+
+    apply_schema(conn)
+
+
+def _migration_generated_write_review(conn: sqlite3.Connection) -> None:
+    from zotero_summarizer.storage.pending_actions import apply_schema
+
+    apply_schema(conn)
+
+
+def _migration_combined_live_review(conn: sqlite3.Connection) -> None:
+    from zotero_summarizer.storage import pending_actions, research_feed_telegram
+
+    columns = repositories.table_columns(conn, "pending_changes")
+    triggers = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+    pending = [name in columns for name in ("proposal_json", "audit_json", "backup_path")]
+    pending += [name in triggers for name in ("pending_generated_immutable", "pending_generated_no_delete")]
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    live = ["initial_window_committed" in repositories.table_columns(conn, "research_feed_telegram_channels")]
+    live += [name in tables for name in ("research_feed_telegram_bindings", "research_feed_telegram_account")]
+    if (any(pending) and not all(pending)) or (any(live) and not all(live)):
+        raise ValueError("incomplete experimental version-12 schema footprint")
+    if not all(pending):
+        pending_actions.apply_schema(conn)
+    if not all(live):
+        research_feed_telegram.apply_live_schema(conn)
+
+
+def _migration_telegram_conversations(conn: sqlite3.Connection) -> None:
+    from zotero_summarizer.storage.research_feed_conversations import apply_schema
+
+    apply_schema(conn)
+
+
+def _migration_verdict_reason_chips(conn: sqlite3.Connection) -> None:
+    """One-tap Today reason chips (#37): a nullable column on the verdict row.
+
+    Same shape as v7's ``training_sample_json``. NULL = no reason given; a fresh
+    verdict without chips re-writes it to NULL (the decision owns its reasons)."""
+    if "reasons_json" not in repositories.table_columns(conn, "label_verdicts"):
+        conn.execute("ALTER TABLE label_verdicts ADD COLUMN reasons_json TEXT")
+
+
+def _migration_verdict_proposal(conn: sqlite3.Connection) -> None:
+    """App proposal at decision time (#224): a nullable JSON column on the verdict row.
+
+    NULL = no snapshot (old rows, machine writes). Additive; old builds ignore it."""
+    if "proposal_json" not in repositories.table_columns(conn, "label_verdicts"):
+        conn.execute("ALTER TABLE label_verdicts ADD COLUMN proposal_json TEXT")
+
+
+def _migration_telegram_post_reasons(conn: sqlite3.Connection) -> None:
+    """One-tap 'не подошло' reasons on a Telegram post (#112): a nullable JSON column.
+
+    NULL = not rejected; ``{"chips": [...], "v": 1}`` = rejected (chips may be empty)."""
+    if "reasons_json" not in repositories.table_columns(conn, "research_feed_telegram_posts"):
+        conn.execute("ALTER TABLE research_feed_telegram_posts ADD COLUMN reasons_json TEXT")
+
+
+def _migration_rss_fetch_watermark(conn: sqlite3.Connection) -> None:
+    """Per-feed fetch progress (#161): newest confirmed-complete item time + an
+    'incomplete fetch' flag. Nullable/defaulted, so old rows keep working."""
+    cols = repositories.table_columns(conn, "rss_feeds")
+    if not cols:  # table not created yet (partial legacy DB): baseline creates it with the columns
+        return
+    if "fetch_watermark" not in cols:
+        conn.execute("ALTER TABLE rss_feeds ADD COLUMN fetch_watermark TEXT")
+    if "fetch_incomplete" not in cols:
+        conn.execute("ALTER TABLE rss_feeds ADD COLUMN fetch_incomplete INTEGER NOT NULL DEFAULT 0")
+
+
 # Append-only, version-ordered. To change the schema, add a new Migration with
 # the next version number — never edit a shipped one or add inline ALTERs.
 TRIAGE_MIGRATIONS: list[Migration] = [
@@ -91,6 +191,16 @@ TRIAGE_MIGRATIONS: list[Migration] = [
     Migration(6, "corpus_paper_identity_alignment", _migration_baseline_corpus),
     Migration(7, "review_training_sample", _migration_review_training_sample),
     Migration(8, "sync_resolution_index", _migration_sync_resolution_index),
+    Migration(9, "review_questions", _migration_review_questions),
+    Migration(10, "review_note_projection", _migration_review_note_projection),
+    Migration(11, "saved_telegram_news", _migration_saved_telegram_news),
+    Migration(12, "generated_write_review", _migration_generated_write_review),
+    Migration(13, "combined_live_telegram_review", _migration_combined_live_review),
+    Migration(14, "telegram_conversation_snapshots", _migration_telegram_conversations),
+    Migration(15, "verdict_reason_chips", _migration_verdict_reason_chips),
+    Migration(16, "telegram_post_reasons", _migration_telegram_post_reasons),
+    Migration(17, "rss_fetch_watermark", _migration_rss_fetch_watermark),
+    Migration(18, "verdict_proposal_snapshot", _migration_verdict_proposal),
 ]
 CORPUS_MIGRATIONS: list[Migration] = [
     Migration(1, "baseline_embedding_cache", _migration_baseline_corpus),
@@ -101,6 +211,16 @@ CORPUS_MIGRATIONS: list[Migration] = [
     Migration(6, "corpus_paper_identity", _migration_corpus_paper_identity),
     Migration(7, "review_training_alignment", _migration_baseline_corpus),
     Migration(8, "sync_resolution_index_alignment", _migration_baseline_corpus),
+    Migration(9, "review_questions_alignment", _migration_baseline_corpus),
+    Migration(10, "review_note_projection_alignment", _migration_baseline_corpus),
+    Migration(11, "saved_telegram_news_alignment", _migration_baseline_corpus),
+    Migration(12, "generated_write_review_alignment", _migration_baseline_corpus),
+    Migration(13, "combined_live_telegram_review_alignment", _migration_baseline_corpus),
+    Migration(14, "telegram_conversation_snapshots_alignment", _migration_baseline_corpus),
+    Migration(15, "verdict_reason_chips_alignment", _migration_baseline_corpus),
+    Migration(16, "telegram_post_reasons_alignment", _migration_baseline_corpus),
+    Migration(17, "rss_fetch_watermark_alignment", _migration_baseline_corpus),
+    Migration(18, "verdict_proposal_snapshot_alignment", _migration_baseline_corpus),
 ]
 
 # Both namespaces advance in lockstep so one reported target stays meaningful;
@@ -181,6 +301,8 @@ def migrate_existing(settings: Settings | None = None) -> MigrationResult:
     Existing ``triage_history.db`` and ``corpus_cache.db`` files are reused.
     Migrations are additive and version-gated via the ``schema_migrations``
     table, so re-running is a no-op once the DB is at ``SCHEMA_VERSION``.
+    A DB already above this build's ``SCHEMA_VERSION`` (e.g. after rolling
+    code back) is left untouched; older code ignores the extra nullable columns.
     """
     from zotero_summarizer.storage.corpus import EmbeddingCache
 

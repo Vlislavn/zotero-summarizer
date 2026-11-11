@@ -51,6 +51,42 @@ def test_rss_feed_routes_crud(tmp_path, monkeypatch) -> None:
     assert asyncio.run(rss_routes.list_feeds())["total"] == 0
 
 
+@pytest.mark.parametrize("saved_url", [
+    "https://hackernoon.com/tagged/ai-agents/feed",
+    "https://HACKERNOON.com:443/tagged/ai-agents/feed",
+])
+def test_create_only_subscription_preserves_existing_disabled_row(tmp_path, monkeypatch, saved_url) -> None:
+    monkeypatch.setattr(rss_routes, "get_settings", lambda: _settings(tmp_path))
+    monkeypatch.setattr(rss_routes, "validate_rss_url", lambda url: str(url).strip())
+    saved = asyncio.run(rss_routes.add_feed(rss_routes.RssFeedRequest(
+        name="Keep my name", url=saved_url, enabled=False,
+    )))
+
+    result = asyncio.run(rss_routes.add_feed(rss_routes.RssFeedRequest(
+        name="HackerNoon AI Agents", url="https://hackernoon.com/tagged/ai-agents/feed",
+        enabled=True, create_only=True,
+    )))
+
+    assert result == saved
+    assert asyncio.run(rss_routes.list_feeds())["total"] == 1
+
+
+def test_create_only_subscription_creates_a_new_row_and_custom_upsert_still_updates(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(rss_routes, "get_settings", lambda: _settings(tmp_path))
+    monkeypatch.setattr(rss_routes, "validate_rss_url", lambda url: str(url).strip())
+    saved = asyncio.run(rss_routes.add_feed(rss_routes.RssFeedRequest(
+        name="New subscription", url="https://example.com/feed", create_only=True,
+    )))
+    assert saved["enabled"] is True
+
+    updated = asyncio.run(rss_routes.add_feed(rss_routes.RssFeedRequest(
+        name="Custom update", url=saved["url"], enabled=False,
+    )))
+    assert updated["id"] == saved["id"]
+    assert updated["name"] == "Custom update"
+    assert updated["enabled"] is False
+
+
 def test_rss_feed_route_rejects_unsafe_url(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(rss_routes, "get_settings", lambda: _settings(tmp_path))
 
@@ -76,10 +112,11 @@ def test_rss_refresh_route_uses_bounded_app_reader(tmp_path, monkeypatch) -> Non
         def __init__(self, db_path):
             seen["db_path"] = db_path
 
-        def refresh_feeds(self, *, max_feeds, max_new_items_per_feed, per_feed_timeout):
+        def refresh_feeds(self, *, max_feeds, backfill_days, max_pages_per_feed, per_feed_timeout):
             seen.update(
                 max_feeds=max_feeds,
-                max_new_items_per_feed=max_new_items_per_feed,
+                backfill_days=backfill_days,
+                max_pages_per_feed=max_pages_per_feed,
                 per_feed_timeout=per_feed_timeout,
             )
             return {"feeds": max_feeds, "inserted": 0, "updated": 0, "errors": []}
@@ -89,7 +126,8 @@ def test_rss_refresh_route_uses_bounded_app_reader(tmp_path, monkeypatch) -> Non
         rss_routes.refresh_feeds(
             rss_routes.RssRefreshRequest(
                 max_feeds=3,
-                max_new_items_per_feed=4,
+                backfill_days=4,
+                max_pages_per_feed=2,
                 per_feed_timeout_secs=5,
             )
         )
@@ -99,6 +137,7 @@ def test_rss_refresh_route_uses_bounded_app_reader(tmp_path, monkeypatch) -> Non
     assert seen == {
         "db_path": tmp_path / "triage.db",
         "max_feeds": 3,
-        "max_new_items_per_feed": 4,
+        "backfill_days": 4,
+        "max_pages_per_feed": 2,
         "per_feed_timeout": 5.0,
     }

@@ -7,6 +7,8 @@ from typing import Any
 
 import fitz
 
+from zotero_summarizer.integrations.pdf import raw_link_uris
+
 _ARXIV_RE = re.compile(r"arXiv:\s*(\d{4}\.\d{4,5})(v\d+)?", re.IGNORECASE)
 _CAPTION_RE = re.compile(r"^\s*(Figure|Fig\.?|Table)\s+(\d+)[.:]?\s+(.+)", re.IGNORECASE)
 _SECTION_RE = re.compile(
@@ -44,16 +46,15 @@ def extract_link_uris(doc: fitz.Document) -> list[str]:
     embedded raw whitespace/newlines verbatim, so a crafted PDF could pack a fake
     "code available at github.com/attacker/x" *phrase* into one link value and, once
     the harvested URIs are newline-joined into the code-link text, smuggle an
-    availability phrase that outranks the paper's real repo. A real URL has no raw
-    whitespace — reject any that does (I/O-boundary validation, injection defense).
+    availability phrase that outranks the paper's real repo. This presentation
+    helper strips outer whitespace, rejects remaining embedded whitespace and
+    deduplicates; exact machine authority uses the neutral raw tuple instead.
     """
     seen: dict[str, None] = {}
-    for page in doc:
-        for link in page.get_links():
-            if link.get("kind") == fitz.LINK_URI:
-                uri = str(link.get("uri") or "").strip()
-                if uri and uri not in seen and not any(ch.isspace() for ch in uri):
-                    seen[uri] = None
+    for raw_uri in raw_link_uris(doc):
+        uri = raw_uri.strip()
+        if uri and uri not in seen and not any(ch.isspace() for ch in uri):
+            seen[uri] = None
     return list(seen)
 
 

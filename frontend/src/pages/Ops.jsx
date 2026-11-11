@@ -1,13 +1,32 @@
 import { useEffect, useState } from 'react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import DeploymentCard from '../components/settings/DeploymentCard.jsx';
+import CalibrationCard from '../components/settings/CalibrationCard.jsx';
+import TaskPage from '../components/settings/TaskPage.jsx';
+import { taskUrl } from '../utils/settingsNavigation.js';
 import Review from './Review.jsx';
 import Triage from './Triage.jsx';
 import Pending from './Pending.jsx';
 import AdminSection from '../components/AdminSection.jsx';
 import ModelCard from '../components/ModelCard.jsx';
+import FeedbackAnalysisCard from '../components/FeedbackAnalysisCard.jsx';
 
 function SystemOps() {
-  return <div className="space-y-4"><ModelCard /><AdminSection /></div>;
+  const location = useLocation();
+  const task = new URLSearchParams(location.search).get('task');
+  useEffect(() => {
+    if (!task && location.state?.focusTask) document.getElementById(`task-${location.state.focusTask}`)?.focus();
+  }, [task, location.state?.focusTask]);
+  if (task === 'readiness' || task === 'calibration') return <TaskPage
+    title={task === 'readiness' ? 'Check readiness' : 'Calibrate reviews'} backTo={taskUrl(location, null)} backLabel="Back to System"
+    description="Work starts only when explicitly requested. Leaving stops viewing, not server work; return to read the current status.">
+    {task === 'readiness' ? <DeploymentCard /> : <CalibrationCard />}
+  </TaskPage>;
+  return <div className="space-y-5"><h2 className="font-display text-3xl font-light text-forest-800">System</h2>
+    <nav aria-label="System maintenance" className="flex flex-wrap gap-4 text-sm text-forest-800">
+      <Link id="task-readiness" className="min-h-11 inline-flex items-center underline" to={taskUrl(location, 'readiness')}>Check readiness</Link>
+      <Link id="task-calibration" className="min-h-11 inline-flex items-center underline" to={taskUrl(location, 'calibration')}>Calibrate reviews</Link>
+    </nav><FeedbackAnalysisCard /><ModelCard /><AdminSection /></div>;
 }
 
 // Operator-only workflows share one tabbed surface; legacy deep links still work.
@@ -27,6 +46,7 @@ function readInitialTab(searchParams, hash) {
   if (fromQuery && VALID_TABS.has(fromQuery)) return fromQuery;
   const fromHash = (hash || '').replace(/^#/, '');
   if (fromHash && VALID_TABS.has(fromHash)) return fromHash;
+  if (['readiness', 'calibration'].includes(searchParams.get('task'))) return 'system';
   return DEFAULT_TAB;
 }
 
@@ -44,6 +64,7 @@ export default function Ops() {
     setTab(id);
     const next = new URLSearchParams(searchParams);
     next.set('tab', id);
+    if (id !== tab) next.delete('task');
     navigate({ search: `?${next.toString()}` }, { replace: true });
   }
 

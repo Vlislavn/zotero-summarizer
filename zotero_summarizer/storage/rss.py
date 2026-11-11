@@ -5,7 +5,16 @@ import json
 import sqlite3
 from typing import Any
 
+import httpx
+
 from zotero_summarizer.storage.feed_identity import stable_feed_key_from_item
+
+
+def _subscription_url_key(url: str) -> str:
+    try:
+        return str(httpx.URL(url.strip()).copy_with(fragment=None))
+    except httpx.InvalidURL:
+        return url.strip()
 
 
 def list_rss_feeds(
@@ -25,6 +34,11 @@ def list_rss_feeds(
     return [dict(row) for row in rows]
 
 
+def count_rss_items_by_feed(conn: sqlite3.Connection) -> dict[int, int]:
+    rows = conn.execute("SELECT rss_feed_id, COUNT(*) AS n FROM rss_items GROUP BY rss_feed_id").fetchall()
+    return {int(row["rss_feed_id"]): int(row["n"]) for row in rows}
+
+
 def upsert_rss_feed(
     conn: sqlite3.Connection,
     *,
@@ -33,6 +47,7 @@ def upsert_rss_feed(
     enabled: bool = True,
     source: str = "app",
     imported_zotero_library_id: int | None = None,
+    create_only: bool = False,
 ) -> int:
     safe_name = str(name or "").strip()
     safe_url = str(url or "").strip()
@@ -40,6 +55,13 @@ def upsert_rss_feed(
         raise ValueError("feed name is required")
     if not safe_url:
         raise ValueError("feed url is required")
+    if create_only:
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        key = _subscription_url_key(safe_url)
+        for row in conn.execute("SELECT id, url FROM rss_feeds"):
+            if _subscription_url_key(row["url"]) == key:
+                return int(row["id"])
     conn.execute(
         """
         INSERT INTO rss_feeds (name, url, enabled, source, imported_zotero_library_id)
@@ -114,18 +136,27 @@ def record_rss_fetch_result(
     error: str | None,
     etag: str | None = None,
     modified: str | None = None,
+    watermark: str | None = None,
+    incomplete: bool | None = None,
 ) -> None:
+    """Stamp a fetch. ``watermark`` only moves forward and only when the caller
+    confirmed the interval complete; ``incomplete=None`` leaves the flag as is
+    (a hard failure must not clear an earlier incomplete state)."""
     conn.execute(
         """
         UPDATE rss_feeds
         SET last_fetched_at = datetime('now'),
-            last_error = ?,
-            etag = COALESCE(?, etag),
-            modified = COALESCE(?, modified),
+            last_error = :error,
+            etag = COALESCE(:etag, etag),
+            modified = COALESCE(:modified, modified),
+            fetch_watermark = CASE WHEN :wm IS NOT NULL AND (fetch_watermark IS NULL OR :wm > fetch_watermark)
+                                   THEN :wm ELSE fetch_watermark END,
+            fetch_incomplete = COALESCE(:incomplete, fetch_incomplete),
             updated_at = datetime('now')
-        WHERE id = ?
+        WHERE id = :id
         """,
-        (error, etag, modified, int(feed_id)),
+        {"error": error, "etag": etag, "modified": modified, "wm": watermark,
+         "incomplete": None if incomplete is None else int(incomplete), "id": int(feed_id)},
     )
 
 
@@ -134,7 +165,13 @@ def upsert_rss_item(
     *,
     rss_feed_id: int,
     item: dict[str, Any],
-) -> tuple[int, bool]:
+) -> tuple[int, str]:
+    """Store one feed item; returns ``(id, "inserted" | "updated" | "unchanged")``.
+
+    An existing row is rewritten only when the incoming content differs from what is stored
+    (a missing incoming value keeps the old one), so re-fetching an identical feed is a no-op.
+    An item keeps its FIRST feed (``rss_feed_id``, ``publication_title``): the same key arriving from
+    another feed neither moves it nor counts as a change."""
     stable = str(item.get("stable_feed_key") or stable_feed_key_from_item(item) or "").strip()
     if not stable:
         raise ValueError("rss item has no stable feed key")
@@ -143,6 +180,7 @@ def upsert_rss_item(
         "SELECT id FROM rss_items WHERE stable_feed_key = ?",
         (stable,),
     ).fetchone()
+    changes_before = conn.total_changes
     conn.execute(
         """
         INSERT INTO rss_items (
@@ -152,7 +190,6 @@ def upsert_rss_item(
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(stable_feed_key) DO UPDATE SET
-            rss_feed_id = excluded.rss_feed_id,
             guid = COALESCE(excluded.guid, rss_items.guid),
             entry_id = COALESCE(excluded.entry_id, rss_items.entry_id),
             title = excluded.title,
@@ -162,12 +199,24 @@ def upsert_rss_item(
             doi = COALESCE(excluded.doi, rss_items.doi),
             arxiv_id = COALESCE(excluded.arxiv_id, rss_items.arxiv_id),
             publication_date = COALESCE(excluded.publication_date, rss_items.publication_date),
-            publication_title = COALESCE(excluded.publication_title, rss_items.publication_title),
+            publication_title = COALESCE(rss_items.publication_title, excluded.publication_title),
             authors = COALESCE(excluded.authors, rss_items.authors),
             item_type = excluded.item_type,
             raw_json = COALESCE(excluded.raw_json, rss_items.raw_json),
             fetched_at = datetime('now'),
             updated_at = datetime('now')
+        WHERE rss_items.title IS NOT excluded.title
+           OR rss_items.item_type IS NOT excluded.item_type
+           OR (excluded.guid IS NOT NULL AND rss_items.guid IS NOT excluded.guid)
+           OR (excluded.entry_id IS NOT NULL AND rss_items.entry_id IS NOT excluded.entry_id)
+           OR (excluded.abstract IS NOT NULL AND rss_items.abstract IS NOT excluded.abstract)
+           OR (excluded.url IS NOT NULL AND rss_items.url IS NOT excluded.url)
+           OR (excluded.canonical_url IS NOT NULL AND rss_items.canonical_url IS NOT excluded.canonical_url)
+           OR (excluded.doi IS NOT NULL AND rss_items.doi IS NOT excluded.doi)
+           OR (excluded.arxiv_id IS NOT NULL AND rss_items.arxiv_id IS NOT excluded.arxiv_id)
+           OR (excluded.publication_date IS NOT NULL AND rss_items.publication_date IS NOT excluded.publication_date)
+           OR (excluded.authors IS NOT NULL AND rss_items.authors IS NOT excluded.authors)
+           OR (excluded.raw_json IS NOT NULL AND rss_items.raw_json IS NOT excluded.raw_json)
         """,
         (
             int(rss_feed_id),
@@ -193,7 +242,8 @@ def upsert_rss_item(
     ).fetchone()
     if row is None:
         raise RuntimeError(f"rss_items upsert failed for {stable!r}")
-    return int(row["id"]), before is None
+    state = "inserted" if before is None else "updated" if conn.total_changes > changes_before else "unchanged"
+    return int(row["id"]), state
 
 
 def list_rss_items(
@@ -250,6 +300,7 @@ def import_zotero_feeds(
     feed_groups: list[dict[str, Any]],
 ) -> dict[str, int]:
     imported = 0
+    added = 0
     skipped = 0
     for feed in feed_groups:
         url = str(feed.get("url") or "").strip()
@@ -257,6 +308,7 @@ def import_zotero_feeds(
         if not url or not name:
             skipped += 1
             continue
+        added += conn.execute("SELECT 1 FROM rss_feeds WHERE url = ?", (url,)).fetchone() is None
         upsert_rss_feed(
             conn,
             name=name,
@@ -266,7 +318,7 @@ def import_zotero_feeds(
             imported_zotero_library_id=int(feed.get("library_id") or 0) or None,
         )
         imported += 1
-    return {"imported": imported, "skipped": skipped}
+    return {"imported": imported, "added": added, "skipped": skipped}
 
 
 def get_rss_item_by_stable_key(

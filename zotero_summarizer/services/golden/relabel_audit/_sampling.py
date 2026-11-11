@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import random
 
-from zotero_summarizer.services._common import load_golden_rows
+from zotero_summarizer.services.golden.csv_store import load_golden_rows
 from zotero_summarizer.services.golden.relabel_audit._constants import (
     AGE_BUCKET_EDGES,
     AGE_BUCKET_NAMES,

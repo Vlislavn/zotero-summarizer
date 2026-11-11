@@ -1,0 +1,839 @@
+{
+  "note": "67 explicit finding members, not67independent bugs; duplicates/fixture mismatches/noncanonical and unsubstantiated claims retained separately",
+  "findings": [
+    {
+      "id": "audit-42-navbar-test-copy-drift",
+      "lane": "audit-42-sync-status",
+      "severity": "P3",
+      "source": "frontend/src/components/NavBar.test.jsx",
+      "disposition": "fixture_corrected",
+      "reason": "Literal-copy drift no longer prevents explicit unavailable/retry/loopback-boundary controls from executing; no product-copy reduction to satisfy a test.",
+      "source_and_regressions": [
+        "frontend/src/components/NavBar.test.jsx"
+      ]
+    },
+    {
+      "id": "native-editor-free-tag-draft-lost-on-uncertain-write",
+      "lane": "audit-38-native-editor",
+      "severity": "P2",
+      "source": "frontend/src/components/paper/TagOfInterestEditor.jsx",
+      "disposition": "fixed",
+      "reason": "Same-item request-owned tag draft survives uncertain/refused/declined-force outcomes; unchanged submitted text clears only on confirmed applied/no-op receipt. Newer text and retired callbacks fenced; no recursive force/replay.",
+      "source_and_regressions": [
+        "frontend/src/components/paper/TagOfInterestEditor.jsx",
+        "frontend/src/components/paper/TagOfInterestEditor.test.jsx"
+      ]
+    },
+    {
+      "id": "AUD14-02",
+      "lane": "audit-14-today-review",
+      "severity": "P2",
+      "source": "frontend/src/components/paper/review/OrthogonalSignals.jsx",
+      "disposition": "already_absent",
+      "reason": "Current shared isSupportedGoal predicate serves both headline and goal tiles; the separate goalLabel divergence is absent. No claim that the old omitted-field API response was captured.",
+      "source_and_regressions": [
+        "frontend/src/components/paper/review/briefModel.js",
+        "frontend/src/components/paper/review/briefModel.test.js"
+      ]
+    },
+    {
+      "id": "AUD14-01",
+      "lane": "audit-14-today-review",
+      "severity": "P2",
+      "source": "frontend/src/components/paper/review/PaperReview.jsx",
+      "disposition": "fixed",
+      "reason": "Folded remainder does not call unknown retrieval a confirmed miss; individual GoalTile evidence states retained, not merged into a negative judgment.",
+      "source_and_regressions": [
+        "frontend/src/components/paper/review/PaperReview.jsx",
+        "frontend/src/components/paper/review/PaperReview.reading.test.jsx"
+      ]
+    },
+    {
+      "id": "UA-01-unsaved-login-url",
+      "lane": "audit-10-university-access",
+      "severity": "P2",
+      "source": "frontend/src/components/settings/UniversityAccessPanel.jsx",
+      "disposition": "fixed",
+      "reason": "Login destination requires relevant acknowledged saved university-access values and no Save in progress; unrelated dirty goals do not block it. No browser account launched.",
+      "source_and_regressions": [
+        "frontend/src/components/settings/UniversityAccessPanel.jsx",
+        "frontend/src/pages/Settings.test.jsx"
+      ]
+    },
+    {
+      "id": "audit-42-offline-hook-fixture-mismatch",
+      "lane": "audit-42-sync-status",
+      "severity": "P2",
+      "source": "frontend/src/hooks/usePaperReview.offline.test.jsx",
+      "disposition": "fixture_corrected",
+      "reason": "Offline cached fast path and actual received HTTP403 are separate countercontrols; a forced-offline setup no longer pretends its deferred network request executed.",
+      "source_and_regressions": [
+        "frontend/src/hooks/usePaperReview.offline.test.jsx",
+        "frontend/src/api/goldenApi.questions.test.js"
+      ]
+    },
+    {
+      "id": "audit-22-F2",
+      "lane": "audit-22-review-runner",
+      "severity": "P2",
+      "source": "frontend/src/pages/PaperReviewPage.jsx",
+      "disposition": "fixed",
+      "reason": "Explicit current-paper status GET retry remains available beside valid cached review; generation disabled during unknown/checking, idle retry latches autoRun off. Full/compact presenters use same hook.",
+      "source_and_regressions": [
+        "frontend/src/hooks/useDeepReviewRunner.js",
+        "frontend/src/hooks/useDeepReviewRunner.test.jsx",
+        "frontend/src/pages/PaperReviewPage.test.jsx"
+      ]
+    },
+    {
+      "id": "audit28-01-evidence-horizontal-overflow",
+      "lane": "audit-28-discovery-session",
+      "severity": "P2",
+      "source": "frontend/src/pages/Search.jsx",
+      "disposition": "fixed",
+      "reason": "Reuse anywhere prose wrapping plus shrinking card/zero-min grid; full IDs/locators/quotes retained. Actual390/1440 built geometry/copy controls pass; not merely clipped overflow.",
+      "source_and_regressions": [
+        "frontend/src/pages/Search.jsx",
+        "tests/test_discovery_browser.py"
+      ]
+    },
+    {
+      "id": "audit-33-search-polling-1",
+      "lane": "audit-33-search-polling",
+      "severity": "P2",
+      "source": "frontend/src/pages/Search.jsx",
+      "disposition": "fixed",
+      "reason": "Old poll AND direct retry GET generations retire on ACK. Same-session retry preserves already-pending sibling Add owners; fresh polling reaches terminal state, no extra writes. Actual280/281 RED then28279/79; final973 includes same regressions.",
+      "source_and_regressions": [
+        "frontend/src/pages/Search.jsx",
+        "frontend/src/pages/Search.test.jsx",
+        "frontend/src/searchPolling.js"
+      ]
+    },
+    {
+      "id": "audit-37-pending-F1",
+      "lane": "audit-37-pending",
+      "severity": "P2",
+      "source": "frontend/src/pages/pendingComponents.jsx",
+      "disposition": "fixed",
+      "reason": "Five editor field types have native htmlFor/id association, unique per captured change; selection/confirmation/native-write authority unchanged.",
+      "source_and_regressions": [
+        "frontend/src/pages/pendingComponents.jsx",
+        "frontend/src/pages/Pending.test.jsx"
+      ]
+    },
+    {
+      "id": "audit-45-F1",
+      "lane": "audit-45-remote-security",
+      "severity": "P2",
+      "source": "tests/test_application_browser_live.py",
+      "disposition": "verification_boundary_corrected",
+      "reason": "Patchright fulfilment is NOT real CORS transport evidence. Built app fixture used for rendering/ASGI state only; current direct gateway/native transport and Vite AST-to-ASGI contracts carry security assertions. No product CORS vulnerability inferred or browser synthesis hidden.",
+      "source_and_regressions": [
+        "tests/test_application_browser_live.py",
+        "tests/test_gateway_real_transport.py",
+        "tests/test_vite_proxy_contract.py"
+      ]
+    },
+    {
+      "id": "A29-F1",
+      "lane": "audit-29-discovery-add",
+      "severity": "P2",
+      "source": "tests/test_application_browser_live.py",
+      "disposition": "fixture_corrected",
+      "reason": "Actual backed-up owned native writer/readback used instead of bare Mock receipt; distinct same-title candidate identities/authors, two explicit Adds and reload remain checked. Uncertainty/recovery remains separate.",
+      "source_and_regressions": [
+        "tests/test_application_browser_live.py",
+        "tests/test_search_materialize_recovery.py"
+      ]
+    },
+    {
+      "id": "audit-31-search-browser-writer-fixture",
+      "lane": "audit-31-search-order",
+      "severity": "P2",
+      "source": "tests/test_application_browser_live.py",
+      "disposition": "fixture_corrected",
+      "reason": "Actual backed-up owned native writer/readback used instead of bare Mock receipt; distinct same-title candidate identities/authors, two explicit Adds and reload remain checked. Uncertainty/recovery remains separate.",
+      "source_and_regressions": [
+        "tests/test_application_browser_live.py",
+        "tests/test_search_materialize_recovery.py"
+      ]
+    },
+    {
+      "id": "audit-33-search-polling-2",
+      "lane": "audit-33-search-polling",
+      "severity": "P2",
+      "source": "tests/test_application_browser_live.py",
+      "disposition": "fixture_corrected",
+      "reason": "Actual backed-up owned native writer/readback used instead of bare Mock receipt; distinct same-title candidate identities/authors, two explicit Adds and reload remain checked. Uncertainty/recovery remains separate.",
+      "source_and_regressions": [
+        "tests/test_application_browser_live.py",
+        "tests/test_search_materialize_recovery.py"
+      ]
+    },
+    {
+      "id": "AUDIT30-FIXTURE-001",
+      "lane": "audit-30-search-query",
+      "severity": "P2",
+      "source": "tests/test_application_browser_live.py",
+      "disposition": "fixture_corrected",
+      "reason": "Actual backed-up owned native writer/readback used instead of bare Mock receipt; distinct same-title candidate identities/authors, two explicit Adds and reload remain checked. Uncertainty/recovery remains separate.",
+      "source_and_regressions": [
+        "tests/test_application_browser_live.py",
+        "tests/test_search_materialize_recovery.py"
+      ]
+    },
+    {
+      "id": "audit28-02-original-browser-membership-fixture-mismatch",
+      "lane": "audit-28-discovery-session",
+      "severity": "P2",
+      "source": "tests/test_discovery_browser.py",
+      "disposition": "fixture_corrected",
+      "reason": "Positive recommendation fixture establishes native miss; unknown membership stays retained/expandable, not converted into new-paper recommendation. Both native disclosure and full retained pool preserved.",
+      "source_and_regressions": [
+        "tests/test_discovery_browser.py",
+        "frontend/src/pages/Search.discovery.test.jsx"
+      ]
+    },
+    {
+      "id": "audit-27-browser-retained-candidate-hidden-until-expanded",
+      "lane": "audit-27-discovery-admission",
+      "severity": "P3",
+      "source": "tests/test_discovery_browser.py",
+      "disposition": "fixture_corrected",
+      "reason": "Positive recommendation fixture establishes native miss; unknown membership stays retained/expandable, not converted into new-paper recommendation. Both native disclosure and full retained pool preserved.",
+      "source_and_regressions": [
+        "tests/test_discovery_browser.py",
+        "frontend/src/pages/Search.discovery.test.jsx"
+      ]
+    },
+    {
+      "id": "A49-03",
+      "lane": "audit-49-experiments",
+      "severity": "P2",
+      "source": "tests/test_interpretation_producer.py",
+      "disposition": "fixture_corrected",
+      "reason": "Original interpretation obligations reconciled to frozen explicit-only actual producer/qualification/consumer contracts; no class alias or blanket collection waiver. Base/private currentness and optional drift controls retained.",
+      "source_and_regressions": [
+        "tests/test_interpretation_producer.py",
+        "tests/test_interpretation_binding.py",
+        "tests/test_interpretation_experiment_review_fleet.py"
+      ]
+    },
+    {
+      "id": "audit50-unsafe-legacy-backup-oracles",
+      "lane": "audit-50-full-regression",
+      "severity": "P2",
+      "source": "tests/test_mark_feed_item_read.py",
+      "disposition": "fixture_corrected",
+      "reason": "Unsafe no-backup oracle replaced by actual prewrite/rollback/capacity-retention contract; no removal of required recovery snapshot.",
+      "source_and_regressions": [
+        "tests/test_mark_feed_item_read.py",
+        "tests/test_raw_feed_backup.py"
+      ]
+    },
+    {
+      "id": "audit-37-pending-F2",
+      "lane": "audit-37-pending",
+      "severity": "P2",
+      "source": "tests/test_pending_confirmation.py",
+      "disposition": "fixture_corrected",
+      "reason": "Pending fixture consumes neutral lower-level native helper, not whole obsolete generated-review test module; captured approval/currentness/partial/uncertain safety assertions execute.",
+      "source_and_regressions": [
+        "tests/test_pending_confirmation.py",
+        "tests/_zotero_fixtures.py"
+      ]
+    },
+    {
+      "id": "audit-26-F1",
+      "lane": "audit-26-related-consent",
+      "severity": "P2",
+      "source": "tests/test_related_library.py",
+      "disposition": "fixture_corrected",
+      "reason": "Current RelatedPapers/explicit availability/context owners used; deleted obsolete component stays deleted. Actual owned DB/PDF/native same-title Add plus consent/private projection checks retained.",
+      "source_and_regressions": [
+        "tests/test_related_library.py",
+        "tests/test_related_client_consent.py",
+        "tests/test_related_session_projection.py"
+      ]
+    },
+    {
+      "id": "AUDIT12-TEST-SETUP-001",
+      "lane": "audit-12-today-add",
+      "severity": "P2",
+      "source": "tests/test_review_question_add_browser.py",
+      "disposition": "fixture_corrected",
+      "reason": "Owned PDF/current real review producer/verifier/binder fixture replaces absent helper; explicit Add browser journey reaches native eligibility rather than setup AttributeError.",
+      "source_and_regressions": [
+        "tests/test_review_question_add_browser.py",
+        "tests/_reading_contract.py"
+      ]
+    },
+    {
+      "id": "audit50-obsolete-setup-policy-fixtures",
+      "lane": "audit-50-full-regression",
+      "severity": "P2",
+      "source": "tests/test_setup_load_admission16.py",
+      "disposition": "fixture_corrected",
+      "reason": "Canonical assess_setup_load(provider,model), strict selected policy-file I/O and real native request-finality controls replace retired operator kwargs. UNKNOWN remains before credentials without executing-runtime evidence; not synthetic hardware approval.",
+      "source_and_regressions": [
+        "tests/test_setup_load_admission16.py",
+        "tests/test_setup_load_policy_io.py",
+        "tests/test_setup_request_transport.py"
+      ]
+    },
+    {
+      "id": "A49-02",
+      "lane": "audit-49-experiments",
+      "severity": "P2",
+      "source": "tests/test_support_decision_contract.py",
+      "disposition": "fixture_corrected",
+      "reason": "Support/Priority/Collection old obligations ported individually to actual frozen transport/workload/recording contracts; actual remaining-budget/native telemetry/ACK boundaries preserved, not old aliases.",
+      "source_and_regressions": [
+        "tests/test_support_decision_contract.py",
+        "tests/test_priority_decision_contract.py",
+        "tests/test_collection_decision_contract.py"
+      ]
+    },
+    {
+      "id": "AUD14-03",
+      "lane": "audit-14-today-review",
+      "severity": "P3",
+      "source": "tests/test_today_selection_browser.py",
+      "disposition": "fixed",
+      "reason": "Contrast helpers require nonempty visible samples and retained measured ratios; empty arrays are not a GREEN. Current Today/Reading built controls execute; selected contrast fixes retain raw evidence and disclosure.",
+      "source_and_regressions": [
+        "tests/test_today_selection_browser.py",
+        "tests/test_review_reading_browser.py"
+      ]
+    },
+    {
+      "id": "audit50-interpretation-native-render-contract",
+      "lane": "audit-50-full-regression",
+      "severity": "P1",
+      "source": "zotero_summarizer/services/faithbench/_interpretation.py",
+      "disposition": "fixed",
+      "reason": "Shared qualified optional Finding/Scope/Unproven projection reaches brief AND note builders; complete assigned artifacts publish. Ordinary output/authority unchanged, optional experimental data never becomes default write consent.",
+      "source_and_regressions": [
+        "zotero_summarizer/services/faithbench/_interpretation.py",
+        "zotero_summarizer/services/zotero/_notes.py",
+        "tests/test_interpretation_experiment_review_fleet.py"
+      ]
+    },
+    {
+      "id": "audit-22-F1",
+      "lane": "audit-22-review-runner",
+      "severity": "P1",
+      "source": "zotero_summarizer/services/library/deep_review.py",
+      "disposition": "fixed",
+      "reason": "Context-setup failure cannot replace active keyed worker with error and admit duplicate submission; existing job update preserves running owner atomically.",
+      "source_and_regressions": [
+        "zotero_summarizer/services/library/deep_review.py",
+        "tests/test_deep_review_concurrency.py"
+      ]
+    },
+    {
+      "id": "audit50-offline-prefetch-admission",
+      "lane": "audit-50-full-regression",
+      "severity": "P1",
+      "source": "zotero_summarizer/services/setup/assets.py",
+      "disposition": "fixed",
+      "reason": "Strict offline refuses prefetch before config/acquisition/flag mutation; nonloading inventory remains available. Sentinel controls, not actual downloads.",
+      "source_and_regressions": [
+        "zotero_summarizer/services/setup/assets.py",
+        "tests/test_offline.py"
+      ]
+    },
+    {
+      "id": "A49-01",
+      "lane": "audit-49-experiments",
+      "severity": "P1",
+      "source": "zotero_summarizer/services/zotero/_notes.py",
+      "disposition": "fixed",
+      "reason": "Shared qualified optional Finding/Scope/Unproven projection reaches brief AND note builders; complete assigned artifacts publish. Ordinary output/authority unchanged, optional experimental data never becomes default write consent.",
+      "source_and_regressions": [
+        "zotero_summarizer/services/faithbench/_interpretation.py",
+        "zotero_summarizer/services/zotero/_notes.py",
+        "tests/test_interpretation_experiment_review_fleet.py"
+      ]
+    },
+    {
+      "id": "A17-01",
+      "lane": "audit-17-library-rescore",
+      "severity": "P2",
+      "source": "frontend/src/components/AdminSection.jsx",
+      "disposition": "fixed",
+      "reason": "Status error stops interval even with retained running DTO; explicit same-job Retry status never repeats label refresh/retraining. Unknown initial status also blocks duplicate start; not real training-quality verification.",
+      "source_and_regressions": [
+        "frontend/src/components/AdminSection.jsx",
+        "frontend/src/components/AdminSection.test.jsx"
+      ]
+    },
+    {
+      "id": "PAPERQ-02-durable-question-does-not-reach-ask",
+      "lane": "audit-23-paper-questions",
+      "severity": "P2",
+      "source": "frontend/src/components/library/AskPaperBox.jsx",
+      "disposition": "fixed",
+      "reason": "Actual saved-question/Ask/mirror receipts traced through full-page refresh, sync-first/direct and lost-response paths. Stable item/request delivery lifetime retains confirmed ACK and continuation or typed failure; capture independent of answer.",
+      "source_and_regressions": [
+        "frontend/src/components/library/AskPaperBox.jsx",
+        "tests/test_review_question_browser.py",
+        "tests/test_review_question_lost_response_browser.py"
+      ]
+    },
+    {
+      "id": "P19-03",
+      "lane": "audit-19-paper-reader",
+      "severity": "P2",
+      "source": "frontend/src/components/library/PaperReaderPane.jsx",
+      "disposition": "fixed",
+      "reason": "Current source/render identity and audited named figures govern serving and UI. Per-item/render stale attempt latch; captured mutation target prevents late A callback invalidating B. Actual273/274 REDs then275 GREEN; no saved-state rewriting on GET.",
+      "source_and_regressions": [
+        "zotero_summarizer/services/library/paper_render.py",
+        "frontend/src/components/library/PaperReaderPane.jsx",
+        "tests/test_paper_output_paths.py",
+        "frontend/src/components/library/PaperReaderPane.test.jsx"
+      ]
+    },
+    {
+      "id": "P19-01",
+      "lane": "audit-19-paper-reader",
+      "severity": "P2",
+      "source": "frontend/src/components/library/PaperReaderPane.jsx",
+      "disposition": "fixed",
+      "reason": "Current source/render identity and audited named figures govern serving and UI. Per-item/render stale attempt latch; captured mutation target prevents late A callback invalidating B. Actual273/274 REDs then275 GREEN; no saved-state rewriting on GET.",
+      "source_and_regressions": [
+        "zotero_summarizer/services/library/paper_render.py",
+        "frontend/src/components/library/PaperReaderPane.jsx",
+        "tests/test_paper_output_paths.py",
+        "frontend/src/components/library/PaperReaderPane.test.jsx"
+      ]
+    },
+    {
+      "id": "PAPER-POLICY-05",
+      "lane": "audit-20-paper-policy",
+      "severity": "P3",
+      "source": "frontend/src/components/paper/PaperDetailView/index.test.jsx",
+      "disposition": "fixture_corrected",
+      "reason": "Full offlineStore replacement exports actual production-hook imports so intended policy assertions execute, no product alias.",
+      "source_and_regressions": [
+        "frontend/src/components/paper/PaperDetailView/index.test.jsx"
+      ]
+    },
+    {
+      "id": "PAPER-POLICY-02",
+      "lane": "audit-20-paper-policy",
+      "severity": "P2",
+      "source": "frontend/src/components/paper/review/PaperReview.jsx",
+      "disposition": "fixed",
+      "reason": "Folded remainder does not call unknown retrieval a confirmed miss; individual GoalTile evidence states retained, not merged into a negative judgment.",
+      "source_and_regressions": [
+        "frontend/src/components/paper/review/PaperReview.jsx",
+        "frontend/src/components/paper/review/PaperReview.reading.test.jsx"
+      ]
+    },
+    {
+      "id": "MANUAL-NOTES-001",
+      "lane": "audit-25-manual-notes",
+      "severity": "P2",
+      "source": "frontend/src/components/paper/review/ReviewNotes.jsx",
+      "disposition": "not_a_canonical_requirement",
+      "reason": "Canonical notes feature promises Save and independent durable question/manual-note state, plus dirty-navigation cancel/discard already verified. Auditor-added Cancel/Delete CRUD itinerary is not an existing promised delete API; deliberately no new destructive workflow.",
+      "source_and_regressions": [
+        "docs/features.md",
+        "frontend/src/pages/PaperReviewPage.test.jsx",
+        "frontend/src/components/paper/review/ReviewNotes.jsx"
+      ]
+    },
+    {
+      "id": "PAPER-POLICY-01",
+      "lane": "audit-20-paper-policy",
+      "severity": "P2",
+      "source": "frontend/src/components/paper/review/briefModel.js",
+      "disposition": "fixed",
+      "reason": "Compact labels cover supplied/applicable type-specific rubric criteria; UI does not recompute scientific grade or invent absent criteria.",
+      "source_and_regressions": [
+        "frontend/src/components/paper/review/briefModel.js",
+        "frontend/src/components/paper/review/briefModel.test.js"
+      ]
+    },
+    {
+      "id": "routing-custom-reasoning-ui-displays-default-for-unrecognized-wire-key",
+      "lane": "audit-09-provider-routing",
+      "severity": "P3",
+      "source": "frontend/src/components/settings/ActiveModelsSummary.jsx",
+      "disposition": "not_substantiated",
+      "reason": "Original report explicitly source-only and possibly interpretive. Current badge reports typed effort, then recognized legacy enable_thinking, otherwise Default/per-call; no captured persisted/custom native wire or actual model behavior establishes claimed mismatch. No unsupported claim of effective reasoning measurement, speculative patch or model-bound conclusion.",
+      "source_and_regressions": [
+        "frontend/src/components/settings/ActiveModelsSummary.jsx",
+        "tests/test_provider_routing.py"
+      ]
+    },
+    {
+      "id": "RSS-HEALTH-MOCK-MISSING-CANCELDOCTOR",
+      "lane": "audit-06-rss-crud",
+      "severity": "P2",
+      "source": "frontend/src/components/settings/RssFeedsSection.health.test.jsx",
+      "disposition": "fixture_corrected",
+      "reason": "Mock modules implement actual cancelDoctor/DeploymentCard contracts; no nonexistent parent callbacks. Real page mounts and stale-health/ambiguous-save/recovery assertions execute.",
+      "source_and_regressions": [
+        "frontend/src/components/settings/RssFeedsSection.health.test.jsx",
+        "frontend/src/pages/Settings.doctor.test.jsx",
+        "frontend/src/pages/Settings.test.jsx"
+      ]
+    },
+    {
+      "id": "today-unconfigured-copy-implies-llm-required",
+      "lane": "audit-15-today-triage",
+      "severity": "P3",
+      "source": "frontend/src/components/setup/NotConfiguredCard.jsx",
+      "disposition": "fixed",
+      "reason": "One existing nudge permits AI or ML-only; no false universal LLM-key prerequisite. Actual268RED,26934/34; no new mode/store/action.",
+      "source_and_regressions": [
+        "frontend/src/components/setup/NotConfiguredCard.jsx",
+        "frontend/src/pages/Today.test.jsx"
+      ]
+    },
+    {
+      "id": "LOCAL-SETUP-MANUAL-MODEL",
+      "lane": "audit-03-setup-local",
+      "severity": "P2",
+      "source": "frontend/src/components/setup/StepConnectLlm.jsx",
+      "disposition": "fixed",
+      "reason": "Known existing endpoint model remains editable before nonloading inventory; incompatible saved local profile cannot advance as newly eligible setup. Saving is not runtime or hardware certification.",
+      "source_and_regressions": [
+        "frontend/src/components/setup/StepConnectLlm.jsx",
+        "frontend/src/pages/SetupFlow.jsx",
+        "frontend/src/pages/SetupFlow.local.test.jsx"
+      ]
+    },
+    {
+      "id": "A43-001",
+      "lane": "audit-43-accessibility",
+      "severity": "P2",
+      "source": "frontend/src/components/setup/StepProgress.jsx",
+      "disposition": "fixed",
+      "reason": "Bound the sr-only progress state in its containing block, preserving accessible state while actual320/390 browser countercontrols remove horizontal overflow.",
+      "source_and_regressions": [
+        "frontend/src/components/setup/StepProgress.jsx",
+        "tests/test_setup_surface_browser.py"
+      ]
+    },
+    {
+      "id": "setup-progress-sr-only-mobile-overflow",
+      "lane": "audit-02-setup-no-llm",
+      "severity": "P3",
+      "source": "frontend/src/components/setup/StepProgress.jsx",
+      "disposition": "fixed",
+      "reason": "Bound the sr-only progress state in its containing block, preserving accessible state while actual320/390 browser countercontrols remove horizontal overflow.",
+      "source_and_regressions": [
+        "frontend/src/components/setup/StepProgress.jsx",
+        "tests/test_setup_surface_browser.py"
+      ]
+    },
+    {
+      "id": "PAPERQ-03-acknowledged-question-mirror-renders-unknown",
+      "lane": "audit-23-paper-questions",
+      "severity": "P2",
+      "source": "frontend/src/hooks/useNoteDelivery.js",
+      "disposition": "fixed",
+      "reason": "Actual saved-question/Ask/mirror receipts traced through full-page refresh, sync-first/direct and lost-response paths. Stable item/request delivery lifetime retains confirmed ACK and continuation or typed failure; capture independent of answer.",
+      "source_and_regressions": [
+        "frontend/src/components/library/AskPaperBox.jsx",
+        "tests/test_review_question_browser.py",
+        "tests/test_review_question_lost_response_browser.py"
+      ]
+    },
+    {
+      "id": "LIB-BATCH-KEY-LOADING-001",
+      "lane": "audit-18-library-batch",
+      "severity": "P2",
+      "source": "frontend/src/pages/AnnotationVerdict.jsx",
+      "disposition": "fixed",
+      "reason": "Priority keyboard writes require successful matching selected detail; loading/error/foreign data cannot erase saved rationale. Existing navigation and overwrite confirmation retained; actual276RED,27749/49.",
+      "source_and_regressions": [
+        "frontend/src/pages/AnnotationVerdict.jsx",
+        "frontend/src/pages/AnnotationVerdict.keyboard.test.jsx"
+      ]
+    },
+    {
+      "id": "A43-002",
+      "lane": "audit-43-accessibility",
+      "severity": "P3",
+      "source": "frontend/src/pages/Ops.jsx",
+      "disposition": "fixed",
+      "reason": "Native persistent Search labels and System h2 only, no new controls/requests/state. Actual28921/2FAIL before5line markup fix; final973/973 and builtDOM both390/1440 demonstrate associated visible labels after typing, hierarchy and no overflow; four PNGs parent-read.",
+      "source_and_regressions": [
+        "frontend/src/pages/Search.jsx",
+        "frontend/src/pages/Ops.jsx",
+        "frontend/src/pages/Search.test.jsx",
+        "frontend/src/pages/Ops.test.jsx"
+      ]
+    },
+    {
+      "id": "PAPERQ-01-source-gated-question-capture",
+      "lane": "audit-23-paper-questions",
+      "severity": "P2",
+      "source": "frontend/src/pages/PaperReviewPage.jsx",
+      "disposition": "fixed",
+      "reason": "Removed complete-composer canAsk gate from page/rail; no-PDF/no-render capture uses same durable owner, while raw-PDF answer modes still require PDF. Actual page regression, not forced canAsk=true helper.",
+      "source_and_regressions": [
+        "frontend/src/pages/PaperReviewPage.jsx",
+        "frontend/src/components/paper/review/ActionRail.jsx",
+        "frontend/src/pages/PaperReviewPage.test.jsx"
+      ]
+    },
+    {
+      "id": "audit-35-ack-identity",
+      "lane": "audit-35-ops-feed-review",
+      "severity": "P2",
+      "source": "frontend/src/pages/Review.jsx",
+      "disposition": "fixed",
+      "reason": "Exact processed_id and action-appropriate user_approved/user_rejected required for local saved state. Missing/mismatched/transport receipt unconfirmed;404/422 refusal distinct, no automatic replay.",
+      "source_and_regressions": [
+        "frontend/src/pages/Review.jsx",
+        "frontend/src/pages/Review.test.jsx"
+      ]
+    },
+    {
+      "id": "A43-003",
+      "lane": "audit-43-accessibility",
+      "severity": "P3",
+      "source": "frontend/src/pages/Search.jsx",
+      "disposition": "fixed",
+      "reason": "Native persistent Search labels and System h2 only, no new controls/requests/state. Actual28921/2FAIL before5line markup fix; final973/973 and builtDOM both390/1440 demonstrate associated visible labels after typing, hierarchy and no overflow; four PNGs parent-read.",
+      "source_and_regressions": [
+        "frontend/src/pages/Search.jsx",
+        "frontend/src/pages/Ops.jsx",
+        "frontend/src/pages/Search.test.jsx",
+        "frontend/src/pages/Ops.test.jsx"
+      ]
+    },
+    {
+      "id": "SETTINGS-DOCTOR-MOCK-MISSING-CANCEL",
+      "lane": "audit-08-settings-profile",
+      "severity": "P2",
+      "source": "frontend/src/pages/Settings.doctor.test.jsx",
+      "disposition": "fixture_corrected",
+      "reason": "Mock modules implement actual cancelDoctor/DeploymentCard contracts; no nonexistent parent callbacks. Real page mounts and stale-health/ambiguous-save/recovery assertions execute.",
+      "source_and_regressions": [
+        "frontend/src/components/settings/RssFeedsSection.health.test.jsx",
+        "frontend/src/pages/Settings.doctor.test.jsx",
+        "frontend/src/pages/Settings.test.jsx"
+      ]
+    },
+    {
+      "id": "SETTINGS-AI-HASH-DISCLOSURE",
+      "lane": "audit-08-settings-profile",
+      "severity": "P2",
+      "source": "frontend/src/pages/Settings.jsx",
+      "disposition": "fixed",
+      "reason": "Hash recovery opens/focuses existing AI/RSS owner after loading without saving, refreshing sources or changing mode; unrelated URL state retained.",
+      "source_and_regressions": [
+        "frontend/src/pages/Settings.jsx",
+        "frontend/src/pages/Settings.test.jsx"
+      ]
+    },
+    {
+      "id": "SETTINGS-RSS-HASH-FOCUS",
+      "lane": "audit-08-settings-profile",
+      "severity": "P2",
+      "source": "frontend/src/pages/Settings.jsx",
+      "disposition": "fixed",
+      "reason": "Hash recovery opens/focuses existing AI/RSS owner after loading without saving, refreshing sources or changing mode; unrelated URL state retained.",
+      "source_and_regressions": [
+        "frontend/src/pages/Settings.jsx",
+        "frontend/src/pages/Settings.test.jsx"
+      ]
+    },
+    {
+      "id": "SETTINGS-TEST-RECOVERY-MOCK-MISMATCH",
+      "lane": "audit-08-settings-profile",
+      "severity": "P2",
+      "source": "frontend/src/pages/Settings.test.jsx",
+      "disposition": "fixture_corrected",
+      "reason": "Mock modules implement actual cancelDoctor/DeploymentCard contracts; no nonexistent parent callbacks. Real page mounts and stale-health/ambiguous-save/recovery assertions execute.",
+      "source_and_regressions": [
+        "frontend/src/components/settings/RssFeedsSection.health.test.jsx",
+        "frontend/src/pages/Settings.doctor.test.jsx",
+        "frontend/src/pages/Settings.test.jsx"
+      ]
+    },
+    {
+      "id": "LOCAL-SETUP-INCOMPATIBLE-SAVED-PROFILE-ADVANCES",
+      "lane": "audit-03-setup-local",
+      "severity": "P2",
+      "source": "frontend/src/pages/SetupFlow.jsx",
+      "disposition": "fixed",
+      "reason": "Known existing endpoint model remains editable before nonloading inventory; incompatible saved local profile cannot advance as newly eligible setup. Saving is not runtime or hardware certification.",
+      "source_and_regressions": [
+        "frontend/src/components/setup/StepConnectLlm.jsx",
+        "frontend/src/pages/SetupFlow.jsx",
+        "frontend/src/pages/SetupFlow.local.test.jsx"
+      ]
+    },
+    {
+      "id": "setup-422-doctor-cache-invalidated-on-no-write-rejection",
+      "lane": "audit-02-setup-no-llm",
+      "severity": "P3",
+      "source": "frontend/src/pages/SetupFlow.jsx",
+      "disposition": "fixed",
+      "reason": "Definitive no-write422 rejection preserves unchanged Doctor Ready; successful/ambiguous writes still invalidate and require reread. Saving is not verification.",
+      "source_and_regressions": [
+        "frontend/src/pages/SetupFlow.jsx",
+        "frontend/src/pages/SetupFlow.test.jsx"
+      ]
+    },
+    {
+      "id": "triage-monitor-backlog-job-status-mismatch",
+      "lane": "audit-15-today-triage",
+      "severity": "P2",
+      "source": "frontend/src/pages/Triage.jsx",
+      "disposition": "fixed",
+      "reason": "Removed wrong duplicate Ops backlog-start shortcut; Today owns backlog progress, Library selected-item initiation and Ops jobs/cancel stay intact.",
+      "source_and_regressions": [
+        "frontend/src/pages/Triage.jsx",
+        "frontend/src/pages/Triage.test.jsx",
+        "frontend/src/pages/Today.jsx"
+      ]
+    },
+    {
+      "id": "audit39-test-optin-mismatch",
+      "lane": "audit-39-offline-cold",
+      "severity": "P2",
+      "source": "tests/test_offline_library_browser.py",
+      "disposition": "fixture_corrected",
+      "reason": "Correct serialized offline opt-in actually executes; scoped unique cold-detail locator preserves both compact snapshot caveats. Literal154-of166 join now proves execution, no skipped-green substitution.",
+      "source_and_regressions": [
+        "tests/test_offline_library_browser.py",
+        "tests/test_offline_review_browser.py"
+      ]
+    },
+    {
+      "id": "audit39-cold-locator",
+      "lane": "audit-39-offline-cold",
+      "severity": "P2",
+      "source": "tests/test_offline_library_browser.py",
+      "disposition": "fixture_corrected",
+      "reason": "Correct serialized offline opt-in actually executes; scoped unique cold-detail locator preserves both compact snapshot caveats. Literal154-of166 join now proves execution, no skipped-green substitution.",
+      "source_and_regressions": [
+        "tests/test_offline_library_browser.py",
+        "tests/test_offline_review_browser.py"
+      ]
+    },
+    {
+      "id": "AUDIT-21-CONTRAST-ORACLE-EMPTY",
+      "lane": "audit-21-paper-reading-layout",
+      "severity": "P2",
+      "source": "tests/test_review_reading_browser.py",
+      "disposition": "fixed",
+      "reason": "Contrast helpers require nonempty visible samples and retained measured ratios; empty arrays are not a GREEN. Current Today/Reading built controls execute; selected contrast fixes retain raw evidence and disclosure.",
+      "source_and_regressions": [
+        "tests/test_today_selection_browser.py",
+        "tests/test_review_reading_browser.py"
+      ]
+    },
+    {
+      "id": "PAPER-POLICY-04",
+      "lane": "audit-20-paper-policy",
+      "severity": "P3",
+      "source": "tests/test_review_reading_browser.py",
+      "disposition": "fixture_corrected",
+      "reason": "Real current producer/source/verifier/binder supplies exact read targets/basis; current full_text_not_confirmed machine enum and explicit withheld controls retained. Raw model read is not projection authority; no legacy alias.",
+      "source_and_regressions": [
+        "tests/test_review_reading_browser.py",
+        "tests/_reading_contract.py"
+      ]
+    },
+    {
+      "id": "AUDIT-21-READING-POLICY-FIXTURE-MISSING-TARGETS",
+      "lane": "audit-21-paper-reading-layout",
+      "severity": "P2",
+      "source": "tests/test_review_reading_browser.py",
+      "disposition": "fixture_corrected",
+      "reason": "Real current producer/source/verifier/binder supplies exact read targets/basis; current full_text_not_confirmed machine enum and explicit withheld controls retained. Raw model read is not projection authority; no legacy alias.",
+      "source_and_regressions": [
+        "tests/test_review_reading_browser.py",
+        "tests/_reading_contract.py"
+      ]
+    },
+    {
+      "id": "PAPER-POLICY-03",
+      "lane": "audit-20-paper-policy",
+      "severity": "P3",
+      "source": "tests/test_review_reading_browser.py",
+      "disposition": "fixture_corrected",
+      "reason": "Real current producer/source/verifier/binder supplies exact read targets/basis; current full_text_not_confirmed machine enum and explicit withheld controls retained. Raw model read is not projection authority; no legacy alias.",
+      "source_and_regressions": [
+        "tests/test_review_reading_browser.py",
+        "tests/_reading_contract.py"
+      ]
+    },
+    {
+      "id": "AUDIT-21-READING-POLICY-STALE-FLAG-EXPECTATION",
+      "lane": "audit-21-paper-reading-layout",
+      "severity": "P2",
+      "source": "tests/test_review_reading_browser.py",
+      "disposition": "fixture_corrected",
+      "reason": "Real current producer/source/verifier/binder supplies exact read targets/basis; current full_text_not_confirmed machine enum and explicit withheld controls retained. Raw model read is not projection authority; no legacy alias.",
+      "source_and_regressions": [
+        "tests/test_review_reading_browser.py",
+        "tests/_reading_contract.py"
+      ]
+    },
+    {
+      "id": "QEV-001-stale-search-evidence-test-imports",
+      "lane": "audit-32-question-evidence",
+      "severity": "P2",
+      "source": "tests/test_search_question_policy.py",
+      "disposition": "fixture_corrected",
+      "reason": "Current original-source question-evidence owner, provenance/partial/unknown/negative and invalidation controls replace unavailable private-module imports. Original named intent retained without alternate evidence_pass facade.",
+      "source_and_regressions": [
+        "tests/test_search_question_policy.py",
+        "zotero_summarizer/services/search/_question_evidence.py"
+      ]
+    },
+    {
+      "id": "MCP-001",
+      "lane": "audit-46-mcp",
+      "severity": "P2",
+      "source": "zotero_summarizer/mcp/tools/search.py",
+      "disposition": "fixed",
+      "reason": "Blank effective query refuses before queue I/O; returned semantic must literally be true, not requested hint. Native wire/missing/false countercontrols and confirmed-empty/explicit-query controls retained.",
+      "source_and_regressions": [
+        "zotero_summarizer/mcp/tools/search.py",
+        "tests/test_mcp_audit_regressions.py",
+        "tests/test_mcp_search_contract.py"
+      ]
+    },
+    {
+      "id": "P19-02",
+      "lane": "audit-19-paper-reader",
+      "severity": "P2",
+      "source": "zotero_summarizer/services/library/paper_render.py",
+      "disposition": "fixed",
+      "reason": "Current source/render identity and audited named figures govern serving and UI. Per-item/render stale attempt latch; captured mutation target prevents late A callback invalidating B. Actual273/274 REDs then275 GREEN; no saved-state rewriting on GET.",
+      "source_and_regressions": [
+        "zotero_summarizer/services/library/paper_render.py",
+        "frontend/src/components/library/PaperReaderPane.jsx",
+        "tests/test_paper_output_paths.py",
+        "frontend/src/components/library/PaperReaderPane.test.jsx"
+      ]
+    },
+    {
+      "id": "provider-routing-reasoning-declaration-disagrees-with-wire-payload",
+      "lane": "audit-09-provider-routing",
+      "severity": "P2",
+      "source": "zotero_summarizer/services/llm/factory.py",
+      "disposition": "fixture_corrected",
+      "reason": "Original mixed32 failure group not called one root cause. Current per-stage factory/capability/payload controls reconcile retired APIs and preserve actual unsupported-field-before-credentials refusal; seven routing vectors and native boundaries separately verified. Declaration is not observed operation.",
+      "source_and_regressions": [
+        "tests/test_provider_routing.py",
+        "tests/test_provider_capabilities.py",
+        "tests/test_runtime_stage_client_cache.py",
+        "zotero_summarizer/services/llm/factory.py"
+      ]
+    }
+  ]
+}

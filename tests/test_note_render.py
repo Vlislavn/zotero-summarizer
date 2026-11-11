@@ -27,6 +27,28 @@ def test_build_digest_note_html_marked_and_escaped():
     assert "Writing · moderate" in h and "&lt;T&gt;" in h
 
 
+def test_digest_note_preserves_all_four_read_and_skip_targets_in_order():
+    from html import escape
+
+    from zotero_summarizer.models import PaperDigest
+    from zotero_summarizer.services.zotero.pending import DIGEST_NOTE_MARKER, build_digest_note_html
+
+    targets = ["§2.1 Protocol", "Figure 3 — site splits", "Table 4 — failures", 'Appendix C <safety> & limits']
+    skips = ["§1 Background", "§2.2 Notation", "Appendix A", "Appendix B"]
+    digest = PaperDigest(read_decision="skim", read_parts=targets, skip_parts=skips,
+                         read_why="Inspect the held-out design.", estimated_read_minutes=12,
+                         original_value="Site-split detail.", writing_friction="low")
+
+    html = build_digest_note_html(digest)
+
+    positions = [html.index(f"<li>{escape(target)}</li>") for target in targets + skips]
+    assert positions == sorted(positions)
+    assert html.count("<li>") == len(targets) + len(skips)
+    assert "12 min" in html and "Site-split detail." in html
+    assert html.endswith(f"{DIGEST_NOTE_MARKER};version=1</em></p>")
+    assert digest.read_parts == targets and digest.skip_parts == skips
+
+
 def _summary(**overrides) -> SummarizeResponse:
     base = {
         "executive_summary": "Paper introduces approach X.",

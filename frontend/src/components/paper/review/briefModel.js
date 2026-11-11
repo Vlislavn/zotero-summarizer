@@ -11,20 +11,20 @@ export const isSupportedGoal = (goal) => goal?.retrieval_state === 'hit'
 
 export const BAND_GLOSS = {
   highlight: {
-    lead: 'Rigorous enough to act on.',
-    body: 'Passed our independent checks for evidence and reporting — read with confidence.',
+    lead: 'Strong checklist coverage.',
+    body: 'Applicable evidence/reporting checks were met; this is not scientific certification.',
   },
   flag: {
     lead: 'Read critically.',
-    body: 'We found rigor problems that could make the headline result unreliable — see below.',
+    body: 'Applicable checks or material concerns warrant checking the claims below.',
   },
   neutral: {
-    lead: 'Sound but unremarkable.',
-    body: "No red flags, but it doesn't clear the bar for a confident highlight — judge it on relevance.",
+    lead: 'Mixed checklist coverage.',
+    body: 'Judge the applicable evidence and remaining gaps on relevance, not writing polish.',
   },
   uncertain: {
     lead: 'Needs your eyes.',
-    body: "Our independent passes disagreed on the verdict — don't trust the band alone.",
+    body: 'Assessment is unavailable or model passes disagreed; this is not a scientific failure.',
   },
 };
 
@@ -34,8 +34,8 @@ export const BAND_GLOSS = {
 export function bandGloss(band, hasRedFlags = false) {
   if (hasRedFlags && (band === 'neutral' || band === 'highlight')) {
     return {
-      lead: 'Mostly sound, with caveats.',
-      body: 'It clears the bar overall, but our independent checks flagged the issues below — weigh them before relying on it.',
+      lead: 'Checklist coverage with caveats.',
+      body: 'Model-generated concerns below need checking before relying on the claims.',
     };
   }
   return BAND_GLOSS[band] || { lead: '', body: '' };
@@ -43,19 +43,22 @@ export function bandGloss(band, hasRedFlags = false) {
 
 // The literal answer to "what did we apply?" (· N/M passes agree is appended).
 export const METHOD_CLAUSE =
-  'How we judged it: a reference-free rubric + red-flag scan — no citation counts, ' +
-  'authors hidden, scored only from what the paper itself shows. Agreement below is ' +
-  'self-consistency across runs, not yet human-validated.';
+  'How we judged it: a general checklist plus a scan for red flags — no citation counts, ' +
+  'authors hidden, scored only from what the paper itself shows. We run the check several ' +
+  'times; agreement is how often the runs gave the same answer, not a human check.';
 
 // Legend terms (rendered as <b>term</b> gloss, joined by ·).
 export const LEGEND = [
-  { term: 'FLAG', gloss: 'a rigor red-flag fired' },
-  { term: 'NEUTRAL', gloss: 'sound, unremarkable' },
-  { term: 'HIGHLIGHT', gloss: '≥6 grounded checks, zero flags' },
+  { term: 'FLAG', gloss: 'serious concerns or missing checks' },
+  { term: 'NEUTRAL', gloss: 'mixed results' },
+  { term: 'HIGHLIGHT', gloss: 'most applicable checks met' },
 ];
 
 // Plain-English labels for rubric keys (mirrors _paper_read_brief._RUBRIC_LABEL).
 const RUBRIC_LABEL = {
+  thesis: 'States a clear thesis / position',
+  evidence_cited: 'Supports premises with cited evidence',
+  scope_match: 'Matches claim scope to the evidence offered',
   external_validation: 'Validated on independent / held-out data',
   uncertainty: 'Reports uncertainty (CIs, error bars, seeds)',
   ablation: 'Ablations isolate what drives the result',
@@ -67,8 +70,43 @@ const RUBRIC_LABEL = {
   clinical_calibration: 'Calibration / multi-site validation',
   determinism: 'Reports run-to-run determinism',
   eval_contamination: 'Addresses eval contamination',
+  motivation: 'Dataset motivation and intended use documented',
+  composition: 'Dataset contents (instances, labels, splits) described',
+  collection: 'Data collection process described',
+  known_biases: 'Known biases and limits of the data disclosed',
 };
 export const rubricLabel = (k) => RUBRIC_LABEL[k] || String(k || '').replace(/_/g, ' ');
+
+// Checklist names in plain words (the standard stays in brackets where it is the recognised name).
+const STANDARD_LABEL = {
+  'Datasheets for Datasets': 'Dataset documentation checklist',
+  'Leakage taxonomy': 'Data-leakage checks',
+  };
+export const standardLabel = (s) => Object.entries(STANDARD_LABEL).reduce((t, [name, plain]) => t.replace(name, plain), String(s || ''));
+
+// Red flags come from several model runs that word the same concern differently
+// ("The literature search is not described" / "No description of the search strategy").
+// Keep the first of each near-identical group (token Jaccard >= 0.7 on word stems; negation
+// must match so "X is provided" never merges with "No X is provided").
+const FLAG_STOP = new Set(['the', 'and', 'for', 'with', 'that', 'are', 'was', 'were', 'does', 'did',
+  'has', 'have', 'been', 'any', 'its', 'their', 'from', 'into']);
+const flagStems = (text) => new Set((String(text).toLowerCase().match(/[a-z0-9]+/g) || [])
+  .map((w) => (w === 'no' ? 'not' : w)).filter((w) => w === 'not' || (w.length > 2 && !FLAG_STOP.has(w)))
+  .map((w) => w.slice(0, 5)));
+export function dedupeFlags(flags) {
+  const kept = [];
+  const stems = [];
+  for (const flag of flags) {
+    const own = flagStems(flag);
+    const dup = stems.some((other) => {
+      const shared = [...own].filter((w) => other.has(w)).length;
+      return own.has('not') === other.has('not') && own.size > 0
+        && shared / (own.size + other.size - shared) >= 0.7;
+    });
+    if (!dup) { kept.push(flag); stems.push(own); }
+  }
+  return kept;
+}
 
 // Paper-type → display label (mirrors _paper_type_checklists labels). The two
 // generic_* are the safe supertypes the detector falls back to (shown "type uncertain").
@@ -78,7 +116,8 @@ export const PAPER_TYPE_LABEL = {
   rct_ai: 'RCT of an AI intervention', dataset_benchmark: 'Dataset / benchmark',
   systematic_review: 'Systematic review / meta-analysis', narrative_review: 'Narrative review',
   survey: 'Survey', position: 'Position / perspective', policy: 'Policy / framework / guideline',
-  theory: 'Theory / analysis', case_report: 'Case report', editorial: 'Editorial / commentary',
+  theory: 'Theory / analysis', case_report: 'Clinical case report',
+  experience_report: 'Experience report', editorial: 'Editorial / commentary',
   generic_empirical: 'Empirical (type uncertain)', generic_review: 'Review (type uncertain)',
 };
 export const paperTypeLabel = (t) => PAPER_TYPE_LABEL[t] || String(t || '').replace(/_/g, ' ');
@@ -90,7 +129,6 @@ const CORE_KEYS = [
   'dataset_provenance', 'repro_detail', 'code_data_released',
 ];
 const DOMAIN_KEYS = ['patient_level_split', 'clinical_calibration', 'determinism', 'eval_contamination'];
-const TRIAD = ['external_validation', 'uncertainty', 'ablation']; // the rigor floor
 
 function shortGoal(goal, words = 4) {  // matches server _short_goal (words=4)
   const parts = String(goal || '').match(/[A-Za-z0-9/&-]+/g) || [];
@@ -100,33 +138,16 @@ function shortGoal(goal, words = 4) {  // matches server _short_goal (words=4)
 // The 2-3 rubric items that moved the band, in plain English (ported from
 // _decisive_rows). Returns { heading, rows:[{ok,label}], caption }.
 export function decisiveRows(rubric = {}, band = '') {
-  const val = {};
-  for (const k of new Set([...CORE_KEYS, ...TRIAD, ...Object.keys(rubric)])) {
-    val[k] = String(rubric[k] || 'na').toLowerCase();
-  }
-  const yesCount = CORE_KEYS.filter((k) => val[k] === 'yes').length;
-  if (band === 'highlight') {
-    const ordered = [...TRIAD, ...CORE_KEYS.filter((k) => !TRIAD.includes(k))];
-    const earned = ordered.filter((k) => val[k] === 'yes').slice(0, 3);
-    return {
-      heading: 'What earned it',
-      rows: earned.map((k) => ({ ok: true, label: rubricLabel(k) })),
-      caption: `${yesCount}/${CORE_KEYS.length} rigor checks met`,
-    };
-  }
-  if (band === 'flag') {
-    const failed = TRIAD.filter((k) => val[k] !== 'yes').slice(0, 3);
-    return { heading: 'Why it sank', rows: failed.map((k) => ({ ok: false, label: rubricLabel(k) })), caption: '' };
-  }
-  if (band === 'uncertain') {
-    return {
-      heading: 'Split decision',
-      rows: TRIAD.map((k) => ({ ok: val[k] === 'yes', label: rubricLabel(k) })),
-      caption: '',
-    };
-  }
-  const gaps = CORE_KEYS.filter((k) => val[k] === 'no').slice(0, 3);
-  return { heading: "What's missing", rows: gaps.map((k) => ({ ok: false, label: rubricLabel(k) })), caption: '' };
+  const val = Object.fromEntries(Object.entries(rubric).map(([key, value]) => [key, String(value || 'na').toLowerCase()]));
+  const applicable = Object.keys(val).filter(key => ['yes', 'no'].includes(val[key]));
+  const met = applicable.filter(key => val[key] === 'yes');
+  const selected = band === 'highlight' ? met : band === 'uncertain' ? applicable
+    : applicable.filter(key => val[key] === 'no');
+  return {
+    heading: { highlight: 'What earned it', uncertain: 'Assessment uncertain', flag: 'Checks to inspect' }[band] || "What's missing",
+    rows: selected.slice(0, 3).map(key => ({ ok: val[key] === 'yes', label: rubricLabel(key) })),
+    caption: applicable.length ? `${met.length}/${applicable.length} applicable checks met` : '',
+  };
 }
 
 // Full rubric rows for the "show all checks" disclosure: core first, then domain,

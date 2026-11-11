@@ -76,3 +76,21 @@ def test_firewall_candidate_view_hides_graded_labels():
     assert set(view) == {"item_key", "text_path", "pdf_path", "gold_type"}
     for leak in bench._LABEL_FIELDS:
         assert leak not in view
+
+
+def test_nullable_coverage_is_explicitly_unscored_not_zero_or_an_exception(monkeypatch):
+    monkeypatch.setattr(bench, "_kappa", lambda *_args: None)
+    paper = {"item_key": "K", "gold_type": "position", "gold_rubric": {"thesis": "yes"},
+             "gold_band": "highlight", "gold_coverage_fraction": 1.0}
+    row = {"track": "checklist", "status": "ok", "key": "K", "run": 0,
+           "pred_rubric": {}, "pred_band": "uncertain", "coverage_fraction": None}
+    gold = {"papers": [paper], "pairs": []}
+
+    unknown = bench.build_report(gold, [row])["tracks"]["checklist_coverage"]
+    mixed = bench.build_report(gold, [row, {**row, "run": 1, "coverage_fraction": 0.5}])["tracks"]["checklist_coverage"]
+
+    assert unknown["coverage_fraction_mae"] is None
+    assert unknown["coverage_fraction_scored"] == 0 and unknown["coverage_fraction_unknown"] == 1
+    assert mixed["coverage_fraction_mae"] == 0.5
+    assert mixed["coverage_fraction_scored"] == 1 and mixed["coverage_fraction_unknown"] == 1
+    assert mixed["n_trials"] == 2

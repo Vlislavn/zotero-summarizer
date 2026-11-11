@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
+import unicodedata
 from typing import Any
 
 from zotero_summarizer.services.library._paper_read_meta import qa_body_text
@@ -12,6 +14,30 @@ _SPACE = re.compile(r"\s+")
 
 def _digest(value: str) -> str:
     return hashlib.sha256(_SPACE.sub(" ", value).strip().encode()).hexdigest()
+
+
+def _alnum_key(text: str) -> tuple[str, list[int]]:
+    """Letters/digits only (NFKC, casefolded) plus each kept char's offset in ``text``."""
+    chars: list[str] = []
+    origin: list[int] = []
+    for index, char in enumerate(text):
+        for folded in unicodedata.normalize("NFKC", char).casefold():
+            if folded.isalnum():
+                chars.append(folded)
+                origin.append(index)
+    return "".join(chars), origin
+
+
+def _locate(body: str, quote: str) -> tuple[int, int] | None:
+    """Span of ``quote`` in ``body``; tolerant of invisible characters, line breaks and hyphenation
+    (the grounding check already accepted the quote under the same tolerance)."""
+    start = body.find(quote)
+    if start >= 0:
+        return start, start + len(quote)
+    body_key, origin = _alnum_key(body)
+    quote_key, _ = _alnum_key(quote)
+    at = body_key.find(quote_key) if quote_key else -1
+    return (origin[at], origin[at + len(quote_key) - 1] + 1) if at >= 0 else None
 
 
 def extraction_version(artifact: dict[str, Any]) -> str:
@@ -24,12 +50,12 @@ def evidence_handle(
     if not quote:
         return None
     body = qa_body_text(artifact)
-    start = body.find(quote)
+    span = _locate(body, quote)
     return {
         "paper_id": item_key,
         "extraction_version": extraction_version(artifact),
-        "span": {"start": start, "end": start + len(quote)} if start >= 0 else None,
-        "quote_digest": _digest(quote),
+        "span": {"start": span[0], "end": span[1]} if span else None,
+        "quote_digest": _digest(body[span[0]:span[1]] if span else quote),
         "input_digest": _digest(question),
     }
 
@@ -74,11 +100,23 @@ def compact_history(
         handle = turn.get("evidence_handle")
         if verified_quote(item_key, artifact, handle) is None:
             continue
-        checkpoints.append(
-            f"evidence:{handle['quote_digest'][:16]} (resolve against the current extraction before exact claims)"
-        )
+        input_digest = handle.get("input_digest")
+        if isinstance(input_digest, str) and len(input_digest) >= len(raw):
+            return raw, False, 0
+        if not isinstance(input_digest, str):
+            question = turn.get("question")
+            input_digest = _digest(question) if isinstance(question, str) else None
+        span = handle["span"]
+        checkpoints.append({
+            "paper_id": handle["paper_id"],
+            "extraction_version": handle["extraction_version"],
+            "span": {"start": span["start"], "end": span["end"]},
+            "quote_digest": handle["quote_digest"],
+            "input_digest": input_digest,
+        })
     compacted = "\n".join([
-        "Earlier evidence checkpoint: " + ("; ".join(checkpoints) or "no current verified handles"),
+        "Earlier evidence checkpoint: " + json.dumps(checkpoints),
+        "(resolve against the current extraction before exact claims)",
         *[_turn_text(turn) for turn in recent],
     ])
     return (compacted, True, len(checkpoints)) if len(compacted) < len(raw) else (raw, False, 0)

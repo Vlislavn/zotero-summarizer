@@ -82,55 +82,20 @@ def get_pending_changes(
 ) -> list[dict[str, Any]]:
     safe_limit = max(1, min(limit, 5000))
     safe_item_key = str(item_key or "").strip()
+    conditions, params = [], []
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+    if safe_item_key:
+        conditions.append("item_key = ?")
+        params.append(safe_item_key)
+    where = " WHERE " + " AND ".join(conditions) if conditions else ""
     conn = _get_conn()
     try:
-        if status and safe_item_key:
-            rows = conn.execute(
-                """
-                SELECT id, item_key, item_title, change_type, payload_json, status,
-                       error_message, created_at, applied_at
-                FROM pending_changes
-                WHERE status = ? AND item_key = ?
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                (status, safe_item_key, safe_limit),
-            ).fetchall()
-        elif safe_item_key:
-            rows = conn.execute(
-                """
-                SELECT id, item_key, item_title, change_type, payload_json, status,
-                       error_message, created_at, applied_at
-                FROM pending_changes
-                WHERE item_key = ?
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                (safe_item_key, safe_limit),
-            ).fetchall()
-        elif status:
-            rows = conn.execute(
-                """
-                SELECT id, item_key, item_title, change_type, payload_json, status,
-                       error_message, created_at, applied_at
-                FROM pending_changes
-                WHERE status = ?
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                (status, safe_limit),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT id, item_key, item_title, change_type, payload_json, status,
-                       error_message, created_at, applied_at
-                FROM pending_changes
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                (safe_limit,),
-            ).fetchall()
+        rows = conn.execute(
+            "SELECT * FROM pending_changes" + where + " ORDER BY created_at DESC LIMIT ?",
+            [*params, safe_limit],
+        ).fetchall()
         return _pending_rows(rows)
     finally:
         conn.close()
@@ -169,21 +134,24 @@ def pending_change_exists(
 def insert_pending_change_if_absent(
     item_key: str, item_title: str, change_type: str, payload: dict[str, Any],
 ) -> bool:
-    """Atomically insert one pending signature unless it exists in any status."""
+    """Dedup exact ordinary signatures in any status; closed history is not a proposal."""
     safe_item_key = str(item_key or "").strip()
     safe_type = str(change_type or "").strip()
     if not safe_item_key or not safe_type:
         raise ValueError("Pending changes require an item key and change type")
+    from zotero_summarizer.storage.pending_actions import history_request
+
     payload_json = json.dumps(payload, ensure_ascii=False)
     conn = _get_conn()
     try:
         conn.execute("BEGIN IMMEDIATE")
-        found = conn.execute(
-            """SELECT 1 FROM pending_changes
-               WHERE item_key = ? AND change_type = ? AND payload_json = ? LIMIT 1""",
+        matches = conn.execute(
+            """SELECT * FROM pending_changes
+               WHERE item_key = ? AND change_type = ? AND payload_json = ?""",
             (safe_item_key, safe_type, payload_json),
-        ).fetchone()
-        if found:
+        ).fetchall()
+        origins = [history_request(dict(row)) for row in matches]
+        if any(origin is None for origin in origins):
             conn.commit()
             return False
         _insert_pending_changes(conn, safe_item_key, item_title, [{
@@ -241,28 +209,12 @@ def get_pending_changes_by_ids(
     placeholders = ",".join("?" for _ in normalized)
     conn = _get_conn()
     try:
-        if status:
-            rows = conn.execute(
-                f"""
-                SELECT id, item_key, item_title, change_type, payload_json, status,
-                       error_message, created_at, applied_at
-                FROM pending_changes
-                WHERE id IN ({placeholders}) AND status = ?
-                ORDER BY created_at DESC
-                """,
-                [*normalized, status],
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                f"""
-                SELECT id, item_key, item_title, change_type, payload_json, status,
-                       error_message, created_at, applied_at
-                FROM pending_changes
-                WHERE id IN ({placeholders})
-                ORDER BY created_at DESC
-                """,
-                normalized,
-            ).fetchall()
+        status_filter = " AND status = ?" if status else ""
+        rows = conn.execute(
+            f"SELECT * FROM pending_changes WHERE id IN ({placeholders})"
+            + status_filter + " ORDER BY created_at DESC",
+            [*normalized, status] if status else normalized,
+        ).fetchall()
         return _pending_rows(rows)
     finally:
         conn.close()
@@ -273,14 +225,30 @@ def set_pending_changes_status(
     status: str,
     error_message: str | None = None,
     expected_status: str | None = None,
+    *, require_all: bool = False,
 ) -> int:
+    if require_all and any(type(change_id) is not int or change_id <= 0 for change_id in change_ids):
+        raise ValueError("A complete Pending selection requires positive integer IDs")
     normalized = [int(change_id) for change_id in change_ids if int(change_id) > 0]
+    if require_all:
+        normalized = list(dict.fromkeys(normalized))
     if not normalized:
         return 0
+
+    from zotero_summarizer.storage.pending_actions import ensure_pending
 
     placeholders = ",".join("?" for _ in normalized)
     conn = _get_conn()
     try:
+        conn.execute("BEGIN IMMEDIATE")
+        selected = conn.execute(
+            f"SELECT * FROM pending_changes WHERE id IN ({placeholders})", normalized,
+        ).fetchall()
+        ensure_pending(selected)
+        if require_all:
+            source = expected_status or ChangeStatus.PENDING.value
+            if len(selected) != len(normalized) or any(row["status"] != source for row in selected):
+                raise ValueError("Pending selection changed; reload before rejecting")
         if status == ChangeStatus.APPLIED.value:
             source = expected_status or ChangeStatus.PENDING.value
             cursor = conn.execute(
@@ -316,8 +284,14 @@ def set_pending_changes_status(
                 """,
                 [status, (error_message or "").strip(), *normalized],
             )
+        updated = int(cursor.rowcount or 0)
+        if require_all and updated != len(normalized):
+            raise ValueError("Pending selection could not be changed completely")
         conn.commit()
-        return int(cursor.rowcount or 0)
+        return updated
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -327,23 +301,29 @@ def update_pending_change_payload(change_id: int, payload: dict[str, Any]) -> bo
     if safe_id <= 0:
         return False
 
+    from zotero_summarizer.models.zotero_actions import preview_hash
+    from zotero_summarizer.storage import pending_actions
+
     payload_json = json.dumps(payload or {}, ensure_ascii=False)
-    conn = _get_conn()
-    try:
+    with pending_actions.locked_queue() as conn:
+        pending_actions.ensure_pending(conn.execute("SELECT * FROM pending_changes WHERE id=?", (safe_id,)))
         cursor = conn.execute(
             """
             UPDATE pending_changes
             SET payload_json = ?,
                 error_message = ''
             WHERE id = ?
-              AND status = ?
+              AND status = ? AND proposal_json IS NULL
             """,
             (payload_json, safe_id, ChangeStatus.PENDING.value),
         )
-        conn.commit()
-        return int(cursor.rowcount or 0) > 0
-    finally:
-        conn.close()
+        if not cursor.rowcount:
+            return False
+        pending_actions.record(conn, safe_id, {
+            "event": "payload_edited", "actor": "current_user", "source": "pending_edit",
+            "payload_sha256": preview_hash(payload or {}),
+        })
+        return True
 
 
 __all__ = [

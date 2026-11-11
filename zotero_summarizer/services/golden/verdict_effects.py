@@ -9,15 +9,11 @@ from typing import Any
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services._common import settings
 from zotero_summarizer.services.library import review_detail
-from zotero_summarizer.services.zotero._notes import VERDICT_NOTE_MARKER
 from zotero_summarizer.services.zotero.zotero import (
     get_library_reader,
     get_zotero_reader_or_raise,
-    zotero_set_label_tag,
-    zotero_upsert_user_note,
-    zotero_upsert_verdict_note,
 )
-from zotero_summarizer.storage import feeds as feeds_storage, label_mirrors, repositories, review_notes
+from zotero_summarizer.storage import feeds as feeds_storage, repositories
 from zotero_summarizer.storage.feed_identity import LEGACY_FEED_PREFIX
 
 LOGGER = logging.getLogger(__name__)
@@ -114,6 +110,7 @@ def add_feed_verdict_to_library(item_key: str, priority: str, db_path: Path | No
         "add_status": str(result.get("status") or ""),
         "add_error": None,
         "_zotero_key": result.get("zotero_key"),
+        "review_note_mirror": result.get("review_note_mirror"),
     }
 
 
@@ -123,21 +120,10 @@ def _optional_zotero(exc: BaseException) -> bool:
 
 def mirror_current_verdict(db_path: Path, item_key: str, *, redeliver: bool = False) -> dict | None:
     """Mirror current label and rationale under one lock; acknowledge deletions."""
+    from zotero_summarizer.services.zotero.mirror_notes import mirror_verdict
+
     try:
-        with label_mirrors.current_label(db_path, item_key, redeliver=redeliver) as desired:
-            if desired is None:
-                return None
-            key, priority = desired["target_key"], desired["value"]
-            comment = desired["comment"] if priority is not None else ""
-            note_written = bool(comment.strip()) or any(
-                VERDICT_NOTE_MARKER in note["note"]
-                for note in get_zotero_reader_or_raise().get_item_notes(key)
-            )
-            if note_written:
-                zotero_upsert_verdict_note(key, priority or "", comment)
-            if desired["label_pending"]:
-                zotero_set_label_tag(key, priority)
-        return {"label_written": desired["label_pending"], "note_written": note_written}
+        return mirror_verdict(db_path, item_key, redeliver=redeliver)
     except APIError as exc:
         # Local-first verdicts remain usable without configured Zotero. Leaving
         # the receipt absent keeps an explicit retraction retryable.
@@ -196,17 +182,7 @@ def apply_verdict_effects(db_path: Path, item_key: str, priority: str, comment: 
 
 
 def mirror_review_note(db_path: Path, item_key: str) -> dict[str, Any]:
-    """Deliver current committed note intent, never a historical request body."""
-    source = review_detail.classify_item_key(item_key)
-    if source in (review_detail.SOURCE_FEED, review_detail.SOURCE_NOTE):
-        return {"note_written": False, "note_error": None}
-    try:
-        with review_notes.current_for_mirror(db_path, item_key) as note:
-            # The app's clear-body contract also applies to sync deletion tombstones.
-            zotero_upsert_user_note(item_key, "" if note is None else note)
-        return {"note_written": True, "note_error": None}
-    except APIError as exc:
-        # Unconfigured Zotero is optional for the existing local-first workflow.
-        if not _optional_zotero(exc):
-            raise
-        return {"note_written": False, "note_error": None}
+    """Deliver the current composite through its native receipt owner."""
+    from zotero_summarizer.services.zotero.mirror_notes import mirror_review_note as deliver
+
+    return deliver(db_path, item_key)

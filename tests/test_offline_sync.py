@@ -203,6 +203,20 @@ def test_same_field_conflict_and_resolution_are_explicit_and_audited(
     assert rejected["results"][0]["status"] == "rejected"
 
 
+def test_future_base_revision_conflicts_instead_of_overwriting_current_state(tmp_path):
+    db = _db(tmp_path)
+    _set_server_verdict(db, "should_read")
+    current_revision = repositories.sync_current_fields(db)[("P1", "verdict")]["revision"]
+    mutation = _mutation("P1", "verdict", "dont_read", current_revision + 1)
+
+    result = repositories.apply_sync_mutation(db, mutation)
+
+    assert result["status"] == "conflict"
+    assert result["conflict_revision"] == current_revision
+    assert result["canonical"]["value"] == "should_read"
+    assert repositories.get_label_verdict(db, "P1")["user_priority"] == "should_read"
+
+
 def test_pull_has_resumable_cursor_and_compact_offline_context(tmp_path, monkeypatch):
     db = _db(tmp_path)
     _set_server_verdict(db, "should_read")

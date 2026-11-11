@@ -2,12 +2,73 @@
 // the per-page LOC budget. No React here — only payload parsing, draft
 // construction, and presentational utilities for queued Zotero changes.
 
+import { formatWhen } from '../utils/stepModelStatus.js';
+
+export const UNBOUND_GENERATED_TARGET_MESSAGE = 'This note has no Zotero target. Reject it or regenerate the review.';
+
+export function hasUnboundGeneratedTarget(change) {
+  return Boolean(change.generated_preview && !change.generated_preview.target);
+}
+
+export const MISSING_APPROVAL_MESSAGE = 'Exact change not available. Reload and check it before applying.';
+
+export function hasApprovalPreview(change) {
+  const preview = change.approval_preview;
+  return !hasUnboundGeneratedTarget(change)
+    && preview?.version === 1
+    && preview.change_id === change.id
+    && preview.item_key === change.item_key
+    && preview.change_type === change.change_type
+    && preview.payload !== null && typeof preview.payload === 'object' && !Array.isArray(preview.payload)
+    && Number.isInteger(preview.edit_revision) && preview.edit_revision >= 0
+    && preview.target !== null && typeof preview.target === 'object' && !Array.isArray(preview.target)
+    && typeof preview.preview_sha256 === 'string' && /^[a-f0-9]{64}$/.test(preview.preview_sha256);
+}
+
+export function approvalPreviews(changes) {
+  if (!changes.length || !changes.every(hasApprovalPreview)) return null;
+  return Object.fromEntries(changes.map((change) => [change.id, change.approval_preview.preview_sha256]));
+}
+
+// Server times are UTC, either ISO or SQLite's "YYYY-MM-DD HH:MM:SS"; show them in the reader's zone as "11 Nov, 05:59".
+export function localTime(value) {
+  const raw = String(value || '').trim();
+  const iso = /^\d{4}-\d\d-\d\d \d\d:\d\d(:\d\d)?$/.test(raw) ? `${raw.replace(' ', 'T')}Z` : raw;
+  return formatWhen(iso) || raw;
+}
+
+// A regenerated note is the same change under a new body, so notes are keyed by note title, not by the summary.
+const staleKeyPart = (change) => (change.change_type === 'add_note' || change.change_type === 'upsert_note'
+  ? readPayload(change).note_title || 'Triage note'
+  : changeSummary(change));
+
+// Identical queued rows for one paper (same type and visible summary; notes: same note title) are re-queued versions of the same
+// change: the newest (the API lists newest first) stays visible, older pending ones fold behind a disclosure.
+export function collapseStaleChanges(changes) {
+  const rows = [];
+  const byKey = new Map();
+  for (const change of changes) {
+    const key = change.status === 'pending' ? `${change.change_type}|${staleKeyPart(change)}` : null;
+    const head = key && byKey.get(key);
+    if (head) head.older.push(change);
+    else {
+      const row = { change, older: [] };
+      rows.push(row);
+      if (key) byKey.set(key, row);
+    }
+  }
+  return rows;
+}
+
 export const STATUS_TABS = [
   { value: 'pending', label: 'Pending' },
   { value: 'applied', label: 'Applied' },
   { value: 'rejected', label: 'Rejected' },
   { value: 'failed', label: 'Failed' },
+  { value: 'applying', label: 'Needs checking' },
 ];
+
+export const statusLabel = (status) => STATUS_TABS.find((tab) => tab.value === status)?.label || status;
 
 export function flattenCollections(nodes, depth = 0) {
   const flat = [];
@@ -102,6 +163,30 @@ export function previewChange(change) {
   }
 }
 
+// One readable line for the change target (the badge already names the action).
+export function changeSummary(change) {
+  const payload = readPayload(change);
+  const collection = String(payload.collection_path || payload.collection_name || payload.collection_key || '').trim();
+  switch (change.change_type) {
+    case 'tag_changes': {
+      const added = (payload.add_tags || []).map((t) => `+${t}`);
+      const removed = (payload.remove_tags || []).map((t) => `−${t}`);
+      return [...added, ...removed].join('  ') || 'No tag changes';
+    }
+    case 'add_to_collection':
+    case 'remove_from_collection':
+      return collection || 'No collection chosen';
+    case 'add_note':
+    case 'upsert_note': {
+      // Notes queued before the band was dropped from the heading still carry « · band highlight».
+      const excerpt = stripHtml(payload.note_html).replace(/ · band \w+/g, '').slice(0, 90);
+      return `“${payload.note_title || 'Triage note'}”${excerpt ? ` — ${excerpt}` : ''}`;
+    }
+    default:
+      return previewChange(change);
+  }
+}
+
 export function changeBadgeClass(type) {
   switch (type) {
     case 'tag_changes':
@@ -136,8 +221,16 @@ export function changeBadgeTone(type) {
   }
 }
 
+const CHANGE_TYPE_LABELS = {
+  tag_changes: 'Change tags',
+  add_to_collection: 'Add to collection',
+  remove_from_collection: 'Remove from collection',
+  add_note: 'Add note',
+  upsert_note: 'Add or update note',
+};
+
 export function changeTypeLabel(type) {
-  return String(type || '').replace(/_/g, ' ');
+  return CHANGE_TYPE_LABELS[type] || String(type || '').replace(/_/g, ' ');
 }
 
 export function collectionOptionLabel(entry) {
@@ -169,4 +262,10 @@ export function buildPayloadFromDraft(change, draftsForId, flatCollections) {
     };
   }
   return null;
+}
+
+// «6 changes applied.» / «5 applied, 1 failed — see the Failed tab»
+export function appliedMessage(applied, failed) {
+  if (failed > 0) return `${applied} applied, ${failed} failed — see the Failed tab`;
+  return `${applied} ${applied === 1 ? 'change' : 'changes'} applied.`;
 }

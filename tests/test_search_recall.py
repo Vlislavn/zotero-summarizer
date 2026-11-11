@@ -106,7 +106,7 @@ def test_old_session_without_variant_keys_loads_empty() -> None:
 def test_display_expands_lexical_variants() -> None:
     plan = build_query_plan(_intent())
     rows = plan.display()
-    lex = [r["query"] for r in rows if r["source"] == "openalex (lexical)"]
+    lex = [r["query"] for r in rows if r["source"] == "OpenAlex · keyword search"]
     assert lex == plan.openalex_lexical_variants
 
 

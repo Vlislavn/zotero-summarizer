@@ -10,12 +10,18 @@ from fastapi.testclient import TestClient
 
 from zotero_summarizer.api.errors import APIError, install_error_handlers
 from zotero_summarizer.api.routes import library
+from zotero_summarizer.runtime import AppContext, set_context
+from zotero_summarizer.settings import Settings
+from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS, run_migrations
 from zotero_summarizer.services.library import paper_render
 from zotero_summarizer.services.library.review_fleet import fleet
 
 
 @pytest.fixture
 def storage(tmp_path, monkeypatch):
+    settings = Settings.load(project_root=tmp_path)
+    run_migrations(settings.triage_db_path, "triage", TRIAGE_MIGRATIONS)
+    set_context(AppContext(settings=settings))
     root = tmp_path / "data" / "render"
     root.mkdir(parents=True)
     monkeypatch.setattr(paper_render, "settings", lambda: SimpleNamespace(paper_render_dir=root))

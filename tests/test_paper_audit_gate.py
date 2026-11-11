@@ -161,11 +161,76 @@ def test_unlisted_leftover_figure_cannot_be_served_or_attached(paper):
     built = paper_render.build_paper_read("KEY")
     extra = Path(built["outputs"]["figures_dir"]) / "fig2_old.png"
     extra.write_bytes(b"OLD UNAPPROVED IMAGE")
+    assert paper_render.render_paper("KEY")["status"] == "completed"
     with pytest.raises(APIError) as caught:
         paper_render.figure_path("KEY", extra.name)
     assert caught.value.status_code == 404
     assert [fig["name"] for fig in paper_figures.attachable_figures("KEY")] == [built["figures"][0]["name"]]
     assert extra.read_bytes() == b"OLD UNAPPROVED IMAGE"
+
+
+@pytest.mark.parametrize("change", ["bytes", "attachment", "renderer", "parser", "legacy_key"])
+def test_stale_outputs_are_not_served_or_attached_but_saved_bytes_survive(paper, monkeypatch, change):
+    built = paper_render.build_paper_read("KEY")
+    directory = Path(built["outputs"]["presentation"]).parent
+    saved = _snapshot(directory)
+    if change == "bytes":
+        paper.write_bytes(paper.read_bytes() + b"\n% changed source bytes\n")
+    elif change == "attachment":
+        other = paper.with_name("other.pdf")
+        other.write_bytes(paper.read_bytes())
+        monkeypatch.setattr(paper_render, "_item_detail", lambda _: {"pdf_path": str(other)})
+    elif change == "renderer":
+        monkeypatch.setattr(paper_render, "_RENDERER_REV", "changed-renderer")
+    elif change == "parser":
+        monkeypatch.setattr(paper_render, "_use_docling", lambda: not built["pdf_key"].endswith("True"))
+    else:
+        paper_render._write_state("KEY", {**built, "pdf_key": "paper-read-v1:legacy"})
+    state_path = paper_render._state_path("KEY")
+    retained = state_path.read_bytes()
+    assert paper_render.render_paper("KEY")["stale"] is True
+
+    for route in ("presentation", "figures/" + built["figures"][0]["name"]):
+        app = FastAPI()
+        app.include_router(library.router)
+        install_error_handlers(app)
+        with TestClient(app) as client:
+            response = client.get(f"/api/library/render/KEY/{route}")
+        assert response.status_code == 404
+        assert response.json()["error"] == "not_ready"
+    with pytest.raises(APIError) as caught:
+        paper_figures.attachable_figures("KEY")
+    assert caught.value.error == "not_ready"
+    assert paper_render.source_pdf_path("KEY") == paper.resolve()
+    assert _snapshot(directory) == saved
+    assert state_path.read_bytes() == retained
+
+
+def test_missing_listed_figure_is_incomplete_without_rewriting_state_and_can_be_rebuilt(paper):
+    built = paper_render.build_paper_read("KEY")
+    state_path = paper_render._state_path("KEY")
+    retained = state_path.read_bytes()
+    name = built["figures"][0]["name"]
+    figure = Path(built["outputs"]["figures_dir"]) / name
+    original = figure.read_bytes()
+    figure.unlink()
+
+    status = paper_render.render_paper("KEY")
+    assert status["status"] == "missing" and status["stale"] is True
+    assert "figure" in status["message"].lower()
+    with pytest.raises(APIError):
+        paper_render.presentation_path("KEY")
+    assert state_path.read_bytes() == retained
+
+    figure.write_bytes(original)
+    assert paper_render.render_paper("KEY")["status"] == "completed"
+    assert paper_render.figure_path("KEY", name) == figure.resolve()
+    assert state_path.read_bytes() == retained
+    figure.unlink()
+    rebuilt = paper_render.build_paper_read("KEY")
+    assert rebuilt["status"] == "completed" and figure.is_file()
+    assert paper_render.render_paper("KEY").get("stale") is not True
+    assert paper_render.presentation_path("KEY").is_file()
 
 
 def test_figure_metadata_without_an_image_blocks_publication(paper, monkeypatch):

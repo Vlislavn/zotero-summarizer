@@ -10,11 +10,16 @@ The server SQLite database remains canonical. `pull` returns compact paper
 snapshots plus a monotonic field-change cursor; protocol-v1 `changes` is always
 empty because clients reconcile from the snapshot and never consume the event
 history. This keeps stale-device pulls independent of accumulated note/verdict
-transitions. `push` applies ordered verdict or
+transitions. Snapshot rows for label/note keys outside the reading-queue window take their title from `item_titles` (corpus cache, then feed items); the key remains only when no title is known (the client then says “this paper”). One `pull` computes review currentness once (`runtime.request_memo`). `push` applies ordered verdict or
 review-note mutations. Each mutation has a UUID and per-field base revision, so
-replay is idempotent, edits to different fields merge, and same-field divergence
-returns an explicit conflict. A resolution is another mutation naming the
-conflicted mutation. Delete tombstones retain their last revision, so a client
+replay is idempotent, edits to different fields merge, and any mismatch with the
+current field revision, including a future base, returns an explicit conflict. A resolution is another mutation naming the
+conflicted mutation. `keep_server` carries no value/comment: it references the
+compared conflict and exact field revision. The same SQLite transaction verifies
+that target/version and records the actual no-op UUID receipt; a changed version
+conflicts again. No canonical field/origin, transition log or native mirror is
+changed by that choice or its replay. Set/delete and their existing effects stay
+separate; canonical readouts are not restricted by outbound mutation size caps. Delete tombstones retain their last revision, so a client
 that has pulled a deletion can edit from that revision without a false conflict;
 replaying a conflict UUID returns the same conflict rather than treating it as
 an applied write.
@@ -43,9 +48,10 @@ reported as active work.
 Snapshot review payloads are filtered through the same PDF/model/config identity
 check as Library policy consumers; stale deep-review output is never synced as current.
 
-This protocol is currently safe for the default same-machine/loopback PWA only.
-It has no remote-user authentication or HTTPS bootstrap; exposing it to a LAN or
-internet client is deferred until that transport boundary exists. The JSONL
+The default transport is the same-machine/loopback PWA. Remote use requires the
+explicit owner-authenticated HTTPS/private-Unix gateway described in
+[remote access](../../../docs/features.md#remote-access); the sync protocol itself
+does not authorize an unauthenticated LAN listener. The JSONL
 transition log is not an exactly-once transactional outbox.
 
 Verdict `delete` effects now share the online retraction command, including UUID
@@ -68,7 +74,8 @@ share the current-label writer lock too; older CSV enrichment remains separate.
 Pushes contain at most 100 mutations. The optional, bounded `predecessors` UUID
 list names already-applied server receipts: the next batch inherits only that
 device/item/field's acknowledged revision, without rewriting immutable request
-bodies or rerunning predecessor effects. Intervening writes still conflict.
+bodies or rerunning predecessor effects. Replaying an older receipt cannot lower
+that acknowledged continuation revision. Intervening writes still conflict.
 Unknown or conflict receipts reject the request before writes. IndexedDB commits
 these receipt IDs with acknowledgement retirement, so continuation survives a
-restart or the existing 15-second whole-sync deadline. No schema or worker is added.
+restart or the existing 15-second whole-sync deadline.

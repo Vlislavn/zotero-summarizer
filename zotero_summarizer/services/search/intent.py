@@ -1,9 +1,10 @@
 """Parse a raw topic into a structured intent + a PER-SOURCE query plan.
 
 The expert review's first architectural fix (spec §13.1): one universal
-reformulated query is wrong — different engines want different inputs. A cheap
-``feed``-stage LLM produces a ``SearchIntent`` (canonical English question,
-concepts, synonyms, must/must-not), and ``build_query_plan`` deterministically
+reformulated query is wrong — different engines want different inputs. The
+``deep_review``-stage LLM (``pipeline.default_deps``) produces a ``SearchIntent``
+(canonical English question, concepts, synonyms, 2-4 keyword ``search_queries``, one
+``semantic_query``, must/must-not), and ``build_query_plan`` deterministically
 derives a query string per source. The plan is shown to the user (transparency).
 
 If the LLM output is empty or unparseable, ``parse_intent`` falls back to the raw
@@ -30,6 +31,12 @@ TOPIC: {topic}
 Return ONE JSON object with these keys:
 - "canonical_question": one clear English sentence stating the information need \
 (a paragraph-length restatement good for semantic search).
+- "search_queries": 2-4 SHORT keyword queries (3-8 words each, no quotes, no \
+operators) that a paper on this topic would match in its title or abstract. Use \
+the field's real terminology and synonyms, not the user's wording; tightest first \
+(e.g. "LLM agent plan verification failure prediction").
+- "semantic_query": ONE natural-language sentence (<=40 words) describing the \
+papers wanted, for a meaning-based search engine; fold in the researcher's questions.
 - "concepts": 3-8 core concept phrases (lowercase noun phrases).
 - "synonyms": a FLAT array of alternative terms / acronyms (max 8 strings; do \
 NOT nest objects).
@@ -60,6 +67,12 @@ def _as_str_list(value: Any) -> list[str]:
     return [s.strip() for s in value if isinstance(s, str) and s.strip()]
 
 
+def _clean_queries(value: Any, limit: int = 4) -> list[str]:
+    """Model keyword queries → plain, deduped, bounded strings (quotes/operators dropped)."""
+    cleaned = (" ".join(re.sub(r'["()\\]', " ", q).split()[:12]) for q in _as_str_list(value))
+    return list(dict.fromkeys(q for q in cleaned if q))[:limit]
+
+
 def _parse_once(prompt: str, *, llm: Any) -> dict[str, Any]:
     """One LLM call → parsed dict. Salvages a fenced / trailing-prose JSON blob
     (``extract_json_blob``); raises ``ValueError`` if nothing parseable came back."""
@@ -67,7 +80,7 @@ def _parse_once(prompt: str, *, llm: Any) -> dict[str, Any]:
 
 
 def parse_intent(raw_query: str, questions: list[str], *, llm: Any) -> SearchIntent:
-    """LLM feed-stage parse → SearchIntent. One strict retry when the model returns
+    """LLM deep_review-stage parse → SearchIntent. One strict retry when the model returns
     unparseable JSON (fenced/truncated/nested — small models do all three), THEN a
     raw-query fallback with ``parse_ok=False`` so a degraded plan is visible, never
     silent (spec §7 error contract)."""
@@ -105,6 +118,8 @@ def parse_intent(raw_query: str, questions: list[str], *, llm: Any) -> SearchInt
         synonyms=_as_str_list(parsed.get("synonyms"))[:8],
         related_terms=_as_str_list(parsed.get("related_terms"))[:8],
         domain=parsed.get("domain", "") if isinstance(parsed.get("domain", ""), str) else "",
+        search_queries=_clean_queries(parsed.get("search_queries")),
+        semantic_query=" ".join(str(parsed.get("semantic_query") or "").split())[:500],
         must_include=_as_str_list(parsed.get("must_include")),
         must_not_include=_as_str_list(parsed.get("must_not_include")),
         study_types=_as_str_list(parsed.get("study_types")),
@@ -194,8 +209,9 @@ def build_query_plan(intent: SearchIntent) -> QueryPlan:
         domain_note = (f"Supplied in topic: {domain}" if domain else
                        f"Proposed, not a mandatory anchor: {intent.domain}" if intent.domain else
                        "No domain supplied; refine the topic if context needs disambiguation")
-        # Raw user need, not the model's expanded canonical question, owns semantic scope.
-        semantic = " ".join([intent.raw_query, *intent.questions]).strip()
+        # The model's semantic_query owns semantic scope; raw topic + questions only when it is absent
+        # (parse failure, or a stored/legacy intent without the field).
+        semantic = intent.semantic_query or " ".join([intent.raw_query, *intent.questions]).strip()
         expanded = semantic
     lexical = _constrained_lexical(lexical, intent)
     return QueryPlan(
@@ -208,7 +224,8 @@ def build_query_plan(intent: SearchIntent) -> QueryPlan:
         openalex_semantic=semantic,
         europepmc=lexical,
         arxiv=arxiv_bag,
-        crossref=" ".join([*concepts[:6], *intent.must_include, *intent.synonyms]),
+        crossref=(" ".join([intent.search_queries[0], *intent.must_include]) if intent.search_queries
+                  else " ".join([*concepts[:6], *intent.must_include, *intent.synonyms])),
         semantic_scholar=semantic,
         openreview=semantic,
         openalex_lexical_variants=variants,

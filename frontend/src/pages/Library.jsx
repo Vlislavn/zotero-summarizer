@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import LibraryReadNext from './LibraryReadNext.jsx';
 import AnnotationVerdict from './AnnotationVerdict.jsx';
+import PageTitle from '../components/ui/PageTitle.jsx';
 
 // Library page — one surface, two modes (Increment 3 nav collapse). The default
 // "Read next" mode is the unchanged ranked reading queue (LibraryReadNext); the
@@ -50,6 +51,7 @@ export default function Library() {
 
   return (
     <div>
+      <PageTitle title="Library" page="library" />
       <div
         role="tablist"
         aria-label="Library modes"

@@ -11,6 +11,7 @@ from zotero_summarizer.services.library.review_eligibility import (
 )
 from zotero_summarizer.services.library.review_summary import pick_stored_summary
 from zotero_summarizer.storage import feeds as feeds_storage
+from zotero_summarizer.storage.feed_identity import row_feed_keys
 
 
 LOGGER = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ def materialize_row(
     collection_name: str = "Inbox",
     label_priority: str | None = None,
     review_proof: ReviewedFeed | None = None,
+    mirror_note: bool = True,
 ) -> str:
     """Materialize a row; a caller may reuse its own pre-write review proof."""
     from zotero_summarizer.services.triage.feeds import (
@@ -62,33 +64,37 @@ def materialize_row(
         existing = feeds_storage.current_materialization_intent(conn, row, label_priority)
         if existing:
             feeds_storage.link_materialized_sibling(conn, row, existing)
-            conn.commit()
-            return existing
-        writer.apply_feed_materialization(
-            new_item_key=new_key,
-            feed_payload=feed_payload,
-            inbox_collection_name=collection_name,
-            matched_collections=_matched_collections_from_row(row),
-            tags=tags,
-            note_title=f"Triage: {str(row.get('title') or '')[:80]}",
-            note_html=note_html,
-            provenance_tag=pending_service.SYSTEM_TAG_FEEDS_V3,
-        )
-        if feeds_storage.record_materialization(
-            conn,
-            feed_library_id=int(row["feed_library_id"]),
-            feed_item_id=int(row["feed_item_id"]),
-            materialized_zotero_key=new_key,
-            outcome_window_days=7,
-        ):
-            feeds_storage.update_to_decision(
+            new_key = existing
+        else:
+            writer.apply_feed_materialization(
+                new_item_key=new_key,
+                feed_payload=feed_payload,
+                inbox_collection_name=collection_name,
+                matched_collections=_matched_collections_from_row(row),
+                tags=tags,
+                note_title=f"Triage: {str(row.get('title') or '')[:80]}",
+                note_html=note_html,
+                provenance_tag=pending_service.SYSTEM_TAG_FEEDS_V3,
+            )
+            if feeds_storage.record_materialization(
                 conn,
                 feed_library_id=int(row["feed_library_id"]),
                 feed_item_id=int(row["feed_item_id"]),
-                decision=feeds_storage.DECISION_SELECTED,
-                decision_reason=f"materialized_via_{reason}",
-            )
+                materialized_zotero_key=new_key,
+                outcome_window_days=7,
+            ):
+                feeds_storage.update_to_decision(
+                    conn,
+                    feed_library_id=int(row["feed_library_id"]),
+                    feed_item_id=int(row["feed_item_id"]),
+                    decision=feeds_storage.DECISION_SELECTED,
+                    decision_reason=f"materialized_via_{reason}",
+                )
         conn.commit()
+    from zotero_summarizer.services.golden import verdict_effects
+
+    if mirror_note:
+        verdict_effects.mirror_review_note(get_settings().triage_db_path, new_key)
     return new_key
 
 
@@ -163,17 +169,24 @@ def apply_all_approved(since_hours: int | None = None) -> dict[str, Any]:
 
     used_keys: set[str] = set()
     applied = 0
+    note_mirrors = []
+    from zotero_summarizer.services.golden import verdict_effects
+
     for row, priority in eligible:
         try:
             materialize_row(row, writer=writer, used_keys=used_keys, label_priority=priority,
-                            review_proof=require_review(row))
+                            review_proof=require_review(row), mirror_note=False)
         except feeds_storage.MaterializationSuperseded as conflict:
             failed.append({"id": row["id"], "code": "superseded", "error": str(conflict)})
         else:
             applied += 1
+            note_mirrors.append({"id": row["id"], **verdict_effects.mirror_review_note(
+                settings_.triage_db_path, row_feed_keys(row)[0],
+            )})
 
     return {
         "applied": applied,
+        "note_mirrors": note_mirrors,
         "pending_sync": 0,
         "zotero_sync_error": None,
         "failed_count": len(failed),

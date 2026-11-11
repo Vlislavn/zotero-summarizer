@@ -98,6 +98,9 @@ async def calibration_metrics() -> CalibrationMetricsResponse:
     })
 
 
+MAX_ITEM_KEYS_LOOKUP = 200
+
+
 async def dashboard_results(
     scope: str = "latest",
     batch_id: str | None = None,
@@ -106,7 +109,19 @@ async def dashboard_results(
     order: str = "desc",
     limit: int = 200,
     offset: int = 0,
+    item_keys: str | None = None,
 ) -> dict[str, Any]:
+    if item_keys is not None:
+        # Batch lookup of the latest row per item (one query instead of N /api/results/{id} calls).
+        keys = list(dict.fromkeys(key.strip() for key in item_keys.split(",") if key.strip()))
+        if len(keys) > MAX_ITEM_KEYS_LOOKUP:
+            raise APIError(error="validation_error", status_code=422,
+                           message=f"item_keys accepts at most {MAX_ITEM_KEYS_LOOKUP} keys")
+        latest = await asyncio.to_thread(triage_db.get_latest_results_for_items, keys)
+        rows = [latest[key] for key in keys if key in latest]
+        for row in rows:
+            row["response_json"] = safe_parse_response_json(row.get("response_json"), f"/api/results item_id={row.get('item_id')}")
+        return {"scope": "items", "total": len(rows), "items": rows, "selected_batch_ids": []}
     limit = max(0, min(limit, 500))
     offset = max(0, offset)
     safe_scope = str(scope or "latest").strip().lower()

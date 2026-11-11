@@ -28,7 +28,7 @@ from zotero_summarizer.domain import (
     PRIORITY_MUST_READ_THRESHOLD,
     PRIORITY_SHOULD_READ_THRESHOLD,
 )
-from zotero_summarizer.services._common import load_golden_rows as load_rows
+from zotero_summarizer.services.golden.csv_store import load_golden_rows as load_rows
 
 
 LOGGER = logging.getLogger(__name__)

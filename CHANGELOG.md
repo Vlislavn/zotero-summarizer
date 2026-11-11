@@ -1,741 +1,103 @@
 # Changelog
 
-All notable changes to this project are documented here. Format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project does not
-yet publish versioned releases, so everything currently lives under
-`[Unreleased]`.
-
-Deep technical detail (benchmark numbers, parameter sweeps, measurement rationale)
-is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current behavior lives in [docs/features.md](docs/features.md); history only.
 
 ## [Unreleased]
 
-### Changed
-- Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
-- Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.
-- Fold goal findings without losing originals; disclose saved source basis and unknown reviewed extent. Factor literal warning frames into one introduction with expanded scope/context, qualifiers and source links; retain original wording. Compact cards remain unchanged.
-- Retain long paper-specific note fields by default. Whole-field omission budgets are explicit renderer opt-ins only, pending usefulness validation; no unmeasured shortening policy is enabled in materialization.
-- Reorder full reviews around contribution, caveats and findings; fold assessment and goal evidence without losing source text. Improve triage-note fallback, optional sections and materialization metrics; retain explicit native/user acceptance gates.
-- Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
-
-### Fixed
-- Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
-- Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
-- A124: verify section one-liners in a second batch against the same first 700 source characters (up to 24 sections); omit unsupported summaries. Scripted checks do not establish live semantic accuracy.
-- A136: use figure metadata only for affirmative whole-paper figure-count wording; route scoped, uncertain, table-only, combined, and unmatched counts to grounded Q&A. Live scope accuracy is unmeasured.
-- A142: validate persisted and injected review-fleet proposals; skip malformed rows, retain valid neighbors, and calibrate only valid human/proposal pairs.
-- A176: cover admitted Faithbench text with contiguous 6,000-character windows; default 32, maximum 256, with preflight rejection above budget and the effective limit recorded in metadata.
-- FaithBench build resolves window budgets as CLI > shell environment > selected-project `.env` > default before provider setup; warning-call assertions are isolated from root-logger propagation.
-- Extract analysis text through the existing plain-PDF backend, avoiding Markdown transformations that can interleave signed superscripts/subscripts. Include the adapter fingerprint in review identity; presentation parsing stays separate and generated-PDF regressions preserve uncertainty order.
-- Reuse bounded source mapping for long triage inputs; subdivide only explicitly truncated maps to the existing minimum, checking cancellation between calls. Keep token limits, models and numerical scoring unchanged; exhausted or empty segments still fail.
-- Identify note ownership structurally, not from marker-like body text. Keep digest metadata last so comment-free native notes remain updatable; protect manual and cross-kind notes.
-- Ground refinement's date, experimental phases, study safeguards and uncertainty associations. Distinguish computed final priority from the model's pre-mapping proposal without losing its explanation or changing scores.
-- Pass complete typed refinement evidence to triage; preserve conditional effect directions, Results exceptions and validation/reproducibility distinctions in the default refinement prompt. Existing calls, routing and numerical scoring are unchanged.
-- Store note add/upsert HTML in Zotero's native envelope so its loader preserves sections instead of displaying escaped markup. Reuse existing envelopes and keep exact legacy replay idempotent without auto-migrating user notes.
-- Preserve ownership metadata as note text across native editor save/reopen; reuse footers, retain legacy comments and protect unrelated manual notes. Comments alone are not a durable ownership boundary.
-- Validate complete, unambiguous typed refinement JSON instead of selecting a leading unrelated object. The single repair receives the canonical schema and validation errors; differing valid roots fail safely.
-- Preserve observed versus simulated/projected outcomes, conditional scope and author attribution in refinement findings and overview; do not promote correlation to causality.
-- Put contribution before recommendations on full reviews, qualify exact overstated findings once, fold goal reasons with evidence, and keep the mobile verdict link in document flow rather than covering text.
-- Preserve every saved finding, reading hint and tag instead of silently capping lists at six; add eight-item regressions.
-- Prioritize bounded publication-type recovery with title hints, never title-based eligibility; expose unattempted/confirmed counts. Real source metadata recovered qualifying reviews without increasing lookup budgets.
-- Normalize optional positive signs in source/digest numeric tokens. A real captured review failed on `+3.3` versus `3.3` and `9.6` versus `+9.6`; negative signs, absent magnitudes, arithmetic restrictions and semantic verification remain enforced.
+- Paper card (#311): the method icons and legend follow the paper's own review (yes/no) where one exists, so they no longer contradict it; the facts scan keeps appendices after the reference list; the AI card is told only the flags the scan found and never an absence it could have missed.
+- Paper review at a glance (#308): one card (paper page, Library row) leads with what the paper does, the verdict line, grade with a check bar, the key metric as a number, a strength and a weakness; Assessment opens second as a data→method→baselines map; the TL;DR `Code` line gives way to «Not found».
+- Search (#310): the AI now writes real keyword queries (2–4, with synonyms) and one natural-language query from your topic instead of sending it as typed; the OR bag needs a topic word; sources that return nothing now say why (rate limited, request error, not configured), including OpenReview.
+- Today (#309): the card title opens the full review (publisher page = quiet «Source ↗»); a regenerating card shows step, elapsed time and queue position; «New shortlist» shows a pending state and «N new papers» / «Same papers — nothing new since …».
+- Research-feed Markdown report reads like the Weekly page: near-threshold rejects show plain gate rationales and project-use notes spell out status tokens («not applicable»).
+- Code-health scan (#301): deadcode-audit now also scans `frontend/src` (JS/TS via oxlint; `make scan` gains a Python + JS/TS quality section) and `make scan-overlaps` runs the two-pass embedding overlaps; the unused `DEFAULT_SORT` import and the duplicate `fetch_trashed_guids` are gone.
+- `research-feed run` no longer looks hung (#302): it says how many new papers it is screening with the AI model and prints «screened 40/432 (2 failed) · 3 min» to stderr every 10 papers; `--cached-only` skips screening.
+- Long papers in Triage (#284): a remote provider reads the whole paper in one call (its window, as deep review); longer sources (>80k chars on local) map chunks (parallel on remote, serial on local; same map step as deep review), and a cancelling job says «Stopping after the current AI call finishes…».
+- RSS refresh counts (#285): a story served by several feeds keeps its first feed instead of flipping on every fetch, and GitHub release notes no longer change per fetch (expiring image tokens dropped), so a repeat refresh reports 0 updated; «unchanged» now counts items, not feeds.
+- Settings connections (#281): «Connect provider»/«Load models» on an address and authorization that is already saved reuses that connection (no more duplicates); provider status re-checks after a save instead of showing a stale «✓ Provider reachable»; a briefly busy settings file waits ≤2 s, then says «Settings are saving — try again in a moment».
+- Slow server vs. absent server (#282): a request timeout or 502/503/504 now shows «Server is busy — retrying…» and keeps retrying; «Server unreachable» when the connection is refused, the device is offline, or 3 timeouts in a row get no answer; Today no longer says «AI not connected» after a failed or timed-out status check.
+- Plain wording (#277): digest reproducibility rationale (page and Markdown), search «What was searched» source names («OpenAlex · keyword search»), and Pending apply result («6 changes applied.»).
+- Search clarity (#274): «Reviewed N of 10» while reviewing, plain per-source «What was searched» lines (results / not available right now / «Some sources failed»), HTML entities and heading breaks in abstracts and titles, one «Published article · Crossref» chip.
+- Find new relevant no longer fails with «Seed context changed; reload discovery» (#275): the discovery fingerprint ignores the constantly written `corpus_cache.db` file marker and changes only with the seed's own data.
+- Busy database and Ask (#269): a locked database answers 503 «The app was busy; try again in a moment.» (quiet retry ×2) instead of a 500; Ask on a paper without a PDF fails at once with plain wording and no Retry; triage errors read «The model did not answer in time» / «The database was busy; run again»; editors say «The app is busy» (not «need the Mac») when the server merely errored.
+- Plain-words fixes (#270): «Not interested» everywhere with readable priority bins, «Saved to Zotero» / «will be written when the Mac is connected», no journal/DOI prefix in abstract previews, no mid-sentence red-flag fragments or licence quotes, no «Outdated review» flash, folded duplicate Pending rows with local times.
+- Review output cut off (#268): a digest/verifier call that hits the output limit is re-run once with a doubled output budget (≤32768) and recorded in the lineage; failure banners say why in plain words (cut off, connection dropped, no answer in time) instead of «Inspect the attempt error».
+- Ask this paper no longer abstains on papers whose PDF text hides soft hyphens or zero-width spaces (e.g. NEJM AI): quotes are matched ignoring them, and «verified quote» is shown again (#271).
+- Today, offline and conflict wording (#265): plain «still being added» banner; a paper with a review no longer flashes «needs a review» after Add/verdict; offline paper pages say «You are offline — AI review needs the Mac»; conflict banners show the paper title (feed-key titles now resolved) or «this paper»; Keep mine refreshes the open note.
+- CLI errors and progress: `research-feed view` on a missing report, offline `prefetch-models` and a missing model cache give one-line errors or an empty inventory, not tracebacks; `doctor` says «Local model not tested» instead of «failed»; `calibrate` prints per-paper progress.
+- Weekly/RSS wording (#264): «Dataset provenance» not the raw key, «1 card», capitalised Not-a-fit chips, readable «Last checked» and Markdown range; RSS refresh no longer rewrites identical items, so re-fetched feeds count «unchanged».
+- Library, Setup and AI approval read plainly: no glued abstract text, «Papers the model is unsure about» / «Not interested» labels, `/setup` shows the current state, and AI models has an explicit «Approve this connection» button.
+- Paper page and Today read plainly: «Loading today's papers…», «← Back», no raw item keys in Ask errors, one wording for verdicts, plain checklist/legend text, repeated red flags merged, bottom bar no longer covers text.
+- Search and Find similar read in plain words and fit a 390 px screen: no sideways scroll, no raw HTML in abstracts, readable source and status labels, the saved query shown.
+- Reviews you ask for no longer wait behind background work (#251): Generate/Regenerate and Add start before Today preparation, prewarm and fleet reviews (`queue_ahead` in review status); Search reviews 4 papers at a time, not 14 in a row.
+- Search and Pending clarity (#299): «What was searched» rows read «Must mention (title/abstract)», «Filters» (AI-suggested vs confirmed by you) and «Needs your confirmation: …»; Pending folds re-queued versions of one note (same title) behind «N older versions».
 
 ### Added
 
-- Independent HTML-preservation checks and mutation controls; opt-in frozen real-review browser replays skip when inputs are absent. Literal retention proves neither scientific truth nor native-editor compatibility.
-- Review attempts expose typed stage/recovery and metadata-only traces. Explicit local CLI captures retain decoded calls; operational source templates never become scientific reviews, and unavailable placeholders preserve current valid reviews (#32).
-- Search hard constraints require user confirmation; model hints/refinement cannot create bans. Bounded complementary queries, publication metadata recovery and retrieval accounting preserve legacy plans and disclose coverage limits (#31).
+- CLI/MCP (#249): busy-port `serve` and `feeds select-daily` exit promptly; bad `--inspect`/recipe/snapshot → one line, exit 2; `restore-model` says to restart; MCP `search_papers` ~10 calls instead of ~770; synthetic experiment examples (`python -m tools.method_validation.examples DIR`).
+- RSS, Settings and offline wording (#248): plain feed errors, "Added N new feeds" and "Nothing new" refresh summaries, host-only feed rows, paper-named sync conflicts, one approval hint, iPhone home-screen icon.
+- Background processing (#219): Settings task for papers reviewed at once (8), calls per paper (2), feed catch-up days (7) and pages per feed (10); saved to goals.yaml only when changed from the default.
+- Checklist engine (#147): Settings choice Off (default) / Local / Cloud. When on, an external checklist model answers up to 5 checklist items (code/data, uncertainty, ablation, baselines, outside validation) with a verified evidence passage; unsure or failing cases fall back to the language model. Local = your own server address, not validated; Cloud sends paper text externally.
+- Your decisions (#47, #218): Ops → System analyses your accumulated verdicts (what changed, agreement with saved predictions, per-class ranges, data gaps) with “Run now”; also weekly with the feed daemon (switch in that card). Read-only: labels and models never change.
+- Review depth (#143): Settings choice Thorough (default) or Fast. Fast turns off the digest model's reasoning and runs the rubric once: writing step 50–75% quicker, but wording changed on 3 of 4 test papers and 1 grade changed. Other-depth reviews show as outdated.
+- Paper page: **Evidence** fold (#40) with the verbatim quotes behind each verified claim, grouped by field (read-only `GET /api/library/review-audit/{key}`); summary card with verdict, why, read first, code row; sticky verdict bar; collapsible sections.
+- Today (#37, #124, #151, #159, #163, #165, #172, #183): one column, one «New shortlist», per-card must/should/could/skip with undo and reason chips; decision shown after a verdict; «Not reviewed yet» shelf; outdated reviews get a badge + Regenerate; «k of n checks».
+- Cards (#98, #108, #114, #127): AI card with TL;DR, key result, novelty/code/h-index strip and one plain why-line naming the goal; ≤4 labelled bullets, English UI; generated ahead for Today's top-15 under per-paper and daily caps and a circuit breaker.
+- Zotero note (#152): carries the whole review: digest fields, rubric with quotes, k of n checks, red flags, overstatements, type, goal board, code link, section lines, verification. Writes still follow approval and a backup.
+- Paper types (#169, #180): `experience_report`; stricter position-paper checklist; «type uncertain» graded by the generic checklist.
+- Telegram (#99, #112, #119–#126, #128, #157, #167, #170, #174, #184): one «Check channels» job with progress and remembered consent; whole discussions read; comments load on tap; one line per key comment; «Disagreement» only when detected; trends; archive by date; feedback chips + note.
+- Local model Test checks memory first (#117): reads RAM/swap and model size, sends one ≤16-token prompt only if safe, otherwise returns `memory_insufficient`/`swap_nearly_full`/`model_size_unknown` with numbers.
+- Today logs what it shows (local `data/today-exposure/`; off: `ZS_TODAY_EXPOSURE_LOG=0`) and adds up to two marked “Random check” papers per day (`ZS_TODAY_EXPLORATION_SLOTS`). Ranking: goal-text cosine (`ZS_TODAY_RANKER=composite_v1` restores the old order).
+- Search and discovery: targeted Search over arXiv/Europe PMC/OpenAlex/Crossref/Semantic Scholar, find-new-relevant for saved papers, Related links, Weekly paper-gap review, optional question-evidence retrieval; opt-in offline comparisons.
+- Offline PWA review on iPhone (Tailscale HTTPS or private socket): working set, queued saves/notes/questions, conflict choices, ordered sync; Ask grounded questions about a paper with quotes.
+- Deep review features: map-reduce digests, parameter extraction, code-repo links, figure attachment, review notes mirrored to Zotero, one-tap Confirm/Override on proposed verdicts; review fleet with university browser access for gated PDFs.
+- Setup and deployment: first-run setup (local, hosted or no LLM) validated by Doctor; deployment profiles with opt-in “Calibrate to my setup”; `ZS_AUTOMATIC_GATE_UPDATES=0` pins a retained model; local weights run from another volume with bounded batch/KV size.
+- Sources: PubMed (with PMC full text), HackerNoon and flagship-journal feeds; Pending Changes keyboard navigation; Telegram as a source with one-time terminal authorization.
 
-- A positive verdict (must/should/could-read) on a Today-feed paper now auto-materializes it into the Zotero Inbox (`materialize_feed_verdict`) — previously the verdict only labelled it and the paper never reached Zotero. `dont_read` never adds; the Zotero add is best-effort and surfaced in the UI.
-- That materialization now also stamps the user's `label:<priority>` ground-truth tag on the new Zotero item (threaded through `review.materialize_row`), so the verdict set in Today lands as a Zotero tag even while Zotero stays open — the standalone `zotero_set_label_tag` refuses then.
-- Targeted Search (`services/search/`, `/api/search*`, `/search`): query→per-source plan→concurrent arXiv/Europe PMC/OpenAlex federation (keyless `arxiv.py`+`europepmc.py`)→version-family dedup→cross-encoder relevance under a constrained re-rank→light-review tier→grounded deep read.
-- Targeted Search federates two more sources: **Crossref** (`integrations/crossref.py` — ~150M works, broadest recall, `mailto` polite pool) and **Semantic Scholar** (`integrations/semantic_scholar.py` — relevance-ranked + abstract-rich, gated on a conservative 1 req/s limiter since the keyless tier 429s). Both are host-locked keyless leaves that dedupe into the existing version families (DOI/arXiv/PubMed ids). OpenAlex is now wired INDEPENDENTLY of the prestige feature (`pipeline._search_openalex_client`), so the broadest source contributes to Search even when prestige is off. `QueryPlan` + its display panel gained the two new source rows. (bioRxiv/medRxiv left to OpenAlex/Europe PMC/Crossref coverage — no dedicated leaf.)
-- Targeted Search results are now Today-like: each card shows a pool-relative **relevance band** (strong / on-topic / weak — cohort terciles of the `[0,1]` `query_score` + an absolute floor so an all-bad pool gets no "strong") and ≤3 plain **why** chips (relevance, cross-source agreement, quality grade/band, version standing) from `services/search/_relevance.py`; the low-relevance tail collapses under a "N weaker matches ▾" disclosure on `/search`.
-- "Add to library" on Targeted Search results (`services/search/materialize.py`, `POST /api/search/{id}/materialize`) — files one candidate into a user-chosen Zotero collection (validated key→name, Candidate→feed_payload adapter, idempotent, key stamped under the session lock; locked DB → 503, no fake success). A shared `<CollectionPicker>` collection chooser is now on BOTH `/search` (per-result Add) and Today's add-to-library batch bar (`add_to_library` gained `target_collection_key`, `review.materialize_row` gained `collection_name`, default "Inbox"). `ZoteroReader.get_collections` now scopes both its queries to the user library.
-- Targeted Search agentic refinement (`services/search/refine.py`, opt-in `ZS_SEARCH_AGENTIC`) — after the first screen, an LLM reads the top results and emits a pseudo-relevance-feedback delta (add under-covered concept facets, drop off-topic drift); the delta concepts are re-federated, unioned into the existing version families, and the whole pool is re-scored/ranked/banded. Bounded rounds (default 2), stops early when the LLM proposes no additions or the strong band stabilizes. Runs BEFORE the auto deep-review so the deep set is chosen from the refined pool. Each round's added/dropped concepts + new-paper count persist on the session (`ResearchSession.refinements`) and render in a `/search` panel. `dedup._merge_family` now preserves derived state (query score, quality, review, verdict, band, materialized key) so a re-fetched richer version can't discard a completed review.
-- Targeted Search recall: each lexical source adds a tight exact-match quoted-phrase pass (the user's leading clause) beside the concept bag, unioned pre-rerank (`intent._tight_query`, `QueryPlan.*_variants`, `federate`). The citation-weighted OpenAlex bag buried specific/new papers; `tools/bench_search_recall.py` lands the CAPA-target survey #2 that the bag missed.
-- Targeted Search candidates gain library-coverage annotation (`pipeline._annotate_library_coverage`): `in_library` (tri-state, fail-open) + `existing_zotero_key` + OpenAlex `cited_by_count`. Advisory — a paper already in Zotero still ranks; it flags which top results are missing.
-- Weekly paper-gap review: `/weekly-review` screens each goal via Targeted Search, curates ~12 papers with in-library flags, confirms with the user, then flags gaps; a SessionStart hook (`.claude/hooks/weekly_review_gate.sh`) nudges once/week when overdue.
-- Zotero-column sort in Library Read next: Best match / Title / Creator / Publication / Year / Date Added with Zotero's first-click directions and empty-cells-sink-last, URL-persisted (`s`/`sd`); queue recs now carry `publication_date`/`date_modified` (`_ranking._build_recs`).
-- The fleet's Confirm/Override card (`ProposedVerdictCard`) is now actually mounted on Read-next rows — one-tap Confirm of a confident proposal (low-confidence/flagged still forces Override), as PredictionsBar's state line always promised. Was built but never rendered; 3 regression tests.
+### Changed
+
+- Ops wording (#246): a note made for another Zotero library says so (header pending count refreshes after Apply/Reject); retrain text matches the restorable model history; plain model-card, readiness and Gate-rejected labels.
+- Weekly digests in plain words (#247): date ranges, “Worth a skim”, sentences instead of snake_case flags and raw gate scores, project use said once, link-only Telegram posts titled by their first text line, “2 comments” labels.
+- UI noise leftovers (#237): plain Ops pending-changes copy, one chevron for every disclosure (no native ▶), shared label style on paper-page rail headings, 8 px shorter iPhone nav.
+- Field repair (#191) tries a fast attempt without reasoning first and escalates once with reasoning only if the field is still rejected (repair call ~10 s instead of 17–89 s); a field emptied by repair is listed as not established; lineage records rejected fields.
+- Calmer pages (#227): the paper verdict is on the first iPhone screen (long author lists fold to `+N more`, facts under the verdict, one-line outdated note); Today shows «Quality A», hides feed codes; Library hides raw HTML and folds explainers; no weight ≥600 anywhere.
+- Calmer Settings (#230): each provider failure and address is shown once (rows say «Not reachable»; reason on AI models, addresses under «Providers and status checks»); Needs-attention lists only open issues; short «Change» actions; repeated notes folded; Forest checkboxes.
+- Paper card facts (#231): the icon row shows only the facts that were found (one row on iPhone); with none, one quiet line instead of 11 empty circles. “more” still lists every checked fact.
+- Dead-code, duplication and overlap checks now run through deadcode-audit, always on its latest main (`make lint`/`make install` refresh it; offline falls back). Diff gates run at pre-push and in `make lint`; the local scripts and allowlists are gone (#223).
+- Whole paper body in review (#136): every judging stage reads the whole body minus references, boilerplate and page furniture (256k window; longer papers are split and merged). Prompts grow up to ~2.5× on long papers; existing reviews show as outdated.
+- Deep review speed (#135, #137, #141, #180): quality layers run beside the digest, light calls no longer reason, section one-liners build on open: −2…−5 calls per review; grade, band and goals unchanged on 4 test papers. The claims check and the overstatement check stay two separate calls (#134).
+- Review fleet (#193): 8 papers at once × 2 calls each (was 4×4): 8 test papers in 324 s instead of 668 s, no rate-limit errors. `quality_review.fleet_papers`/`calls_per_paper` = 0 restores the old split.
+- Review repair (#130): a digest field the verifier cannot ground is repaired by one call, else shown as «Could not be grounded · Regenerate»; the review is kept. Only required fields (TL;DR, read-why, key findings) still fail it.
+- Goal board and overstatements (#187, #194) only inform: shown as badge and flag, never change a verdict, read decision or Today eligibility. Proposal confidence drops only for an `uncertain` quality band.
+- Owner verdicts store the app's proposal at decision time (#224, migration v18 `label_verdicts.proposal_json`); feedback analysis reports app-vs-owner agreement. Auto quality-gate verdicts are no longer training labels (#111).
+- Feeds keep every entry (#161, #217): arXiv queries are paged back to a per-feed watermark (`feeds.backfill_days` 7, `max_pages_per_feed` 10); “Incomplete fetch” shown when cut off. Cards show the last author's h-index.
+- Settings: saved-first AI connections (Connect, catalog or manual choice, impact preview, explicit Use); one table of which model runs each step with median time and status; scoped saves; article selection/RSS lives in Today and Telegram.
+- Today separates relevance from AI evidence; feed papers need a current full-text review before Add or a positive feed label; the daemon no longer auto-adds or rejects picks. Today and Library read as terse decision cards with readable counts.
+- Review quality: grades come from a validated deterministic checklist, keep idea/evidence/writing separate and cap advice for weak evidence; verification checks critical criteria against source context and runs against the original paper only.
+- Writes are safe: Zotero note/tag writes and raw RSS read-state updates back up first; pending changes reject as one transaction; remote or local model operations need explicit consent and a resource envelope.
+- Search constraints need your confirmation; library membership stays unknown when it cannot be checked. Weekly (#128) is English with one status line and terse Telegram gists in the chat's language.
+- Make: bare `make` shows help; `make install` and `make run` (rebuilds a stale UI); `make iphone` maps Tailscale HTTPS. Compact app chrome, gzip for JSON/static over 1 KB, `/` opens Today.
+
+### Fixed
+
+- Find similar papers no longer marks its AI check as stale after unrelated background work.
+- Zotero (#254): applying an `upsert note` replaces the paper's earlier app-written digest/verdict/My-notes note in place, including legacy ones whose marker was HTML-escaped, and trashes extra owned duplicates, so one note per paper.
+- Connection approval (#244): an approved server stays approved across unrelated Settings saves, other providers' key saves and Telegram edits; it expires only when that provider's address/auth or its own key changes (one re-approval for older approvals).
+- Reviews (#242): web articles with non-breaking spaces or soft hyphens now render to PDF; heavy pages no longer fail on the browser proxy's connection cap; concurrent reviews wait for the browser instead of skipping it; Today preparation starts ~30 s after launch.
+- Find similar (#216, #225): works for feed-only papers too, sits right under the review, shows progress, drops the paper itself from results; library membership is cached until the library changes (/discover p50 1.1 s → 0.13 s).
+- Outdated-but-valid reviews (#116) keep the card recommended, accept verdict and Add for the same PDF, and show an «Outdated review» badge + refresh instead of a blank panel; review identity tracks only inputs that shape content.
+- Model Test (#101) keeps the true local memory-safety reason; connection approval is told apart from network failure with exact-connection recovery; setup cancellation or credential changes invalidate stale Ready.
+- Telegram live collection (#99): bare auto-linked domains no longer void a fetched page; posts carry `replies_count`; the gate scorer loads SPECTER2.
+- Owner relabels of an auto quality-gate hide keep no machine comment on your `user` row; Trash/Add toasts report pending sync and label errors; double Add no longer duplicates; Search/Related results are deduped.
+- PDF and full text: browser-like User-Agent for open-access PDFs, bioRxiv/medRxiv `.full.pdf` fallback, Cloudflare and paywalled PDFs via the browser rung, text-only snapshots kept apart from publisher PDFs.
+- Figures: stale renders show «Rebuilding figures…» or «Rebuild»; Figures and Tables are listed separately. Number normalisation and line-break artifacts no longer falsely reject sound claims.
+- Deep review no longer polls forever on a stalled response, retries once on malformed replies and reports the real failure; malformed saved rows give per-paper errors; missing values stay unknown, not zero.
+- Mobile: banners wrap, tabs wrap on narrow screens, 320/390 px reflow, offline Generate disabled; page layout polish (#124–#126 follow-up). RSS refresh rotates feeds; Retrain no longer double-runs; prestige no longer claims `h=0`.
 
 ### Removed
 
-- Re-label Audit page (`pages/Audit.jsx` + `api/auditApi.js` + the de-linked `/audit-page` route) — unreachable from the nav since Increment 3; old bookmarks land on Library via the catch-all.
-- Today card's per-card Quality expander (`QualityBlock`) — a second ordinal scale the card's own header forbids (one scale: the relevance band); full quality lives in the paper's review page.
-- The dead `derivedPriority` prop chain (VerdictPanel ignored it by design, FORK-A) — removed from VerdictPanel, ActionRail, PaperDetailView, AnnotationVerdict, InlineAnnotate, usePaperReview, ReadNextView.
-
-- OpenReview simplification (no behavior change): the duplicated `_disable_prestige_when_offline`/`_disable_openreview_when_offline` helpers collapsed to one parametrized `_disable_section_when_offline`; the unused per-paper `forum_reviews` rating fan-out is now opt-in (`search_openreview(..., with_ratings=True)`) — production reads only the venue+tier chip, so it stops the wasted GET (the two benches opt in to preserve their rating arms); the dead `openreview.limit` config field (`ZS_OPENREVIEW_LIMIT`) dropped (`docs/overrides.md` regenerated); two one-shot backfill scripts deleted (already run, `backfill_verdict_add.py` was also bit-rotted).
-- Tier-1 orphans: `measure_latency` moved out of `services/setup/calibration.py` to its only consumer domain (`tools/eval_small_models.py`, + regression test); test-only `feed_key_alias_validation_report` deleted (its test queries the ambiguity table directly). `dump-orphans` is now empty.
-
-### Changed
-
-- Map-reduce digests now verify against the original paper, including correction/fallback, never generated notes. Empty sources or chunk summaries fail before publishing a review. Regression tests cover parallel map failures and over-budget rank/prefix dispatch (#36; refs #32/#34).
-- Feed papers now need a current full-text review before Add or a positive feed label; the daemon no longer auto-adds/rejects picks. Mixed batches report `review_required`, while Trash stays immediate. Stale offline replays and concurrent Add/Trash cannot revive a rejected pending Add; an explicit newer positive verdict can reauthorize it. Approved sibling rows reuse one Zotero item; updated stable verdicts outrank older legacy aliases.
-- Setup chooses local, hosted or no LLM before Zotero, validates every stage and gates completion on Doctor. Cache-only assets report blocked network attempts; config/RSS/credential changes invalidate stale success. Zotero stays optional for RSS-only use; No LLM mode now explains why new feed Adds need AI while manual imports remain available.
-- Review Relevance renders repeated goal conclusions once in React and HTML, caps the first view, and keeps distinct goal evidence behind disclosures.
-- Playwright found offline Generate falsely enabled and rejected verdicts shown as saved; review actions now fail closed, paper details refetch after sync and stale green device-save notices clear on reconciliation.
-- Paper review badge and heading now count supported goals consistently; desktop pages without a TOC give the review its missing column instead of word-wrapping each card vertically.
-- The mobile sync banner wraps long stable keys in rejected drafts and conflicts; primary tabs wrap on narrow screens so recovery details and navigation do not widen the viewport.
-- The first Today Trash/verdict creates the canonical golden CSV under `data/` instead of failing on a clean checkout with no prior export.
-- A retrieved but unsupported goal no longer appears green or “addressed” in React/HTML; both surfaces distinguish located evidence from a positive relevance judgment.
-- Triage notes no longer print an independent LLM reading recommendation that could contradict their ranked priority; the complete stored summary is preserved.
-- Research-feed offline check now marks missing frozen production inputs and reviews as unscorable instead of reporting fallback-path 0% inclusion or synthetic 100% artifact precision; it still fails acceptance.
-- Today displays top-level full-text acquisition errors without confusing the failure with a successful Zotero Add; Spot-check now keeps pending-sync/mark-read failures visible in a warning after acting on its last card.
-- An interrupted Doctor retry now clears cached Ready instead of letting a stale success unlock Today; credential replacement now serializes with Doctor, rotates a durable revision before writing the key, and clears cached UI Ready.
-- Targeted Search page state survives tab switches: session id + typed drafts + target collection persist in `sessionStorage`; on remount the server-backed session is refetched and a still-running review resumes polling. A dead pointer clears itself.
-- Library Rescore button renders only when actionable (computing/error/stale/never-scored/unscored rows) — quiet-state noise removed; retrain hot-swap already rescores automatically.
-- One name per target: the interactive `/paper/:key` page is "Open full review ↗" everywhere (Today card renamed); the standalone HTML artifact link in the reader pane is now "Open static brief ↗".
-- Tier-6 redundancy → zero: the duplicated JSON state readers (`read_calibration`, `classifier_backup._read_meta`) folded into `services/_common.read_json_or_empty` (missing file → `{}`; an existing-but-corrupt file raises). Redundancy allowlist now EMPTY.
-- Sqlite openers unified: `storage.feeds.open_triage_conn` (api routes / app_rss / review / feeds `_common`) + `storage.corpus.open_corpus_conn` — `CorpusBM25` now runs the same WAL journal mode as `EmbeddingCache` on the shared corpus DB (latent inconsistency fixed).
-- Tier-7 slop → zero via param bundles: `_BrowserLib` (browser_fetch), `RunInputs` (faithbench `run_benchmark`/`judge_run`), `ChunkBudget` (`digest_for_strategy`), `_OofDiag` (`_training_metadata`); `_run_rubric` prompt lifted to its caller; tick adapter resolution split into `_tick_setup.py`. Slop allowlist now EMPTY.
-- Overlap-scan dedups: `daily_actions.record_row_outcome` made public (routes/daily's copy deleted), `pick_stored_summary` shared by both review-apply paths, `is_app_rss_source` in `_common`, `_zotero_write_tags` delegates to `repositories.table_columns`, `_bootstrap_feeds_cli` shared by 3 subcommands, `integrations.llm._log_call` extracted.
-- Guardrail allowlists after the sweep: `dead_code`/`slop`/`redundancy` allowlists now EMPTY (header-only); `vulture_allowlist` regenerated to 3 justified residue entries; `check_allowlists.py reconcile` exits 0 (CLEAN).
-
+- Telegram: the duplicate CLI «saved news» pipeline (`research-feed run --source telegram`, `run_saved`, `TelegramNewsVerdict`, v1 reports), and the dead `conversations` path; the Re-label Audit page; Today's per-card Quality expander; legacy `llm.draft_model`/`refine_model`.
+- `make api`, `make ui` and `make ui-build` (use `make run` or `make dev`); `serve --no-kill`: it reports the bind error instead of stopping another process; `docs/benchmarking.md` is local-only.
 ### Fixed
 
-- Reconciled the 2026-10-05 functional audit against verified regressions; retained five partial #25 findings. Removed stale Markdown-sidecar output claims from render configuration and triage documentation (no behavior change).
+- Readable labels: Weekly saved digests show date ranges, the Telegram sign-in command includes `zotero-summarizer`, `research-feed run --cached-only` names papers by title and exits 0 for uncached ones, Pending changes use plain action names and drop the internal band.
 
-- Q&A support accepts grounded rewording using order-free content-token coverage while retaining required grounded quotes and verbatim-span acceptance. Regression tests preserve rejection of source-absent content.
-- Same sweep root-caused two more false-abstention classes from PDF-extraction artifacts: line-end word breaks (`re-\ntrieval` vs the model's `retrieval`) and typographic punctuation (`LLM’s` vs `LLM's`). The grounding contract now normalizes quote and context symmetrically (`_dehyphenate` + apostrophe/quote folding in `_match_normalize`) before matching, fixing both classes without loosening either strictness level — hallucinated content still fails. Verified live: 4/5 probe questions on a 98k-char paper now answer where the answer is inside the 60k context cap; residual abstentions are genuine (answer past the cap, or not in the paper).
-- Deep review no longer polls forever when an OpenAI-compatible response stalls: the shared client factory now applies `SUMMARY_TIMEOUT_SECONDS` to transport reads, allowing the existing worker error boundary to terminate the job and drain queued reviews.
-- Author bylines no longer claim `h=0` when OpenAlex returns authors without resolvable IDs. Unknown/zero max h-index is now `None`, ignored as prestige evidence, and hidden for historical rows.
-- Targeted Search re-rank was near-unconstrained: `query_score` is a sigmoid `[0,1]` (1-label CrossEncoder → ST default), but `rank.py` assumed unbounded logits and used `EPSILON=0.5`, collapsing `[0,1]` to 2 buckets — quality could reorder a `0.51` paper above a `0.99` one. Retuned `DEFAULT_EPSILON=0.05` (~20 buckets) + fixed the stale comment; regression test fails under the old `0.5`.
-- Targeted Search now auto-starts the deep review of the top papers right after `/screen` (single-flight `session.claim` CAS; `run_review` `save_merge`s after the light band and each deep read so the UI watches reviews fill in). Concurrent "Add to library" can't lose-update the worker (per-session lock; add-only `materialized_zotero_key` preserved). Manual "Deep-review" button removed from `/search`.
-- Targeted Search produced no plan and no deep reads on a live run. Intent parse now salvages a small model's fenced/nested/trailing-junk JSON (`extract_json_blob` + one strict retry + dict-of-lists synonym flatten) instead of bare `json.loads` silently falling back to the raw query; a genuine fallback sets `SearchIntent.parse_ok=False` so a degraded plan is visible.
-- Targeted Search PMC candidates yielded zero full text (the `?pdf=render` OA link 404s, NCBI's `/pdf/` mirror bot-blocks). `_fulltext` now recovers a PMCID hit's body via Europe PMC's `fullTextXML` endpoint (`fetch_fulltext_xml`, `<body>`-only JATS strip).
-- `make scan` outside the venv crashed reconcile (`No module named vulture`): a reconciler whose tool isn't importable now SKIPS with a note (the real gate still enforces it in `make lint`). Also a `# type:`-prefixed comment wrap in `quality_eval.py` broke vulture's parse → 6 phantom findings; reworded.
-- `check_overlaps.py` paired a function with its OWN nested closure (`get_collections`/`get_item_detail`) — same-path prefix-qualname pairs are now suppressed, with a regression test pinning that same-file siblings still pair.
-
-### Changed
-
-- Docs truth pass: architecture.md, README.md, docs/usage.md, and feeds CLI help now reflect the app-owned RSS pool as the triage source; Zotero is an optional adapter (Inbox picks, label writes, read-sync), not the feed reader.
-
-### Fixed
-
-- Firewalled eval loader (`tools/_eval_labels.py`) silently measured on kept=5: it joined only 2 of 3 live verdict key shapes (missing `stable_feed_key`/`feed:g:<sha>`) plus an over-strict abstract filter. Fix adds the 3rd join path, drops the filter (title-only goal_sim is a valid floor), dedups one-row-per-verdict → kept 5→42. Ported `eval_triage_score_calibration.py` off leaked `decision`; re-anchored relevance_score AUC 0.852→0.634 (0.852 was a 15-kept artifact).
-- Quality eval mis-flagged technical ML papers as clinical: the "clinical data with cross-validation but no patient-level split" red flag fired type-agnostically on any empirical paper (a technical paper mentioning `cross-validation` + incidental `cell`/`protein`/`cohort` was graded D/`flag`). Each structural red-flag is now family-gated — the clinical flag fires on CLIN types only, the leakage flag on EMP only — and `_CLINICAL` narrowed to genuine patient/clinical context. Regression tests pin both the suppression (empirical) and the retained true-positive (clinical_prediction).
-- Zotero feed cards stayed unread since the app-RSS source migration (`mark_feed_items_read` structurally unreachable — every item is `source_type=app_rss`). New per-tick read-sync reconciler (`feeds/_zotero_readsync.py`) marks Zotero's unread `feedItems` read by guid once the app read them (`feeds.zotero_read_sync`, default on).
-- RSS refresh starved 31/41 enabled feeds forever (alphabetical top-`max_feeds` slice). `AppRssReader.refresh_feeds` now rotates least-recently-fetched-first, covering every enabled feed across ticks.
-- Outcome resolution and library dedup were silently dead post-migration (`AppRssReader` lacks `get_item_membership`; its dedup hook always returned None → removed). The tick wires a separate optional `ZoteroReader` for both; outcome checks no longer run in `dry_run` (they write).
-- `apply_changes` (force-apply write executor) had no lock-retry, unlike other Zotero writes; now `_retry_on_lock`-wrapped. `remove_items_from_collection` likewise; its failure now surfaces as `inbox_removed_error` in the apply response, not just a log.
-
-### Added
-
-- Quality-first Today ordering (`ZS_RANK_QUALITY_FIRST`, default OFF): new `rank_blend_quality.py` — quality LEADS, topicality soft-gates, so a grade-A off-topic paper beats a grade-D on-topic one. Model floor swaps composite→`relevance_score>2`; `rank_blend` stays the control arm, eval-gated.
-- Track-C frontier eval for the quality-first re-rank: `eval_slate_blend.py --replay` measures label-free contamination@k + q-lift@k over daily cohorts (`_eval_replay.py`); `quality_first_key` gains a swept `gate_floor`. Frontier ran + verified (ADR-A9): the +0.10 q-lift bar exceeds the oracle ceiling (+0.088, A2 captures 100%); offline exhausted → decision moves online (P3 interleave), default stays OFF.
-- P3 online interleave (`ZS_RANK_INTERLEAVE`, default OFF): Today team-draft-merges the A0 control and A2 quality-first slates blind; `tools/eval_interleave.py` scores user verdicts per competitive pair via Wald SPRT — the flip trigger for `ZS_RANK_QUALITY_FIRST`.
-- P3 evidence-integrity guards (adversarial review, ADR-A9): interleave_log is day-level write-once; daemon slate assemblies bypass the interleave; scorer firewalls machine-authored selected/black_swan via decision_reason and counts an item only in its last logged pair (i.i.d.).
-- `feeds.*` is now a validated `FeedsConfig` section (`models/feeds_config.py`) instead of raw-dict passthrough goals.yaml silently dropped — 19 auto-derived `ZS_FEEDS_*` env overrides (docs/overrides.md regenerated).
-- `pre-commit run --all-files` is green again: `services/config_overrides.py` (cross-domain env/calibration override engine, consumed by shared `config.py` + `_common.py`) added to the import-policy shared set — it predates tracking, so the gate had never seen it.
-- `user_approved` review rows could age past `apply_all_approved`'s 720h window and become permanently unreachable (nothing else consumes them). `select_by_decisions` now accepts `since_hours=None` (no window); `apply_all_approved` defaults to it.
-- Today's Add/Trash toasts and the paper-verdict submit no longer report plain success when the API returns pending_sync/marked_read_error/failed_count or label_error/note_error; those now show a warning-tone note instead.
-
-### Changed
-
-- Guardrail allowlists regenerated against live findings after the sweep: every stale grandfather removed (reconcile exit 0), every kept entry re-justified inline. Slop 5 entries→6 (3 fixed, 4 surfaced from newly tracked WIP), redundancy pairs re-frozen under rule-of-three.
-
-### Changed
-
-- faithbench: `PaperSubstrate` bundles the per-paper text/norm/index trio (`judge_claim` 9→7 params), `judge_run` split into per-track row helpers, `run_benchmark` takes a `RunOptions` dataclass (16→10 params) with trial closures extracted. Public entry points unchanged in behavior; `RunOptions` exported.
-
-### Changed
-
-- `run_daemon_tick` slimmed 222→193 LOC: app-RSS refresh, L1 abstract-less rescue, and auto quality-gate blocks extracted into `_maybe_*` helpers in `_tick.py`, following the module's existing thin-orchestrator pattern. No behavior change.
-
-### Changed
-
-- Deduped eight near-identical helper clones found by the semantic overlap scan: shared `_inline_file` (routes), `_validate_choice` (4 config validators), `_quality_toggle_enabled`, storage `_col`, `_flight.run_in_background(name=)`, `_h` escape, `corpus_bm25.tokenize` as the single tokenizer, and one canonical `_parse_pub_year`. Zero behavior change; two validator error strings now use the sorted-list format.
-
-### Removed
-
-- Dead code sweep: `fetch_resolved_outcomes` (orphan; the README claim about it was stale — the real consumer uses `fetch_resolved_outcomes_by_key`), test-only `get_user_library_id`, `get_run_summary`, `list_recent_decisions` + their tests; vulture allowlist shrunk 6→2.
-
-### Removed
-
-- `docs/benchmarking.md` untracked from the repo (now gitignored, kept local-only); `tools/README.md` links updated to note it.
-
-### Fixed
-
-- **Review UX pains.** (1) Quality grade now shows the deterministic checklist grade (`quality.grade`) instead of the LLM's `digest.grade`, which flipped A↔B between runs while the chip was labelled "reference-free". (2) Review recency now reads "reviewed 3d ago" (exact date on hover) + a chip in the review header, so it's clear WHEN the deep review ran. (3) Non-paper sources get a loud amber "Not peer-reviewed" chip. (4) Read-next rows now show the `why_reason` (top rank signal) inline, not just as a filter. (5) `j`/`k` review switching also works when opened from Today (the slate now writes `zs.reviewOrder`, like Read-next), not only from Read next.
-- **Prestige was dark for every item** ("high 0 / low 0 / new 1825"). `PrestigeConfig.enabled` defaulted **off**, so OpenAlex citation enrichment never ran — no item had a citation percentile / h-index → all bucketed "new". Flipped the default **on** (keyless, cached, fails soft); `ZS_OFFLINE` forces it off, `ZS_PRESTIGE_ENABLED=0` opts out. Existing items need one full-library rescore to backfill.
-
-### Added
-
-- **Review page: Prev/Next through the ranked queue** (`/paper/:itemKey`). Read next stores the displayed order in `localStorage` (`zs.reviewOrder`); the review page derives `‹ Prev` / `Next ›` + a `3 / 40` position and wires `j`/`k` keys (auto-disabled while typing). Same tab, no backend. Key not in the stored order → buttons hide.
-- **Review notes → app + Zotero.** A free-text "My notes" box on the review page, saved to the new `review_notes` table (`POST /api/golden/review-note`) and best-effort mirrored to the Zotero item under a `My notes` note (refuses while Zotero is open — soft status, exactly like the verdict note). Decoupled from the verdict.
-- **Attach paper figures to Zotero.** Review page → Figures → "+ Attach to Zotero" (`POST /api/zotero/items/{key}/figures`) files the extracted figure PNGs as child image attachments on the item, so they render in Zotero next to the paper. Dedups by filename (re-click is safe); same connector force-handshake as the other writes. `add_attachment` generalized from PDF-only to any content type.
-
-### Changed
-
-- **Quality → must_read promotion ON by default** (`quality_promote`; floor 3.5→3.0). The compressed gate leaves must_read empty (0/69 recall); promotion lifts grade-A/B + on-goal + gate-confirmed papers in. New `tools/eval_quality_promote.py`: on 68 firewalled user-verdict rows, 3.0/0.55 → 3 must + 9 should at 1.00 precision, 0 flooding (3.5 promoted just 1). `ZS_QUALITY_PROMOTE=0` opts out.
-- **Model card no longer shows the always-zero `Thresholds` row.** `keep/must/could` are legacy classifier fields the current regressor gate hardcodes to `0.0` (bands come from fixed `domain` constants), so the row read like a bug. Dropped from `ModelCard.jsx` (+ its `formatThresholds` helper); the API still returns them, just unrendered.
-
-- **Code-repo detection now catches GitHub links hidden in PDF hyperlink annotations.** A URL that's only a clickable annotation over text like "our code" (never in the extracted visible text) was invisible to the code-link regex. `_paper_read_pdf.extract_link_uris` harvests annotation URIs (as `content['link_uris']`, kept out of `full_text`) and the deep-review code-link layer appends them before `find_code_link`, so the repo now shows (may render `unverified`/grey — no availability phrase — still found). Harvested URIs with embedded whitespace/newlines are rejected (a crafted annotation could otherwise smuggle a fake "code available at …" phrase that outranks the real repo — injection defense).
-
-- **Deep-review speed: cheap sub-calls now ride the feed model.** The rubric yes/no checks, overstatement, self-verify and section one-liners are known-cheap by task identity, so they route to the already-built feed client (`llm_map`) instead of the expensive deep_review reasoning model; the digest and goal summaries stay on the strong model. Task-specific routing reuses the `feed` stage without new configuration. Add `deep_review.light_model` later only if feed ≠ desired sub-call model.
-- **Digest reasoning now follows the provider's `thinking_effort`** instead of a hard-coded `enable_thinking=True`. New `ProviderConfig.thinking_on` (True unless `thinking_effort: off`) drives the 4 digest sites (deep_review, verify CLI, setup profiles, calibration). Digest still reasons by default (measured NEEDED); set `thinking_effort: off` on the deep_review provider to disable it — no separate toggle.
-
-### Fixed
-
-- **Today card quality bars stuck at 0** while the grade showed. The bars read the digest's 1-5 self-scores, but the deep-review bridge passes the reference-free `QualityEval` (which deliberately drops those unvalidated self-scores). Replaced the card's 5 dimension bars with the coverage-based signal the brief already uses (grade + rigor band chip + `met/applicable` checklist items + red flags) — one consistent quality language across card and brief; deleted the dead `QualityBar`.
-- **Tags silently not saved when Zotero is open.** `TagOfInterestEditor` ignored the `requires_force` handshake, so with Zotero running every tag write was a no-op that looked successful. Now mirrors `CollectionEditor`: confirm → retry with `force` (`updateItemTags` gained a `force` arg).
-
-- **`_auto_review_slate` never ran** (`quality_review.auto_on_tick_k` always 0). `_load_config()` in `feeds/_common.py` omitted the `quality_review` key; `QualityReviewConfig` defaults now included so the daemon tick actually submits in-place reviews.
-- **`run_deep_review` missed reader for feed keys.** `library.py` now passes `resolve_reader_for_key(key)` so a `stable_feed_key` dispatches to `AppLibraryReader` instead of the Zotero reader (which 404s feed keys).
-- **Invalid key formats accepted silently on `POST /api/library/deep-review/run`.** Now validates: must be 8-alnum Zotero key or `is_stable_feed_key` — otherwise 422.
-- **SPA catch-all returned misleading "PDF file not found" for wrong-method API paths.** `app.py` now raises `APIError(404)` for any path under `api/` that reaches the catch-all.
-- **Double `add-to-library` created duplicate Zotero entries.** `daily_actions.add_to_library` now skips rows whose `materialized_zotero_key` is already set.
-- **Review fleet accepted `feed:` keys silently.** `POST /api/library/deep-review/run` (fleet mode) now rejects `feed:` keys with 422 — fleet only supports library (Zotero) keys.
-- **`build_feed_detail` dead function removed** (`review_detail.py`). Zero callers; deleted.
-
-### Added
-
-- **Heavy paper brief for the top Today feed papers.** After triage, the daemon builds
-  the full render (notes.md / presentation.html / figures) for the top
-  `quality_review.render_on_tick_k` (default 3) feed papers — reusing the cached in-place
-  review + cached PDF (no extra LLM), keyed by `stable_feed_key`. A Today card's "Open
-  full brief ↗" opens the SAME `/paper/:key` page the library uses (now resolving feed
-  keys via `resolve_reader_for_key`); the feed detail folds in the in-place review (was
-  hardcoded none) and sources its metadata from app-owned `rss_items` so the feed brief
-  renders WITHOUT a live Zotero DB (the old path read Zotero's feedItems table and raised
-  when Zotero was absent). On "Add to library" the render rebuilds under the new Zotero key.
-
-### Fixed
-
-- **Prestige filter no longer blanks a preprint library.** The Library Prestige
-  filter now keys on prestige *evidence* (OpenAlex citation percentile OR author
-  h-index), not citation-only, so uncited preprints by known authors are
-  filterable instead of all vanishing on high/low; chips show live bucket counts.
-  The conservative banding floor stays citation-only.
-
-### Changed
-
-- **"Calibrate to my setup" now shows live progress + explains itself.** The sweep
-  runs on a background thread with a `GET /api/setup/calibrate/status` poll, so the
-  card shows "reviewed N of M" instead of an opaque spinner; the copy states what it
-  tunes (text budget + lean/full profile to YOUR endpoint), that it runs ~6 reviews,
-  that it needs a built brief first, and what it changed afterward. The missing-brief
-  precondition surfaces as a clear "open a paper's deep review first" message.
-
-### Added
-
-- **Today papers now carry a real quality grade.** After ML triage, the daemon tick
-  deep-reviews the top Today slate IN-PLACE (no Zotero write) — PDFs fetched to the
-  local cache, reviews cached by `stable_feed_key`, run in parallel on the shared pool.
-  The Today→quality bridge joins on `stable_feed_key` (not just the materialized Zotero
-  key), so cards show A–D instead of "not assessed". Adding a paper to the library copies
-  its review onto the new library key (`deep_review.copy_review`), so the review persists.
-  Gated by `quality_review.auto_on_tick_k`; re-ticks skip already-reviewed keys.
-
-- **Web articles / non-papers get a relevance-only review.** A `NON_PAPER` type
-  (detected from the web-article render or a non-research Zotero itemType) skips the
-  scientific A–D grade / red-flags — it's read for relevance + summary only.
-  `review_web_articles` now defaults ON so a blog/news page with no PDF is rendered
-  and reviewed instead of skipped. The UI shows "relevance read (not a research paper)".
-
-- **Library journal/venue filter.** Zotero `publicationTitle` surfaced as `venue`;
-  a Journal select (Advanced filters) narrows the queue by journal.
-
-- **Code-repo link atop the deep review.** Extracts the paper's own GitHub repo
-  from full text (`_code_link.py`), validates live/dead via keyless
-  `integrations/github.py` + relevance, caches `code_link`, renders a banner on
-  the brief; "no repo" when absent.
-
-- **Production-grade gate rollback (fixes the `--force` overwrite problem).**
-  `train-classifier --force` now snapshots the live model into
-  `history/{name}/{ts}__{sha8}__oof{ρ}/` BEFORE the overwrite. INVARIANT: a
-  snapshot that can't be written RAISES → `save_trained` aborts → the live model is
-  NEVER overwritten without a successful backup. Rolling cap (`DEFAULT_KEEP=10`).
-  New CLI: `goldenset model-history` (list rollback targets) + `goldenset
-  restore-model --snapshot <name>` (atomic restore; backs up the live model first →
-  reversible). 7 regression tests (`tests/test_model_backup_rollback.py`).
-
-- **Quality → must_read promotion.** New `rank_blend.promote_band`: lifts a paper
-  to must_read when grade ∈ {A,B} ∧ goal_sim ≥ 0.55 ∧ gate relevance ≥ 3.5 (strict
-  AND, precision-first). One band up only; absent signal → no promotion; user
-  verdicts still win. OFF by default (`ZS_QUALITY_PROMOTE`) — flip after verdicting
-  reviewed rows.
-
-- **`ProviderConfig.keep_alive`.** Ollama warm-hold knob (seconds a local model
-  stays loaded) forwarded as `extra_body.keep_alive`. Off by default; pinning a
-  model resident grows steady-state RAM.
-
-- **`GET /api/golden/verdicts?source=...` provenance filter.** Lists the auto
-  quality-gate's hides for one-tap restore without paging all `dont_read` rows.
-
-- **Auto quality gate (precision mode) — quality as a hard filter.**
-  Papers that fail quality are hidden automatically (`dont_read`,
-  `source=auto_quality`, one-tap reversible, never clobbers a `source=user` verdict).
-  Two cascaded layers: L1 = feed-stage LLM `relevance_score` floor (abstract-based);
-  L2 = deep-review grade D / band `flag` (full-text, top-K). On by default
-  (`ZS_AUTO_QUALITY_GATE`). Config: `ZS_AUTO_QUALITY_LLM_FLOOR`,
-  `ZS_AUTO_QUALITY_HIDE_GRADES`, `ZS_AUTO_QUALITY_HIDE_BANDS`. See
-  `services/library/README.md`.
-
-- **Structured parameter extraction in the deep-review digest.** New
-  `PaperParameters` model (`dataset`/`baselines`/`sample_size`/`metrics`/
-  `architecture`/`external_validation`) as an optional `parameters` field on
-  `PaperDigest`, extracted from the full text the review already reads.
-  `parameters=null` for non-empirical papers. Regression test
-  `tests/test_paper_parameters.py`.
-
-- **Pipeline hyperparam wiring: `chunk_strategy`, `num_ctx`, structured output.**
-  (1) `chunk_strategy` was dead config — now wired via `_map_reduce.digest_for_strategy`
-  (`rank`/`prefix`/`map_reduce`). (2) `num_ctx` auto-derived for local providers in
-  `read_config` and forwarded to ollama — prevents silent truncation at the default
-  3900-token context. (3) Decoder-level JSON schema output (`response_format
-  json_schema strict`) now configurable; off by default (prompt-level wins for
-  well-behaved models).
-
-- **Map-reduce deep review.** New `services/library/_map_reduce.py`: MAP each paper
-  chunk on the cheap/local model (parallel), REDUCE into the digest on the remote
-  API model. Exposed via `quality_review.chunk_strategy` (`rank` default | `prefix`
-  | `map_reduce`) + `ZS_QUALITY_REVIEW_CHUNK_STRATEGY`. `rank` stays default.
-
-- **Deployment profiles — Fully local vs Hybrid.** New Settings "Deployment" card +
-  `profile` CLI + `GET/POST /api/setup/profile[s]`: **Fully local** (every stage on
-  your local model; deep reviews on the lean tier) or **Hybrid** (local feed triage;
-  deep_review on the remote API). `local_depth` lets a user force a slow deep local
-  review. `services/setup/profiles.py`.
-
-- **"Calibrate to my setup" — Tier-2 opt-in LLM sweep.** A foreground,
-  memory-safe orchestrator (`services/setup/calibration.run_full_calibration`,
-  `calibrate` CLI, `POST /api/setup/calibrate`, Settings card) sweeps the
-  deep-review text budget on your endpoint and picks the fastest budget at no
-  completeness loss.
-
-- **Per-user calibration layer + Tier-1 env probe.** A derived `data/calibration.json`
-  artifact slots into the override precedence: **code default < goals.yaml <
-  calibration.json < ZS_* env** (`config_overrides.apply_calibration`). Tier-1
-  measures your endpoint's throughput and writes the lean/full text+consistency
-  profile automatically. Idempotent; remote endpoint is memory-safe.
-
-- **Remote reasoning model for deep review.** A remote OpenAI-compatible provider is
-  wired into `llm_routing`; the `deep_review` stage now runs on the remote reasoning
-  model, while high-volume feed triage keeps the cheap local model. Override per-run
-  with `--provider remote --model <name>`.
-
-- **Tier-3 continuous recalibration.** `services/setup/calibration.tier3_recalibrate`
-  (`calibrate --tier3`) recalibrates the classifier on your own golden labels once
-  the set is large enough; below the floor the Tier-0 defaults stand. Runnable
-  harnesses for each provisional default: `tools/eval_triage_threshold.py`,
-  `tools/eval_prestige_weight.py`, `tools/eval_self_consistency.py`,
-  `tools/eval_prompt_variant.py`. See `docs/internal/validated_defaults.md`.
-
-- **One-click "Review cool papers" — auto deep-review of every high-relevance pick.**
-  The Library Read-next bar shows **Review cool papers (N)**, where N = undecided
-  must/should-read picks. Loops the review fleet in chunks of 5 until drained, the
-  user hits Stop, or a round proposes nothing new. Results stream in mid-run.
-
-- **Annotate active-learning list orders by decision value.** Border mode (🎯) now
-  surfaces model↔prediction conflicts, then picks closest to the decision boundary
-  (`border_distance`). One-line caption explains the order.
-
-- **Per-tab comfort pass:**
-  **Today** — source/feed filter on the cull slate.
-  **Triage** — "Needs feedback only" filter on completed results.
-  **Pending** — title filter + per-row Retry on the Failed tab.
-  **Settings** — Discard button to revert unsaved edits without a page reload.
-  **Audit** — Goal-Gradient progress bar on the session summary.
-  **Annotate** — live `m:ss` elapsed timer during rescore + `sortBorderByUncertainty`.
-
-- **Acquire-before-score rescue for abstract-less prestige-journal papers.**
-  Nature/Science/Cell/NEJM RSS ships a boilerplate notice, not a real abstract, so
-  the gate scored those papers on no content and dropped high-goal ones. The daemon
-  now fetches full text for gate-rejected abstract-less items whose goal_sim clears
-  a threshold, then re-scores before the verdict stands. `max_per_tick` caps the
-  browser fetch. (`feeds/_tick_phases.recover_abstractless_rescues`)
-
-- **Deep-review quality lift in ranking.** Grade/band float high-quality papers up
-  WITHIN their relevance band (never across). Band-primary mode via
-  `ZS_QUALITY_BAND_PRIMARY`.
-
-- **Quality reaches the Today slate** via a GUID↔item_key bridge. The lift is
-  confined to the floored model role; discovery roles stay quality-free.
-
-- **Per-card Quality chip** in Read-next: one word (Highlight/Flag or A–D grade)
-  reusing shared review tones.
-
-- **Agentic interaction log** (`data/interaction-events.jsonl`): append-only JSON
-  line per reading decision + the model prediction + the 7-day outcome. Emitted by
-  verdict routes, Today keep/trash, review queue, triage feedback, and the outcome
-  daemon.
-
-- **Gated picks surface as one-click sign-in links.** When the fleet can't fetch a
-  paywalled paper, the Suggested-verdicts bar renders each as a link — open it, log
-  in, then Predict again.
-
-- **Review fleet now reviews web articles** (blogs/Substack/news), not just PDFs.
-  New `_pdf_acquire` web-article rung renders such a page to a PDF via headless
-  browser. Gated by `quality_review.review_web_articles` (off by default; needs
-  `[browser]` extra).
-
-- **Docs: flagship journals documented** (Nature, Nat Commun, Nat Biomed Eng,
-  Science, NEJM, Lancet, Cell) with the principle + PubMed F1–F4 backstop. See
-  `docs/usage.md`.
-
-- **HackerNoon documented as a triage source.** Zero code: `hackernoon.com/tagged/llm/feed`
-  flows through the Zotero-RSS pipeline. Triage-only (no PDF/deep-review).
-
-- **PubMed as a first-class triage source + PMC full-text rung.** Zero-code ingestion
-  (the pipeline reads Zotero feed items). New `integrations/pubmed.py` resolves
-  PMID/DOI → PMC PDF URL for papers without a DOI that the Unpaywall/OpenAlex rungs
-  miss.
-
-- **University browser access for the review fleet's PDF fetch.** Non-arXiv /
-  paywalled picks can be reviewed: `_pdf_acquire` resolves arXiv → Unpaywall OA →
-  OpenAlex `oa_url` → a real browser (`integrations/browser_fetch.py`, optional
-  `[browser]` extra) driving a persistent profile the user logs into once via
-  Settings → University access.
-
-- **Reuse an existing browser login instead of a second in-app sign-in.**
-  `university_access.cookie_browser` (chrome/firefox/edge/brave) reads that
-  browser's session cookies and injects them into the fetch context. NOTE: **Safari
-  is unreadable on macOS 15+** (Apple hardened its cookie container); use
-  Chrome/Firefox or the in-app login.
-
-- **Shared UI foundation.** New reusable primitives: `components/ui/{Spinner,
-  Skeleton,Async,Badge,HintBanner}.jsx`, `utils/humanizeError.js`,
-  `components/paper/PaperDetailView/`, hooks `useKeyboardNav` /
-  `useOptimisticAction` / `useFocusOnChange`.
-
-- **Power-tool interaction parity.** Pending Changes: keyboard nav (j/k move · space
-  select · a apply · r reject), optimistic apply/reject with rollback,
-  focus-follows-action. Triage Monitor: sticky per-row Approve/Reject bar, keyboard
-  nav, auto-refresh on job finish.
-
-- **Config-UX simplification — backend.** New `services/setup/` + `/api/setup/*`
-  endpoints: readiness probe, Zotero path detection, path writing, config validation.
-
-- **`zotero-summarizer setup`** — interactive terminal onboarding reusing the same
-  `services/setup` primitives.
-
-- **Phase-0 bootstrap** — on `serve` startup, absent `goals.yaml` / `.env` are
-  created from safe defaults. Idempotent; never overwrites existing files. Removes
-  the manual `cp *.example` + `migrate` steps.
-
-- **Config-UX simplification — frontend.** First-run wizard (`/setup`): Connect
-  Zotero → Connect LLM → Describe research. `SetupGate` redirects a new user once
-  (skippable/resumable). Settings re-chunked into Essentials + Advanced disclosure.
-
-- **One-click "open brief" (ℹ) button on every Read-next row.** Opens the brief if
-  built, else builds on demand (spinner) then opens. No backend change.
-
-- **Legible model config: Active-Models summary + per-provider `temperature` &
-  `thinking_effort`.** Settings opens with a read-only "Active models" card showing
-  the resolved provider/model/temperature/thinking + a live reachability dot per
-  stage. New `thinking_effort` (off/low/medium/high; maps per dialect — Anthropic
-  budget, OpenAI `reasoning_effort`, or vLLM `enable_thinking`).
-
-### Security
-
-- **Injection-safe default triage prompts.** The triage prompts now default to the
-  security-hardened versions (feed fields wrapped in `<untrusted_input>` + the
-  prompt-injection SECURITY directive) as code constants
-  (`services/triage/prompts.py`), not just text that happened to live in
-  `goals.example.yaml`. `test_prompt_injection_defense` asserts on the shipped
-  constants.
-
-### Changed
-
-- **Split `api/routes/golden.py`**: the `/api/golden/border-suggestions`
-  active-learning endpoint moved to `api/routes/_golden_border.py` (mounted via
-  `include_router`) after the verdicts `source`-filter pushed `golden.py` past the
-  500-LOC hard cap. No route/behavior change.
-
-- **Config is now intent-only.** `goals.yaml` holds ONLY user intent (research
-  goals, triage criteria, rubric, summary structure, language) + the LLM connection
-  + university access. Every technical knob is a validated code default;
-  `write_user_config` persists only the user-owned keys. Settings UI drops the
-  Classifier-Gate section + corpus control. `classifier_gate` defaults flipped to
-  `enabled: true` / `model_name: lightgbm`.
-
-- **Figure lightbox → native `<dialog>`.** Uses the platform `<dialog>` (top-layer,
-  native Esc + backdrop dismiss, focus-trap, `::backdrop` scrim) — removed the
-  hand-rolled fixed-overlay + manual Esc listener + z-index. Active TOC link gets
-  `aria-current="location"`.
-
-- **Single-scroll paper "story" page.** `/paper/:key` is now a dedicated 3-zone page
-  (sticky TOC · reading column · action+chat rail): auto-generates the review on
-  open, overlays deep-review findings onto paper sections via `§ Title·p.N` chips,
-  figures inline + lightbox, grounded Ask side chat.
-
-- **Story-page UX grounded in reading research.** Key findings surfaced above the
-  digest; red flags framed as "model judgment", demoted to "low confidence" when
-  self-consistency disagreed; a located chip degrades to a muted `≈ § Section` on
-  coarse match; rail chat offers clinician starter questions.
-
-- **Interactive full review + quick filing.** "Open full review ↗" opens a React
-  page to set the verdict, file to a collection, add/remove tags. Row-card lifts
-  the collection picker out + adds a one-tap verdict; tag input autocompletes from
-  existing Zotero tags.
-
-- **Library row → terse decision card.** One banner chip-row (verdict word + grade +
-  quality band + ⚠ red-flag count, each hide-when-empty) + a single reason line +
-  "Open full review ↗". Everything else folds behind "Details" or the new-tab
-  brief. Collections, Tags, and smart filters fold into one "Browse & filter" drawer.
-
-- **Frontend adopts the "Ease Health" design system.** One saturated Forest Ink on
-  Linen-White, surface-tint elevation (no shadows, no bold), Fraunces + Inter.
-  Remaps Tailwind's color ramps + radii/shadows so every existing utility and
-  `tones.js` inherit it. CSS/tokens only; no data change.
-
-- **"Read next" opens much faster.** `get_all_items` now runs one un-paged query.
-  Zotero read budget rose 0.2s→2s, eliminating the WAL checkpoint lock fallback.
-
-- **Goal-similarity no longer recomputed on every queue open.** The
-  corpus-embedding matrix is cached process-wide (main+`-wal` fingerprint) and each
-  item's `goal_sim` is persisted in the score cache at Rescore time.
-
-- **Widened + made the standalone paper brief responsive.** `.content` max-width
-  740px → `min(960px,92vw)`, goal board reflows via `auto-fit/minmax` (3→2→1 cols).
-
-- **Code-health cleanup.** Removed dead `contracts.TriageJob`; lifted duplicated
-  `_RateLimiter` into `integrations/_rate_limiter.py`; promoted
-  `corpus_bm25.tokenize` to the single word-tokenizer.
-
-- **"Review cool papers" extracted to `useReviewCoolLoop` hook.** Shrinks
-  `LibraryReadNext.jsx` 832→671 lines. 7 hook tests cover pin / re-chew regression /
-  drain / drain-bound / terminate / stop / count. Auto-review status line is now an
-  ARIA live region.
-
-- **`eval_slate_blend.py` firewalled + CI'd.** Positive class restricted to
-  `user_approved`; adds the reviewed∩labeled join via `materialized_zotero_key` +
-  a measurability floor, bootstrap 95% CIs, and an additive-vs-normalized
-  counterfactual.
-
-- **Per-paper deep review fetches the full text.** "Run deeper review" on a paper
-  with no Zotero PDF now acquires one first (OA/PMC/library session/web-article
-  render) and reviews from it. On a paywall with no session it reports an honest
-  "no full text available".
-
-- **Frontend banners deduped.** `StatusBanner` (5 copies) and `ErrorBanner` (2
-  copies) collapsed to one each in `components/library/shared.jsx`, with a11y
-  `role`/`aria-live` and `humanizeError`.
-
-- **Prewarm reads the deep-review cache once, not per pick.** New
-  `deep_review.cached_review_keys()` (one read) replaces per-row
-  `get_cached_review()`.
-
-- **Unchecked Today→library adds downgraded to weak `could_read` (3.0).** A
-  provisional "Add" was a full-strength `should_read` training label
-  indistinguishable from a verified one.
-
-- **Daemon + active-learning retrains now apply the `hybrid_gt` verdict overlay**
-  (threaded `triage_db_path` through `load_or_train`), matching `/admin/retrain`.
-
-- **Honest quality calibration scaffold.** `GET /api/library/review-fleet/calibration`:
-  agreement and Cohen's κ between fleet proposals and confirmed labels, flagged
-  `insufficient` until enough matched pairs accumulate.
-
-- **Quality in ranking + a "quality papers" filter.** Deep-review grade/band ride on
-  each queue row; a bounded quality lift floats well-graded papers up; a Quality
-  (A/B · C/D) filter chip appears once rows are graded.
-
-- **Expanded review opens in a right-side panel** (~44%, stacks on mobile). Figure
-  captions no longer double-render.
-
-- **Read-next layout — three labelled regions.** Split into `Find` (search + smart
-  filters) / `Review queue` (`PredictionsBar` + ranked list) / `Export to Zotero`.
-
-- **Review surface — aggressive subtract.** Decision-only by default: proposed-verdict
-  card drops duplicate grade chip / rationale / flag pills; expanded review folds
-  TLDR, method clause, signals, claims, checklist, legend, digest into "Details".
-
-- **Paper-review render — flatten.** The in-app brief `<iframe>` is gone — the
-  review renders natively via `PaperReview` + shared primitives. Nested cards
-  collapsed to one container + hairline dividers + reading-grade type (13–16px /
-  66ch). Grade/decision/band colours consolidated into `tones.js`.
-
-- **Settings simplification.** Removed legacy `llm.draft_model / refine_model /
-  api_base / api_key_env` inputs. Classifier-gate sub-fields render only when the
-  gate is enabled. LLM API secret is name-only in the UI.
-
-- **`vite.config.js`** — dev `/api` proxy target is `VITE_API_TARGET`-overridable
-  (defaults to `http://localhost:8000`).
-
-- **Scan-hygiene dedup.** Lifted 3 copy-paste idioms to shared helpers: prewarm-k
-  → `_flight.resolve_prewarm_k`, atomic JSON writes → `_common.write_json_atomic`,
-  golden-CSV reads → `_common.load_golden_rows`.
-
-- **Review fleet — "Predict next 5" advances.** Re-running skips picks that already
-  have a proposed verdict or user label.
-
-- **Auto-rescore after a big backlog drain.** When a drain adds ≥
-  `ZS_AUTORESCORE_MIN_ITEMS` (default 10) new items, the whole library rescores in
-  the background.
-
-- **Deep-review a 2nd paper while a 1st is still running.** `deep_review` is now
-  per-item jobs over one provider-aware pool; each panel polls `status(item_key)`
-  for its own progress.
-
-- **Review-fleet deep reviews run in parallel for a remote provider, serial for
-  local.** The fleet now batches its picks into ONE `deep_review.start` call; fan-out
-  width comes from `deep_review_fleet_concurrency`.
-
-- **UI clarity pass, pt.2.** Settings: University-access folded into one config form.
-  Library search is semantic-only. VerdictPanel fixes the dont_read-renders-green
-  bug. Bundle 464→446 kB.
-
-- **UI clarity pass (subtraction-first), pt.1.** One tone vocabulary. Today drops
-  PipelineFunnel/Refresh/telemetry. `PaperCard` loses relevance+prestige bars.
-  `ModelCard` 14→5 audit fields. Library band-filter = histogram bars only.
-
-- **Review fleet reviews from a local cache, not a Zotero attachment.** Acquired
-  PDF injected via `start(pdf_overrides=…)`; no Zotero write. Outcome taxonomy:
-  `no_fetchable_source` vs `needs_library_login`.
-
-### Removed
-
-- **Dead over-engineering.** Unused `TriageRepository` OO facade (zero prod callers)
-  and `TriageJobService` class (→ module function `new_job`). ~70 LOC.
-
-### Fixed
-
-- **Deep-review digest now retries once on a malformed reply.** A reasoning model
-  occasionally emits a digest with out-of-range scores or non-JSON; `assess_digest`
-  re-asks once strictly before propagating the error.
-
-- **`recover_abstractless_rescues` crashed on an empty gate-reject set when
-  `app_state` was unset.** The `if not gate_rejected: return` early-exit now runs
-  first (`feeds/_tick_phases.py`).
-
-- **Library "read hidden" count inflated; read papers not hidden.** New `READ_EMOJIS`
-  constant (`score_delta != 0.0` only) replaces `ALL_EMOJIS` in the read-check.
-  Papers tagged only with meta emojis (🤖 ⚪ 🔮 🗣) no longer falsely classified as
-  "read". `triage-approved` tag also skipped.
-
-- **Mobile (<640px) overflow + tap-targets.** `overflow-wrap:anywhere` on
-  `.review-prose`; 44px min tap-height; 16px inputs (no iOS zoom-on-focus).
-
-- **"Review cool papers" now actually drains the cool set** (band-axis mismatch).
-  `fleet.start(item_keys=…)` pins the exact cool keys; `handleReviewCool` tracks an
-  attempted ledger and terminates on "no new cool key".
-
-- **"Reviewing paper N of 5" no longer overshoots** ("6 of 5"): progress index
-  clamped to the batch total.
-
-- **Stop now reads honestly.** Distinct "Stopping…" state held until the in-flight
-  chunk actually settles.
-
-- **A 0-proposal run explains itself** instead of reverting to neutral idle.
-
-- **First click no longer wastes itself on a running prewarm.** Detects the foreign
-  run, drains it without counting a round, then pins its own cool keys.
-
-- **Browser PDF fetch now passes Cloudflare for declared PDFs.** On a
-  `context.request.get` miss, `_drive_browser` navigates to the PDF as a real page
-  (`page.goto`). The per-paper path retries with a headed browser for stubborn
-  challenges. When still gated, surfaces a click-to-open sign-in link.
-
-- **Follow the page's real "Download PDF" link**, not just `citation_pdf_url`.
-  Collects BOTH the meta and the on-page Download-PDF anchors and tries each.
-
-- **Browser fetch drives the real Chrome binary** (`UniversityAccessConfig.browser_channel`,
-  default `chrome`). Bundled Chromium's fingerprint doesn't match a `cf_clearance`
-  cookie the real Chrome earned; the real binary's fingerprint does.
-
-- **"Needs library login" was misleading + over-fired.** Fires ONLY when a real
-  `citation_pdf_url` PDF exists but is gated at a publisher the browser isn't signed
-  into. Web content (e.g. Nature news/comment) gets the render rung instead.
-
-- **Paywalled publisher PDFs fetch via the browser rung.** PDF size cap raised 20 MB
-  → 50 MB (`quality_review`/`full_text_refine.max_pdf_bytes`).
-
-- **Gate-only backlog drain crashed on title-only items + now derives their abstract.**
-  `predict` backfills missing abstracts from OpenAlex (`abstract_inverted_index`,
-  already cached for prestige); residual is a terminal `gate_rejected:gate_unscorable:no_abstract`.
-
-- **Temporal-eval `days_since_added=-1` sentinel bug.** Undated rows now sort oldest
-  (never held out); the holdout fraction is taken over the dated pool.
-
-- **"Predict next 5" silently did nothing on a heavily-labeled library.** Now scans
-  the whole ranked library. Also fetches the arXiv PDF for a PDF-less pick and
-  recomputes stale digest-less cached reviews.
-
-- **`serve` died with `Errno 48 address already in use`.** Now reclaims its port
-  first (`lsof` → SIGTERM → SIGKILL). Opt out with `--no-kill`.
-
-- **Deep review crashed with `'str' object has no attribute 'model_copy'`.**
-  `assess_digest` now salvages a JSON blob with `extract_json_blob` and raises
-  cleanly on a truly empty completion.
-
-- **Deep-review failures were always blamed on an unreachable endpoint.**
-  The unreachable-endpoint suffix is now gated on a connectivity-looking error.
-
-- **Library Rescore / Sync reloaded the MiniLM embedder once per 50-item predict
-  batch.** `_resolve_embedding_cache` now reuses the runtime singleton.
-
-- **Ask-the-paper returned an unhandled 500 on empty LLM output.** Now catches the
-  parse `ValueError` and abstains.
-
-- **"Predict next 5" reported every paper `failed` when a deep-review job was in
-  flight.** `deep_review.start()` now returns `accepted`; the fleet waits then
-  re-claims the slot.
-
-- **Retrain double-ran on a fast double-click.** `retrain()` now claims the lock
-  synchronously.
-
-- **Sort-ranks (Call Number) re-stamped every item every run** even when unchanged.
-  Now skips items whose Call Number already equals the computed rank.
-
-- **Trash 500'd the whole batch when Zotero held the DB lock.** `mark_feed_items_read`
-  is now best-effort: reports `marked_read: 0` + `marked_read_error`.
-
-- **Quality band: near-perfect-metric red flag false-fired on the Adam β2
-  hyperparameter.** A near-1 value now counts as a headline metric only when a
-  performance-metric word (accuracy/AUC/F1/…/"reached") sits within ~40 chars.
-
-- **Quality checklist grounding was too strict.** `quote_is_grounded(..., fuzzy=True)` —
-  token-SequenceMatcher grounds a paraphrase whose tokens cover ≥80% of the quote,
-  while still rejecting hallucinated quotes.
-
-- **Quality band over-conservatism: self-verify + overstatement red-flag over-fired.**
-  `SELF_VERIFY_PROMPT` reframed from "skeptical reviewer" to confirm-by-default.
-  `OVERSTATEMENT_PROMPT` now flags only clear/material over-claims. Red-flag gate
-  raised 2→3.
-
-- **Self-verification 2nd pass catches the LLM positivity bias.** After the rubric,
-  one extra short LLM call re-checks critical items marked met. Configured via
-  `quality_review.self_verification` (default on).
-
-- **Optional Docling PDF parser** (`quality_review.use_docling`). Recovers structured
-  tables + figure captions fitz misses. Gated; fitz stays the default.
-
-- **Paper-type fallback no longer mis-routes consensus guidelines.** Now keys on
-  strong we-built/ran-it signals (`propose`/`rct`) before falling back.
-
-- **Deep review judged every paper by the same empirical-ML rubric.** Now detects
-  paper type (`paper_type.detect`) and judges against the recognized standard
-  (SANRA/PRISMA/TRIPOD+AI/CONSORT-AI/REFORMS etc.).
-
-- **Quality scores were unvalidated 1-5 LLM self-reports.** Band + A–D grade now
-  derived from transparent checklist COVERAGE via `coverage_grade`.
-
-- **Red flags showed near-duplicates; gloss contradicted them.** Merged by
-  token-Jaccard (`_dedupe_near`). QUALITY gloss now derived from the actual
-  red-flag list (`_gloss` / `bandGloss`).
-
-- **"Predict next 5" silently did nothing.** Now tallies `proposed` /
-  `skipped_no_fulltext` / `failed`; surfaces `status:"done_empty"` and names the
-  cause.
-
-- **"Triage backlog" silently did nothing.** Declared `lightgbm`; added
-  `services/readiness.py` (boot log + `setup/status.subsystems[]` + 503 guard on
-  the drain route).
-
-- **Pending Changes: no more React "setState during render".** Derives the displayed
-  value via a pure read-through.
-
-- **First-run wizard no longer traps the user on the LLM step.** Next gates on a
-  structurally-valid provider, not a passing live connection test.
-
-- **Wizard progress indicator** no longer shows a later step as "done" before it is
-  reached.
-
-- **First-run no longer shows raw errors behind the setup card.** `/library` and
-  `/today` gate their Zotero-backed fetches on a connected reader.
-
-- `GET /api/library/reading-queue` returns a clean **503 `zotero_unavailable`**
-  when Zotero isn't configured.

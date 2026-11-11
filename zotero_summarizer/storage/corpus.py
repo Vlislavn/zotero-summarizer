@@ -20,6 +20,7 @@ from zotero_summarizer.domain import (
     TRIAGE_REJECTED_TAG_TOKEN,
 )
 from zotero_summarizer.models import CorpusItem
+from zotero_summarizer.storage.corpus_nearest import CorpusNearestMixin
 from zotero_summarizer.storage.corpus_read import CorpusReadMixin
 from zotero_summarizer.storage.corpus_types import CorpusMatchResult  # noqa: F401
 
@@ -46,7 +47,7 @@ def open_corpus_conn(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-class EmbeddingCache(CorpusReadMixin):
+class EmbeddingCache(CorpusReadMixin, CorpusNearestMixin):
     """Stores and queries library embeddings for corpus-aware triage.
 
     Read/query methods (match + metadata) live in ``CorpusReadMixin``.

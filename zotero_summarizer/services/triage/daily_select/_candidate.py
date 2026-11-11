@@ -27,6 +27,14 @@ from typing import Any
 from zotero_summarizer.services._common import LOGGER
 from zotero_summarizer.services.model.rank_blend import blend_scores
 from zotero_summarizer.services.model.rank_blend_quality import quality_first_key, unified_quality
+from zotero_summarizer.services.triage.daily_select._goal_match import row_goal_text
+from zotero_summarizer.services.triage.daily_select._selection_evidence import (
+    rank_observations,
+    source_observations,
+)
+from zotero_summarizer.services.triage.daily_select._review_status import (
+    _join_review, _quality_from_row as row_quality,
+)
 
 
 def parse_payload(row: dict[str, Any]) -> dict[str, Any]:
@@ -177,24 +185,6 @@ def row_rationale(payload: dict[str, Any]) -> str:
     return _row_str(payload, "triage_rationale", "rationale")
 
 
-def row_quality(row: dict[str, Any]) -> dict[str, Any]:
-    """Parse the persisted full-text :class:`QualityReview` for the card.
-
-    Empty ``{}`` when the row has no review yet (the documented "not in the
-    top-K reviewed set" contract). Corrupt JSON raises — a data-integrity bug,
-    same posture as :func:`parse_payload`.
-    """
-    raw = (row.get("quality_review_json") or "").strip()
-    if not raw:
-        return {}
-    parsed = json.loads(raw)
-    if not isinstance(parsed, dict):
-        raise ValueError(
-            f"row id={row.get('id')!r} quality_review_json is not a JSON object"
-        )
-    return parsed
-
-
 def _row_item_key(row: dict[str, Any]) -> str:
     """Prefer the feed item GUID, fall back to a synthetic ``row-{id}`` token.
 
@@ -232,6 +222,14 @@ def row_top_author_h_index(payload: dict[str, Any]) -> int | None:
     if h is None or float(h) <= 0:
         return None
     return int(h)
+
+
+def row_last_author_h_index(payload: dict[str, Any]) -> int | None:
+    """The last author's OWN h-index from ``aux_context.last_author_h_index``.
+
+    ``None`` = unknown (never resolved / pre-#161 row); a real 0 stays 0."""
+    h = _aux_dict(payload).get("last_author_h_index")
+    return int(h) if h is not None else None
 
 
 def row_citation_percentile(payload: dict[str, Any]) -> float | None:
@@ -299,7 +297,7 @@ def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
     surprise_f = 0.0 if surprise is None else float(surprise)
     corpus_affinity = row_corpus_affinity(row, payload)
     h_index = row_top_author_h_index(payload)
-    return {
+    cand = {
         "id": int(row_id),
         "item_key": _row_item_key(row),
         # Durable feed identity — the key the IN-PLACE Today deep review caches under
@@ -321,6 +319,7 @@ def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
         "quality": row_quality(row),
         "shap_top": shap_top3(payload),
         "max_author_h_index": h_index,
+        "last_author_h_index": row_last_author_h_index(payload),
         "feed_name": str(row.get("feed_name") or ""),
         "created_at": str(row.get("created_at") or ""),
         "abstract": row_abstract(row),
@@ -331,6 +330,7 @@ def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
         # DISPLAY, but the blend must only ever see real evidence (its last-resort
         # composite/5 fallback would be circular as a ranking input).
         "goal_sim": row_goal_sim(payload),
+        "goal_text": row_goal_text(payload),  # argmax goal of goal_sim; display only
         "citation_percentile": row_citation_percentile(payload),
         # Quality-first blend inputs (services/model/rank_blend_quality): the LLM
         # 1-5 goal_alignment dim (topicality), rigor+evidence dims (abstract-only
@@ -350,6 +350,11 @@ def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
         # assembly attaches them after the cohort exists (_relevance.attach_why).
         "why": [],
     }
+    cand["selection_evidence"] = source_observations(row)
+    cand["selection_evidence"]["review"]["quality_origin"] = (
+        "legacy_row" if cand["quality"] else "none"
+    )
+    return cand
 
 
 def dedup_keep_newest(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -380,29 +385,11 @@ def attach_quality_from_reviews(candidates: list[dict[str, Any]]) -> int:
     NONE match — the v1 trap was a silently always-0 join, never surface that as
     'no quality'."""
     from zotero_summarizer.services.library import deep_review  # lazy cross-domain read
-    from zotero_summarizer.services.library.review_eligibility import usable_review
 
-    reviews = deep_review.current_reviews()
-    joinable = 0
-    matched = 0
-    for cand in candidates:
-        # The IN-PLACE Today review caches under stable_feed_key; a materialized pick
-        # caches under its Zotero key. Try the library key first (post-materialize wins),
-        # then the feed key.
-        mkey = (cand.get("materialized_zotero_key") or "").strip()
-        skey = (cand.get("stable_feed_key") or "").strip()
-        if not mkey and not skey:
-            continue
-        joinable += 1
-        entry = (reviews.get(mkey) if mkey else None) or (reviews.get(skey) if skey else None)
-        if entry is None:
-            continue
-        cand["review_ready"] = usable_review(entry)
-        # The QualityEval carries the coverage-based signal the card + brief render
-        # (grade, band, coverage_met/applicable, red_flags) — the honest replacement
-        # for the digest's unvalidated 1-5 self-scores. No digest merge needed.
-        cand["quality"] = entry.get("quality") or {}
-        matched += 1
+    reviews = deep_review.usable_reviews()
+    joinable = sum(bool((cand.get("materialized_zotero_key") or "").strip()
+                        or (cand.get("stable_feed_key") or "").strip()) for cand in candidates)
+    matched = sum(_join_review(cand, reviews) for cand in candidates)
     if reviews and joinable and not matched:
         LOGGER.warning(
             "deep-review quality bridge matched 0/%d joinable candidates against "
@@ -452,6 +439,10 @@ def attach_rank_scores(candidates: list[dict[str, Any]], *, quality_first: bool 
         )
     for cand, key in zip(candidates, keys):
         cand["rank_score"] = key
+        cand["selection_evidence"] = rank_observations(
+            cand.get("selection_evidence", {}), quality_first=quality_first, key=key,
+            goal=cand.get("goal_text"),
+        )
 
 
 __all__ = [

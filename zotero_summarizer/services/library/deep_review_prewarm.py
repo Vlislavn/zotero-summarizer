@@ -81,7 +81,7 @@ def _prewarm_worker(k: int, config: Any, app_state: Any) -> None:
             LOGGER.info("deep-review prewarm: top-%d already cached, nothing to do", k)
             return
         LOGGER.info("deep-review prewarm: warming %d uncached pick(s): %s", len(keys), keys)
-        deep_review.start(item_keys=keys)
+        deep_review.start(item_keys=keys, background=True)
     except Exception as exc:  # noqa: BLE001 — background-worker boundary; prewarm is best-effort
         LOGGER.warning("deep-review prewarm failed: %s", exc)
 

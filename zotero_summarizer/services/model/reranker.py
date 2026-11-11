@@ -10,8 +10,9 @@ Inference errors also propagate. A process-level singleton keeps the model resid
 from __future__ import annotations
 
 import logging
+import math
 import threading
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 from sentence_transformers import CrossEncoder
 
@@ -58,6 +59,21 @@ class Reranker:
                 self._load_future = pool.submit(self._load)
             finally:
                 pool.shutdown(wait=False)
+
+    def wait_until_ready(self, *, timeout: float) -> bool:
+        """Wait once on the owned load Future; expiry is pending, not cancellation."""
+        if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("reranker readiness timeout must be finite and positive")
+        self.ensure_loaded_async()
+        future = self._load_future
+        if future is not None:
+            try:
+                future.result(timeout=timeout)
+            except FutureTimeoutError:
+                if future.done():
+                    future.result(timeout=0)  # Preserve a load's own TimeoutError.
+                return False
+        return self.is_ready()
 
     def rerank(self, query: str, pairs: list[tuple[str, str]], top_n: int) -> list[tuple[str, float]]:
         """``[(item_key, score)]`` sorted by descending relevance, capped to

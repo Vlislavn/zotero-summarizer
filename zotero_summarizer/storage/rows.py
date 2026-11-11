@@ -4,8 +4,8 @@ The repository functions historically return ``dict[str, Any]`` straight from
 SQLite, so a renamed/dropped column surfaces only as a silent ``None`` deep in a
 service. These models put one strict, typed definition of a row in one place:
 ``from_row`` raises immediately if an expected column is missing (fail-loud on
-schema drift), and ``to_dict`` reproduces the exact legacy key set so existing
-callers are untouched.
+schema drift), and ``to_dict`` retains legacy fields alongside pending audit
+and backup metadata.
 
 This is the pattern for typing the boundary incrementally — add a model here and
 route the matching reader through it. ``PendingChangeRow`` is the first adopter.
@@ -44,6 +44,9 @@ class PendingChangeRow:
     error_message: str | None
     created_at: str
     applied_at: str | None
+    proposal_json: str | None = None
+    audit_json: str = "[]"
+    backup_path: str | None = None
 
     _COLUMNS = (
         "id",
@@ -70,6 +73,9 @@ class PendingChangeRow:
             error_message=row["error_message"],
             created_at=str(row["created_at"]),
             applied_at=row["applied_at"],
+            proposal_json=row.get("proposal_json"),
+            audit_json=row.get("audit_json", "[]"),
+            backup_path=row.get("backup_path"),
         )
 
     @property
@@ -82,4 +88,15 @@ class PendingChangeRow:
         return decoded if isinstance(decoded, dict) else {}
 
     def to_dict(self) -> dict[str, Any]:
-        return {column: getattr(self, column) for column in self._COLUMNS}
+        from zotero_summarizer.storage.pending_actions import edit_revision
+
+        result = {column: getattr(self, column) for column in self._COLUMNS}
+        result["audit"] = json.loads(self.audit_json)
+        edit_revision(result["audit"])
+        result["backup_path"] = self.backup_path
+        if self.proposal_json is not None:
+            from zotero_summarizer.storage.pending_actions import preview
+
+            result["proposal_json"] = self.proposal_json
+            result["generated_preview"] = preview(result)
+        return result

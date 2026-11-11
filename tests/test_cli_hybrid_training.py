@@ -10,7 +10,7 @@ from zotero_summarizer.cli import main
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.models.config import GoalsConfig
 from zotero_summarizer.services import _common
-from zotero_summarizer.services.golden.csv_store import edit_csv
+from zotero_summarizer.services.golden.csv_store import edit_csv, load_golden_rows
 from zotero_summarizer.services.model import classifier, classifier_embed, classifier_persistence as cp
 from zotero_summarizer.services.model.eval_baseline import _featurize, _runners
 from zotero_summarizer.services.setup import calibration
@@ -147,5 +147,5 @@ def test_predict_feed_cli_reaches_model_with_effective_labels_and_writes_results
     predict.assert_called_once()
     _assert_truth(predict.call_args.kwargs["training_rows"])
     assert predict.call_args.kwargs["new_items"][0]["item_id"] == 999
-    assert _common.load_golden_rows(output)[0]["predicted_priority"] == "should_read"
+    assert load_golden_rows(output)[0]["predicted_priority"] == "should_read"
     assert settings.golden_csv_path.read_bytes() == original

@@ -24,7 +24,11 @@ class FeedsConfig(BaseModel):
     # (rotation), so a bounded pass still covers EVERY enabled feed across
     # successive ticks — the old alphabetical slice starved feeds 11..N forever.
     max_feeds_per_pass: int = Field(default=10, ge=1)
-    max_new_items_per_feed: int = Field(default=25, ge=1)
+    # Ingestion never slices entries before dedupe (REQ-S4): arXiv API queries are
+    # paged until max(per-feed watermark, now - backfill_days) or max_pages_per_feed.
+    # (The old ``max_new_items_per_feed`` key is ignored when still present in a config.)
+    backfill_days: int = Field(default=7, ge=1, le=60)
+    max_pages_per_feed: int = Field(default=10, ge=1, le=50)
     per_feed_timeout_secs: float = Field(default=10.0, ge=1.0, le=300.0)
     mark_processed_as_read: bool = Field(default=True)
     # Reconcile app-side read state back into Zotero's unread badge (guid match

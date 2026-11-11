@@ -79,7 +79,8 @@ def local_profile_catalog(settings: Any) -> dict[str, Any]:
         row = {"id": name, **profile, "compatible": memory_ok and disk_ok}
         row["provider"] = _local_provider(_LOCAL_URL).model_dump(mode="json")
         row["compatibility_detail"] = (
-            "; ".join(reasons) or "Compatible with detected hardware"
+            "; ".join(reasons) or ("Meets static profile floors" if profile["model"]
+                                   else "Runtime compatibility and capacity are unverified")
         )
         row["pull_command"] = (
             f"ollama pull {profile['model']}" if profile["model"] else None

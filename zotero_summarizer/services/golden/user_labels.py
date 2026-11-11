@@ -148,9 +148,7 @@ def _retracted_priorities(states: dict[str, dict], zotero_db_path: Path, triage_
             continue
         priority = detect_label(live.get(key, []))
         if not row["mirrored"]:
-            if key in live and priority is None:
-                with label_mirrors.current_label(triage_db_path, row["item_key"], revision=row["revision"]):
-                    pass  # Live Zotero already has no recognized label to remove.
+            # Only the configured current-intent mirror can ACK both tag and note completion.
             priority = None
         priorities[key] = priority
     return priorities

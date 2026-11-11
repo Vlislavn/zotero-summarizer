@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
 import pydantic
 import yaml
 
+from zotero_summarizer.integrations.zotero_read import ZoteroReadError
 from zotero_summarizer.models.providers import resolve_stage
 from zotero_summarizer.models.setup import (
     ClassifierStatus,
@@ -58,10 +60,12 @@ async def _llm_status(config: object | None) -> LlmStatus:
         )
     resolved = resolve_stage(config.llm_routing, "deep_review")  # type: ignore[attr-defined]
     provider, model = resolved.provider, resolved.model
-    preset_local = provider.is_local and provider.api_key_env == "OLLAMA_API_KEY"
-    api_key_present = (
-        preset_local or credentials.get_api_key(provider.api_key_env) is not None
-    )
+    from zotero_summarizer.services.llm.connection_approval import is_approved
+
+    preset_local = provider.is_local
+    approved = is_approved(provider)
+    api_key_present = provider.auth_mode != 'none' and approved and (preset_local or credentials.get_api_key(provider.api_key_env) is not None)
+    auth_status = 'none' if provider.auth_mode == 'none' else 'unknown' if not approved or preset_local else 'stored' if api_key_present else 'absent'
 
     reachability = await operational_check.check_reachability()
     default_row = next(
@@ -77,6 +81,10 @@ async def _llm_status(config: object | None) -> LlmStatus:
         default_model=model,
         api_key_env=provider.api_key_env,
         api_key_present=api_key_present,
+        auth_required=provider.auth_mode != 'none',
+        auth_status=auth_status,
+        reachability=default_row.get('status', 'reachable' if default_row.get('reachable') else 'unreachable' if default_row.get('reachable') is False else 'unknown'),
+        reason_code=default_row.get('reason_code'),
         reachable=bool(default_row.get("reachable", False)),
         detail=str(default_row.get("detail", "")),
     )
@@ -107,9 +115,14 @@ def _zotero_status() -> ZoteroStatus:
     library_item_count = int(stats.get("total_items", 0) or 0)
 
     feed_count = 0
+    error = str(payload.error or "")
     reader = getattr(state(), "zotero_reader", None)
-    if reader is not None:
-        feed_count = len(reader.get_feed_groups())
+    if db_found and reader is not None:
+        try:
+            feed_count = len(reader.get_feed_groups())
+        except ZoteroReadError as exc:
+            db_found = False
+            error = str(exc)
 
     return ZoteroStatus(
         db_found=db_found,
@@ -117,7 +130,7 @@ def _zotero_status() -> ZoteroStatus:
         db_path=str(payload.db_path),
         library_item_count=library_item_count,
         feed_count=feed_count,
-        error=str(payload.error or ""),
+        error=error,
     )
 
 
@@ -139,7 +152,7 @@ async def get_setup_status() -> SetupStatusResponse:
     config_status, config = _config_status()
     llm = await _llm_status(config)
     paths = _path_status()
-    zotero = _zotero_status()
+    zotero = await asyncio.to_thread(_zotero_status)
     classifier = await _classifier_status()
 
     from zotero_summarizer.services.setup.doctor import doctor_status
@@ -148,7 +161,7 @@ async def get_setup_status() -> SetupStatusResponse:
     configured = bool(
         config_status.valid
         and config_status.research_goals_count > 0
-        and (not llm.enabled or llm.api_key_present)
+        and (not llm.enabled or not llm.auth_required or llm.api_key_present or llm.auth_status == 'unknown')
     )
     ready = bool(configured and (not llm.enabled or llm.reachable) and verified)
 

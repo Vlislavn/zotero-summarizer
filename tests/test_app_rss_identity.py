@@ -193,7 +193,7 @@ def test_app_rss_reader_refresh_stores_items_without_scoring(
     )
 
     reader = AppRssReader(db_path)
-    result = reader.refresh_feeds(max_feeds=1, max_new_items_per_feed=5)
+    result = reader.refresh_feeds(max_feeds=1)
 
     assert result["inserted"] == 1
     assert result["errors"] == []
@@ -220,7 +220,7 @@ def test_overlapping_tag_feeds_reuse_one_guid_row() -> None:
         rss_feed_id=b,
         item={"guid": "shared-story", "title": "Concrete agent post"},
     )
-    assert first == second and inserted is True and inserted_again is False
+    assert first == second and inserted == "inserted" and inserted_again == "unchanged"
     assert conn.execute("SELECT COUNT(*) FROM rss_items").fetchone()[0] == 1
 
 

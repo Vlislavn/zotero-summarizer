@@ -8,10 +8,13 @@ from zotero_summarizer.settings import Settings
 from zotero_summarizer.cli._helpers import _resolve_feed_ids
 
 
-def _bootstrap_feeds_cli(args: argparse.Namespace) -> tuple[Settings, list[int] | None]:
+def _bootstrap_feeds_cli(
+    args: argparse.Namespace, *, background: bool = True,
+) -> tuple[Settings, list[int] | None]:
     """Shared bootstrap for the feeds subcommands: load settings, resolve an
     optional ``--feeds`` filter, set the runtime context, and run app startup
-    with an optional ``--model`` override. Tick exclusion belongs to the service."""
+    with an optional ``--model`` override. Tick exclusion belongs to the service.
+    ``background=False`` skips the daemon prewarm/import/rescore workers (read-only inspections)."""
     from zotero_summarizer.runtime import AppContext, set_context
     from zotero_summarizer.services import lifecycle
 
@@ -23,7 +26,7 @@ def _bootstrap_feeds_cli(args: argparse.Namespace) -> tuple[Settings, list[int] 
     set_context(AppContext(settings=settings))
     lifecycle.startup(
         override_model=getattr(args, "model", None) or None,
-        background=not getattr(args, "dry_run", False),
+        background=background and not getattr(args, "dry_run", False),
     )
     return settings, feed_filter
 
@@ -105,7 +108,7 @@ def _feeds_serve(args: argparse.Namespace) -> int:
         from zotero_summarizer.services.triage.feeds import run_daemon_loop
 
         _settings, feed_filter = _bootstrap_feeds_cli(args)
-        await run_daemon_loop(feed_library_ids=feed_filter, max_ticks=args.max_ticks)
+        await run_daemon_loop(feed_library_ids=feed_filter, max_ticks=args.max_ticks, feedback_settings=_settings)
         return 0
 
     return asyncio.run(_run())
@@ -118,7 +121,7 @@ def _feeds_select_daily(args: argparse.Namespace) -> int:
     async def _run() -> int:
         from zotero_summarizer.services.triage.feeds import run_daily_selection
 
-        _bootstrap_feeds_cli(args)
+        _bootstrap_feeds_cli(args, background=False)  # read-only: no prewarm/import workers
         result = await asyncio.to_thread(run_daily_selection)
         print(json.dumps(result, indent=2))
         return 0 if not result.get("errors") else 1

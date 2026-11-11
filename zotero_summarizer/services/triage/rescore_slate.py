@@ -51,7 +51,7 @@ def _item_from_row(row: dict[str, Any], payload: dict[str, Any]) -> dict[str, An
     limitation re: venue)."""
     guid = (row.get("guid") or "").strip()
     return {
-        "item_key": guid or f"row-{row['id']}",
+        "item_key": str(row.get("feed_item_id") or guid or f"row-{row['id']}"),
         "item_id": row.get("feed_item_id"),
         "title": row.get("title") or "",
         "abstract": row.get("abstract") or "",

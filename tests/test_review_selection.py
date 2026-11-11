@@ -75,21 +75,32 @@ def test_resolver_preserves_scope_and_first_seen_order(monkeypatch, keys, expect
     ({"item_keys": ["B", "A", "B", "A"], "top_k": 1}, ["B", "A"]),
 ])
 def test_http_scope_reaches_real_workers_once(client, monkeypatch, payload, expected):
+    from copy import deepcopy
+    from tests.test_research_feed import _review
+    from zotero_summarizer.runtime import get_context
+    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.setup.bootstrap import _default_goals_config
+    from zotero_summarizer.services.zotero import generated_notes
+
+    context = get_context()
+    context.settings.config_path.write_text(_default_goals_config().model_dump_json())
+    context.state.app_state = SimpleNamespace(config=read_config(
+        context.settings.config_path, context.settings.calibration_path))
+    accepted = {key: _review(key) for key in expected}
     reviewed, scans = [], []
+    monkeypatch.setattr(generated_notes, 'stage_current_digest', lambda _key: None)
     monkeypatch.setattr(fleet._flight, "run_in_background", lambda fn: fn())
     monkeypatch.setattr(deep_review, "_build_ctx", lambda **kw: {})
     monkeypatch.setattr(deep_review, "_ensure_pool", lambda provider: SimpleNamespace(
         submit=lambda fn, *args: fn(*args),
     ))
-    monkeypatch.setattr(deep_review, "review_is_current", lambda entry, _key: bool(entry))
     monkeypatch.setattr(deep_review.reading_queue, "build_reading_queue",
                         lambda **kw: scans.append(kw) or {"items": [{"item_key": "AUTO"}]})
     monkeypatch.setattr(deep_review.reading_queue, "get_cached_scoring", lambda key: None)
 
     def review(item, **kwargs):
         reviewed.append(item["item_key"])
-        return {"review_contract_version": deep_review.REVIEW_CONTRACT_VERSION,
-                "digest": {"read_decision": "skim", "grade": "C"}, "needs_pdf": False}
+        return deepcopy(accepted[item['item_key']])
 
     monkeypatch.setattr(deep_review, "_review_one", review)
     response = client.post("/api/library/review-fleet/run", json=payload)

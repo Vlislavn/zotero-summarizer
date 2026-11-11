@@ -15,7 +15,7 @@ from zotero_summarizer.services import corpus
 from zotero_summarizer.services.triage import triage_jobs
 from zotero_summarizer.services._adapters import build_pdf_extractor
 from zotero_summarizer.services._common import LOGGER, read_config, settings, setup_logging, state
-from zotero_summarizer.settings import Settings
+from zotero_summarizer.settings import Settings, automatic_gate_updates_enabled
 from zotero_summarizer.storage import repositories as triage_db
 from zotero_summarizer.storage.corpus import EmbeddingCache
 
@@ -34,7 +34,14 @@ def _load_config(current_settings: Settings, override_model: str | None) -> Goal
     if not current_settings.config_path.exists():
         raise RuntimeError(f"Missing config file: {current_settings.config_path}")
 
-    config = read_config(current_settings.config_path, current_settings.calibration_path)
+    from zotero_summarizer.storage.configuration_lock import configuration_lock, file_revision
+
+    with configuration_lock(current_settings.data_dir):
+        loaded_revision = file_revision(current_settings.config_path)
+        config = read_config(current_settings.config_path, current_settings.calibration_path)
+        if loaded_revision != file_revision(current_settings.config_path):
+            raise RuntimeError('Configuration changed while loading')
+        state().config_disk_revision = loaded_revision
     if override_model:
         LOGGER.info(
             "LLM model override: default stage model %r -> %r",
@@ -52,7 +59,7 @@ def _init_models(
     """Wire the PDF extractor + embedding cache singletons.
 
     LLM clients are NOT built here: each pipeline stage resolves its own client
-    lazily on first use via ``RuntimeState.resolve_stage_client`` (so a missing
+    lazily on first use via ``services.llm.factory.resolve_stage_client`` (so a missing
     key/unreachable endpoint never blocks startup)."""
     app_state.app_state = AppState(config=config)
     app_state.invalidate_stage_clients()
@@ -73,14 +80,12 @@ def _init_metadata_clients(app_state: RuntimeState, config: GoalsConfig, current
     """OpenAlex prestige + Unpaywall full-text + OpenReview peer-review clients (all optional)."""
     app_state.openalex_client = None
     app_state.unpaywall_client = None
-    app_state.openalex_cache = None
     app_state.openreview_client = None
-    if config.prestige.enabled or config.full_text_refine.enabled or config.openreview.enabled:
-        ttl_days = max(config.prestige.cache_ttl_days, 1)
-        app_state.openalex_cache = OpenAlexCache(
-            current_settings.corpus_db_path,
-            ttl_seconds=ttl_days * 86400,
-        )
+    ttl_days = max(config.prestige.cache_ttl_days, 1)
+    app_state.openalex_cache = OpenAlexCache(
+        current_settings.corpus_db_path,
+        ttl_seconds=ttl_days * 86400,
+    )
     if config.prestige.enabled:
         app_state.openalex_client = OpenAlexClient(
             app_state.openalex_cache, mailto=config.prestige.user_agent_email or None
@@ -123,6 +128,9 @@ def _init_metadata_clients(app_state: RuntimeState, config: GoalsConfig, current
 
 
 def _schedule_startup_gate_refresh(gate: object | None, reason: str = "startup") -> None:
+    if not automatic_gate_updates_enabled():
+        LOGGER.info("Automatic classifier training and startup rescoring disabled")
+        return
     from zotero_summarizer.services.triage import feeds
 
     started = feeds.schedule_gate_retrain_async(reason, allow_initial=gate is None)
@@ -161,7 +169,7 @@ def _init_classifier_gate(
     from zotero_summarizer.services.triage.feeds._gate import _gate_quality_label
 
     golden_csv = current_settings.golden_csv_path
-    if not golden_csv.exists():
+    if not golden_csv.exists() and automatic_gate_updates_enabled():
         LOGGER.warning(
             "classifier_gate.enabled but %s missing; gate disabled "
             "(run `zotero-summarizer goldenset export` first)",
@@ -186,8 +194,7 @@ def _init_classifier_gate(
     if gate is not None and gate.feature_dim != classifier.FEATURE_DIM:
         LOGGER.warning(
             "Cached classifier %s has feature_dim=%d but the builder now "
-            "emits %d; ignoring the stale model and retraining in "
-            "background (gate off until ready)",
+            "emits %d; ignoring the incompatible model",
             config.classifier_gate.model_name,
             gate.feature_dim,
             classifier.FEATURE_DIM,
@@ -213,8 +220,8 @@ def _init_classifier_gate(
         if background and not defer_retrain:
             _schedule_startup_gate_refresh(gate)
     else:
-        if not background:
-            raise RuntimeError("No compatible cached classifier; train it before a dry-run")
+        if not background or not automatic_gate_updates_enabled():
+            raise RuntimeError("No compatible cached classifier; train it explicitly before startup")
         # No usable cached model (missing, or rejected as stale above).
         LOGGER.info(
             "Classifier gate %s not ready; training in background "
@@ -282,9 +289,8 @@ def _schedule_startup_rss_refresh(
 ) -> bool:
     """Schedule a small fetch-only app RSS refresh on startup."""
     max_feeds = int(os.environ.get("ZS_STARTUP_RSS_MAX_FEEDS", "5"))
-    max_new = int(os.environ.get("ZS_STARTUP_RSS_MAX_NEW_PER_FEED", "10"))
     timeout = float(os.environ.get("ZS_STARTUP_RSS_TIMEOUT_SECS", "8"))
-    if loop is None or max_feeds <= 0 or max_new <= 0:
+    if loop is None or max_feeds <= 0:
         return False
 
     def _run_refresh() -> None:
@@ -293,7 +299,6 @@ def _schedule_startup_rss_refresh(
         reader = AppRssReader(current_settings.triage_db_path)
         result = reader.refresh_feeds(
             max_feeds=max_feeds,
-            max_new_items_per_feed=max_new,
             per_feed_timeout=timeout,
         )
         LOGGER.info("startup app RSS refresh complete: %s", result)
@@ -383,11 +388,17 @@ def startup(override_model: str | None = None, *, background: bool = True) -> No
     from zotero_summarizer.services.library.review_fleet import prewarm as review_fleet_prewarm
     review_fleet_scheduled = review_fleet_prewarm.schedule_on_startup(config, app_state)
 
+    # Today preparation otherwise starts only from a feed tick, and ``serve`` runs none.
+    from zotero_summarizer.services.triage import today_preparation
+    today_prep_scheduled = today_preparation.schedule_on_startup(
+        current_settings.triage_db_path,
+        limit=config.quality_review.auto_on_tick_k if config.quality_review.enabled else 0)
+
     LOGGER.info(
         (
             "Startup complete config=%s timeout=%ss log_file=%s corpus_db=%s embedding_model=%s "
             "zotero_data_dir=%s interrupted_jobs=%s resumed_jobs=%s auto_corpus_import=%s "
-            "startup_rss_refresh=%s deep_review_prewarm=%s review_fleet_prewarm=%s triage_job_concurrency=%s"
+            "startup_rss_refresh=%s deep_review_prewarm=%s review_fleet_prewarm=%s today_preparation=%s triage_job_concurrency=%s"
         ),
         current_settings.config_path,
         current_settings.summary_timeout_seconds,
@@ -401,5 +412,6 @@ def startup(override_model: str | None = None, *, background: bool = True) -> No
         rss_refresh_scheduled,
         prewarm_scheduled,
         review_fleet_scheduled,
+        today_prep_scheduled,
         current_settings.triage_job_concurrency,
     )

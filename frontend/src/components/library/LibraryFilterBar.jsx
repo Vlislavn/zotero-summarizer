@@ -16,8 +16,8 @@ const PRESTIGE_OPTS = [
   { value: 'new', label: 'new' },
 ];
 const GOAL_OPTS = [
-  { value: 'high', label: 'high' },
-  { value: 'low', label: 'low' },
+  { value: 'high', label: 'strong' },
+  { value: 'low', label: 'weak' },
 ];
 // Deep-review quality grade: A/B = "quality papers", C/D = weak. Only shown when
 // some rows carry a grade (i.e. have been deep-reviewed).
@@ -64,7 +64,7 @@ export default function LibraryFilterBar({
 
         {/* Goal-match — only when a goal signal exists (corpus on, scored rows). */}
         {goalEnabled && (
-          <Cluster label="Goal">
+          <Cluster label="Matches my goals">
             {GOAL_OPTS.map((o) => (
               <FilterChip
                 key={o.value}

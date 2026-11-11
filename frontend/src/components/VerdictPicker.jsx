@@ -7,7 +7,7 @@ import { PRIORITIES } from './VerdictPanel.jsx';
 // the four priorities that commits on one click and immediately advances
 // (Feed Review's relabel row, the blind Re-label Audit). They share ONE human
 // vocabulary and palette with the panel by importing the same `PRIORITIES`
-// (Jakob's Law / Mental Model: "Must read … Remove ❌" reads the same
+// (Jakob's Law / Mental Model: "Must read … Remove" reads the same
 // everywhere; the raw `must_read` enum never reaches the user). Collapsing the
 // four bespoke raw-enum buttons each surface used to hand-roll into this one
 // control is the Hick/Occam win — same shape, same words, one source of truth.

@@ -6,9 +6,7 @@ import { CHIP_TONE as TONE_CLS } from '../paper/review/tones.js';
 // (emerald=positive/must_read, sky=should_read, amber=warn/could_read,
 // rose=error/dont_read, teal=brand, slate=neutral, violet=active):
 //
-//   StatusPill    — the operational ✓ / ✗ pill (re-homed from
-//                   LlmRoutingSection so it lives with its siblings; that
-//                   module re-exports it for back-compat with its importers).
+//   StatusPill    — the operational ✓ / ✗ pill.
 //   PriorityBadge — must_read / should_read / could_read / dont_read in the
 //                   canonical emerald / sky / amber / rose vocab.
 //   ActionBadge   — a generic status/change pill: pass a `tone` token (or a
@@ -18,8 +16,7 @@ import { CHIP_TONE as TONE_CLS } from '../paper/review/tones.js';
 // above) so a dont_read / B-grade / error reads the SAME shade in a Badge as in a
 // Chip — one tone vocabulary app-wide (Law of Similarity), not a drifting copy.
 
-// Operational check pill — exact markup the LlmRoutingSection original used so
-// the Settings/Setup surfaces render byte-identically.
+// Operational check pill.
 export function StatusPill({ status }) {
   const ok = status === 'operational';
   return (

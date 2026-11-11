@@ -5,14 +5,14 @@ The headline regression: a review paper is judged on SANRA, never flagged for
 "no ablation / no leakage discussion" (the bug this redesign fixes)."""
 from __future__ import annotations
 
-from zotero_summarizer.services.library import quality_eval
+from zotero_summarizer.services.library import _paper_type_checklists as pc, quality_eval
 from zotero_summarizer.services.library._quality_prompts import (
     OverstatementLLMResponse,
     RubricLLMResponse,
     SelfVerifyResponse,
 )
 
-# The GENERIC_EMPIRICAL checklist keys (default when no paper_type is passed). Each
+# The GENERIC_EMPIRICAL checklist keys (an explicitly selected supertype). Each
 # value is a >=6-word / >=40-char verbatim span used as grounded evidence.
 EV = {
     "baselines": "We compare against strong recent baselines including the current state of the art.",
@@ -48,7 +48,7 @@ class _FakeLLM:
         return RubricLLMResponse(checks=dict(sample), evidence=dict(self._evidence), concerns=[], band="highlight")
 
 
-def _eval(llm, *, body=RIGOROUS_BODY, digest=None, paper_type=None, **kw):
+def _eval(llm, *, body=RIGOROUS_BODY, digest=None, paper_type="generic_empirical", **kw):
     return quality_eval.evaluate_quality(
         title="Hidden", full_text=body, sections=[{"title": "Methods", "text": body}],
         digest=digest or {"tldr": "a method", "key_findings": [], "grade": "A"},
@@ -66,6 +66,9 @@ class _CapReporter:
 
     def sub(self, done, total):
         self.subs.append((done, total))
+
+    def finish(self, name):
+        pass
 
 
 def test_evaluate_quality_reports_phase_and_subprogress():
@@ -114,16 +117,16 @@ def test_review_paper_not_judged_on_empirical_criteria():
     gets NO empirical leakage/ablation red flag."""
     body = ("In this review we survey the field and recommend best practices. "
             "One cited study reported 0.99 AUC on a patient cohort.")
-    out = _eval(_FakeLLM([{}, {}, {}]), body=body, paper_type="narrative_review")
+    unassessed = {item.key: "na" for item in pc.spec_for("narrative_review").items}
+    out = _eval(_FakeLLM([unassessed] * 3), body=body, paper_type="narrative_review")
     assert not any("leakage" in f for f in out.red_flags)  # empirical flag suppressed
     assert out.coverage_standard.startswith("SANRA")
     assert out.paper_type == "narrative_review"
 
 
-def test_overstatements_below_threshold_do_not_flag_well_covered_paper():
-    # Layer-3 fix: 1-2 abstract-vs-body overstatements (often false-positives on a
-    # faithful paper) must NOT alone drag a fully-covered paper to `flag`; only a
-    # cluster (>=3) does. Was the bug: a coverage-1.0 case report flagged on 2 overstatements.
+def test_overstatements_never_flag_a_well_covered_paper():
+    # #189/#194: overstatement flags are advisory only (stored precision 0.03 on 132
+    # hand-labelled claims), so even a cluster never moves the band.
     two = _eval(
         _FakeLLM([ALL_YES, ALL_YES, ALL_YES],
                  overstatements=["claims causality without RCT", "SOTA without baseline table"]),
@@ -135,7 +138,7 @@ def test_overstatements_below_threshold_do_not_flag_well_covered_paper():
                  overstatements=["causal claim, no design", "SOTA, no baseline", "generalizes, no external data"]),
         digest={"tldr": "we prove X causes Y", "key_findings": ["SOTA"], "grade": "B"},
     )
-    assert three.quality_band == "flag" and len(three.overstatements) == 3
+    assert three.quality_band == "highlight" and len(three.overstatements) == 3
 
 
 def test_self_consistency_disagreement_is_uncertain():

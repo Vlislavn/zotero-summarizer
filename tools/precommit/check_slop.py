@@ -407,7 +407,8 @@ def _runtime_python_files() -> list[str]:
         ["git", "ls-files", f"{RUNTIME_ROOT}/**/*.py", f"{RUNTIME_ROOT}/*.py"],
         cwd=REPO_ROOT, capture_output=True, text=True, check=True,
     )
-    return [line for line in result.stdout.splitlines() if line]
+    # Tracked-but-deleted files (an uncommitted removal) are skipped, not read.
+    return [line for line in result.stdout.splitlines() if line and (REPO_ROOT / line).is_file()]
 
 
 def _scan(paths: list[str]) -> list[Diagnostic]:

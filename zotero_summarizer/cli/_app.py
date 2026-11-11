@@ -2,12 +2,42 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 
+from zotero_summarizer.services.setup.deployment import require_loopback_bind
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.storage.migrations import migrate_existing
 
 
+def _port_is_busy(host: str, port: int) -> bool:
+    """True only when something already listens there (EADDRINUSE); any other bind problem is left to uvicorn."""
+    import errno
+    import socket
+
+    try:
+        family = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)[0][0]
+    except OSError:
+        return False
+    with socket.socket(family) as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind((host, port))
+        except OSError as exc:
+            return exc.errno == errno.EADDRINUSE
+    return False
+
+
 def _serve(args: argparse.Namespace) -> int:
+    require_loopback_bind(args.host)
+    # uvicorn binds only AFTER the lifespan startup, which has already launched the
+    # prewarm/rescore workers; a bind failure then left those threads running for
+    # minutes. Fail before any startup work (the listener is never touched).
+    if _port_is_busy(args.host, args.port):
+        print(f"error: {args.host}:{args.port} is already in use; pick another --port", file=sys.stderr)
+        return 1
+    # The string factory (including reload workers) must use the admitted root.
+    os.environ["ZOTERO_SUMMARIZER_HOME"] = args.project_root
     import uvicorn
 
     # factory=True so the app is built when uvicorn starts (and on each reload),
@@ -18,6 +48,7 @@ def _serve(args: argparse.Namespace) -> int:
         host=args.host,
         port=args.port,
         reload=args.reload,
+        proxy_headers=False,
     )
     return 0
 
@@ -67,6 +98,11 @@ def _prefetch_models(args: argparse.Namespace) -> int:
     if args.check:
         print(json.dumps(asset_report(settings), indent=2))
         return 0
+    from zotero_summarizer.settings import offline_requested
+
+    if offline_requested():
+        print("error: cannot prefetch models in offline mode; use --check for cache inventory", file=sys.stderr)
+        return 2
     print("Prefetching local ML assets (downloads on first run)…", flush=True)
     print(json.dumps(prefetch_assets(settings), indent=2))
     return 0
@@ -168,9 +204,19 @@ def _verify_deep_review(args: argparse.Namespace) -> int:
         return 0
 
 
+def _loopback_bind(value: str) -> str:
+    try:
+        return require_loopback_bind(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def register_app(subparsers) -> None:
+    from zotero_summarizer.cli._mobile_serve import register_mobile_serve
+
+    register_mobile_serve(subparsers)
     serve = subparsers.add_parser("serve", help="Run the local FastAPI server")
-    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--host", default="127.0.0.1", type=_loopback_bind)
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--reload", action="store_true")
     serve.set_defaults(func=_serve)

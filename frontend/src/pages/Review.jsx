@@ -11,6 +11,7 @@ import { pretty } from '../utils/priorityLabels.js';
 import VerdictPicker from '../components/VerdictPicker.jsx';
 import { humanizeError } from '../utils/humanizeError.js';
 import { StatusBanner } from '../components/library/shared.jsx';
+import FeedReviewEmpty from '../components/FeedReviewEmpty.jsx';
 
 // Tabs the Today funnel can deep-link into (?state=gate_rejected etc.).
 const VALID_STATES = new Set(['awaiting_review', 'gate_rejected']);
@@ -24,20 +25,23 @@ function AuxContext({ aux }) {
   if (!aux) return null;
   return (
     <div className="mt-2 text-[11px] text-slate-600 flex flex-wrap gap-3">
-      {aux.max_author_h_index && (
-        <span>Max author h-index: <span className="mono font-semibold">{aux.max_author_h_index}</span></span>
+      {aux.max_author_h_index > 0 && (
+        <span>Top author h-index: <span className="mono font-semibold">{aux.max_author_h_index}</span></span>
       )}
-      {aux.venue_works_count && (
+      {aux.last_author_h_index > 0 && (
+        <span>Last author's h-index: <span className="mono font-medium">{aux.last_author_h_index}</span></span>
+      )}
+      {aux.venue_works_count > 0 && (
         <span>Venue works: <span className="mono font-semibold">{aux.venue_works_count}</span></span>
       )}
-      {aux.cited_by_count && (
+      {aux.cited_by_count > 0 && (
         <span>Cited: <span className="mono font-semibold">{aux.cited_by_count}</span></span>
       )}
     </div>
   );
 }
 
-function ReviewItem({ item, localState, onAction }) {
+function ReviewItem({ item, localState, onAction, showReviewLink = true }) {
   const url = reviewPaperUrl(item);
   const wrapperClass = localState === 'approved'
     ? 'bg-emerald-50 border-emerald-300'
@@ -52,10 +56,10 @@ function ReviewItem({ item, localState, onAction }) {
             <span className={`font-bold uppercase tracking-wide px-2 py-0.5 rounded ${priorityClass(item.reading_priority)}`}>
               {item.reading_priority ? pretty(item.reading_priority) : '?'}
             </span>
-            <span className="mono text-slate-500">
-              {item.composite_score != null ? Number(item.composite_score).toFixed(2) : '—'}
+            <span className="text-slate-500">
+              {item.composite_score != null ? `Score ${Number(item.composite_score).toFixed(1)}` : 'No score'}
             </span>
-            <span className="text-slate-400">feed{item.feed_library_id ?? '?'}</span>
+            {item.feed_name && <span className="text-slate-400">{item.feed_name}</span>}
             {item.audit_pick && (
               <span className="px-2 py-0.5 rounded bg-violet-100 text-violet-800 border border-violet-300 font-semibold"
                 title="Gate said dont_read — surfaced for audit. Your verdict here measures the gate's false-negative rate.">
@@ -104,7 +108,7 @@ function ReviewItem({ item, localState, onAction }) {
           disabledPriorities={item.review_ready ? [] : ['must_read', 'should_read', 'could_read']}
           onPick={(priority) => onAction(item.id, 'relabel', priority)}
         />
-        {!item.review_ready && item.stable_feed_key && (
+        {showReviewLink && !item.review_ready && item.stable_feed_key && (
           <Link className="text-xs text-teal-700 underline" to={`/paper/${encodeURIComponent(item.stable_feed_key)}`}>
             Generate a review before adding
           </Link>
@@ -177,13 +181,18 @@ export default function Review() {
 
   const handleAction = useCallback(async (id, action, label = null) => {
     try {
-      await reviewAction(id, action, label);
+      const result = await reviewAction(id, action, label);
       const wentApproved = action === 'approve' || (action === 'relabel' && label !== 'dont_read');
+      const expectedState = wentApproved ? 'user_approved' : 'user_rejected';
+      if (result?.processed_id !== id || result?.state !== expectedState) {
+        throw new Error('The server did not acknowledge this item and decision.');
+      }
       setItemState((prev) => ({ ...prev, [id]: wentApproved ? 'approved' : 'rejected' }));
       setMessage(`Item ${id}: ${action}${label ? ` (${pretty(label)})` : ''} OK`);
       setIsError(false);
     } catch (err) {
-      setMessage(`Item ${id}: ${action} failed — ${humanizeError(err)}`);
+      const rejected = err?.status === 404 || err?.status === 422;
+      setMessage(`Item ${id}: ${action} ${rejected ? 'failed' : 'unconfirmed'} — ${humanizeError(err)}${rejected ? '' : ' Refresh the queue before another action.'}`);
       setIsError(true);
     }
   }, []);
@@ -287,10 +296,11 @@ export default function Review() {
         <div className="mb-3 p-2 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-900">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
-              <strong>Gate-rejected pile</strong> — items the classifier dropped before LLM
-              ({items.length} shown). Use <b>relabel</b> to either confirm the verdict
-              ({pretty('dont_read')}) or correct false negatives. Approve / Reject are hidden
-              here — relabel does the right thing for both training and Zotero.
+              <strong>Gate-rejected pile</strong> — papers the filter screened out before AI review
+              ({loading ? 'loading…' : `${items.length} shown`}). Use <b>Relabel</b> to confirm the verdict
+              ({pretty('dont_read')}) or to correct a miss. These papers have no AI review yet, so
+              only “{pretty('dont_read')}” can be set here; to rate one higher, open the paper and
+              generate a review first.
             </div>
             <button
               type="button"
@@ -307,10 +317,7 @@ export default function Review() {
       <StatusBanner message={message} isError={isError} />
 
       {!loading && items.length === 0 && (
-        <div className="text-sm text-slate-500">
-          No items awaiting review. Run{' '}
-          <span className="mono">zotero-summarizer feeds run --feeds &lt;name&gt;</span> first.
-        </div>
+        <FeedReviewEmpty onDone={() => load(state, sort)} />
       )}
 
       <div className="space-y-3">
@@ -320,6 +327,7 @@ export default function Review() {
             item={item}
             localState={itemState[item.id]}
             onAction={handleAction}
+            showReviewLink={state !== 'gate_rejected'}
           />
         ))}
       </div>

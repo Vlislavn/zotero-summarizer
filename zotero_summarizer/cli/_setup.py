@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 from zotero_summarizer.settings import Settings
 
@@ -77,7 +78,7 @@ def _step_provider(settings: Settings) -> None:
     from zotero_summarizer.services._common import read_config, write_user_config
     from zotero_summarizer.services.llm import operational_check
 
-    print("\n== LLM provider (reachability test) ==")
+    print("\n== LLM provider (configuration; optional real inference) ==")
     print("  (the API key is read from an ENV VAR you name below — never typed here)")
     type_raw = _prompt("Provider type (openai|anthropic)", "openai").lower()
     provider_type = (
@@ -112,9 +113,9 @@ def _step_provider(settings: Settings) -> None:
         config.model_copy(update={"llm_enabled": True, "llm_routing": routing}),
     )
     print(f"  saved {provider.name}/{model} to {settings.config_path}")
-    if not _confirm("Run the reachability probe now?", default=True):
+    if not _confirm("Run real inference now (may load the configured model)?", default=False):
         return
-    print("  probing…")
+    print("  verifying…")
     result = operational_check.probe_provider(provider, model)
     status = result["status"]
     detail = result["detail"]
@@ -251,11 +252,13 @@ def _calibrate(args: argparse.Namespace) -> int:
         flush=True,
     )
     result = run_full_calibration(
-        settings, item_keys=item_keys, papers_limit=args.papers
+        settings, item_keys=item_keys, papers_limit=args.papers,
+        progress=lambda update: print(update["phase"], file=sys.stderr, flush=True),
     )
 
     if args.tier3:
-        from zotero_summarizer.services._common import load_golden_rows, read_config
+        from zotero_summarizer.services._common import read_config
+        from zotero_summarizer.services.golden.csv_store import load_golden_rows
         from zotero_summarizer.services.golden.hybrid_gt import apply_hybrid
         from zotero_summarizer.services.model.eval_baseline import run_baseline
 

@@ -19,7 +19,7 @@ def config():
 
 def refine(llm, config):
     return _refine_with_retry(llm, config, SummarizeRequest(title="Example", pdf_path="/stub.pdf"),
-                              "Source text", "test")
+                              "Source text", "test", original_text="Source text")
 
 
 @pytest.mark.parametrize("payload", [

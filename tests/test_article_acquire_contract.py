@@ -70,8 +70,8 @@ def _expected_publisher_cache_path(url, cache_dir):
     return cache_dir / f"{key}.pdf"
 
 
-def _controlled_pdf(cache_dir):
-    path = _expected_snapshot_path(ARTICLE_URL, cache_dir)
+def _controlled_pdf(cache_dir, article_url=ARTICLE_URL):
+    path = _expected_snapshot_path(article_url, cache_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"%PDF-1.7\ncontrolled article body\n")
     return path
@@ -205,12 +205,14 @@ def _clear_review_jobs():
         deep_review._JOBS.clear()
 
 
-def _prepare_review_context(monkeypatch, tmp_path, *, render, extract_text):
+def _prepare_review_context(
+    monkeypatch, tmp_path, *, render, extract_text, article_url=ARTICLE_URL, item_type=None,
+):
     config = _default_goals_config()
     config.quality_review.review_web_articles = True
     detail = {
-        "title": "Controlled article", "url": ARTICLE_URL, "doi": "", "abstract": "",
-        "pdf_path": "", "has_pdf": False, "item_type": None,
+        "title": "Controlled article", "url": article_url, "doi": "", "abstract": "",
+        "pdf_path": "", "has_pdf": False, "item_type": item_type,
     }
     reader = types.SimpleNamespace(get_item_detail=lambda _key: detail)
     extractor = types.SimpleNamespace(extract_text=extract_text)
@@ -221,9 +223,9 @@ def _prepare_review_context(monkeypatch, tmp_path, *, render, extract_text):
     app = types.SimpleNamespace(
         app_state=types.SimpleNamespace(config=config), pdf_extractor=extractor,
         unpaywall_client=None, openalex_cache=None, openalex_client=None, zotero_reader=reader,
-        resolve_stage_client=lambda *_args, **_kwargs: object(),
         resolve_stage_provider=lambda *_args, **_kwargs: provider,
     )
+    monkeypatch.setattr(deep_review.factory, "resolve_stage_client", lambda *_args, **_kwargs: object())
     _wire_acquisition(monkeypatch, app, tmp_path, render=render)
     monkeypatch.setattr(deep_review, "get_state", lambda: app)
     monkeypatch.setattr(deep_review, "_load_prestige_context", lambda: ({}, None))
@@ -231,22 +233,33 @@ def _prepare_review_context(monkeypatch, tmp_path, *, render, extract_text):
     monkeypatch.setattr(_review_cache, "_cache_path", lambda: tmp_path / "deep_reviews.json")
     monkeypatch.setattr(review_detail, "classify_item_key", lambda _key: "feed")
     note_writes = []
-    monkeypatch.setattr(
-        zotero_svc, "zotero_upsert_digest_note", lambda key, _digest: note_writes.append(key),
-    )
+
+    def forbidden_native_writer():
+        note_writes.append("native writer resolution")
+        pytest.fail("Feed article review must not resolve a native writer")
+
+    monkeypatch.setattr(zotero_svc, "get_zotero_writer_or_raise", forbidden_native_writer)
     deep_review._set_job("ARTICLE", status="running", started_at="test", completed=0, progress={})
     context = deep_review._build_ctx(reader=reader)
     context["_acquire_missing"] = True
     return config, context, note_writes
 
 
-def test_article_review_uses_relevance_only_and_current_cache_identity(monkeypatch, tmp_path):
-    path = _controlled_pdf(tmp_path)
+@pytest.mark.parametrize("article_url", [
+    ARTICLE_URL,
+    "https://hackernoon.com/synthetic-engineering-story",
+    "https://www.hackernoon.com/synthetic-engineering-story",
+])
+def test_article_review_uses_relevance_only_and_current_cache_identity(
+    monkeypatch, tmp_path, article_url,
+):
+    path = _controlled_pdf(tmp_path, article_url)
     extracted, render_calls, classified = [], [], {}
     config, ctx, note_writes = _prepare_review_context(
         monkeypatch, tmp_path,
         render=lambda url, **kwargs: render_calls.append((url, kwargs)) or path,
         extract_text=lambda source: extracted.append(source) or "controlled article text",
+        article_url=article_url, item_type="journalArticle",
     )
     monkeypatch.setattr(
         _map_reduce, "digest_for_strategy",
@@ -276,12 +289,12 @@ def test_article_review_uses_relevance_only_and_current_cache_identity(monkeypat
     assert entry["needs_pdf"] is False and entry["digest"] is not None
     assert extracted == [str(path)]
     assert render_calls == [(
-        ARTICLE_URL,
+        article_url,
         {"cache_dir": tmp_path, "timeout": config.university_access.fetch_timeout_secs,
          "max_bytes": config.quality_review.max_pdf_bytes},
     )]
     assert entry["acquired_pdf"] == {
-        "path": str(path), "source": "web_article", "source_url": ARTICLE_URL,
+        "path": str(path), "source": "web_article", "source_url": article_url,
     }
     assert classified["web_article"] is True
     assert entry["paper_type"]["type"] == paper_type.PaperType.NON_PAPER.value

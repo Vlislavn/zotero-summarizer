@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from types import SimpleNamespace
 
 from zotero_summarizer.services.golden import goldenset
 from zotero_summarizer.services.llm import operational_check as oc
@@ -88,10 +89,13 @@ def test_probe_stage_bounded_times_out(monkeypatch):
     monkeypatch.setattr(oc, "_PROBE_TIMEOUT_SECS", 0.05)
     monkeypatch.setattr(
         oc, "_stage_skeleton",
-        lambda routing, stage: (None, {"stage": stage, "provider": "p", "type": "openai", "model": "m"}),
+        lambda routing, stage: (
+            SimpleNamespace(provider=SimpleNamespace(is_local=False)),
+            {"stage": stage, "provider": "p", "type": "openai", "model": "m"},
+        ),
     )
 
-    def _slow(routing, stage):  # simulates a hung/loading provider
+    def _slow(routing, stage, memory_probe=False):  # simulates a hung/loading provider
         time.sleep(1.0)
         return {"stage": stage, "status": "operational", "detail": ""}
 
@@ -106,11 +110,13 @@ def test_probe_stage_bounded_passes_through_fast_result(monkeypatch):
     monkeypatch.setattr(oc, "_PROBE_TIMEOUT_SECS", 1.0)
     monkeypatch.setattr(
         oc, "_stage_skeleton",
-        lambda routing, stage: (None, {"stage": stage}),
+        lambda routing, stage: (
+            SimpleNamespace(provider=SimpleNamespace(is_local=False)), {"stage": stage},
+        ),
     )
     monkeypatch.setattr(
         oc, "_probe_stage",
-        lambda routing, stage: {"stage": stage, "status": "operational", "detail": ""},
+        lambda routing, stage, memory_probe=False: {"stage": stage, "status": "operational", "detail": ""},
     )
     row = asyncio.run(oc._probe_stage_bounded(routing=None, stage="feed"))
     assert row["status"] == "operational"

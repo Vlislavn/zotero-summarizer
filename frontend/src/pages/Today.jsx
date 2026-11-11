@@ -1,545 +1,223 @@
-// /today route — Stage 1 of the two-stage reading flow: cull the feed firehose
-// into the library. Each card shows provenance (bucket + source feed); the user
-// reads the abstract, multi-selects, then commits ONE batch decision:
-//   • Add to library  → materialize into the Zotero "Inbox" + positive training
-//   • Trash           → strong negative training + mark read
-// The fine must/should/could/don't priority is NOT chosen here — that happens in
-// Stage 2 (Library "Read next") after actually reading.
-//
-// Laws of UX: Hick's Law (2 actions, not 7 buttons/card), Jakob's Law
-// (checkbox multi-select + batch action, the familiar inbox pattern),
-// Law of Common Region (provenance badges group origin).
-
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+// One retained shortlist; current facts refresh without selecting replacements.
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
+import ConfigTask from '../components/settings/ConfigTask.jsx';
+import { RssSourcesTask } from '../components/settings/SourceTasks.jsx';
+import { taskUrl } from '../utils/settingsNavigation.js';
 import PaperCard from '../components/today/PaperCard.jsx';
+import NotReviewedShelf from '../components/today/NotReviewedShelf.jsx';
 import CollectionPicker from '../components/CollectionPicker.jsx';
 import NotConfiguredCard from '../components/setup/NotConfiguredCard.jsx';
 import Spinner from '../components/ui/Spinner.jsx';
+import Icon from '../components/ui/Icon.jsx';
+import Skeleton from '../components/ui/Skeleton.jsx';
 import { ErrorBanner, StatusBanner } from '../components/library/shared.jsx';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
-import {
-  fetchDailySlate,
-  addToLibrary,
-  trashPapers,
-  triggerTriageBacklog,
-  getTriageStatus,
-} from '../api/dailyApi.js';
-import { fetchReview } from '../api/reviewApi.js';
-import { reviewPaperUrl } from './reviewHelpers.js';
-import { fulltextMessage } from './todayHelpers.js';
-import { writeStorage } from '../utils/safeStorage.js';
-
-// ---------------------------------------------------------------------------
-// Spot-check — a capped, clearly-labeled sample of papers the filter rejected,
-// shown only when the cull queue is empty. Lets the user catch a wrong reject
-// without the old degenerate "one audit card at a time, forever" stream.
-// ---------------------------------------------------------------------------
-
-const SPOTCHECK_LIMIT = 5;
-
-function SpotCheckCard({ item, onAdd, onTrash, busy, llmEnabled }) {
-  const url = reviewPaperUrl(item);
-  const scoreStr =
-    item.composite_score != null ? Number(item.composite_score).toFixed(2) : '—';
-  return (
-    <article className="border border-slate-200 rounded-lg p-2.5 bg-white">
-      <div className="text-sm font-semibold leading-snug">
-        {url ? (
-          <a href={url} target="_blank" rel="noreferrer noopener" className="hover:text-teal-700 hover:underline">
-            {item.title || '(untitled)'}
-          </a>
-        ) : (
-          <span>{item.title || '(untitled)'}</span>
-        )}
-      </div>
-      <div className="mt-1 text-[11px] text-slate-500 flex flex-wrap items-center gap-x-2">
-        <span className="text-slate-400">feed {item.feed_library_id ?? '?'}</span>
-        <span className="mono">relevance {scoreStr}</span>
-      </div>
-      {item.summary?.abstract_preview && (
-        <p className="mt-1 text-xs text-slate-600 line-clamp-2">{item.summary.abstract_preview}</p>
-      )}
-      <div className="mt-2 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => onAdd(item.id)}
-          disabled={busy || !item.review_ready}
-          title={!item.review_ready ? (llmEnabled ? 'Generate a review before adding' : 'Enable AI to generate a review') : undefined}
-          className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
-        >
-          Add to library
-        </button>
-        {!item.review_ready && item.stable_feed_key && (llmEnabled ? (
-          <a href={`/paper/${encodeURIComponent(item.stable_feed_key)}`} className="text-xs text-teal-700 underline">
-            Generate review
-          </a>
-        ) : <a href="/settings" className="text-xs text-teal-700 underline">Enable AI to add</a>)}
-        <button
-          type="button"
-          onClick={() => onTrash(item.id)}
-          disabled={busy}
-          className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-slate-300 hover:bg-slate-100 disabled:opacity-40"
-        >
-          Trash
-        </button>
-      </div>
-    </article>
-  );
-}
-
-function SpotCheck({ onNavigate, llmEnabled }) {
-  const queryClient = useQueryClient();
-  const [dismissed, setDismissed] = useState(() => new Set());
-  const [msg, setMsg] = useState(null);
-
-  const query = useQuery({
-    queryKey: ['spotcheck-gate-rejected', SPOTCHECK_LIMIT],
-    queryFn: () => fetchReview({ state: 'gate_rejected', limit: SPOTCHECK_LIMIT }),
-    staleTime: 30_000,
-    refetchOnMount: 'always',
-  });
-
-  const addMut = useMutation({ mutationFn: addToLibrary });
-  const trashMut = useMutation({ mutationFn: trashPapers });
-  const busy = addMut.isPending || trashMut.isPending;
-
-  const act = useCallback(
-    (mutation, id, verb) => {
-      mutation.mutate([id], {
-        onSuccess: (res) => {
-          if (res?.failed_count) {
-            setMsg({ text: res.failed?.[0]?.error || 'Generate a review before adding.', tone: 'warn' });
-            return;
-          }
-          const count = res?.added ?? res?.trashed ?? 0;
-          if (count > 0) setDismissed((prev) => new Set(prev).add(id));
-          const warnings = [];
-          if (res?.pending_sync) warnings.push(`Zotero sync pending (${res.pending_sync}); not saved to Zotero yet`);
-          if (res?.marked_read_error) warnings.push('Zotero mark-read failed');
-          const pdf = fulltextMessage(res?.fulltext);
-          if (pdf) warnings.push(pdf.text);
-          setMsg({ text: `${verb} ${count} paper${count === 1 ? '' : 's'}${warnings.length ? ` — ${warnings.join(', ')}` : ''}.`,
-            tone: warnings.length || count === 0 ? 'warn' : 'success' });
-          queryClient.invalidateQueries({ queryKey: ['daily-pipeline'] });
-        },
-      });
-    },
-    [queryClient],
-  );
-
-  const items = (query.data?.items || []).filter((it) => !dismissed.has(it.id));
-  if (query.isLoading || (items.length === 0 && !msg)) return null;
-
-  return (
-    <div className="mt-4">
-      <div className="flex items-baseline justify-between gap-2 flex-wrap">
-        <h3 className="text-sm font-semibold text-slate-800">Spot-check the filter</h3>
-        <button
-          type="button"
-          onClick={() => onNavigate('/review?state=gate_rejected')}
-          className="text-xs text-teal-700 hover:text-teal-900 underline"
-        >
-          Browse all filtered ↗
-        </button>
-      </div>
-      <p className="text-[11px] text-slate-500 mt-0.5">
-        Papers the model rejected (marked read in Zotero, not added). Add any it got wrong.
-      </p>
-      {msg && (
-        <div role="status" className={`my-2 p-2 rounded-lg border text-xs ${msg.tone === 'warn'
-          ? 'bg-amber-50 border-amber-200 text-amber-900'
-          : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
-          {msg.text}
-        </div>
-      )}
-      <div className="mt-2 space-y-2">
-        {items.map((item) => (
-          <SpotCheckCard
-            key={item.id}
-            item={item}
-            busy={busy}
-            llmEnabled={llmEnabled}
-            onAdd={(id) => act(addMut, id, 'Added')}
-            onTrash={(id) => act(trashMut, id, 'Trashed')}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Today page
-// ---------------------------------------------------------------------------
+import useTodayVisit from '../hooks/useTodayVisit.js';
+import { memberPresentation, preparationText } from '../utils/todayVisit.js';
+import { formatWhen } from '../utils/stepModelStatus.js';
+import { feedLabel } from '../utils/feedText.js';
+import { triggerTriageBacklog, getTriageStatus } from '../api/dailyApi.js';
 
 export default function Today() {
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
+  const location = useLocation();
+  const [params] = useSearchParams();
+  const task = params.get('task');
   const { status } = useSetupStatus();
-  const setupStatusKnown = Boolean(status);
-  const [selectedIds, setSelectedIds] = useState(() => new Set());
-  // Target Zotero collection for "Add to library" ('' = server default "Inbox").
+  const enabled = Boolean(status) && !task;
+  const view = useTodayVisit(enabled);
+  const { refresh, selectedIds, toggleSelect, setSelected } = view;
   const [addCollectionKey, setAddCollectionKey] = useState('');
-  // { text, tone } | null — tone flips to 'warn' when the API reports a
-  // partial failure (Zotero side-effect didn't land even though the label did).
-  const [actionMsg, setActionMsg] = useState(null);
-  const triageKicked = useRef(false);
+  const [feedFilter, setFeedFilter] = useState('');
+  const [moreOpen, setMoreOpen] = useState(Boolean(location.state?.focusTask));
+  useEffect(() => {
+    if (!task && location.state?.focusTask) document.getElementById(`task-${location.state.focusTask}`)?.focus();
+  }, [task, location.state?.focusTask]);
 
-  // K=15 (API ceiling 20): show MORE cards so the queue isn't drip-fed 5 at a
-  // time. The model role quota scales with K server-side, so this actually
-  // returns up to 15 (was capped at 5 by the fixed 3/1/1 role default).
-  const slateQuery = useQuery({
-    queryKey: ['daily-slate', { K: 15, lookback_hours: 168 }],
-    queryFn: () => fetchDailySlate({ K: 15, lookback_hours: 168 }),
-    enabled: setupStatusKnown,
-  });
+  const members = useMemo(() => (view.visit?.members || []).map(member => ({
+    ...member, display: memberPresentation(member, view.fresh),
+  })), [view.visit, view.fresh]);
+  const feedNames = useMemo(() => [...new Set(members.map(member => member.paper.feed_name).filter(Boolean))].sort(), [members]);
+  const visible = members.filter(member => !feedFilter || member.paper.feed_name === feedFilter);
+  const selectable = visible.filter(member => member.display.selectable);
+  const selected = selectable.filter(member => selectedIds.has(member.paper.item_id));
+  const selectedReady = selected.filter(member => member.display.reviewReady);
+  const allSelected = selectable.length > 0 && selectable.every(member => selectedIds.has(member.paper.item_id));
+  const commit = kind => {
+    view.act(kind, selected.map(member => member.paper.item_id), addCollectionKey);
+    setSelected(new Set());
+  };
+  const llmEnabled = status?.llm?.enabled !== false;
+  const preparation = view.visit?.preparation;
+  const preparing = preparationText(preparation);
 
-  const addMutation = useMutation({ mutationFn: (ids) => addToLibrary(ids, addCollectionKey) });
-  const trashMutation = useMutation({ mutationFn: trashPapers });
+  // New shortlist outcome: compare member ids before/after on the client (the call itself is a re-rank).
+  const [renewal, setRenewal] = useState(null);
+  const [renewResult, setRenewResult] = useState(null);
+  const startRenewal = () => {
+    setRenewResult(null);
+    setRenewal({ visitId: view.visit?.id, ids: new Set(members.map(member => member.paper.item_id)),
+      at: view.visit?.createdAt });
+    view.renew();
+  };
+  useEffect(() => {
+    if (!renewal) return;
+    if (view.selectionError) { setRenewal(null); return; }
+    if (!view.visit || view.visit.invalid || view.visit.id === renewal.visitId) return;
+    setRenewResult({ added: view.visit.members.filter(member => !renewal.ids.has(member.paper.item_id)).length,
+      since: formatWhen(renewal.at) });
+    setRenewal(null);
+  }, [renewal, view.visit, view.selectionError]);
 
-  // Always poll once on mount so the button reflects a drain already running
-  // (e.g. started in another tab or before a reload); it self-stops when idle.
   const triageStatusQuery = useQuery({
-    queryKey: ['triage-status'],
-    queryFn: getTriageStatus,
-    enabled: setupStatusKnown,
-    refetchInterval: (q) => (q.state.data?.running ? 3000 : false),
+    queryKey: ['triage-status'], queryFn: getTriageStatus, enabled,
+    refetchInterval: query => query.state.data?.running || query.state.status === 'error' ? 3000 : false,
   });
   const triageStatus = triageStatusQuery.data;
-
-  const triageMutation = useMutation({
-    mutationFn: triggerTriageBacklog,
-    onSuccess: () => {
-      triageKicked.current = true;
-      triageStatusQuery.refetch();
-    },
-  });
-  const draining = triageMutation.isPending || Boolean(triageStatus?.running);
-
-  const slate = slateQuery.data;
-  // Memoized so its identity is stable across renders — keeps the select-all /
-  // filter memos below from recomputing every render (and silences the hook-deps lint).
-  const papers = useMemo(() => slate?.papers || [], [slate]);
-
-  // Source filter: focus the cull on a single feed (arXiv vs PubMed vs HN…) when
-  // the slate mixes sources. Client-side over the already-loaded slate; "" = all.
-  const [feedFilter, setFeedFilter] = useState('');
-  const feedNames = useMemo(
-    () => [...new Set(papers.map((p) => p.feed_name).filter(Boolean))].sort(),
-    [papers],
-  );
-  const visiblePapers = useMemo(
-    () => (feedFilter ? papers.filter((p) => p.feed_name === feedFilter) : papers),
-    [papers, feedFilter],
-  );
-  const visibleSelectedIds = useMemo(
-    () => visiblePapers.filter((paper) => selectedIds.has(paper.item_id)).map((paper) => paper.item_id),
-    [visiblePapers, selectedIds],
-  );
-
-  // Store the visible slate order so the full review page's j/k Prev/Next pages
-  // through Today's list — the card links to /paper/:stable_feed_key, the same key
-  // used here, so this mirrors Read-next's zs.reviewOrder write and makes the
-  // switching hotkeys work when a review is opened from Today (not just Read next).
+  const triageUnknown = triageStatusQuery.isPending || triageStatusQuery.isError;
+  const triageRunning = !triageUnknown && Boolean(triageStatus?.running);
+  const triageMutation = useMutation({ mutationFn: triggerTriageBacklog, onSuccess: () => triageStatusQuery.refetch() });
+  const draining = triageMutation.isPending || triageRunning;
+  const previousRunning = useRef(false);
   useEffect(() => {
-    if (visiblePapers.length) {
-      writeStorage(
-        'zs.reviewOrder',
-        JSON.stringify(visiblePapers.map((p) => p.stable_feed_key).filter(Boolean)),
-      );
-    }
-  }, [visiblePapers]);
+    if (triageUnknown) return;
+    if (previousRunning.current && !triageRunning) refresh();
+    previousRunning.current = triageRunning;
+  }, [triageRunning, triageUnknown, refresh]);
 
-  const toggleSelect = useCallback((id) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  if (task === 'selection') return <ConfigTask key={task} task={task} backTo={taskUrl(location, null)} backLabel="Back to Today" />;
+  if (task === 'rss') return <RssSourcesTask key={task} />;
+  if (task) return <section role="alert"><h1>Today task not found</h1><Link to={taskUrl(location, null)}>Back to Today</Link></section>;
 
-  // Select-all operates on the VISIBLE (filtered) slate, so it never silently
-  // selects papers hidden by the source filter.
-  const allSelected = visiblePapers.length > 0 && visiblePapers.every((p) => selectedIds.has(p.item_id));
-  const toggleSelectAll = useCallback(() => {
-    setSelectedIds((prev) => {
-      const allOn = visiblePapers.length > 0 && visiblePapers.every((p) => prev.has(p.item_id));
-      return allOn ? new Set() : new Set(visiblePapers.map((p) => p.item_id));
-    });
-  }, [visiblePapers]);
+  const triageLabel = triageStatusQuery.isError ? 'Triage status unavailable'
+    : triageStatusQuery.isPending ? 'Checking triage status…'
+      : draining ? `Sorting the backlog… ${triageStatus?.gate_onward ?? triageStatus?.triaged ?? 0} kept` : 'Triage backlog';
+  const menuLink = 'inline-flex min-h-11 items-center text-sm text-forest-800 underline underline-offset-4 sm:min-h-9';
+  const secondary = 'inline-flex min-h-11 items-center gap-1.5 text-sm text-forest-800 underline underline-offset-4 disabled:no-underline disabled:opacity-50 sm:min-h-9';
 
-  const busy = addMutation.isPending || trashMutation.isPending;
-  const selectedReadyCount = visiblePapers.filter((paper) => selectedIds.has(paper.item_id) && paper.review_ready).length;
-  const blockedSelected = visibleSelectedIds.length > selectedReadyCount;
-  const llmEnabled = status?.llm?.enabled !== false;
+  const showMore = moreOpen || draining || triageStatusQuery.isError;
+  const hasVisit = view.visit && !view.visit.invalid;
 
-  const commit = useCallback(
-    (mutation, verb) => {
-      const ids = visibleSelectedIds;
-      if (ids.length === 0) return;
-      mutation.mutate(ids, {
-        onSuccess: (res) => {
-          const n = res?.added ?? res?.trashed ?? ids.length;
-          // Both endpoints commit the label/decision unconditionally and only
-          // best-effort the Zotero side-effect: add-to-library sets pending_sync
-          // when the writer is unavailable/materialize threw (daily_actions.
-          // add_to_library), trash sets marked_read_error when the best-effort
-          // mark-read fails (daily_actions.trash_papers). Either means the label
-          // is safely saved but Zotero itself did NOT get the write — the toast
-          // must not claim a plain success in that case.
-          const bits = [];
-          let warn = false;
-          if (typeof res?.pending_sync === 'number' && res.pending_sync > 0) {
-            bits.push(`Zotero sync pending (${res.pending_sync})`);
-            warn = true;
-          } else if (res?.added > 0) {
-            bits.push('saved to Zotero');
-          }
-          if (res?.marked_read_error) {
-            bits.push('Zotero mark-read failed');
-            warn = true;
-          }
-          if (res?.failed_count > 0) {
-            bits.push(`${res.failed_count} blocked or failed`);
-            if (res.failed?.some((item) => item.code === 'review_required')) bits.push('Generate a review before adding');
-            warn = true;
-          }
-          const pdf = fulltextMessage(res?.fulltext);
-          if (pdf) {
-            bits.push(pdf.text);
-            warn ||= pdf.unavailable > 0;
-          }
-          const text = `${verb} ${n} paper${n === 1 ? '' : 's'}${bits.length ? ` — ${bits.join(', ')}` : ''}.`;
-          setActionMsg({ text, tone: warn ? 'warn' : 'success' });
-          setSelectedIds(new Set());
-          queryClient.invalidateQueries({ queryKey: ['daily-slate'] });
-        },
-      });
-    },
-    [visibleSelectedIds, queryClient],
-  );
-
-  // Backlog triage is now an explicit user action (the "Triage backlog"
-  // button), not an auto-kick on mount — opening Today must not silently
-  // launch a heavy full-backlog drain. A drain already running is still
-  // reflected via the on-mount triage-status poll.
-
-  const prevRunning = useRef(false);
-  useEffect(() => {
-    const running = Boolean(triageStatus?.running);
-    if (prevRunning.current && !running) {
-      queryClient.invalidateQueries({ queryKey: ['daily-slate'] });
-    }
-    prevRunning.current = running;
-  }, [triageStatus?.running, queryClient]);
-
-  const actionError = addMutation.error || trashMutation.error;
-  const selectedCount = visibleSelectedIds.length;
-
-  return (
-    <section className="glass rounded-2xl border border-slate-200 p-4">
-      <NotConfiguredCard />
-      <header className="mb-3 flex items-baseline justify-between flex-wrap gap-2">
-        <div>
-          <h2 className="font-display text-xl font-light text-slate-900">Today’s reading</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Cull the feed: keep what’s worth reading into your library, trash the rest.
-          </p>
-          {typeof slate?.awaiting_review_total === 'number' && (
-            slate.awaiting_review_total > 0 ? (
-              <p
-                className="text-xs text-slate-600 mt-1"
-                title="Feed papers waiting for your Add/Trash decision — the full backlog, not just what's shown"
-              >
-                📥 <strong>{slate.awaiting_review_total}</strong> awaiting your decision
-                {papers.length > 0 && papers.length < slate.awaiting_review_total && (
-                  <> · showing top {papers.length}</>
-                )}
-              </p>
-            ) : (
-              <p className="text-xs text-emerald-700 font-semibold mt-1">
-                ✓ All caught up — nothing new to cull
-              </p>
-            )
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => triageMutation.mutate()}
-            disabled={draining}
-            title="Rank the whole un-triaged feed backlog with the ML gate (no LLM). Runs in the background; processed items are marked read in Zotero."
-            className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium hover:bg-slate-100 disabled:opacity-50 inline-flex items-center gap-1.5"
-          >
-            {draining && <Spinner size="xs" color="teal" />}
-            {draining
-              ? `Triaging (ML)… ${triageStatus?.gate_onward ?? triageStatus?.triaged ?? 0} kept`
-              : 'Triage backlog'}
-          </button>
-        </div>
-      </header>
-
-      <ErrorBanner error={slateQuery.error} title="Slate load failed" />
-      <ErrorBanner error={actionError} title="Action failed" />
-      {/* The drain needs a live ML gate. A 503 here (e.g. lightgbm not
-          installed / gate retrain failed) is surfaced instead of silently
-          starting a doomed background spin. */}
-      <ErrorBanner error={triageMutation.error} title="Triage backlog unavailable" />
-      {/* A drain that errored AND finished was previously invisible (the error
-          was only shown while running). Surface it now. */}
-      {!triageStatus?.running && (triageStatus?.error || triageStatus?.rescore_error) && (
-        <ErrorBanner
-          error={triageStatus.error || triageStatus.rescore_error}
-          title="Last triage run failed"
-        />
-      )}
-      <StatusBanner message={actionMsg?.text} tone={actionMsg?.tone} />
-
-      {slateQuery.isLoading && (
-        <div role="status" aria-live="polite" className="flex items-center gap-2 p-4 text-sm text-slate-600">
-          <Spinner size="sm" color="teal" />
-          Loading today’s slate…
-        </div>
-      )}
-
-      {/* Caught up: the cull queue is empty. Show a slim, non-blocking
-          "fetching more" note when a backlog drain is running, and always
-          offer the capped spot-check of filtered papers (no endless stream). */}
-      {!slateQuery.isLoading && !slateQuery.error && papers.length === 0 && (
-        <>
-          {triageStatus?.running && (
-            <div className="my-2 p-2 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-600 flex items-center gap-2">
-              <Spinner size="xs" color="teal" />
-              Triaging via the ML gate — kept {triageStatus.gate_onward ?? triageStatus.triaged ?? 0}, filtered{' '}
-              {triageStatus.gate_rejected || 0}. New picks fill in automatically.
-              {triageStatus?.error && <span className="text-rose-700"> — {triageStatus.error}</span>}
-            </div>
-          )}
-          {/* Empty state as an invitation, not a void: point to the next real action. */}
-          {!triageStatus?.running && (
-            <div className="my-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-center">
-              <p className="text-sm font-medium text-slate-700">You&apos;re all caught up.</p>
-              <p className="text-xs text-slate-500 mt-1">
-                Pick up your reading queue in{' '}
-                <button type="button" onClick={() => navigate('/library')} className="text-teal-700 underline hover:text-teal-900">
-                  Library → Read next
-                </button>
-                {' '}or{' '}
-                <button
-                  type="button"
-                  onClick={() => triageMutation.mutate()}
-                  disabled={draining}
-                  className="text-teal-700 underline hover:text-teal-900 disabled:opacity-50"
-                >
-                  run a triage
-                </button>
-                {' '}to process your backlog.
-              </p>
-            </div>
-          )}
-          <SpotCheck onNavigate={navigate} llmEnabled={llmEnabled} />
-        </>
-      )}
-
-      {/* One amber slate-health notice (merged fellback + weak-slate) with the
-          single 'Triage backlog' CTA they both pointed at. */}
-      {!slateQuery.isLoading && !slateQuery.error
-        && (slate?.fellback_to_recent || slate?.weak_slate || (slate?.low_relevance_hidden ?? 0) > 0) && (
-        <div className="mb-3 p-2.5 rounded-xl border border-amber-200 bg-amber-50 text-xs text-amber-900 flex items-start gap-2">
-          <span aria-hidden="true">⚖️</span>
-          <span className="flex-1 leading-snug">
-            {slate?.weak_slate
-              && 'Light week — nothing in your feed strongly matches your goals in the last 7 days. '}
-            {slate?.fellback_to_recent
-              && 'Showing older scored items (no fresh triage in the last 7 days). '}
-            {(slate?.low_relevance_hidden ?? 0) > 0 && (
-              <><strong>{slate.low_relevance_hidden}</strong> below-the-bar paper
-                {slate.low_relevance_hidden === 1 ? '' : 's'} hidden. </>
-            )}
-          </span>
-        </div>
-      )}
-
-      {papers.length > 0 && (
-        <>
-          {/* Batch action bar */}
-          <div className="sticky top-0 z-10 mb-3 flex items-center gap-2 flex-wrap p-2 rounded-xl border border-slate-200 bg-white/90 backdrop-blur">
-            <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={allSelected}
-                onChange={toggleSelectAll}
-                className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-              />
-              {selectedCount > 0 ? `${selectedCount} selected` : 'Select all'}
-            </label>
-            {/* Source filter — only when the slate actually mixes feeds, so a
-                single-source day shows no inert control (Hick's Law). */}
-            {feedNames.length > 1 && (
-              <select
-                value={feedFilter}
-                onChange={(e) => setFeedFilter(e.target.value)}
-                title="Show only papers from one feed source"
-                className="text-xs px-2 py-1 rounded-lg border border-slate-300 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
-              >
-                <option value="">All sources ({papers.length})</option>
-                {feedNames.map((name) => (
-                  <option key={name} value={name}>
-                    {name} ({papers.filter((p) => p.feed_name === name).length})
-                  </option>
-                ))}
-              </select>
-            )}
-            <div className="flex-1" />
-            <CollectionPicker value={addCollectionKey} onChange={setAddCollectionKey} disabled={busy} />
-            <button
-              type="button"
-              onClick={() => commit(addMutation, 'Added')}
-              disabled={selectedReadyCount === 0 || busy}
-              title={selectedReadyCount === 0 && selectedCount ? 'Generate a review before adding' : undefined}
-              className="px-3 py-1.5 rounded-lg border text-xs font-semibold bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {addMutation.isPending ? 'Adding…' : `Add ${selectedCount || ''} to library`}
-            </button>
-            {blockedSelected && <span className="text-xs text-amber-800">
-              {llmEnabled ? 'Generate a review before adding selected papers.' : 'Enable AI in Settings before adding unreviewed papers.'}
-            </span>}
-            <button
-              type="button"
-              onClick={() => commit(trashMutation, 'Trashed')}
-              disabled={selectedCount === 0 || busy}
-              className="px-3 py-1.5 rounded-lg border text-xs font-semibold bg-rose-600 text-white border-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {trashMutation.isPending ? 'Trashing…' : `Trash ${selectedCount || ''}`}
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {visiblePapers.length === 0 ? (
-              <p className="text-xs text-slate-500 p-3">
-                No papers from <span className="font-semibold">{feedFilter}</span> in today’s slate.{' '}
-                <button type="button" onClick={() => setFeedFilter('')} className="text-teal-700 underline hover:text-teal-900">
-                  Show all sources
-                </button>
-              </p>
-            ) : (
-              visiblePapers.map((paper) => (
-                <PaperCard
-                  key={paper.item_key}
-                  paper={paper}
-                  selected={selectedIds.has(paper.item_id)}
-                  onToggleSelect={toggleSelect}
-                  llmEnabled={llmEnabled}
-                />
-              ))
-            )}
-          </div>
-        </>
-      )}
-
-    </section>
-  );
+  // One readable column (≤ 760 px): the cards are a one-at-a-time cull queue, so a
+  // single column keeps the server's order; wider text lines only hurt reading.
+  return <section className="mx-auto w-full max-w-[760px] px-1 sm:px-0">
+    <NotConfiguredCard />
+    <header className="mb-3">
+      <h2 className="font-display text-2xl font-light text-slate-900">Today’s reading</h2>
+      <p className="mt-0.5 text-xs text-slate-500">
+        {hasVisit && members.length > 0
+          ? `Showing ${members.length} of 15 · kept until the next shortlist`
+          : 'New papers from your feeds — decide what enters your library.'}
+      </p>
+      <div className="mt-3 flex items-center gap-2">
+        <button type="button" onClick={startRenewal} disabled={!view.canRenew} aria-busy={view.renewing}
+          className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-forest-800 px-4 text-sm font-medium text-white hover:bg-forest-700 disabled:bg-slate-300 disabled:text-slate-100 sm:flex-none">
+          {view.renewing && <Spinner size="xs" color="teal-on-fill" />}
+          {view.renewing ? 'Choosing papers…' : 'New shortlist'}
+        </button>
+        <button type="button" aria-expanded={showMore} aria-controls="today-more" onClick={() => setMoreOpen(!moreOpen)}
+          className="inline-flex min-h-11 items-center gap-1 rounded-lg border border-slate-300 px-3 text-sm text-slate-700 hover:bg-slate-100">
+          More<Icon name="chevron" size={14} className={`transition-transform duration-150 ${showMore ? 'rotate-90' : ''}`} />
+        </button>
+      </div>
+      <div id="today-more" className={`${showMore ? 'mt-2 flex' : 'hidden'} flex-wrap items-center gap-x-5 gap-y-0.5 rounded-lg bg-slate-50 px-3 py-1`}>
+        {hasVisit && members.length > 0 && <button type="button" onClick={view.refresh}
+          disabled={view.busy} className={secondary}>Refresh status</button>}
+        <button type="button" onClick={() => triageMutation.mutate()} disabled={draining || triageUnknown}
+          title="Optional: rank the un-triaged feed backlog by relevance. This does not replace this shortlist. Processed items are marked read."
+          className={secondary}>
+          {draining && !triageUnknown && <Spinner size="xs" color="teal" />}{triageLabel}
+        </button>
+        <nav aria-label="Today task settings" className="contents">
+          <Link id="task-selection" className={menuLink} to={taskUrl(location, 'selection')}>Article selection</Link>
+          <Link id="task-rss" className={menuLink} to={taskUrl(location, 'rss')}>RSS sources</Link>
+          <Link className={menuLink} to="/weekly">Telegram today</Link>
+        </nav>
+      </div>
+    </header>
+    {renewResult && !view.renewing && <p role="status" className="mb-3 text-xs text-slate-600">
+      {renewResult.added > 0
+        ? `New shortlist: ${renewResult.added} new ${renewResult.added === 1 ? 'paper' : 'papers'}`
+        : `Same papers — nothing new${renewResult.since ? ` since ${renewResult.since}` : ''}`}
+    </p>}
+    <ErrorBanner error={view.selectionError} title="Selection failed — existing shortlist kept" />
+    <ErrorBanner error={view.statusError} title="Member status unavailable — shortlist kept" />
+    <ErrorBanner error={view.actionError} title="Action response unavailable — check each paper" />
+    <ErrorBanner error={triageMutation.error} title="Triage backlog unavailable" />
+    <ErrorBanner error={triageStatusQuery.error} title="Triage status unavailable — reconnecting" />
+    {!triageUnknown && !triageRunning && (triageStatus?.error || triageStatus?.rescore_error) &&
+      <ErrorBanner error={triageStatus.error || triageStatus.rescore_error} title="Last triage run failed" />}
+    {view.persistenceFailed && <StatusBanner tone="warn" message="Browser storage is unavailable. This shortlist stays open here but may not survive reload. The shortlist itself never resends actions." />}
+    {view.visit?.invalid && <StatusBanner tone="warn" message="The saved shortlist could not be read. New shortlist explicitly replaces it; no saved action is replayed." />}
+    {view.carryCount > 0 && <StatusBanner tone="warn" message={`${view.carryCount} ${view.carryCount === 1 ? 'paper is' : 'papers are'} still being added. New shortlist is available once they finish.`} />}
+    {view.loading && <div role="status" aria-label="Loading today’s papers…" className="space-y-3">
+      <p className="flex items-center gap-2 text-sm text-slate-600"><Spinner size="sm" color="teal" />Loading today’s papers…</p>
+      {[0, 1].map(i => <div key={i} aria-hidden="true" className="space-y-3 rounded-xl border border-slate-200 p-4">
+        <Skeleton width="w-24" height="h-4" rounded="rounded-full" /><Skeleton width="w-5/6" height="h-5" /><Skeleton count={2} />
+        <div className="grid grid-cols-4 gap-2">{[0, 1, 2, 3].map(j => <Skeleton key={j} height="h-11" rounded="rounded-lg" />)}</div>
+      </div>)}
+    </div>}
+    {hasVisit && members.length === 0 && <div className="my-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <p className="text-sm font-medium text-slate-800">No papers in today’s shortlist yet.</p>
+      <p className="mt-1 text-xs text-slate-600">
+        Today only shows feed papers that already have a full-text review.
+        {' '}{preparing || 'Papers you haven’t triaged are not analyzed yet, so they don’t appear here.'}
+      </p>
+      <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-slate-600">
+        <li><span className="font-medium text-slate-800">New shortlist</span> (above) picks up to 15 reviewed papers; it does not analyze new ones.</li>
+        <li><span className="font-medium text-slate-800">Triage backlog</span> (under More) ranks the un-triaged feed by relevance and marks those items read, so reviews can be prepared.</li>
+        <li><Link to="/library" className="text-forest-800 underline">Library</Link> lists everything already saved in Zotero.</li>
+      </ul>
+    </div>}
+    {members.length > 0 && <>
+      {(selectable.length > 0 || feedNames.length > 1 || feedFilter) &&
+        <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-0 text-xs text-slate-600">
+          {selectable.length > 0 && <label className="flex min-h-11 cursor-pointer select-none items-center gap-1.5 sm:min-h-9">
+            <input type="checkbox" checked={allSelected} disabled={view.busy}
+              onChange={() => setSelected(allSelected ? new Set() : new Set(selectable.map(member => member.paper.item_id)))}
+              className="h-4 w-4 rounded border-slate-300 text-forest-800 focus:ring-forest-600" />
+            {selected.length ? `${selected.length} selected` : 'Select all'}
+          </label>}
+          {(feedNames.length > 1 || feedFilter) && <select value={feedFilter} onChange={event => setFeedFilter(event.target.value)}
+            aria-label="Feed source" className="min-h-11 min-w-[10rem] max-w-full flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-slate-700 sm:max-w-xs sm:min-h-9">
+            <option value="">All sources ({members.length})</option>
+            {feedFilter && !feedNames.includes(feedFilter) && <option value={feedFilter}>{feedFilter} (0)</option>}
+            {feedNames.map(name => <option key={name} value={name}>{feedLabel(name)} ({members.filter(member => member.paper.feed_name === name).length})</option>)}
+          </select>}
+        </div>}
+      {/* Bulk action bar: appears ONLY when ≥ 1 card is ticked (#37/T05, F04). One slim
+          bottom row, not a 210 px always-on toolbar covering the cards. */}
+      {selected.length > 0 && <div className="sticky bottom-2 z-10 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-2">
+        <span className="text-xs font-medium text-slate-700">{selected.length} selected</span>
+        <button type="button" onClick={() => setSelected(new Set())} className="min-h-11 text-xs text-slate-500 underline">Clear</button>
+        <div className="flex-1" />
+        <CollectionPicker value={addCollectionKey} onChange={setAddCollectionKey} disabled={view.busy} />
+        <button type="button" onClick={() => commit('add')} disabled={!selectedReady.length || view.busy}
+          className="min-h-11 rounded-lg bg-forest-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-forest-700 disabled:opacity-40">
+          Add to library
+        </button>
+        <button type="button" onClick={() => commit('trash')} disabled={view.busy}
+          className="min-h-11 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-rose-700 hover:border-rose-500 disabled:opacity-40">
+          Trash
+        </button>
+        {selected.length > selectedReady.length && <span className="basis-full text-xs text-amber-800">
+          {llmEnabled ? 'Papers without a review are skipped by Add — Trash still works.' : 'Enable AI in Settings before adding unreviewed papers.'}
+        </span>}
+      </div>}
+      <div className="space-y-3">
+        {!visible.length && <p className="text-xs text-slate-500 p-3">This source filter hides the shortlist.{' '}
+          <button type="button" onClick={() => setFeedFilter('')} className="min-h-11 text-forest-800 underline">Show all sources</button>
+        </p>}
+        {visible.map(member => <PaperCard key={member.paper.item_id} paper={member.paper}
+          selectionPolicy={member.selectionPolicy} selected={selectedIds.has(member.paper.item_id) && member.display.selectable}
+          onToggleSelect={toggleSelect} llmEnabled={llmEnabled} visitId={view.visit.id}
+          memberState={member.display} currentFacts={member.facts} statusFresh={view.fresh}
+          busy={view.busy} onRetry={() => view.retry(member)}
+          onDecide={view.decide} onUndo={view.undoDecision} decisionPending={view.decisionPending} />)}
+      </div>
+      {preparing && <p role="status" className="mt-3 text-xs text-slate-600">{preparing}</p>}
+    </>}
+    {hasVisit && <NotReviewedShelf papers={view.visit.unreviewed} visitId={view.visit.id} />}
+  </section>;
 }

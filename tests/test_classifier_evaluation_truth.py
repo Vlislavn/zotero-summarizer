@@ -7,6 +7,7 @@ import pytest
 from zotero_summarizer.cli import main
 from zotero_summarizer.models.config import GoalsConfig
 from zotero_summarizer.services import _adapters, _common
+from zotero_summarizer.services.golden.csv_store import load_golden_rows
 from zotero_summarizer.services.model import classifier
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.storage import repositories
@@ -87,7 +88,7 @@ def test_classify_scores_the_training_snapshot_not_raw_or_later_truth(
     assert holdout["total"] == 1
     assert holdout["accuracy"] == 1.0
     assert holdout["confusion"][3][3] == 1
-    persisted = _common.load_golden_rows(settings.golden_csv_path)
+    persisted = load_golden_rows(settings.golden_csv_path)
     assert [r["gold_priority_final"] for r in persisted] == [
         "dont_read", "must_read", "must_read", "could_read",
     ], "publishing predictions must not overwrite source labels"
@@ -120,6 +121,6 @@ def test_llm_metrics_use_effective_snapshot_and_only_current_limited_results(tmp
     assert metrics["total"] == 2, "old C/D predictions are not results of this limited run"
     assert metrics["accuracy"] == 1.0
     assert metrics["binary"]["f1"] == 1.0
-    persisted = _common.load_golden_rows(settings.golden_csv_path)
+    persisted = load_golden_rows(settings.golden_csv_path)
     assert persisted[0]["gold_priority_final"] == "dont_read"
     assert persisted[1]["cls_test_priority"] == "dont_read"

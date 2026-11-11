@@ -41,8 +41,17 @@ def set_label_verdict(
     transition_comment: str | None = None,
     history_known: bool = True,
     expected_revision: int | None = None,
+    reasons_json: str | None = None,
+    proposal_json: str | None = None,
 ) -> int | None:
     """Commit the current snapshot, then append a human transition if applicable.
+
+    ``reasons_json`` carries the optional Today reason-chip payload; it is written
+    on every commit (NULL clears it), so a fresh verdict without chips drops any
+    reasons the prior verdict carried (#37).
+
+    ``proposal_json`` is the app's proposal snapshot at decision time (#224,
+    :mod:`.proposal_snapshot`); NULL when none is available.
 
     Machine writes never replace a deliberate user verdict. ``history_known`` is
     false when a Zotero label is merely first observed on this device; no prior
@@ -72,6 +81,8 @@ def set_label_verdict(
         comment=comment,
         source=source,
         expected_revision=expected_revision,
+        reasons_json=reasons_json,
+        proposal_json=proposal_json,
     )
     if row_id is None:
         return None

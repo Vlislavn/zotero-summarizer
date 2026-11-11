@@ -218,7 +218,7 @@ def test_model_discovery_rejects_arbitrary_remote_secret_destination(monkeypatch
     with pytest.raises(APIError) as exc:
         model_list.list_models_for_provider(provider)
 
-    assert exc.value.error == "unsafe_provider_discovery"
+    assert exc.value.error == "provider_approval_required" and exc.value.status_code == 403
 
 
 def test_llm_models_route_returns_provider_shape(monkeypatch):

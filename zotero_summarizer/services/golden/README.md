@@ -2,7 +2,11 @@
 
 Owns the training dataset and the "manual label always wins" rule. The golden
 CSV is derived from your Zotero engagement (emoji tags, notes, collections);
-your explicit verdicts overlay on top via hybrid ground truth.
+your explicit verdicts overlay on top via hybrid ground truth. Export preserves
+full source abstracts by default (the CLI's explicit `--abstract-chars` cap remains
+optional). Raw markup is retained for provenance; the SPECTER2 input boundary
+converts it to plain text. Export still reconciles labels, so do not invoke it as
+a read-only text-repair operation.
 A replayed offline verdict may repair post-commit effects only if it still
 matches the latest stable/unique-legacy priority **and** rationale (not the
 first alias found). An older positive UUID cannot
@@ -45,7 +49,8 @@ label_verdicts: current snapshot + append-only user-label transition event
 | `verdict_effects.py` | post-commit effects shared by online and offline verdicts: metadata-enriched golden row, positive-feed materialization, current-state `label:*`/comment mirrors, plus the shared review-note mirror. Sync replays these on `already_applied` to repair a process crash between SQLite commit and delivery. Mirror errors propagate; metadata/materialization retain their separate enrichment result contracts |
 | `goldenset.py` | export the golden CSV/JSONL from Zotero engagement signals (atomic tmp+replace so a crash can't truncate it; labels/relevance from `domain`). A `label:<priority>` tag is the top short-circuit in `_infer_label`; `label:%` is an engagement trigger so a label-only item still gets a row. On export it reconciles `label_verdicts` from those tags (`user_labels.reconcile_label_verdicts`). Preserves **all** manual verdict keys on re-export via the uncapped `repositories.list_label_verdict_keys` (a capped fetch would silently drop verdicts); strips note HTML with the canonical `services._common.html_to_text` |
 | `user_labels.py` | the `label:<priority>` tag bridge: `detect_label` (read → priority, highest wins) + `reconcile_label_verdicts` → `ReconcileCounts(synced, changed, removed)`: imports a changed Zotero current-label mirror into `label_verdicts` (idempotent) and records assignment/change/retraction in the interaction log. It **retracts** a verdict whose tag was deleted only when it is **tag-sourced** (`original_derived_priority == ZOTERO_LABEL_ORIGIN`) and the item is present, live and tag-free. A first observation on a device has unknown earlier history; no old label is guessed. Verdicts typed in the Annotate UI are never auto-deleted unless a later mismatched Zotero label takes ownership; missing/trashed/feed/note items are skipped |
-| `hybrid_gt.py` | the single label-merge point, precedence ladder: explicit user verdict > outcome-corrected machine add > provisional machine add > derived. An **unchecked** "Add to library" verdict (`label_verdicts.source='machine_add'`) is capped at weak `could_read` (3.0) as the effective TRAINING label — not the `should_read` (4.0) the add stamps for display intent — because the user moved it Today→library but hasn't checked the label (`_UNCHECKED_ADD_PRIORITY`). It then gets corrected by the observed 7-day materialization outcome (`processed_feed_items.final_outcome`) — **demote-only** and computed from the could_read cap, not the raw add (`outcome_correction(_UNCHECKED_ADD_PRIORITY, outcome)` → `min` of the cap and `relevance_from_signal_weight(OUTCOME_WEIGHT)`; promotions flow through the engagement export, so promoting here would double-count). `pending`/`unknown`/unmapped outcomes are not behavioural evidence → no correction. Corrected rows get an `outcome_<name>` tier segment (weight: `label_weights`); relevance values from `domain.PRIORITY_TO_RELEVANCE`. Applied by every training path — `/admin/retrain`, the daemon gate retrain, and active-learning all thread `triage_db_path` into `load_or_train` |
+| `proposal_snapshot.py` | builds the `label_verdicts.proposal_json` snapshot (what the app proposed when the owner decided: priority, scores, review grade/band/freshness, model ids, surface) for Today, paper-page/Library and review-queue verdicts; best effort, never blocks a verdict (#224) |
+| `hybrid_gt.py` | the single label-merge point, precedence ladder: explicit user verdict > outcome-corrected machine add > provisional machine add > derived. An **unchecked** "Add to library" verdict (`label_verdicts.source='machine_add'`) is capped at weak `could_read` (3.0) as the effective TRAINING label — not the `should_read` (4.0) the add stamps for display intent — because the user moved it Today→library but hasn't checked the label (`_UNCHECKED_ADD_PRIORITY`). It then gets corrected by the observed 7-day materialization outcome (`processed_feed_items.final_outcome`) — **demote-only** and computed from the could_read cap, not the raw add (`outcome_correction(_UNCHECKED_ADD_PRIORITY, outcome)` → `min` of the cap and `relevance_from_signal_weight(OUTCOME_WEIGHT)`; promotions flow through the engagement export, so promoting here would double-count). `pending`/`unknown`/unmapped outcomes are not behavioural evidence → no correction. Corrected rows get an `outcome_<name>` tier segment (weight: `label_weights`); relevance values from `domain.PRIORITY_TO_RELEVANCE`. **`source='auto_quality'` verdicts (the quality gate's own `dont_read`) are skipped entirely** (`_training_label_state`; the gate would train on itself): the row keeps its derived/engagement label, a gate-only feed row is not a training/effective-label row, and `/effective-labels` + active learning drop it too. Unlike `machine_add` (a human "Add" action, hence a capped weak positive), the gate carries no human input to cap. A user relabel flips the row to `user`. Applied by every training path — `/admin/retrain`, the daemon gate retrain, and active-learning all thread `triage_db_path` into `load_or_train` |
 | `label_provenance.py` | per-row provenance via `compute_provenance` / `provenance_from_row`: which signal produced which label |
 | `feedback.py` | map emoji/engagement events to training signal tiers |
 | `relabel_audit/` | blind test-retest reliability study (κ, ICC, …) |
@@ -61,7 +66,7 @@ malformed headers/rows and failed writes raise, leaving the original intact.
 The sidecar stays beside the Settings-resolved CSV; SQLite releases locks on exit.
 
 `csv_store.read_snapshot` supplies parsed rows and the full SHA-256 of the same
-read to classification, training and the shared row loader. It never rereads the
+read to classification, training and `csv_store.load_golden_rows` (the shared row loader). It never rereads the
 file for provenance. Atomic replacement by app writers preserves a complete read
 snapshot; this is not a transaction across CSV, verdict SQLite and config, nor
 a lock against external in-place writers. File hashes describe bytes, not model
@@ -114,12 +119,19 @@ retryable; only unconfigured Zotero retains the optional local-first result.
 The previous review-note error-as-success fallback is removed. Other verdict
 enrichments retain their separately documented behavior.
 
-Verdict label and comment delivery now share the current alias-aware snapshot
-and writer lock. Set, clear, delete and old UUID replay cannot restore an older
-rationale. Empty/deleted comments clear an existing app-owned verdict note, but
+Verdict label and comment delivery share the current alias-aware snapshot and
+the existing system-mirror delivery owner. Closed positive-ID applying claims bind
+source/revision/target and backup before native dispatch; after that commit gap the
+owner reacquires the writer lock and rechecks intent, native plan and all claims.
+Known native outcomes commit as history before explicit deletion ACK. Uncertain
+completion blocks replay instead of fabricating success. Set, clear, delete and
+old UUID replay cannot restore an older rationale. Empty/deleted comments clear an existing app-owned verdict note, but
 do not create an empty child where none exists. Mirror failures propagate after
 the local commit, so offline retry retains its UUID. Only unconfigured Zotero is
 optional; the success response keeps its existing label/note result fields.
+Reconciliation no longer acknowledges tag absence by merely leaving a label
+context: the configured matching mirror must confirm both current native components.
+Read-only export without that writer leaves delivery pending, not falsely complete.
 
 When a verdict command receives no explicit original priority, it inherits only
 a recognized prior reading priority, otherwise storing `unknown`. A prior
@@ -134,3 +146,6 @@ missing/invalid originals raise. The existing short-circuit trace exposes
 `explicit_label`, so the UI explains the label instead of showing additive math.
 The shared short-circuit constructor also handles trash/veto; unlabeled scoring
 and final-label manual-override detection retain their existing semantics.
+
+[Feedback analysis](feedback_analysis/README.md) owns retained input capture,
+descriptive reports, the manual command and opt-in weekly scheduling/recovery.

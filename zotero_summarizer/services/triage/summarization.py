@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
 from threading import Event
 from time import perf_counter
@@ -9,7 +10,7 @@ from typing import Any
 
 from zotero_summarizer.api.errors import APIError, ExtractionError
 from zotero_summarizer.integrations.llm import LLMClient
-from zotero_summarizer.integrations.pdf import PdfExtractor
+from zotero_summarizer.integrations.pdf import PdfExtractor, PdfSource, capture_pdf_source
 from zotero_summarizer.models import (
     GoalsConfig,
     RefinedSummary,
@@ -18,14 +19,21 @@ from zotero_summarizer.models import (
     TriageResult,
 )
 from zotero_summarizer.domain import ReadingPriority
+from zotero_summarizer.models.providers import resolve_stage
 from zotero_summarizer.services import corpus
+from zotero_summarizer.services.library._paper_body import text_cap
+from zotero_summarizer.services.llm import factory
 from zotero_summarizer.services.model import scoring
 from zotero_summarizer.services.triage.prompts import DEFAULT_REFINE_PROMPT, DEFAULT_TRIAGE_PROMPT
 from zotero_summarizer.services.triage._execution import check_cancelled
 from zotero_summarizer.services.triage._json_output import parse_typed_output
+from zotero_summarizer.services.library._prompt_security import untrusted_input
+from zotero_summarizer.services.triage._method_admission import _admit_method_artifacts, _validate_pdf_authority
+from zotero_summarizer.services.triage._method_context import original_uri_context
 from zotero_summarizer.services._common import (
     LOGGER,
     build_log_prefix,
+    deep_review_sub_concurrency,
     extract_json_blob,
     log_context,
     settings,
@@ -34,7 +42,7 @@ from zotero_summarizer.services._common import (
 )
 
 
-def _extract_pdf_text(pdf_path: str) -> str:
+def _extract_pdf_source(pdf_path: str) -> PdfSource:
     pdf_candidate = Path(pdf_path).expanduser().resolve()
     allowed_root = settings().pdf_root.expanduser().resolve()
     if allowed_root not in [pdf_candidate, *pdf_candidate.parents]:
@@ -52,10 +60,10 @@ def _extract_pdf_text(pdf_path: str) -> str:
     if extractor is None:
         raise ExtractionError("PDF extractor is not initialized")
 
-    text = extractor.extract_text(pdf_candidate)
-    if not text.strip():
+    source = capture_pdf_source(pdf_candidate, extractor)
+    if not source.text.strip():
         raise ExtractionError("Extracted document content is empty")
-    return text
+    return source
 
 
 def _build_refine_prompt(config: GoalsConfig, req: SummarizeRequest, paper_text: str) -> str:
@@ -63,10 +71,10 @@ def _build_refine_prompt(config: GoalsConfig, req: SummarizeRequest, paper_text:
     # directive) — see services/triage/prompts.py. A null override = use it.
     template = config.prompts.refine or DEFAULT_REFINE_PROMPT
     return template.format(
-        title=req.title,
-        doi=req.doi or "N/A",
-        abstract=req.abstract or "N/A",
-        paper_text=paper_text,
+        title=escape(req.title, quote=False),
+        doi=untrusted_input(req.doi or "N/A"),
+        abstract=escape(req.abstract or "N/A", quote=False),
+        paper_text=escape(paper_text, quote=False),
         research_goals="\n".join(f"- {g}" for g in config.research_goals),
         summary_structure="\n".join(f"- {s}" for s in config.summary_structure),
         output_language=config.output_language,
@@ -89,14 +97,14 @@ def _build_triage_prompt(
         triage_criteria="\n".join(f"- {c}" for c in config.triage_criteria),
         relevance_scale="\n".join(f"{score}: {desc}" for score, desc in sorted(config.relevance_scale.items())),
         reading_priority_scale="\n".join(f"{key}: {desc}" for key, desc in config.reading_priority_scale.items()),
-        title=req.title,
-        doi=req.doi or "N/A",
-        summary=json.dumps(refined.model_dump(mode="json"), ensure_ascii=False),
-        corpus_context=corpus.build_corpus_context_text(corpus_context),
+        title=escape(req.title, quote=False),
+        doi=untrusted_input(req.doi or "N/A"),
+        summary=escape(json.dumps(refined.model_dump(mode="json"), ensure_ascii=False), quote=False),
+        corpus_context=escape(corpus.build_corpus_context_text(corpus_context), quote=False),
         corpus_affinity=f"{corpus_context.get('affinity_score', 0.0):.3f}",
-        matched_goal=corpus_context.get("matched_goal", ""),
+        matched_goal=untrusted_input(corpus_context.get("matched_goal", "")),
         matched_goal_similarity=f"{corpus_context.get('matched_goal_similarity', 0.0):.3f}",
-        suggested_collections=", ".join(corpus_context.get("suggested_collections", [])),
+        suggested_collections=untrusted_input(", ".join(corpus_context.get("suggested_collections", []))),
         output_language=config.output_language,
     )
 
@@ -127,7 +135,7 @@ def run_abstract_pipeline(
     """
     app_state = state()
     config: GoalsConfig = app_state.app_state.config
-    llm: LLMClient = llm_override if llm_override is not None else app_state.resolve_stage_client("feed")
+    llm: LLMClient = llm_override if llm_override is not None else factory.resolve_stage_client(app_state, "feed")
     prefix = log_prefix or build_log_prefix(req)
     pipeline_started = perf_counter()
 
@@ -164,6 +172,7 @@ def run_abstract_dry(
     """Run the real abstract prompts without reading or writing app/Zotero state."""
     return _score_abstract(
         config, req, llm, corpus.empty_corpus_match_result(), "doctor", perf_counter(), None,
+        persist_rejections=False,
     )
 
 
@@ -175,11 +184,16 @@ def _score_abstract(
     prefix: str,
     started: float,
     template_override: str | None = None,
+    *,
+    persist_rejections: bool = True,
 ) -> SummarizeResponse:
     abstract_text = (req.abstract or "").strip()
     if not abstract_text:
         return _abstract_only_empty_response("Feed item missing abstract")
-    refined = _refine_with_retry(llm, config, req, abstract_text, prefix)
+    refined = _refine_with_retry(
+        llm, config, req, abstract_text, prefix, original_text=req.abstract or "",
+        persist_rejections=persist_rejections,
+    )
     triage = _run_triage(
         llm, config, req, refined, corpus_context,
         template_override=template_override,
@@ -194,9 +208,11 @@ def _score_abstract(
         composite_score,
         mapped_priority,
     )
-    return _assemble_summary_response(
+    response = _assemble_summary_response(
         refined, triage, composite_score, mapped_priority, corpus_context
     )
+    response.should_deep_read = "No"
+    return response
 
 
 def _abstract_only_empty_response(reason: str) -> SummarizeResponse:
@@ -216,9 +232,9 @@ def _abstract_only_empty_response(reason: str) -> SummarizeResponse:
 def _fast_reject_response(
     req: SummarizeRequest, corpus_context: dict[str, Any], paper_text: str
 ) -> SummarizeResponse:
-    """Build a low-priority response when corpus pre-filter rejects."""
+    """Build a low-priority response with machine-owned prefilter provenance."""
     summary_seed = (req.abstract or paper_text).strip()[:2000] or "Low corpus affinity."
-    return SummarizeResponse(
+    response = SummarizeResponse(
         executive_summary=summary_seed,
         should_deep_read="No. Low corpus affinity against your engaged library.",
         relevance_to_research="Fast-rejected by corpus similarity pre-filter.",
@@ -236,6 +252,8 @@ def _fast_reject_response(
         suggested_collections=list(corpus_context.get("suggested_collections", [])),
         top_similar_items=list(corpus_context.get("top_similar_items", [])),
     )
+    response._corpus_fast_rejected = True
+    return response
 
 
 def _refine_with_retry(
@@ -245,13 +263,21 @@ def _refine_with_retry(
     paper_text: str,
     prefix: str,
     cancel_event: Event | None = None,
+    *,
+    original_text: str,
+    persist_rejections: bool = True,
+    original_pdf: PdfSource | None = None,
+    source_context: str = "",
 ) -> RefinedSummary:
+    _validate_pdf_authority(original_text, original_pdf)
     check_cancelled(cancel_event)
-    refine_prompt = _build_refine_prompt(config, req, paper_text)
+    refine_prompt = _build_refine_prompt(config, req, paper_text) + source_context
     refined_text = to_text(llm.prompt(refine_prompt))
     check_cancelled(cancel_event)
+    phase = "first"
+    validation_context = {"preserve_method_artifact_literals": True}
     try:
-        return parse_typed_output(refined_text, RefinedSummary)
+        refined = parse_typed_output(refined_text, RefinedSummary, context=validation_context)
     except ValueError as exc:
         LOGGER.warning("%s refine JSON parse failed, retrying", prefix)
         retry_prompt = (
@@ -265,7 +291,11 @@ def _refine_with_retry(
         check_cancelled(cancel_event)
         retry_text = to_text(llm.prompt(retry_prompt))
         check_cancelled(cancel_event)
-        return parse_typed_output(retry_text, RefinedSummary)
+        refined = parse_typed_output(retry_text, RefinedSummary, context=validation_context)
+        phase = "repair"
+    return _admit_method_artifacts(
+        refined, original_text, req, phase=phase, persist_rejections=persist_rejections, original_pdf=original_pdf,
+    )
 
 
 def _run_triage(
@@ -333,13 +363,14 @@ def run_pipeline(
     check_cancelled(cancel_event)
     app_state = state()
     config: GoalsConfig = app_state.app_state.config
-    llm: LLMClient = app_state.resolve_stage_client("feed")
+    llm: LLMClient = factory.resolve_stage_client(app_state, "feed")
     prefix = log_prefix or build_log_prefix(req)
     pipeline_started = perf_counter()
 
     log_context(prefix, "pipeline started pdf_path=%s", req.pdf_path)
     extract_started = perf_counter()
-    raw_text = _extract_pdf_text(req.pdf_path)
+    original_pdf = _extract_pdf_source(req.pdf_path)
+    raw_text = original_pdf.text
     check_cancelled(cancel_event)
     log_context(prefix, "pdf extracted chars=%d in %.2fs", len(raw_text), perf_counter() - extract_started)
 
@@ -361,25 +392,37 @@ def run_pipeline(
         log_context(prefix, "fast-rejected by corpus threshold=%.3f", config.corpus.similarity_threshold)
         return _fast_reject_response(req, corpus_context, raw_text)
 
-    max_direct_chars = 80_000
+    source_context = ""
+    # Same stage as ``llm`` above (resolve_stage_client(app_state, "feed")).
+    feed_provider = resolve_stage(config.llm_routing, "feed").provider
+    # A remote provider reads the whole paper in one call (its window minus reserves, as deep review);
+    # local/lean tiers keep the 80_000 floor.
+    max_direct_chars = max(80_000, text_cap(
+        config.quality_review, feed_provider, lean_tier=bool(getattr(feed_provider, "lean_deep_review", False)),
+    ).chars)
     if len(raw_text) > max_direct_chars:
-        from zotero_summarizer.services.library._map_reduce import _map_chunk, split_chunks
+        from zotero_summarizer.services.library._map_reduce import map_chunks, split_chunks
 
         chunks = split_chunks(raw_text, config.quality_review.map_chunk_chars)
-        log_context(prefix, "long source chars=%d chunks=%d", len(raw_text), len(chunks))
-        notes = []
-        for index, chunk in enumerate(chunks, 1):
-            check_cancelled(cancel_event)
-            log_context(prefix, "chunk %d/%d started chars=%d", index, len(chunks), len(chunk))
-            notes.append(_map_chunk(llm, chunk, check_cancelled=lambda: check_cancelled(cancel_event)))
-            check_cancelled(cancel_event)
+        sub_concurrency = deep_review_sub_concurrency(feed_provider)
+        log_context(prefix, "long source chars=%d chunks=%d sub_concurrency=%d",
+                    len(raw_text), len(chunks), sub_concurrency)
+        notes = map_chunks(llm, chunks, sub_concurrency=sub_concurrency,
+                           check_cancelled=lambda: check_cancelled(cancel_event))
+        check_cancelled(cancel_event)
         paper_text = "\n\n".join(f"[chunk {index}/{len(notes)}]\n{note}"
                                   for index, note in enumerate(notes, 1))
+        check_cancelled(cancel_event)
+        source_context = original_uri_context(raw_text, max_chars=config.quality_review.map_chunk_chars)
+        check_cancelled(cancel_event)
     else:
         paper_text = raw_text
 
     refine_started = perf_counter()
-    refined = _refine_with_retry(llm, config, req, paper_text, prefix, cancel_event)
+    refined = _refine_with_retry(
+        llm, config, req, paper_text, prefix, cancel_event, original_text=raw_text, original_pdf=original_pdf,
+        source_context=source_context,
+    )
     log_context(prefix, "refine completed in %.2fs", perf_counter() - refine_started)
 
     triage_started = perf_counter()

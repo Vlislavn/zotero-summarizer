@@ -26,6 +26,6 @@ it('renders the four-field current-gate contract', async () => {
     trained_at: '2026-05-15T22:15:20Z', oof_spearman_verified: 0.14 });
   expect(await screen.findByText('lightgbm')).toBeTruthy();
   expect(screen.getByText('1171')).toBeTruthy();
-  expect(screen.getByText('2026-05-15T22:15:20Z')).toBeTruthy();
+  expect(screen.getByText(/May/)).toBeTruthy();
   expect(screen.getByText('0.140')).toBeTruthy();
 });

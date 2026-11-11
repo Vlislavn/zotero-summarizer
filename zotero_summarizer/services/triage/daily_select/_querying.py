@@ -114,45 +114,9 @@ def fetch_decided_content_keys(
     return dois, arxiv_ids
 
 
-def fetch_trashed_guids(
-    conn: sqlite3.Connection,
-    *,
-    trashed_decisions: list[str],
-    trashed_outcomes: list[str],
-) -> set[str]:
-    """Stable GUIDs of papers the user explicitly threw away — the durable
-    "never show again" key.
-
-    A trashed paper re-arrives under a *fresh* ``feed_item_id`` (Zotero reassigns
-    feed-item ids on rollover / second feed), so the per-item ``feed:<id>`` trash
-    label and the ``user_rejected`` decision both sit on the *old* row and miss
-    the re-arrival; an id-less journal/news item also escapes DOI/arXiv dedup.
-    The GUID survives re-ingestion, so matching on it makes trash memory
-    permanent. A row qualifies when its decision is in ``trashed_decisions``
-    (trashed from Today) OR its ``final_outcome`` is in ``trashed_outcomes``
-    (trashed/deleted inside Zotero). Empty GUIDs discarded.
-    """
-    if not trashed_decisions:
-        raise ValueError("trashed_decisions must be non-empty")
-    if not trashed_outcomes:
-        raise ValueError("trashed_outcomes must be non-empty")
-    dec_ph = ",".join("?" * len(trashed_decisions))
-    out_ph = ",".join("?" * len(trashed_outcomes))
-    rows = conn.execute(
-        f"""
-        SELECT DISTINCT guid
-        FROM processed_feed_items
-        WHERE decision IN ({dec_ph}) OR final_outcome IN ({out_ph})
-        """,
-        (*trashed_decisions, *trashed_outcomes),
-    ).fetchall()
-    return {str(r["guid"]).strip() for r in rows if str(r["guid"] or "").strip()}
-
-
 __all__ = [
     "open_ro",
     "fetch_rows_by_decisions",
     "fetch_handled_keys",
     "fetch_decided_content_keys",
-    "fetch_trashed_guids",
 ]

@@ -1,6 +1,7 @@
 import pytest
 
 from zotero_summarizer.api.errors import APIError
+from zotero_summarizer.models import PaperDigest
 from zotero_summarizer.services.library import deep_review
 
 
@@ -82,7 +83,7 @@ def test_unavailable_verifier_is_typed_and_does_not_regenerate(monkeypatch):
     class Malformed(_Generator):
         def pydantic_prompt(self, **kwargs):
             self.prompts.append(kwargs['prompt'])
-            if kwargs['pydantic_model'].__name__ == 'PaperDigest':
+            if issubclass(kwargs['pydantic_model'], PaperDigest):
                 return _digest()
             return ''
 

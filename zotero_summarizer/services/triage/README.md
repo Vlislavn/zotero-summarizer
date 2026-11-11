@@ -1,5 +1,41 @@
 # services/triage — the RSS daemon pipeline
 
+`daily_members.read_members` reads up to20 requested PKs, including old, handled
+and unavailable rows, without ranking, inference, attribution or writes. It uses
+current verdict precedence, sibling materialization/pending state and bounded
+read-only review projection. Note-delivery snapshots expose revision/target/pending,
+not note bodies. Browser membership is not a daemon queue or write authorization.
+
+`today_exposure` is the owner-approved, local-only record of Today exposure in
+`Settings.today_exposure_log_dir` (`data/today-exposure/<local day>.jsonl`, `run_log` NDJSON,
+envelope `ts/event/schema(2)/git_commit/ranker` — the Today ranker id, see `daily_select/README.md`): `today_slate` (one per `GET /api/daily`:
+`slate_id` — adopted as the browser visit id —, local `day`, policy, `gate_sha`,
+`goals_hash`, `k`, `pool_size`, members in display order with role, `exploration`
++ `pool`, priority/reason and scores), `today_event` (browser `card_shown`,
+`card_dwell`, `open_review`, `open_link`; `POST /api/daily/events`) and `note_saved`
+(length only). It is a separate file because the feedback-analysis reader treats every
+interaction-log line as a decision; Add/Trash/verdicts stay in the interaction log and
+join by `item_key` + `ts`. Ids, scores, enums and durations only. `ZS_TODAY_EXPOSURE_LOG=0`
+writes nothing and disables exploration (the per-day limit is counted from this log).
+`explored_today(day)` reads back the exploration items already shown that local day
+(only that day's file). Write failures are logged and dropped; malformed lines are skipped.
+
+`today_preparation` keeps up to 20 eligible-or-pending candidates analyzed ahead
+of Today. `plan` walks the top 60 of `daily_select.ranked_unhandled_candidates`
+(168 h, existing trash/handled/dedup guards), reuses every current result
+(negative and `needs_pdf` placeholders included) and lists unreviewed stable feed
+keys. `start` runs one background thread per process (`_flight.FlightLatch`), one
+paper at a time: headless acquisition (`allow_headed_fallback=False`; browser only
+when `university_access.headless`), then the existing `deep_review` worker (started `background=True`: it queues behind any review the owner asks for and never takes the last pool slot) with a
+`pdf_overrides` path, or a `needs_pdf` placeholder when nothing (or only a web page)
+was found. A failing key is not retried in the same process. It runs in whichever
+process ticks (the API's triage button or `feeds serve`); a one-shot `feeds tick`
+exits after at most the paper in flight. `status` derives `ready`/`left` from the
+cache; `running` is process-local. Ranking only orders the work; `daily_select`
+decides what Today shows. One `GET /api/daily` runs inside `runtime.request_memo`:
+review currentness (`deep_review.current_reviews`) and the filtered unhandled pool
+are computed once and shared by the slate, `status` and the header count.
+
 Daily selection now ranks candidates without putting them into Zotero.
 `daily_actions` checks current full-text review eligibility before any Add
 label/pending state/write; mixed batches report blocked rows as
@@ -10,7 +46,9 @@ SQLite-locked current verdict remains positive; a newer Trash produces a
 
 Turns raw RSS feed items into scored, ranked `processed_feed_items` rows that
 the Today tab consumes. The cheap `model/` gate fast-rejects; survivors get an
-LLM summary + composite score.
+LLM summary + composite score. Summarization and the legacy LLM backlog drain
+resolve clients through `services.llm.factory` with the existing runtime cache;
+the default ML-only drain never resolves a client.
 
 ```
 Zotero feedItems ─feeds.run_daemon_tick→ gate(model) ─reject──> dropped
@@ -18,7 +56,8 @@ Zotero feedItems ─feeds.run_daemon_tick→ gate(model) ─reject──> droppe
                                             └─keep──> summarization (LLM) ─score→ row
    recover_abstractless   : acquire-before-score rescue (see below)
    select.plateau_select  : daemon's materialization cutoff (kneedle elbow)
-   daily_select/          : Today's role-mixed slate (model+surprise+diversity)
+   today_preparation      : analyze top-ranked feed papers ahead of Today (background)
+   daily_select/          : Today's slate (analyzed policy for /api/daily; legacy roles)
    daily_actions          : Today "Add to library" / "Trash" (write labels)
    triage_jobs            : on-demand library triage jobs
    triage_backlog         : drain the un-triaged backlog — ML-only by default
@@ -28,9 +67,11 @@ Zotero feedItems ─feeds.run_daemon_tick→ gate(model) ─reject──> droppe
 (`gate_only=True`, `bulk_drain_gate_only` config): the classifier scores every
 survivor from embeddings + prestige with **no per-item LLM call** — fast,
 memory-safe, GPU-accelerated. Rows are written `triaged_pending` + marked read
-(`review_mode=False`) so the slate fills and the picker drains. The full-text
-LLM quality digest is **on-demand per paper** (Library → Deep Review), never run
-in bulk. **Fail-fast precondition:** the gate-only drain MANDATORILY needs a live
+(`review_mode=False`). This scoring phase does not perform full-text analysis;
+the separate bounded `today_preparation` pass runs after a tick only when
+`quality_review.auto_on_tick_k > 0`, and once ~30 s after server startup (`today_preparation.schedule_on_startup`,
+because `serve` runs no tick loop; same latch, a no-op when Today already has its target ready). Explicit per-paper Deep Review remains available.
+**Fail-fast precondition:** the gate-only drain MANDATORILY needs a live
 classifier gate, so the `POST /api/daily/triage-backlog` route calls
 `services.readiness.require("classifier_gate")` first — a missing gate (e.g.
 `lightgbm` uninstalled, or a retrain still in flight) returns a `503` with the real
@@ -66,24 +107,26 @@ final, as before. Skipped in `gate_only` mode (no LLM).
 | `feeds/` | the daemon orchestrator package — facade re-exports the sub-modules below |
 | `feeds/_common.py` | constants, the tick-report dataclass, low-level helpers (leaf) |
 | `feeds/_triage.py` · `feeds/_gate.py` | abstract triage + concurrent scoring + prestige · classifier gate + audit + retrain. Review payloads carry `summary_schema_version=1`, so delayed materialization after restart reconstructs the full note and rejects future contracts. |
-| `feeds/_daily.py` · `feeds/_tick.py` | daily plateau selection + refine · one daemon tick (orchestration). After triage the tick can auto-review the Today slate IN-PLACE via `_auto_review_slate` (gated by `quality_review.auto_on_tick_k`, no Zotero write). The in-place pass is fire-and-forget on the shared `deep_review` pool and skips only reviews whose PDF/model/config identity is still current. A third step `_auto_render_slate` (gated by `quality_review.render_on_tick_k`, default 3) then builds the paper brief (presentation HTML/audit JSON/figures, no Markdown sidecar) for the TOP-K feed papers — only keys ALREADY reviewed and still current — via `paper_render.start_build`. So a top feed paper opens with the same brief as a library item (`/paper/:stable_feed_key`). On "Add to library", `daily_actions._carry_renders_best_effort` rebuilds the render under the new Zotero key |
+| `feeds/_daily.py` · `feeds/_tick.py` | daily plateau selection + refine · one daemon tick (orchestration). After triage the tick starts Today preparation (`_auto_prepare_today` → `today_preparation`, gated by `quality_review.auto_on_tick_k` = papers per run, 0 = off; no Zotero write). A third step `_auto_render_slate` (gated by `quality_review.render_on_tick_k`, default 3) then builds the paper brief (presentation HTML/audit JSON/figures, no Markdown sidecar) for the TOP-K feed papers — only keys ALREADY reviewed and still current — via `paper_render.start_build`. So a top feed paper opens with the same brief as a library item (`/paper/:stable_feed_key`). On "Add to library", `daily_actions._carry_renders_best_effort` rebuilds the render under the new Zotero key |
 | `feeds/_tick_phases.py` · `feeds/_rescue.py` | the discrete tick phases · capped acquire-before-score policies and shared fetch/re-score primitive |
 | `feeds/_outcomes.py` · `feeds/_loop.py` | outcome detection → feedback · the long-running asyncio loop. `_outcomes` also appends an `outcome_resolved` event to the agentic interaction log (`services.interaction_log.log_behavioural_outcome`) — the daemon-resolved 7-day engaged/moved/trashed signal, joined to the at-triage verdict by `feed_item_id`; this is the second event producer (daemon thread, shared UTC stamp) |
 | `summarization.py` | LLM summarize/refine pipeline, including optional exact-URL `method_and_code`; `run_abstract_dry` reuses its real prompt/scoring path for Doctor but omits corpus context and writes |
-| `prompts.py` | validated injection-safe code defaults; HackerNoon gets the practitioner rubric through the same triage contract; legacy refinement cannot recommend deep/full reading from absent/short full text; `DEFAULT_MAP_PROMPT` serves map-reduce deep review |
+| `_method_admission.py` · `_method_context.py` | exact complete original-source URI admission and local rejection receipts · bounded, escaped whole original URI windows for long-source generation; neither classifies scientific support or contribution relevance |
+| `prompts.py` | security-directed code defaults; HackerNoon gets the practitioner rubric through the same triage contract; legacy refinement cannot recommend deep/full reading from absent/short full text; `DEFAULT_MAP_PROMPT` serves map-reduce deep review |
 | `select.py` | plateau/elbow cutoff for daily materialization |
 | `daily_actions.py` | Today keep/trash → Zotero + training labels. "Add" files into the user-chosen collection (`add_to_library(item_ids, target_collection_key=None)` resolves the picker's key → name via `ZoteroReader.collection_name_for_key`, an unknown key → 400; default None → "Inbox") and writes a PROVISIONAL verdict (`label_verdicts.source='machine_add'`, tier `feed_interest`) — captured as interest but UNCHECKED, so `golden/hybrid_gt` caps its effective training label at weak `could_read` (not the `should_read` shown for display intent) until you verify it or the 7-day materialization outcome resolves; trash stays a deliberate `user` verdict and flows through `golden.label_verdicts`, which preserves its prior→new transition and prevents a later machine-add retry from overwriting it. After a usable cached review, an explicit positive verdict (must/should/could) on a feed paper materializes it into the Inbox — `materialize_feed_verdict(item_key, user_priority, create_if_missing=True)` reuses the same `_materialize_one`/`_mark_pending` core as `add_to_library` but writes NO training label (the verdict is already saved), instead stamping `user_priority` as the new item's ground-truth `label:<priority>` tag in the same write so it reaches Zotero even while Zotero stays open (the standalone `zotero_set_label_tag` refuses to). With `create_if_missing=False`, it resolves an already-materialized target for a negative verdict/comment without creating a rejected paper; `dont_read` never adds. On "Add", an IN-PLACE Today review (cached under `stable_feed_key`) is copied onto the new library `item_key` (`deep_review.copy_review`) so the deep review persists into the library. Both keep (`today_keep`) and trash (`today_trash`) also append a `human_feedback` event to the agentic interaction log via `_record_label` (`services.interaction_log.log_feed_decision`) — the gate's pre-mutation derived priority + the human's keep/trash. The daemon gate retrain (`feeds/_gate`) threads `triage_db_path` into `load_or_train`, so it applies this overlay too (not just `/admin/retrain`). **Trash marks the feed items read best-effort**: the `dont_read` labels are the source of truth and are committed per-row, so a Zotero-DB-lock on `mark_feed_items_read` reports `marked_read: 0` + `marked_read_error` instead of 500-ing the whole batch after the labels already saved (matches the per-row best-effort contract) |
 | `triage_jobs.py` | owns on-demand triage workers and their item task groups; cancellation is `cancelling` until blocking work drains, then `cancelled`; job snapshots and cancellation/start writes serialize under the existing start lock |
+| `_plain_error.py` | plain text for a failed job item / drain run: timeouts → «The model did not answer in time; try again.», sqlite busy → «The database was busy; run again.», otherwise the exception's own text |
 | `_execution.py` | context-preserving blocking calls that retain thread ownership on timeout/task cancellation, plus cooperative pipeline stop checks; a deadline stops subsequent work and drains the current call before releasing the slot |
 | `triage_backlog.py` | single-thread **ML-only** drain of un-triaged feed backlog (gate scores; no LLM); the UI button never auto-materialises into the Inbox; `status()` surfaces `gate_reject_rate`. On completion it **auto-rescores the slate** (`rescored`/`rescore_error` in `status()`) so freshly-drained rows rank consistently with what was already there |
-| `rescore_slate.py` | re-score the CURRENT Today slate in place with the live gate; rewrites only the gate-derived fields via `storage.feeds.update_scores` — never a card's decision/read-status, and skips already-handled rows so nothing is re-surfaced. It is now triggered **automatically** (not just by `POST /api/daily/rescore-slate`): after a backlog drain, after any gate retrain (daemon or UI `install_gate`), and at startup for a cached gate — so Today always reflects the current model |
+| `rescore_slate.py` | re-score the CURRENT Today slate in place with the live gate; rewrites only the gate-derived fields via `storage.feeds.update_scores` — never a card's decision/read-status, and skips already-handled rows so nothing is re-surfaced. It is now triggered **automatically** (not just by `POST /api/daily/rescore-slate`): after a backlog drain, after any gate retrain (daemon or UI `install_gate`), and at startup for a cached gate — so new Today selections reflect the current model; retained shortlist scores/reasons remain selection-time observations |
 | `daily_select/` | the role-allocated Today slate (see its README) |
 
 **Source: the app-owned RSS pool.** Since the app-RSS migration the daemon's
 default reader is `integrations/app_rss.py` (`AppRssReader`): subscriptions live
 in the app's `rss_feeds` table (seed via Settings or `POST /api/rss/import-zotero`),
 and each tick fetches upstream RSS/Atom directly into `rss_items` — rotating
-least-recently-fetched-first so a bounded pass covers EVERY enabled feed. The
+least-recently-fetched-first so a bounded pass covers EVERY enabled feed; nothing is cut before dedupe (arXiv queries are paged to the watermark/`feeds.backfill_days`), while LLM work stays bounded by `daemon_batch_size` per tick. The
 pipeline stays source-agnostic (any public RSS/Atom URL: arXiv, bioRxiv,
 **PubMed**, HackerNoon); `_tick_dedup` dedups cross-feed on normalized DOI/arXiv. **Zotero
 stays in sync through a separate OPTIONAL `ZoteroReader`/`ZoteroWriter` pair**
@@ -102,7 +145,7 @@ dropped. *Known caveat:* PubMed RSS abstracts are often truncated to the
 conclusion, so the gate/goal_sim see a partial abstract for PubMed picks.
 Deferred upgrade if this hurts ranking: a PMID→efetch abstract backfill in
 `integrations/` called before the gate. See
-[docs/usage.md](../../../docs/usage.md) "Adding sources".
+[RSS subscriptions](../../../docs/features.md#rss-subscriptions).
 
 Today Add reuses a copied deep-review PDF when present, otherwise runs the non-interactive OA acquisition chain; its response separates item materialization from typed per-paper attachment outcomes.
 
@@ -119,7 +162,11 @@ the reading-score cache and interaction log; a training CSV hash is not a model 
 It reuses `daily_select._fetch_primary_unhandled` with the slate and its counter:
 handled/trash/content/GUID filtering precedes fallback and its cap; mixed SQL/ISO
 timestamps are compared as UTC instants. There is no separate rescore candidate
-policy; only abstract-less survivors are omitted from gate prediction.
+policy; only abstract-less survivors are omitted from gate prediction. Reconstructed
+items retain the original numeric feed-item cache key, so unchanged title/abstract
+content reuses the live gate's SPECTER2 vectors instead of loading the encoder and
+recomputing them after every drain. Legacy rows without a feed-item ID keep their
+GUID/row fallback; cache content/revision checks remain unchanged.
 
 Job cancellation returns `cancelling` / `cancelled=false` while work is still
 active; poll the existing status endpoint (MCP forwards the same values).
@@ -129,6 +176,7 @@ the atomic result/queue write prevent subsequent effects. An already-entered
 transaction may finish while cancelling; cancellation does not roll it back. Only after every
 item thread drains does the worker publish `cancelled`, with no late result.
 On process restart a persisted cancellation becomes cancelled, never resumed.
+The Triage page shows "Stopping after the current AI call finishes…" while a job is `cancelling`.
 
 Job detail and list APIs expose `active_items: [{item_key, title}]` instead of
 the misleading singular `current_item_key`/`current_title`. The worker-owned map
@@ -163,6 +211,13 @@ request: timeouts/cancellation may take longer than the configured deadline,
 and the current call may still incur cost. For a forcibly bounded local stop,
 process isolation is required. No detached thread is declared terminal here.
 
+Successful model-refined abstract summaries expose `should_deep_read="No"` in
+legacy response JSON. The shared live/Doctor abstract boundary owns this projection,
+not the model's wording. Received refinement and triage input remain unchanged;
+PDF advice, other fields, scoring and failure propagation retain their contracts.
+This is not a scientific-quality verdict or the full-text reading policy, and it
+does not rewrite saved summaries or add model calls.
+
 Refinement validates JSON against `RefinedSummary`. Its single existing repair
 attempt receives that model's canonical JSON schema and the actual parse/validation
 error, rather than a duplicate key list. Repair preserves the analysis; invalid
@@ -177,9 +232,14 @@ correlation is not rewritten as causation. Custom `prompts.refine` overrides
 replace this default. Prompt-contract tests check instruction presence and
 rendering only; source-grounded live review must validate actual faithfulness.
 
+A source goes to the model whole up to the feed provider's window (`_paper_body.text_cap`, as deep review: context window minus reserves, ~683k chars with the defaults on a remote provider); local/lean providers keep the 80,000-char floor, and only longer sources are mapped.
+
 Long full-text inputs reuse the library's source-safe mapper and the existing
 `quality_review.map_chunk_chars` setting instead of two unbounded halves. Maps
-run sequentially with cancellation checks; only explicit output truncation is
+run through `_map_reduce.map_chunks` (the deep-review map step) with the feed stage's
+`_common.deep_review_sub_concurrency` — parallel on a remote provider, serial on a local
+one — and a cancellation check before each chunk (a stop skips chunks not yet started; calls
+in flight finish first). Only explicit output truncation is
 subdivided down to the existing minimum work size. Empty or exhausted segments
 still fail before refinement. Generated notes remain derived context, not original
 source evidence; numerical scoring, providers and output-token limits are unchanged.
@@ -190,6 +250,12 @@ Study safeguards and measurement uncertainty associations must be source-explici
 When a triage model's proposed priority differs from composite mapping, the response
 labels the computed priority as authoritative and retains the model assessment as
 its pre-mapping explanation. This does not change scores or promote suggestions.
+
+Prompt rendering escapes delimiter-like markup in title, abstract, PDF text,
+complete summary JSON and corpus context before insertion into the existing
+untrusted wrappers. DOI and auxiliary goal/collection metadata use the shared
+escaped wrapper. This protects the structural boundary, not semantic immunity to
+prompt injection; custom templates still own their placement of source fields.
 
 **Boundaries:** imports `model/` (gate), `zotero/` (pending), the library's existing
 source mapper, and shared scoring; standard services rules.
@@ -207,9 +273,63 @@ attempt (invalid repair propagates). The shared `extract_json_blob` and decoded
 output capture/telemetry are unchanged. Candidate spans do not overlap: scanning
 and decoding work is bounded by input characters, without suffix retries or regex.
 
+Method/code artifacts are checked after the existing typed parse/one repair,
+before triage, response assembly or persistence. Both typed parse attempts retain
+nonempty candidate literals through validation context; whitespace-padded URLs are
+rejected and receipted rather than silently trimmed. Legacy decoding keeps its
+existing cleanup. Each candidate must exactly equal
+a complete HTTP(S) token in the original text or bound title/DOI/abstract, or an
+eligible whole raw PDF annotation URI. Case, percent escapes, query, fragment and
+literal punctuation are not normalized; substring/prefix and nested URLs inside
+containing URI tokens do not authorize links. Markdown labels/destinations retain
+their own bounded scopes. A bare DOI does not authorize a synthesized DOI URL.
+This is source membership, not a contribution-role or scientific-support verdict:
+an unrelated cited repository can be an exact member and must still be excluded
+by refinement/human review. No extra classifier, LLM stage, artifact fetch or execution.
+
+Long PDF maps remain generated context, never admission authority. A suffix of
+whole original URI occurrence windows (200 source characters either side) supplements
+the first refinement call, including custom templates, within the existing
+`quality_review.map_chunk_chars` rendered-character budget. Overlaps share context;
+over-budget windows are skipped intact, not clipped. Matched/retained counts expose
+URI-window coverage only, excluding URI-free and annotation-only evidence; missing
+windows do not prove source absence. Excerpts use the existing escaped untrusted
+data boundary. Direct PDFs, abstract/Doctor and URI-free long inputs add no suffix;
+repair remains schema-only with the original single-call budget.
+
+Rejected candidates append to `Settings.data_dir/method-artifact-rejections.jsonl`
+with field/index, candidate, first/repair phase, grammar version and full original
+text/metadata hashes; PDF cases also record document and annotation-tuple hashes.
+Receipt I/O precedes returning a filtered copy and failures propagate without
+another repair. The process-local lock preserves concurrent JSONL records, not a
+cross-process audit transaction. Logs can contain sensitive source URLs; keep them
+local. Write-free Doctor rejects a nonmember before Settings/state/receipt I/O.
+Access, capture, model and unrecovered schema failures remain errors, never `null`.
+Absent/null, empty legacy objects, artifact-only objects and supported no-code
+methods keep the existing schema behavior; admission does not invent a meaningful
+method or convert a rejected object to null. Existing JSON response, feed payload,
+restart reconstruction and note rendering are reused without migrations or
+retrospective validation of saved summaries.
+
+Regression selectors: `tests/test_method_{source_admission,lexical_preservation,pdf_authority,original_context,context_selection}.py`,
+`tests/test_pdf_source_authority.py`, `tests/test_summarization_repair.py`,
+`tests/test_triage_long_source.py`, `tests/test_triage_job_cancellation.py`,
+`tests/test_method_and_code.py`, `tests/test_method_persistence.py`, and
+`tests/test_delayed_materialization.py`.
+These synthetic/scripted oracles establish mechanical contracts only when run.
+Issue #10's six frozen public papers through effective production refinement,
+source-evidence judgement, useful no-code/null decisions and human/native-note
+acceptance remain separate, unestablished evidence; no issue closure is implied.
+
 Triage receives the complete canonical `RefinedSummary` JSON inside the existing
 untrusted summary boundary, not an executive-only excerpt. Methods, findings,
 limitations and optional artifacts remain available without new calls or scoring
 changes. Default refinement preserves conditional effect directions and Results
 exceptions, failed versus absent validation, and repository versus reproducibility
 evidence. Instruction-presence tests are not scientific-faithfulness evaluations.
+
+The existing daemon training-ledger producer is retained with its original synthetic-trainer regression suite. It appends retained artifact identities only after install/rescore; this packaging adds no fitting, inference or new identity authority.
+
+The original private corpus-prefilter provenance marker is retained with the optional practitioner diagnostic; the marker is not an LLM/public JSON field. No new scoring rule is introduced.
+
+The existing question/native source stack carries the original post-commit materialization/verdict/recovery mirror callers. No new delivery controller or source-derived action is designed here.

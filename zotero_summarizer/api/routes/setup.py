@@ -56,6 +56,7 @@ async def validate_config(req: ValidateConfigRequest) -> ValidateConfigResponse:
 class CredentialRequest(BaseModel):
     name: str
     api_key: str
+    revision: str | None = None
 
 
 async def list_ai_presets() -> dict:
@@ -75,8 +76,10 @@ async def save_ai_credential(req: CredentialRequest) -> dict:
     from zotero_summarizer.services.setup.doctor import store_credential_and_invalidate
 
     credential = await asyncio.to_thread(store_credential_and_invalidate,
-                                         get_settings(), req.name, req.api_key)
-    return {"credential": credential}
+                                         get_settings(), req.name, req.api_key,
+                                         **({'expected_revision': req.revision} if req.revision else {}))
+    revision = credential.pop('_revision', None)
+    return {"credential": credential, **({'revision': revision} if revision else {})}
 
 
 class CalibrateRequest(BaseModel):
@@ -113,14 +116,31 @@ async def doctor_status() -> dict:
 
 async def run_doctor(req: DoctorRequest) -> dict:
     from zotero_summarizer.services.setup.doctor import run_doctor as run_checks
+    from zotero_summarizer.services.setup.load_attempt import SetupAttempt
 
-    return await asyncio.to_thread(
-        run_checks, get_settings(), check_ids=req.check_ids, fix=req.fix,
-    )
+    attempt = SetupAttempt()
+    try:
+        return await asyncio.to_thread(
+            run_checks, get_settings(), check_ids=req.check_ids, fix=req.fix, attempt=attempt,
+        )
+    except asyncio.CancelledError:
+        attempt.abandon("cancelled")
+        raise
+
+
+class CancelDoctorRequest(BaseModel):
+    run_id: str = Field(min_length=1)
+
+
+async def cancel_doctor(req: CancelDoctorRequest) -> dict:
+    from zotero_summarizer.services.setup.doctor import cancel_doctor as cancel
+
+    return cancel(req.run_id)
 
 
 router.add_api_route("/api/setup/doctor", doctor_status, methods=["GET"])
 router.add_api_route("/api/setup/doctor", run_doctor, methods=["POST"])
+router.add_api_route("/api/setup/doctor/cancel", cancel_doctor, methods=["POST"])
 router.add_api_route("/api/setup/status", setup_status, methods=["GET"])
 router.add_api_route("/api/setup/detect-zotero", detect_zotero, methods=["GET"])
 router.add_api_route("/api/setup/paths", update_paths, methods=["PUT"])

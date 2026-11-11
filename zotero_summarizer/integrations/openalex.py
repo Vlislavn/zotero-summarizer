@@ -6,8 +6,8 @@ moves you into the polite pool (faster, lower error rate). Rate limit is
 
 The client returns a normalized :class:`OpenAlexWork` with the fields needed
 for :mod:`zotero_summarizer.services.model.prestige`. Author h-index requires a
-follow-up call to ``/authors/{id}`` — we look up at most ``max_authors`` (default
-3) to keep latency bounded.
+follow-up call to ``/authors/{id}`` — we look up the first ``max_authors`` (default
+3) PLUS the last author, to keep latency bounded.
 
 All HTTP responses are cached via :class:`OpenAlexCache`. Network errors and
 4xx/5xx responses are swallowed (logged) so prestige never blocks triage.
@@ -16,13 +16,15 @@ All HTTP responses are cached via :class:`OpenAlexCache`. Network errors and
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
-from zotero_summarizer.domain import normalize_doi
+from zotero_summarizer.domain import normalize_arxiv_id, normalize_doi
 from zotero_summarizer.integrations._rate_limiter import RateLimiter
 from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
 
@@ -50,7 +52,7 @@ class OpenAlexWork:
     # fwci = field-weighted citation impact (1.0 == field average).
     citation_percentile: float | None = None
     fwci: float | None = None
-    # Cold-start author-reputation prior: the MAX across the work's (≤max_authors)
+    # Cold-start author-reputation prior: the MAX across the work's visited
     # authors of each author's FIELD-NORMALIZED standing = median of that author's
     # works' citation_normalized_percentile, in [0,1]. None when the work already
     # has its own percentile (not cold-start, so not computed) or no author has any
@@ -61,6 +63,10 @@ class OpenAlexWork:
     # title but no abstract so the classifier gate can score them. None when the
     # work has no abstract index (some records omit it).
     abstract: str | None = None
+    # The LAST author's own record ``{"name", "h_index"}`` (h_index None = unknown:
+    # no OpenAlex id / profile unavailable; a real 0 stays 0). None = no authorships
+    # or a payload cached before this field existed.
+    last_author: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +91,7 @@ class OpenAlexSearchHit:
     is_retracted: bool = False
     source_rank: int = 0
     publication_types: list[str] = field(default_factory=list)
+    family_identifier_keys: list[str] = field(default_factory=list)
 
 
 _RATE_LIMITER = RateLimiter(_RATE_LIMIT_PER_SEC)
@@ -150,7 +157,7 @@ class OpenAlexClient:
         return self._work_from_payload(enriched)
 
     def search_works(
-        self, query: str, *, per_page: int = 20, semantic: bool = False
+        self, query: str, *, per_page: int = 20, semantic: bool = False, outcome: dict | None = None
     ) -> list[OpenAlexSearchHit]:
         """Topic search ``/works`` — lexical (``search=``) or, when
         ``semantic=True``, semantic (``search.semantic=``, a paragraph query up
@@ -159,6 +166,8 @@ class OpenAlexClient:
         citation-weighted → candidate-generation only). ``[]`` on a network error
         or exhausted keyless budget (``_get`` returns None) — the leaf best-effort
         contract, so federation survives one dead source (spec §7)."""
+        if outcome is not None:
+            outcome.update(status="unknown", count=None, error_code=None)
         query = (query or "").strip()
         if not query:
             return []
@@ -167,17 +176,28 @@ class OpenAlexClient:
             param_key: query[:2000] if semantic else query,
             "per_page": max(1, min(per_page, 50)),
             "select": "id,doi,title,display_name,publication_year,authorships,"
-            "primary_location,abstract_inverted_index,cited_by_count,is_retracted,open_access,type",
+            "primary_location,locations,abstract_inverted_index,cited_by_count,is_retracted,open_access,type",
         }
-        payload = self._get("/works", params=params)
-        if not payload:
+        payload = self._get("/works", params=params, **({"outcome": outcome} if outcome is not None else {}))
+        if payload is None:
             return []
-        results = payload.get("results") or []
-        return [
-            hit
-            for i, raw in enumerate(results)
-            if (hit := _search_hit_from_payload(raw, source_rank=i)) is not None
-        ]
+        try:
+            if outcome is not None and not isinstance(payload.get("results"), list):
+                raise ValueError
+            if not payload:
+                return []
+            results = payload.get("results") or []
+            hits = [_search_hit_from_payload(raw, source_rank=i) for i, raw in enumerate(results)]
+            if outcome is not None and any(hit is None for hit in hits):
+                raise ValueError
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            if outcome is None:
+                raise
+            outcome.update(status="failed", error_code="parse_error")
+            return []
+        if outcome is not None:
+            outcome.update(status="success_nonempty" if hits else "success_empty", count=len(hits))
+        return [hit for hit in hits if hit is not None]
 
     # ----------------------------------------------------------------- private
 
@@ -203,7 +223,16 @@ class OpenAlexClient:
         h_indices: list[int] = []
         author_pcts: list[float] = []
         enrichment_incomplete = False
-        for auth in authorships[: self.max_authors]:
+        # First ``max_authors`` + ALWAYS the last author (senior/PI slot), however long
+        # the list is. ``author_hs`` keeps each visited author's OWN h (None = unknown).
+        visit = list(authorships[: self.max_authors])
+        if len(authorships) > self.max_authors:
+            visit.append(authorships[-1])
+        last_auth = authorships[-1] if authorships else None
+        last_author: dict[str, Any] | None = (
+            {"name": _author_name(last_auth), "h_index": None} if last_auth is not None else None
+        )
+        for auth in visit:
             author = (auth or {}).get("author") or {}
             author_id = author.get("id")
             if not author_id:
@@ -218,14 +247,16 @@ class OpenAlexClient:
                 profile = self._get(f"/authors/{short_id}")
                 h = None
                 if profile is not None:
-                    h = int(
-                        ((profile.get("summary_stats") or {}).get("h_index")) or 0
-                    )
-                    self.cache.set(cache_key, {"h_index": h})
+                    raw_h = (profile.get("summary_stats") or {}).get("h_index")
+                    h = int(raw_h) if raw_h is not None else None
+                    if h is not None:
+                        self.cache.set(cache_key, {"h_index": h})
                 else:
                     enrichment_incomplete = True
             if h is not None:
                 h_indices.append(h)
+            if auth is last_auth and last_author is not None:
+                last_author["h_index"] = h
             if want_author_pct:
                 ap = self._author_field_percentile(short_id)
                 if ap is not None:
@@ -238,6 +269,7 @@ class OpenAlexClient:
                     # caching and the next pass retries.
                     enrichment_incomplete = True
         work["__max_author_h_index"] = max(h_indices) if h_indices else None
+        work["__last_author"] = last_author
         # MAX across the work's authors (mirrors __max_author_h_index): a paper
         # inherits the standing of its STRONGEST author — the common junior-first-
         # author / senior-PI case is exactly what the cold-start prior should
@@ -319,13 +351,16 @@ class OpenAlexClient:
                 abstract=_abstract_from_inverted_index(
                     payload.get("abstract_inverted_index")
                 ),
+                last_author=payload.get("__last_author") or None,
             )
         except (ValueError, TypeError) as exc:
             LOGGER.debug("openalex: payload parse failed: %s", exc)
             return None
 
-    def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    def _get(self, path: str, params: dict[str, Any] | None = None, *, outcome: dict | None = None) -> dict[str, Any] | None:
         if not self.allow_network:
+            if outcome is not None:
+                outcome.update(status="not_attempted", count=None, error_code="network_disabled")
             return None  # cache-only client: a miss yields None, never a network call
         _RATE_LIMITER.acquire()
         merged: dict[str, Any] = dict(params or {})
@@ -336,6 +371,11 @@ class OpenAlexClient:
             resp = self._http.get(url, params=merged)
         except (httpx.HTTPError, OSError) as exc:
             LOGGER.debug("openalex GET failed: %s (%s)", url, exc)
+            if outcome is not None:
+                outcome.update(status="failed", error_code="transport_error")
+            return None
+        if outcome is not None and resp.status_code != 200:
+            outcome.update(status="failed", error_code="rate_limited" if resp.status_code == 429 else "http_error")
             return None
         if resp.status_code == 404:
             return None
@@ -343,9 +383,21 @@ class OpenAlexClient:
             LOGGER.debug("openalex GET %s: HTTP %d", url, resp.status_code)
             return None
         try:
-            return resp.json()
+            payload = resp.json()
+            if outcome is not None:
+                if not isinstance(payload, dict):
+                    raise ValueError
+                json.dumps(payload, allow_nan=False)
+            return payload
         except ValueError:
+            if outcome is not None:
+                outcome.update(status="failed", error_code="parse_error")
             return None
+
+def _author_name(authorship: Any) -> str:
+    a = (authorship or {}).get("author") or {}
+    return str(a.get("display_name") or (authorship or {}).get("raw_author_name") or "").strip()
+
 
 def _abstract_from_inverted_index(inv: dict[str, list[int]] | None) -> str | None:
     """Reconstruct plain abstract text from OpenAlex's ``abstract_inverted_index``.
@@ -363,6 +415,27 @@ def _abstract_from_inverted_index(inv: dict[str, list[int]] | None) -> str | Non
         return None
     positions.sort(key=lambda p: p[0])
     return " ".join(word for _, word in positions)
+
+
+def _location_identifiers(locations: list[dict[str, Any]]) -> list[str]:
+    identifiers = set()
+    for location in locations:
+        doi = normalize_doi(location.get("doi") or "")
+        if doi:
+            identifiers.add(f"doi:{doi}")
+        for field in ("landing_page_url", "pdf_url"):
+            parsed = urlsplit(location.get(field) or "")
+            if parsed.scheme not in {"http", "https"}:
+                continue
+            if parsed.hostname in {"doi.org", "dx.doi.org"}:
+                doi = normalize_doi(parsed.path.lstrip("/"))
+                if doi:
+                    identifiers.add(f"doi:{doi}")
+            elif parsed.hostname == "arxiv.org" and parsed.path.startswith(("/abs/", "/pdf/")):
+                arxiv = normalize_arxiv_id(parsed.path.split("/", 2)[2])
+                if arxiv:
+                    identifiers.add(f"arxiv:{arxiv}")
+    return sorted(identifiers)
 
 
 def _search_hit_from_payload(raw: dict[str, Any], *, source_rank: int) -> OpenAlexSearchHit | None:
@@ -394,6 +467,7 @@ def _search_hit_from_payload(raw: dict[str, Any], *, source_rank: int) -> OpenAl
         is_retracted=bool(raw.get("is_retracted")),
         source_rank=source_rank,
         publication_types=[raw["type"]] if isinstance(raw.get("type"), str) and raw["type"].strip() else [],
+        family_identifier_keys=_location_identifiers(raw.get("locations") or []),
     )
 
 

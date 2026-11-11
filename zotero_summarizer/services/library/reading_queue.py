@@ -329,14 +329,21 @@ def _verdict_priorities() -> dict[str, str]:
     """``{item_key: user_priority}`` for the user's manual verdicts (``label_verdicts``).
 
     Only ``dont_read`` is "handled" (drops out of Read next, like the Today
-    slate); a POSITIVE verdict is a reading intent, so the paper stays and pins
-    to the top (``_ranking.sort_unread``) — a label makes it findable, not hidden.
+    slate); a POSITIVE verdict is a reading intent, so the paper stays but sorts
+    after the undecided ones (``_ranking.sort_unread``) — findable, not hidden.
     UNCAPPED reader: a paged fetch un-hides handled papers once the table outgrows
     it (the 500-cap training-bug failure class).
     """
     from zotero_summarizer.storage import repositories
 
     return repositories.list_label_verdict_priorities(get_settings().triage_db_path)
+
+
+def _own_verdict_keys() -> set[str]:
+    """Papers carrying the owner's own verdict (``source='user'``) — "decided"."""
+    from zotero_summarizer.storage import repositories
+
+    return repositories.list_user_verdict_keys(get_settings().triage_db_path)
 
 
 def build_reading_queue(
@@ -361,8 +368,8 @@ def build_reading_queue(
     filtering; the score cache is global (a Rescore scans the whole library), so
     filters only select which cached scores appear.
 
-    Returns ``{status, items, total_unread, read_hidden, model_ready, error,
-    computed_at, scores_stale}``."""
+    Returns ``{status, items, total_unread, read_hidden, decided_count, model_ready,
+    error, computed_at, scores_stale}``."""
     # "Meaning" search ranks the WHOLE (collection/tag-scoped) library by hybrid
     # relevance, so the substring filter is bypassed; "Exact" keeps it.
     semantic_requested = bool(semantic and str(search or "").strip())
@@ -387,6 +394,7 @@ def build_reading_queue(
     unread, read = _build_recs(
         rows, cached=cached, verdict_priority=verdict_priority,
         reviews=_dr.current_reviews(), proposed_verdicts=verdict_store.read_all(),
+        own_verdicts=_own_verdict_keys(),
     )
     unread, read, search_flags = _order_and_dedup(
         unread, read, search=search, semantic_requested=semantic_requested,
@@ -416,6 +424,8 @@ def build_reading_queue(
         "items": items,
         "total_unread": len(unread),
         "read_hidden": len(read),
+        # Of ``total_unread``: papers with the owner's own verdict, sorted last.
+        "decided_count": sum(1 for r in unread if r["decided"]),
         "model_ready": model_ready,
         "error": err if status == "error" else None,
         "computed_at": computed_at,

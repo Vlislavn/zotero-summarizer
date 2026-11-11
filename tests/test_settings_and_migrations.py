@@ -145,6 +145,7 @@ def test_v7_database_gets_sync_resolution_index_upgrade(tmp_path):
         conn.execute(repositories._CREATE_REVIEW_NOTES_TABLE)
         apply_sync_schema(conn)
         conn.execute("DROP INDEX idx_sync_mutations_resolution")
+        conn.execute(repositories._CREATE_PENDING_CHANGES_TABLE)
         conn.execute(
             "CREATE TABLE schema_migrations (namespace TEXT PRIMARY KEY, version INTEGER NOT NULL,"
             " applied_at TEXT DEFAULT (datetime('now')) )"

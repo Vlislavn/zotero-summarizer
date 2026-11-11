@@ -4,6 +4,7 @@ import Today from './pages/Today.jsx';
 import Settings from './pages/Settings.jsx';
 import Library from './pages/Library.jsx';
 import Search from './pages/Search.jsx';
+import Weekly from './pages/Weekly.jsx';
 import PaperReviewPage from './pages/PaperReviewPage.jsx';
 import Ops from './pages/Ops.jsx';
 import SetupFlow from './pages/SetupFlow.jsx';
@@ -24,17 +25,17 @@ function RedirectTo({ to, extra }) {
 }
 
 export default function App() {
+  const settingUp = useLocation().pathname === '/setup';  // first-run wizard owns the screen: no app nav
   return (
-    <div className="min-h-screen px-4 py-5 max-w-[1400px] mx-auto">
-      <NavBar />
+    <div className="min-h-screen px-2 sm:px-4 py-2 sm:py-5 max-w-[1400px] mx-auto">
+      {!settingUp && <NavBar />}
       <main>
         {/* SetupGate redirects an unconfigured first-run user from the default
             landing (/ or /library) to /setup — never traps a returning user. */}
         <SetupGate>
           <Routes>
-            {/* Land on Read next (the Library reading queue) — the user's most
-                frequent entry; saves a Today→Library click every session. */}
-            <Route path="/" element={<Navigate to="/library" replace />} />
+            {/* Land on Today — the daily decisions; Library is one tap away. */}
+            <Route path="/" element={<Navigate to="/today" replace />} />
             <Route path="/setup" element={<SetupFlow />} />
             <Route path="/today" element={<Today />} />
             <Route path="/settings" element={<Settings />} />
@@ -43,6 +44,7 @@ export default function App() {
             <Route path="/library" element={<Library />} />
             {/* Targeted Search — query-driven pull surface (services/search). */}
             <Route path="/search" element={<Search />} />
+            <Route path="/weekly" element={<Weekly />} />
             {/* Full-page interactive deep review — opened in a new tab from a
                 row's "Open full review ↗" (replaces the old static HTML brief as
                 the in-app open target; the HTML artifact still ships for Zotero). */}

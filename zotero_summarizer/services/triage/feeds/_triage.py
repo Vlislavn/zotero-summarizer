@@ -96,9 +96,9 @@ def _score_survivors(
 
     ``_triage_one`` converts every per-item failure into ``(None, err, fatal)``
     and never raises, so ``fut.result()`` is the per-item boundary, not an
-    exception path. Partitioning preserves input order and matches the former
-    sequential logic exactly (``cand is None`` → error; ``prefilter_low_corpus_affinity``
-    tag → fast-reject; otherwise triaged).
+    exception path. Partitioning preserves input order: ``cand is None`` → error;
+    the producer-owned corpus-prefilter outcome → fast-reject; otherwise triaged.
+    Generated tags are display data, never machine rejection authority.
     """
     triaged_results: list[tuple[dict[str, Any], "TriagedCandidate"]] = []
     fast_rejected_results: list[tuple[dict[str, Any], "TriagedCandidate"]] = []
@@ -131,10 +131,7 @@ def _score_survivors(
                 fatal_seen = True
                 LOGGER.error("[%s] FATAL LLM error: %s", tick_id, err)
             continue
-        is_fast_reject = any(
-            "prefilter_low_corpus_affinity" in (t or "").lower() for t in (cand.summary.tags or [])
-        )
-        if is_fast_reject:
+        if cand.summary._corpus_fast_rejected:
             fast_rejected_results.append((item, cand))
         else:
             triaged_results.append((item, cand))

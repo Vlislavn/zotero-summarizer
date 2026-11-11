@@ -2,12 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import InlineAnnotate from './InlineAnnotate.jsx';
 import OpenBriefButton from './OpenBriefButton.jsx';
 import ProposedVerdictCard from './ProposedVerdictCard.jsx';
+import BulkVerdictBar from './BulkVerdictBar.jsx';
 import ScoreHistogram from './ScoreHistogram.jsx';
 import { StatusBanner, formatShortDate, truncateAuthors } from './shared.jsx';
 import { pretty } from '../../utils/priorityLabels.js';
-import { CHIP_TONE, bandTone, gradeTone, BAND_LABEL } from '../paper/review/tones.js';
+import { COUNTS_EXPLAINER, isDecided, queueCounts, scoreStatus } from './readNextCopy.js';
+import { CHIP_TONE, bandTone, gradeTone, gradeBasis, BAND_LABEL } from '../paper/review/tones.js';
 import { Disclosure } from '../paper/review/primitives.jsx';
 import { humanizeError } from '../../utils/humanizeError.js';
+import { cleanAbstract } from '../../utils/feedText.js';
 import { SORT_FIELDS, SORT_DEFAULT_DIR, DEFAULT_SORT } from '../../utils/relevanceBands.js';
 import Spinner from '../ui/Spinner.jsx';
 import { readStorage } from '../../utils/safeStorage.js';
@@ -19,10 +22,9 @@ import { readStorage } from '../../utils/safeStorage.js';
 const REVEAL_STEP = 60;  // rows revealed initially and per "Show more" click
 const DESKTOP_QUERY = '(min-width: 1024px)';
 
-// Your explicit verdict label. A positive verdict pins the paper to the top of
-// Read next (the backend sort) — this chip marks it so a labelled paper is
-// instantly recognisable instead of vanishing (dont_read is handled-filtered,
-// so it never reaches the queue and isn't in this map).
+// Your own verdict. A decided paper sorts AFTER the undecided ones (the backend
+// sort) and carries this chip, so it stays findable instead of vanishing
+// (dont_read is handled-filtered, so it never reaches the queue).
 const USER_PRIORITY_LABEL = { must_read: 'must read', should_read: 'should read', could_read: 'could read' };
 
 function useMediaQuery(query) {
@@ -50,7 +52,7 @@ function useMediaQuery(query) {
 }
 
 function ExpandedPaperPanel({
-  item, collections, onClose, onSaved, onQueueRefresh, panelRef, variant = 'mobile',
+  item, collections, onClose, onSaved, onQueueRefresh, onNotesDirtyChange, panelRef, variant = 'mobile',
 }) {
   const desktop = variant === 'desktop';
   return (
@@ -84,20 +86,25 @@ function ExpandedPaperPanel({
           collections={collections}
           onSaved={onSaved}
           onQueueRefresh={onQueueRefresh}
+          onNotesDirtyChange={onNotesDirtyChange}
         />
       </div>
     </aside>
   );
 }
 
+// Feed abstracts arrive as clipped HTML ("<p>Nature, Published online… <a hr"): show the
+// text, without the tags or a tag cut off by the clip.
+const previewText = (text) => cleanAbstract(text).replace(/<\/?[a-z][^>]*$/i, '').trim();
+
 export default function ReadNextView({
   items, loading, err, includeRead, onToggleIncludeRead,
-  readHidden, totalUnread, onSaved, status, modelReady, error, computedAt, scoresStale, distribution, onRescore, onReload,
-  selectMode, onToggleSelectMode, selected, onToggleItem, onRunTriage, starting,
+  readHidden, totalUnread, decidedCount = 0, onSaved, status, modelReady, error, computedAt, scoresStale, distribution, onRescore, onReload,
+  selectMode, onToggleSelectMode, selected, onToggleItem, onRunTriage, onBulkDone, starting,
   // Bulk "Add to collection" (the Meaning-search → Zotero collection shortcut):
   // flat collection list + handler from Library; last target remembered so the
   // common "send to my reading collection" case is one click (Working Memory).
-  collections = [], onAddToCollection, addingToCollection = false,
+  collections = [], onAddToCollection, addingToCollection = false, serverAvailable = true, offline = false,
   // Client-side smart filters (Library owns the state; `items` arrives already
   // filtered). rawCount = pre-filter size, so we can tell "nothing fetched" apart
   // from "filtered to zero". filterSig = serialized filters, to reset the reveal.
@@ -117,6 +124,7 @@ export default function ReadNextView({
     computing || errored || err != null || scoresStale || !computedAt
     || items.some((it) => typeof it.relevance_score !== 'number');
   const [expandedKey, setExpandedKey] = useState(null);
+  const [notesDirty, setNotesDirty] = useState(false);
   const expandedPanelRef = useRef(null);
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   // Target for the bulk "Add to collection" action. Defaults to the last-used
@@ -135,6 +143,9 @@ export default function ReadNextView({
   // reset the reveal here instead.
   useEffect(() => { setVisibleCount(REVEAL_STEP); }, [filterSig]);
   const shown = items.slice(0, visibleCount);
+  // Default order groups decided papers last — label where that group starts.
+  const groupDecided = sort.field === 'best' && !semantic && !offline;
+  const firstDecided = groupDecided ? shown.findIndex(isDecided) : -1;
   // Desktop keeps the review beside the list. Mobile renders it directly under
   // the tapped row; otherwise the panel lands after the whole revealed list.
   const expandedItem = expandedKey ? items.find((it) => it.item_key === expandedKey) : null;
@@ -149,11 +160,22 @@ export default function ReadNextView({
     }
   }, [expandedKey, isDesktop]);
 
+  function chooseExpanded(key) {
+    if (notesDirty && !window.confirm('You have unsaved notes on this paper. Leave without saving them?')) return;
+    setNotesDirty(false);
+    setExpandedKey(key);
+  }
+
   function closeExpanded() {
-    setExpandedKey(null);
+    chooseExpanded(null);
+  }
+
+  function refreshExpanded() {
+    if (!notesDirty) onSaved?.();
   }
 
   function saveExpanded() {
+    if (notesDirty) return;
     setExpandedKey(null);
     onSaved?.();
   }
@@ -162,7 +184,16 @@ export default function ReadNextView({
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <div className="text-xs text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span><strong>{totalUnread}</strong> papers</span>
+          <span title={COUNTS_EXPLAINER}>
+            {queueCounts({
+              totalUnread, decidedCount, readHidden, includeRead,
+              shown: items.length, filtered: hasActiveFilters,
+            }).map((part, i) => (
+              <span key={part} className={i === 0 ? '' : 'text-slate-500'}>
+                {i > 0 && ' · '}{i === 0 ? <strong>{part}</strong> : part}
+              </span>
+            ))}
+          </span>
           {/* Zotero-column sort (Jakob's Law: same field names as Zotero's item
               table). One select + one direction toggle; 'Best match' restores the
               blended server order and hides the toggle. */}
@@ -196,7 +227,7 @@ export default function ReadNextView({
             </span>
           )}
           {sort.field === 'best' && (
-            semantic
+            offline ? <span>· cached working set order</span> : semantic
               ? <span>· ranked by similarity to “{searchQuery}”</span>
               : (modelReady
                 ? (
@@ -206,21 +237,28 @@ export default function ReadNextView({
                 )
                 : <span>· ranked by recency (model not ready yet)</span>)
           )}
-          {readHidden > 0 && !includeRead && (
-            <span className="text-slate-400">· {readHidden} read hidden</span>
-          )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          {modelReady && !offline && (
+            // Plainly: how old the ranking is and whether the model changed since.
+            <span
+              className={`text-[11px] ${scoresStale ? 'text-amber-800' : 'text-slate-500'}`}
+              data-testid="score-status"
+            >
+              {scoreStatus({
+                computedAt, scoresStale,
+                unscored: items.filter((it) => typeof it.relevance_score !== 'number').length,
+              })}
+            </span>
+          )}
           {modelReady && rescoreActionable && (
-            // One control, not three, and only when actionable. The score date is
-            // reference (→ title); the only thing worth saying out loud is "the
-            // model changed, rescore" — the stale state IS the button (amber +
-            // named), the single accent (Von Restorff). Current + fully scored →
+            // One control, only when actionable; the stale state IS the button
+            // (amber), the single accent (Von Restorff). Current + fully scored →
             // no button at all.
             <button
               type="button"
               onClick={onRescore}
-              disabled={computing}
+              disabled={computing || !serverAvailable}
               title={`Recompute relevance scores for your whole library against the current model${computedAt ? ` · scores as of ${formatShortDate(computedAt)}` : ''}. First full scan (~2,400 papers) can take a few minutes; re-scans are fast.`}
               className={`px-2 py-0.5 rounded-md border text-[11px] disabled:opacity-50 disabled:cursor-not-allowed ${
                 scoresStale
@@ -228,7 +266,7 @@ export default function ReadNextView({
                   : 'border-slate-300 text-slate-700 hover:bg-slate-50'
               }`}
             >
-              {computing ? 'Scoring…' : scoresStale ? 'Rescore — model updated' : 'Rescore'}
+              {computing ? 'Scoring…' : 'Rescore'}
             </button>
           )}
           <button
@@ -245,11 +283,14 @@ export default function ReadNextView({
             <button
               type="button"
               onClick={onRunTriage}
-              disabled={!selected || selected.size === 0 || starting}
+              disabled={!serverAvailable || !selected || selected.size === 0 || starting}
               className="px-3 py-0.5 rounded-md bg-teal-700 text-[11px] font-semibold text-white hover:bg-teal-800 disabled:bg-slate-300 disabled:text-slate-500"
             >
               {starting ? 'Starting…' : `Run triage (${selected?.size || 0})`}
             </button>
+          )}
+          {selectMode && onBulkDone && (
+            <BulkVerdictBar keys={[...(selected || [])]} disabled={!serverAvailable} onDone={onBulkDone} />
           )}
           {selectMode && collections.length > 0 && onAddToCollection && (
             <span className="inline-flex items-center gap-1">
@@ -269,7 +310,7 @@ export default function ReadNextView({
               <button
                 type="button"
                 onClick={() => onAddToCollection(targetCollection)}
-                disabled={!selected?.size || !targetValid || addingToCollection}
+                disabled={!serverAvailable || !selected?.size || !targetValid || addingToCollection}
                 className="px-3 py-0.5 rounded-md bg-slate-700 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:bg-slate-300 disabled:text-slate-500"
                 title="Add the selected papers to this Zotero collection (backup-first; no more memorizing titles and re-finding them in Zotero)"
               >
@@ -278,11 +319,16 @@ export default function ReadNextView({
             </span>
           )}
           <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
-            <input type="checkbox" checked={includeRead} onChange={onToggleIncludeRead}
+            <input type="checkbox" disabled={!serverAvailable} checked={includeRead} onChange={onToggleIncludeRead}
               className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500" />
             Show already-read
           </label>
         </div>
+      </div>
+      <div className="-mt-1 mb-3">
+        <Disclosure summary="About these counts">
+          <p className="text-[11px] text-slate-500" data-testid="counts-explainer">{COUNTS_EXPLAINER}</p>
+        </Disclosure>
       </div>
       {/* Score distribution is reference, not the task — fold it behind the shared
           Disclosure (closed by default) so the ranked queue owns the top of the
@@ -290,7 +336,7 @@ export default function ReadNextView({
       {modelReady && distribution && (
         <div className="mb-3">
           <Disclosure
-            summary="Score distribution"
+            summary="Filter by score band"
             count={activeBands?.length ? `${activeBands.length} band filter${activeBands.length === 1 ? '' : 's'}` : null}
           >
             <ScoreHistogram distribution={distribution} activeBands={activeBands} onBandClick={onBandClick} />
@@ -364,6 +410,13 @@ export default function ReadNextView({
       <ol className={`space-y-2 ${expandedItem && isDesktop ? 'lg:flex-1 lg:min-w-0' : ''}`}>
         {shown.map((it, idx) => (
           <li key={it.item_key}>
+            {/* Undecided papers lead; the owner's own verdicts follow under one
+                labelled divider (only in the default order, where they are grouped). */}
+            {groupDecided && idx === firstDecided && (
+              <div className="mb-2 mt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500" role="separator">
+                Already decided by you
+              </div>
+            )}
             <div
               className={`w-full flex items-start gap-2 p-2.5 rounded-xl border bg-white hover:border-teal-300 hover:bg-teal-50/30 ${
                 expandedKey === it.item_key ? 'border-teal-400 ring-1 ring-teal-200' : 'border-slate-200'
@@ -379,30 +432,30 @@ export default function ReadNextView({
               )}
               <button
                 type="button"
-                onClick={() => setExpandedKey(expandedKey === it.item_key ? null : it.item_key)}
+                onClick={() => chooseExpanded(expandedKey === it.item_key ? null : it.item_key)}
                 aria-expanded={expandedKey === it.item_key}
                 className="min-w-0 flex-1 text-left flex items-start gap-2 sm:gap-3"
               >
                 <span className="mono text-xs text-slate-400 mt-0.5 w-6 shrink-0 text-right">{idx + 1}</span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-slate-900 line-clamp-2 sm:truncate">{it.title || '(untitled)'}</span>
-                  <span className="block text-xs text-slate-500 line-clamp-1 sm:truncate">{truncateAuthors(it.authors)}</span>
+                  <span className="text-sm font-medium text-slate-900 line-clamp-2 sm:line-clamp-1">{it.title || '(untitled)'}</span>
+                  <span className="text-xs text-slate-500 line-clamp-1">{truncateAuthors(it.authors)}</span>
                   {(it.review_digest?.tldr || it.abstract_preview) && (
-                    <span className="block mt-1 text-xs text-slate-600 line-clamp-2">
-                      {it.review_digest?.tldr || it.abstract_preview}
+                    <span className="mt-1 text-xs text-slate-600 line-clamp-2">
+                      {it.review_digest?.tldr || previewText(it.abstract_preview)}
                     </span>
                   )}
                   {(it.user_priority || it.proposed_verdict?.proposed || typeof it.relevance_score === 'number') && (
                     <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-5">
-                      {/* Your label leads the row (Von Restorff): a paper you
-                          marked is pinned to the top of Read next and flagged
-                          here, so labelling makes it findable, never hidden. */}
-                      {USER_PRIORITY_LABEL[it.user_priority] && (
+                      {/* Your own verdict leads the row (Von Restorff): a decided
+                          paper is listed after the undecided ones and flagged
+                          here, so deciding makes it findable, never hidden. */}
+                      {isDecided(it) && USER_PRIORITY_LABEL[it.user_priority] && (
                         <span
                           className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-amber-100 text-amber-900 border border-amber-300 font-semibold"
-                          title="Your label — you set this paper's reading priority, so it's pinned to the top of Read next."
+                          title="Your own verdict — you already decided this paper, so it is listed after the undecided ones."
                         >
-                          🏷 {USER_PRIORITY_LABEL[it.user_priority]}
+                          You: {USER_PRIORITY_LABEL[it.user_priority]}
                         </span>
                       )}
                       {/* The fleet's pre-decided verdict — quiet in-row marker;
@@ -421,7 +474,7 @@ export default function ReadNextView({
                           ★ {it.relevance_score.toFixed(1)}
                         </span>
                       ) : (
-                        <span className="text-slate-400" title="Not scored yet — run Rescore to rank this paper">
+                        <span className="text-slate-500" title="Not scored yet — run Rescore to rank this paper">
                           not scored yet
                         </span>
                       )}
@@ -429,7 +482,7 @@ export default function ReadNextView({
                           match / library affinity / prestige). Answers "why did I
                           get this paper?" at a glance without opening the row. */}
                       {it.why_reason && (
-                        <span className="text-slate-400" title="Why this surfaced — the strongest signal behind its rank">
+                        <span className="min-w-0 max-w-full truncate text-slate-600" title={`Why it ranks here — the strongest signal behind its score: ${it.why_reason}`}>
                           · {it.why_reason}
                         </span>
                       )}
@@ -462,7 +515,7 @@ export default function ReadNextView({
                               className={`inline-flex items-center px-1.5 py-0 rounded-full border font-semibold ${CHIP_TONE[gradeTone(grade)]}`}
                               title="Full-text deep-review quality grade (A–D) — floats high-quality papers up within their relevance band."
                             >
-                              {grade}
+                              {[grade, gradeBasis(it.quality_met, it.quality_applicable)].filter(Boolean).join(' · ')}
                             </span>
                           );
                         }
@@ -473,7 +526,10 @@ export default function ReadNextView({
                 </span>
                 <span className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 shrink-0">
                   {it.read && <span title="already read" className="text-xs">🧠</span>}
-                  <span className={`inline-block w-2.5 h-2.5 rounded-full ${it.has_pdf ? 'bg-emerald-500' : 'bg-slate-300'}`} title={it.has_pdf ? 'PDF attached' : 'No PDF'} />
+                  <span className="inline-flex items-center gap-1" title={it.has_pdf ? 'PDF attached' : 'No PDF'}>
+                    <span className={`inline-block w-2.5 h-2.5 rounded-full ${it.has_pdf ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                    {it.has_pdf && <span className="text-[10px] font-medium text-emerald-700">PDF</span>}
+                  </span>
                 </span>
               </button>
               {/* Direct shortcut to the standalone HTML brief — a sibling of the
@@ -491,7 +547,7 @@ export default function ReadNextView({
                 itemKey={it.item_key}
                 proposal={it.proposed_verdict}
                 onSaved={saveExpanded}
-                onOverride={() => setExpandedKey(it.item_key)}
+                onOverride={() => chooseExpanded(it.item_key)}
               />
             )}
             {expandedKey === it.item_key && !isDesktop && (
@@ -501,7 +557,8 @@ export default function ReadNextView({
                 panelRef={expandedPanelRef}
                 onClose={closeExpanded}
                 onSaved={saveExpanded}
-                onQueueRefresh={() => onSaved?.()}
+                onNotesDirtyChange={setNotesDirty}
+                onQueueRefresh={refreshExpanded}
               />
             )}
           </li>
@@ -515,7 +572,8 @@ export default function ReadNextView({
           collections={collections}
           onClose={closeExpanded}
           onSaved={saveExpanded}
-          onQueueRefresh={() => onSaved?.()}
+          onNotesDirtyChange={setNotesDirty}
+          onQueueRefresh={refreshExpanded}
           variant="desktop"
         />
       )}

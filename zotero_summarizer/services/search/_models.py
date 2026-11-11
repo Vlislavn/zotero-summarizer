@@ -8,13 +8,15 @@ pipeline), and a status. All are plain dataclasses with explicit ``to_dict`` /
 """
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from zotero_summarizer.domain import normalize_arxiv_id, normalize_doi
+from zotero_summarizer.services.search._accounting import describe_retrieval
 
 class ConfirmedConstraints(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, strict=True, extra="forbid")
@@ -28,8 +30,16 @@ class ScreenRequest(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True, strict=True)
     constraints: ConfirmedConstraints | None = None
+    evidence_policy: Literal["baseline", "question_evidence"] = "baseline"
     query: str = Field(min_length=1, max_length=4000, description="Natural-language research topic")
     questions: list[Annotated[str, Field(min_length=1, max_length=1000)]] = Field(default_factory=list, max_length=10)
+
+    @field_validator("query", "questions")
+    @classmethod
+    def utf8_inputs(cls, value):
+        for text in value if isinstance(value, list) else [value]:
+            text.encode("utf-8")
+        return value
 
 
 @dataclass(slots=True)
@@ -66,6 +76,7 @@ class Candidate:
     publication_types: list[str] = field(default_factory=list)
     version_type: str = "unknown"
     provenance: list[Provenance] = field(default_factory=list)
+    family_identifier_keys: list[str] = field(default_factory=list)
     # Derived downstream:
     query_score: float | None = None   # master key — OUR cross-encoder vs the query
     goal_sim: float | None = None      # weak tiebreak (standing goals); often absent
@@ -85,8 +96,11 @@ class Candidate:
     in_library: bool | None = None
     existing_zotero_key: str | None = None  # the found item's key when in_library is True
     candidate_id: str = ""             # persisted address, independent of later metadata enrichment
+    question_evidence: list[dict[str, Any]] = field(default_factory=list)
+    planned_zotero_key: str = ""       # reserved before effects, not proof of delivery
 
     def __post_init__(self) -> None:
+        self._validate_planned_key()
         if not isinstance(self.publication_types, list) or any(
                 not isinstance(term, str) or not term.strip() for term in self.publication_types):
             raise ValueError("Publication types must be a list of nonempty metadata strings")
@@ -94,9 +108,31 @@ class Candidate:
         self.arxiv_id = normalize_arxiv_id(self.arxiv_id) if self.arxiv_id else ""
         self.pmid = (self.pmid or "").strip()
         self.pmcid = (self.pmcid or "").strip()
+        if not isinstance(self.family_identifier_keys, list):
+            raise ValueError("Family identifiers must be a list of namespaced keys")
+        normalized = []
+        for key in self.family_identifier_keys:
+            if not isinstance(key, str):
+                raise ValueError("Family identifier must be a namespaced string")
+            namespace, separator, value = key.partition(":")
+            if not separator or namespace not in {"doi", "arxiv", "pmid", "pmcid", "openalex"} or not value.strip():
+                raise ValueError("Invalid family identifier namespace or value")
+            if namespace == "doi":
+                value = normalize_doi(value)
+            elif namespace == "arxiv":
+                value = normalize_arxiv_id(value)
+            if not value:
+                raise ValueError("Family identifier normalization produced an empty value")
+            normalized.append(f"{namespace}:{value}")
+        self.family_identifier_keys = list(dict.fromkeys(normalized))
         if not self.candidate_id:
             self.candidate_id = next((ident for ident in (self.doi, self.arxiv_id, self.pmid, self.pmcid,
                                                           self.openalex_id) if ident), "") or f"local:{uuid.uuid4().hex}"
+
+    def _validate_planned_key(self) -> None:
+        key = self.planned_zotero_key
+        if not isinstance(key, str) or (key and re.fullmatch(r"[A-Z0-9]{8}", key) is None):
+            raise ValueError("Planned Zotero key must be empty or eight ASCII uppercase letters/digits")
 
     def identifier_keys(self) -> list[str]:
         """Namespaced identifier tokens for the dedup graph (empty ones dropped)."""
@@ -104,10 +140,14 @@ class Candidate:
             ("doi", self.doi), ("arxiv", self.arxiv_id), ("pmid", self.pmid),
             ("pmcid", self.pmcid), ("openalex", self.openalex_id),
         )
-        return [f"{ns}:{val}" for ns, val in pairs if val]
+        return list(dict.fromkeys([f"{ns}:{val}" for ns, val in pairs if val] + self.family_identifier_keys))
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        self._validate_planned_key()
+        data = asdict(self)
+        if not self.planned_zotero_key:
+            data.pop("planned_zotero_key")
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Candidate":
@@ -124,7 +164,7 @@ class Candidate:
 @dataclass(slots=True)
 class SearchIntent:
     """Structured parse of the raw topic (spec §13.1). ``canonical_question`` is
-    the English paragraph used for the semantic + library-expanded channels."""
+    the English restatement; ``semantic_query`` drives the semantic + library-expanded channels."""
 
     raw_query: str
     canonical_question: str = ""
@@ -141,6 +181,9 @@ class SearchIntent:
     # False when the LLM parse failed and we fell back to the raw query — so a
     # degraded plan is visible in the UI, never silently passed off as planned.
     parse_ok: bool = True
+    # Model-written retrieval queries; empty on stored intents and on parse failure (raw-topic fallback).
+    search_queries: list[str] = field(default_factory=list)
+    semantic_query: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.domain, str):
@@ -158,6 +201,10 @@ class SearchIntent:
     def from_dict(cls, data: dict[str, Any]) -> "SearchIntent":
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
         return cls(**known)
+
+
+_CONSTRAINT_LABELS = {"must_include": "Must mention", "must_not_include": "Must not mention", "study_types": "Study types"}
+_FILTER_ORIGIN_LABELS = {"model_proposed": "Suggested by the AI — not confirmed by you", "user_confirmed": "Confirmed by you"}
 
 
 @dataclass(slots=True)
@@ -201,27 +248,31 @@ class QueryPlan:
         with query variants (tight + bag) shows one row per variant; else the scalar."""
         rows: list[tuple[str, str]] = [("library", self.library_expanded or self.library_raw)]
         for q in (self.openalex_lexical_variants or [self.openalex_lexical]):
-            rows.append(("openalex (lexical)", q))
-        rows.append(("openalex (semantic)", self.openalex_semantic))
+            rows.append(("OpenAlex · keyword search", q))
+        rows.append(("OpenAlex · meaning search", self.openalex_semantic))
         for q in (self.europepmc_variants or [self.europepmc]):
             rows.append(("europepmc", q))
         for q in (self.arxiv_variants or [self.arxiv]):
             rows.append(("arxiv", q))
         rows.append(("crossref", self.crossref))
-        rows.append(("semantic scholar", self.semantic_scholar))
+        rows.append(("Semantic Scholar", self.semantic_scholar))
         rows.append(("openreview", self.openreview))
-        for name in ("must_include", "must_not_include", "study_types"):
+        for name, label in _CONSTRAINT_LABELS.items():
             if values := getattr(self, name):
-                rows.append((f"local {name} (" + ("source metadata" if name == "study_types" and self.constraint_origin != "legacy_unknown" else "title/abstract") + ")", "; ".join(values)))
-        for source, counts in self.retrieval_accounting.items():
-            rows.append((f"retrieval {source}", "; ".join(f"{key}: {value}" for key, value in counts.items())))
-        rows.append(("constraint authority", self.constraint_origin))
+                rows.append((f"{label} (" + ("source metadata" if name == "study_types" and self.constraint_origin != "legacy_unknown" else "title/abstract") + ")", "; ".join(values)))
+        described = {s: describe_retrieval(c) for s, c in self.retrieval_accounting.items() if isinstance(c, dict) and "observations" in c}
+        for source, (text, _failed) in described.items():
+            rows.append((f"retrieval {source}", text))
+        if any(failed for _text, failed in described.values()):
+            rows.append(("retrieval", "Some sources failed — results may be incomplete."))
+        if origin := _FILTER_ORIGIN_LABELS.get(self.constraint_origin):
+            rows.append(("Filters", origin))
         if self.domain_note:
-            rows.append(("domain context", self.domain_note))
+            rows.append(("Domain context", self.domain_note))
         for name, values in self.pending_constraints.items():
             if values:
-                rows.append((f"confirmation required: {name}", "; ".join(values)))
-        rows.append(("coverage", "Scholarly sources only; handbooks and official guidance may be missing. "
+                rows.append((f"Needs your confirmation: {_CONSTRAINT_LABELS.get(name, name.replace('_', ' ')).lower()}", "; ".join(values)))
+        rows.append(("Coverage", "Scholarly sources only; handbooks and official guidance may be missing. "
                      "Search the relevant official publisher separately. Missing publication-type metadata is unknown."))
         return [{"source": s, "query": q} for s, q in rows if q]
 
@@ -246,12 +297,31 @@ class ResearchSession:
     status: str = "created"
     screened_count: int = 0
     refinements: list[dict[str, Any]] = field(default_factory=list)
+    evidence_policy: str = "baseline"
+    evidence_status: dict[str, Any] = field(default_factory=dict)
+    evidence_baseline_order: list[str] = field(default_factory=list)
+    related: dict[str, Any] = field(default_factory=dict)
+    discovery: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        _require_unique_addresses(self.candidates)
+        from zotero_summarizer.services.search._question_policy import invalidate_stale_evidence
 
-    def to_dict(self) -> dict[str, Any]:
         _require_unique_addresses(self.candidates)
+        if (not isinstance(self.evidence_baseline_order, list)
+                or any(not isinstance(key, str) or not key.strip() for key in self.evidence_baseline_order)
+                or len(set(self.evidence_baseline_order)) != len(self.evidence_baseline_order)):
+            raise ValueError("Evidence baseline order must contain unique candidate addresses")
+        invalidate_stale_evidence(self)
+
+    def to_dict(self, *, for_display: bool = False, for_storage: bool = False) -> dict[str, Any]:
+        from zotero_summarizer.services.search._question_policy import evidence_view, invalidate_stale_evidence
+
+        _require_unique_addresses(self.candidates)
+        binding = invalidate_stale_evidence(self)
+        discovery = dict(self.discovery) if for_storage else {}
+        if self.discovery and not for_storage:
+            discovery = {"version": self.discovery.get("version"), "seed_key": self.discovery.get("seed_key"),
+                         "freshness": "unverified", "new_actions_allowed": False}
         return {
             "id": self.id,
             "created_at": self.created_at,
@@ -259,14 +329,23 @@ class ResearchSession:
             "intent": self.intent.to_dict(),
             "plan": self.plan.to_dict(),
             "questions": list(self.questions),
-            "candidates": [c.to_dict() for c in self.candidates],
+            "candidates": [{**c.to_dict(), "question_evidence": evidence_view(c, self, binding)
+                            if for_display else c.question_evidence} for c in self.candidates],
+            "evidence_policy": self.evidence_policy,
+            "evidence_status": dict(self.evidence_status),
+            "evidence_baseline_order": list(self.evidence_baseline_order),
             "status": self.status,
             "screened_count": self.screened_count,
             "refinements": [dict(r) for r in self.refinements],
+            "related": dict(self.related) if for_storage else {},
+            **({"discovery": discovery} if self.discovery or for_storage else {}),
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ResearchSession":
+        discovery = dict(data.get("discovery") or {})
+        if discovery and not {"snapshot", "context_fingerprint", "candidate_fingerprint"} <= discovery.keys():
+            raise ValueError("Discovery projections cannot restore durable sessions")
         candidates = []
         for index, row in enumerate(data.get("candidates") or []):
             candidate = Candidate.from_dict(row)
@@ -287,4 +366,9 @@ class ResearchSession:
             status=data.get("status", "created"),
             screened_count=int(data.get("screened_count") or 0),
             refinements=[dict(r) for r in data.get("refinements") or []],
+            evidence_policy=data.get("evidence_policy", "baseline"),
+            evidence_status=dict(data.get("evidence_status") or {}),
+            evidence_baseline_order=data.get("evidence_baseline_order", []),
+            related=dict(data.get("related") or {}),
+            discovery=discovery,
         )

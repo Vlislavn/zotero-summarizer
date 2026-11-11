@@ -1,0 +1,332 @@
+[
+  {
+    "feature": "Setup and configuration",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_setup_doctor_runtime_identity.py",
+        "wholePassed": 7,
+        "optInPassed": 0,
+        "unexecuted": []
+      },
+      {
+        "sourceTest": "tests/test_setup_surface_browser.py",
+        "wholePassed": 0,
+        "optInPassed": 8,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Model routing",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_provider_routing.py",
+        "wholePassed": 27,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Offline models",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_offline.py",
+        "wholePassed": 27,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "RSS subscriptions",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_rss_api_routes.py",
+        "wholePassed": 6,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Search",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_search_materialize_recovery.py",
+        "wholePassed": 5,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Related saved papers",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_related_client_consent.py",
+        "wholePassed": 1,
+        "optInPassed": 0,
+        "unexecuted": []
+      },
+      {
+        "sourceTest": "tests/test_related_session_projection.py",
+        "wholePassed": 8,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Saved-paper discovery",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_discovery_server.py",
+        "wholePassed": 28,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Daily triage",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_review_eligibility.py",
+        "wholePassed": 16,
+        "optInPassed": 0,
+        "unexecuted": []
+      },
+      {
+        "sourceTest": "tests/test_abstract_reading_boundary.py",
+        "wholePassed": 61,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Reading reviews",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_review_source_boundary.py",
+        "wholePassed": 35,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Paper questions and notes",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_review_questions.py",
+        "wholePassed": 33,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Zotero changes",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_pending_confirmation.py",
+        "wholePassed": 33,
+        "optInPassed": 0,
+        "unexecuted": []
+      },
+      {
+        "sourceTest": "tests/test_pending_rejection_atomic.py",
+        "wholePassed": 10,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "RSS read-state backups",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_raw_feed_backup.py",
+        "wholePassed": 14,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Labels and learning",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_verdict_training.py",
+        "wholePassed": 3,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Model history and restore",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_model_backup_rollback.py",
+        "wholePassed": 11,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Weekly digests",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_research_feed_web.py",
+        "wholePassed": 52,
+        "optInPassed": 0,
+        "unexecuted": []
+      },
+      {
+        "sourceTest": "tests/test_research_feed_ranking.py",
+        "wholePassed": 106,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Telegram news",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_telegram_public_cli.py",
+        "wholePassed": 9,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Feedback analysis",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_feedback_analysis_operation.py",
+        "wholePassed": 59,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Offline review",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_offline_sync.py",
+        "wholePassed": 10,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Remote access",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_gateway_real_transport.py",
+        "wholePassed": 4,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "MCP tools",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_mcp_search_contract.py",
+        "wholePassed": 14,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Search question evidence",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_search_question_policy.py",
+        "wholePassed": 16,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Support comparison",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_recorded_support_binding.py",
+        "wholePassed": 2,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Priority comparison",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_priority_comparison.py",
+        "wholePassed": 3,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Collection comparison",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_collection_comparison.py",
+        "wholePassed": 4,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  },
+  {
+    "feature": "Interpretation experiment",
+    "canonicalLinkedRegressions": [
+      {
+        "sourceTest": "tests/test_interpretation_experiment_review_fleet.py",
+        "wholePassed": 17,
+        "optInPassed": 0,
+        "unexecuted": []
+      }
+    ],
+    "scope": "Protocol/owned synthetic execution, not model/scientific/account/hardware certification; original50 and current built98 provide complementary UI coverage."
+  }
+]

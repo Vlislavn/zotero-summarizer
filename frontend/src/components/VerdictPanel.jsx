@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
-import { PRIORITY_LABELS, pretty } from '../utils/priorityLabels.js';
+import { useEffect, useRef, useState } from 'react';
+import { PRIORITY_LABELS, pretty, isAutoVerdict } from '../utils/priorityLabels.js';
 import { formatShortDate } from './library/shared.jsx';
+import { DECISION_BTN, DECISION_HOVER, DECISION_TINT, DECISION_WORD } from './decisionVocab.js';
+import Icon from './ui/Icon.jsx';
+import { SectionLabel } from './paper/review/primitives.jsx';
 
 // Verdict editor for a single paper.
 // Props:
@@ -24,7 +27,7 @@ export const PRIORITIES = [
 ].map((p) => ({ ...p, label: PRIORITY_LABELS[p.key] }));
 
 // Text-colour per priority so the saved-verdict word reads its own tone — fixes
-// the bug where every "Previously" value was hardcoded emerald (a saved Remove ❌
+// the bug where every "Previously" value was hardcoded emerald (a saved Remove
 // rendered green). Pretty label + correct colour, not the raw enum.
 const PRIORITY_TEXT = {
   must_read: 'text-emerald-700',
@@ -32,6 +35,12 @@ const PRIORITY_TEXT = {
   could_read: 'text-amber-700',
   dont_read: 'text-rose-700',
 };
+
+function verdictDraft(itemKey, verdict) {
+  const priority = verdict?.user_priority ?? null;
+  const comment = verdict?.comment ?? '';
+  return { itemKey, priority, comment, baselinePriority: priority, baselineComment: comment, editing: !verdict };
+}
 
 export default function VerdictPanel({
   itemKey,
@@ -45,27 +54,33 @@ export default function VerdictPanel({
   deleting = false,
   deleteError = null,
 }) {
-  const [priority, setPriority] = useState(existingVerdict?.user_priority ?? null);
-  const [comment, setComment] = useState(existingVerdict?.comment ?? '');
-  const [editing, setEditing] = useState(!existingVerdict);
+  const [draft, setDraft] = useState(() => verdictDraft(itemKey, existingVerdict));
+  const { priority, comment, editing } = draft;
+  const submitted = useRef(null);
 
-  // Reset when a different paper is selected or the verdict changes (e.g. after a
-  // successful mutation invalidates the query).
   useEffect(() => {
-    setPriority(existingVerdict?.user_priority ?? null);
-    setComment(existingVerdict?.comment ?? '');
-    setEditing(!existingVerdict);
-  }, [itemKey, existingVerdict?.id, existingVerdict?.user_priority, existingVerdict?.comment]);
+    const pending = submitted.current;
+    const acknowledged = pending?.itemKey === itemKey
+      && pending.priority === existingVerdict?.user_priority
+      && pending.comment === (existingVerdict?.comment ?? '');
+    if (acknowledged || pending?.itemKey !== itemKey) submitted.current = null;
+    setDraft((previous) => {
+      const changed = previous.priority !== previous.baselinePriority || previous.comment !== previous.baselineComment;
+      const unchangedSinceSubmit = pending && previous.priority === pending.priority && previous.comment === pending.comment;
+      return previous.itemKey === itemKey && changed && !(acknowledged && unchangedSinceSubmit)
+        ? previous : verdictDraft(itemKey, existingVerdict);
+    });
+  }, [itemKey, existingVerdict]);
 
   function handleSave() {
     if (!priority) return;
+    submitted.current = { itemKey, priority, comment };
     onSubmit({ user_priority: priority, comment });
   }
 
   function handleCancel() {
-    setPriority(existingVerdict?.user_priority ?? null);
-    setComment(existingVerdict?.comment ?? '');
-    if (existingVerdict) setEditing(false);
+    submitted.current = null;
+    setDraft(verdictDraft(itemKey, existingVerdict));
   }
 
   function handleDelete() {
@@ -82,10 +97,10 @@ export default function VerdictPanel({
   if (existingVerdict && !editing) {
     return (
       <div>
-        <h3 className="text-sm font-bold text-slate-900 mb-3">Your verdict</h3>
+        <SectionLabel level={3} className="mb-3">Your verdict</SectionLabel>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-slate-600">
           <span>
-            Previously:{' '}
+            {isAutoVerdict(existingVerdict) ? 'Auto:' : 'Yours:'}{' '}
             <span className={`font-semibold ${PRIORITY_TEXT[existingVerdict.user_priority] || 'text-slate-700'}`}>
               {pretty(existingVerdict.user_priority)}
             </span>
@@ -99,7 +114,7 @@ export default function VerdictPanel({
           <span className="ml-auto flex gap-1.5">
             <button
               type="button"
-              onClick={() => setEditing(true)}
+              onClick={() => setDraft((previous) => ({ ...previous, editing: true }))}
               className="px-2 py-0.5 rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
             >
               Edit
@@ -138,7 +153,7 @@ export default function VerdictPanel({
   const dirty = existingVerdict ? editing : Boolean(priority || comment);
   return (
     <div>
-      <h3 className="text-sm font-bold text-slate-900 mb-3">Your verdict</h3>
+      <SectionLabel level={3} className="mb-3">Your verdict</SectionLabel>
 
       <div className="flex flex-wrap gap-2 mb-3">
         {PRIORITIES.map((p) => {
@@ -147,12 +162,12 @@ export default function VerdictPanel({
             <button
               key={p.key}
               type="button"
-              onClick={() => setPriority(p.key)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
-                active ? `${p.cls} border-transparent` : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-              }`}
+              onClick={() => setDraft((previous) => ({ ...previous, priority: p.key }))}
+              aria-pressed={active}
+              aria-label={p.label}
+              className={`${DECISION_BTN} ${DECISION_TINT[p.key]} ${DECISION_HOVER[p.key]} ${active ? 'border-forest-800 ring-1 ring-forest-800' : ''}`}
             >
-              {p.label}
+              {active && <Icon name="check" size={14} strokeWidth={2} />}{DECISION_WORD[p.key]}
             </button>
           );
         })}
@@ -161,7 +176,7 @@ export default function VerdictPanel({
       <textarea
         rows={4}
         value={comment}
-        onChange={(e) => setComment(e.target.value)}
+        onChange={(e) => setDraft((previous) => ({ ...previous, comment: e.target.value }))}
         placeholder="Why? (free text — used to detect patterns later)"
         className="w-full text-sm px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500"
       />

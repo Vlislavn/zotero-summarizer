@@ -14,7 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from zotero_summarizer.services.library._grounding import quote_is_grounded
-from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, paper_block, untrusted_input
 
 # Body chars per section fed to the summarizer — enough to characterize a section
 # without spending the prompt budget on a long paper's full body.
@@ -46,6 +46,14 @@ _SECTION_SUPPORT_PROMPT = (
     'from that prefix that helps establish the summary; for false, use an empty quote. '
     'Start {{ end }}.'
 )
+
+
+def _lead(body: str | None) -> str:
+    """Prompt opening: the shared whole-paper block first (prefix cache, #136), else the bare rule."""
+    if not body:
+        return UNTRUSTED_INPUT_RULE + "\n\n"
+    return paper_block(body) + ("The whole paper is given above for context only; judge each section "
+                                "solely by its own supplied text below.\n\n")
 
 
 class _SectionLine(BaseModel):
@@ -86,7 +94,7 @@ class _SectionCandidate:
     text: str
 
 
-def _verify_candidates(candidates: list[_SectionCandidate], llm: Any) -> set[int]:
+def _verify_candidates(candidates: list[_SectionCandidate], llm: Any, body: str | None = None) -> set[int]:
     expected = [(candidate.index, candidate.section_id) for candidate in candidates]
     if len(set(expected)) != len(expected) or len({section_id for _, section_id in expected}) != len(expected):
         raise SectionVerifierUnavailable("Section verifier candidates have duplicate mappings")
@@ -97,7 +105,7 @@ def _verify_candidates(candidates: list[_SectionCandidate], llm: Any) -> set[int
         for c in candidates
     ))
     parsed = llm.pydantic_prompt(
-        prompt=UNTRUSTED_INPUT_RULE + "\n\n" + _SECTION_SUPPORT_PROMPT.format(blocks=blocks),
+        prompt=_lead(body) + _SECTION_SUPPORT_PROMPT.format(blocks=blocks),
         pydantic_model=_SectionSupportResponse,
     )
     actual = [(check.index, check.section_id) for check in parsed.checks]
@@ -119,13 +127,15 @@ def _verify_candidates(candidates: list[_SectionCandidate], llm: Any) -> set[int
     return {check.index for check in parsed.checks if check.supported}
 
 
-def summarize_sections(sections: list[dict[str, Any]], llm: Any) -> dict[str, str]:
+def summarize_sections(sections: list[dict[str, Any]], llm: Any, body: str | None = None) -> dict[str, str]:
     """Return supported ``{section_id: one_sentence}`` entries.
 
     One batched generation call is followed by one batched support check against
     each candidate's selected original-text prefix. Errors propagate (the ``deep_review``
     layer boundary degrades this optional enrichment). Invalid generation rows,
-    unsupported claims and sections without body text are absent from the map.
+    unsupported claims and sections without body text are absent from the map. ``body`` (the
+    cleaned whole paper) leads both prompts as shared context; each one-liner and its quote must
+    still be grounded in ITS OWN section prefix, never elsewhere in the body.
     """
     usable = [s for s in (sections or []) if str(s.get("text") or "").strip()][:_MAX_SECTIONS]
     if not usable:
@@ -139,7 +149,7 @@ def summarize_sections(sections: list[dict[str, Any]], llm: Any) -> dict[str, st
         for i, (section, selected_text) in enumerate(selected_sections)
     ))
     generated = llm.pydantic_prompt(
-        prompt=UNTRUSTED_INPUT_RULE + "\n\n" + _SECTION_SUMMARY_PROMPT.format(blocks=blocks),
+        prompt=_lead(body) + _SECTION_SUMMARY_PROMPT.format(blocks=blocks),
         pydantic_model=_SectionSummaryResponse,
     )
     candidates = []
@@ -159,7 +169,7 @@ def summarize_sections(sections: list[dict[str, Any]], llm: Any) -> dict[str, st
             ))
     if not candidates:
         return {}
-    supported = _verify_candidates(candidates, llm)
+    supported = _verify_candidates(candidates, llm, body)
     return {candidate.section_id: candidate.summary for candidate in candidates
             if candidate.index in supported}
 

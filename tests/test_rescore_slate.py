@@ -12,6 +12,11 @@ import json
 import sqlite3
 from types import SimpleNamespace
 
+import numpy as np
+import pytest
+
+from zotero_summarizer.services.model import classifier_embed
+
 from zotero_summarizer.services.triage import rescore_slate as rs
 from zotero_summarizer.services.triage.daily_select._candidate import row_prestige
 from zotero_summarizer.storage import feeds as feeds_storage
@@ -73,6 +78,31 @@ def test_update_scores_preserves_decision_and_read_status(tmp_path):
         conn.close()
 
 
+@pytest.mark.parametrize("item_id", [1, 8273])
+def test_rescore_reuses_the_live_gate_embedding_cache(tmp_path, monkeypatch, item_id):
+    db = tmp_path / "corpus.db"
+    original = {"item_id": item_id, "title": "A paper", "abstract": "Its abstract"}
+    expected = np.arange(768, dtype=np.float32).reshape(1, 768)
+    monkeypatch.setattr(classifier_embed, "compute_embeddings_batch", lambda pairs: expected)
+    classifier_embed.get_or_compute_embeddings_batch(db, [original])
+
+    def unexpected_inference(pairs):
+        pytest.fail("Rescoring unchanged feed content must reuse its cached embedding")
+
+    monkeypatch.setattr(classifier_embed, "compute_embeddings_batch", unexpected_inference)
+    reconstructed = rs._item_from_row(
+        {"id": 99, "feed_item_id": item_id, "guid": "https://example.org/paper",
+         "title": original["title"], "abstract": original["abstract"]}, {},
+    )
+    actual = classifier_embed.get_or_compute_embeddings_batch(db, [reconstructed])
+    np.testing.assert_array_equal(actual, expected)
+
+
+def test_rescore_keeps_guid_identity_for_rows_without_a_feed_item_id():
+    assert rs._item_from_row({"id": 99, "guid": "old-guid"}, {})["item_key"] == "old-guid"
+    assert rs._item_from_row({"id": 99}, {})["item_key"] == "row-99"
+
+
 # --- rescore_slate orchestrator -------------------------------------------
 
 class _FakePred:
@@ -128,8 +158,8 @@ def test_rescore_slate_reranks_in_place_and_skips_handled(tmp_path, monkeypatch)
     )
 
     gate = _FakeGate({
-        "g1": (4.6, "should_read", 0.95),   # promoted + high percentile
-        "g2": (1.5, "dont_read", 0.05),     # demoted + low percentile
+        "1": (4.6, "should_read", 0.95),    # promoted + high percentile
+        "2": (1.5, "dont_read", 0.05),      # demoted + low percentile
     })
     monkeypatch.setattr(rs, "get_settings", lambda: SimpleNamespace(
         triage_db_path=db, corpus_db_path=tmp_path / "corpus.db"))

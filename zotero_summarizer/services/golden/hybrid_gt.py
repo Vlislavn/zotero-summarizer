@@ -32,6 +32,12 @@ Source-of-truth precedence (highest first):
     4. gold_priority_final from CSV               -> source="derived"
     5. row missing from both stores               -> not in the result dict
 
+``source='auto_quality'`` verdicts (the quality gate's own ``dont_read``) are
+not labels at all: the model would learn from its own gate. They are skipped
+here (``_training_label_state``), so the row keeps its derived label, and a
+gate-only feed row is not a training row. A later user relabel flips the row to
+``source='user'`` and it enters as rung 1.
+
 Single responsibility: read both stores, merge, return. No I/O beyond the
 reads. Callers that need per-row metadata still load the CSV themselves and
 call ``apply_hybrid`` on each row.
@@ -46,6 +52,7 @@ from typing import Any, Iterable
 from zotero_summarizer.domain import (
     PRIORITY_TO_RELEVANCE as _PRIORITY_TO_RELEVANCE,
     ReadingPriority,
+    VERDICT_SOURCE_AUTO_QUALITY,
     VERDICT_SOURCE_MACHINE_ADD,
     score_to_priority,
 )
@@ -103,6 +110,14 @@ def _load_label_state(db_path: Path) -> dict[str, dict[str, Any] | None]:
             verdict = out[stable_key]
             out[old_key] = {**verdict, "item_key": old_key} if verdict is not None else None
     return out
+
+
+def _training_label_state(db_path: Path) -> dict[str, dict[str, Any] | None]:
+    """``_load_label_state`` minus machine-derived gate verdicts (not ground truth)."""
+    return {
+        key: verdict for key, verdict in _load_label_state(db_path).items()
+        if verdict is None or verdict.get("source") != VERDICT_SOURCE_AUTO_QUALITY
+    }
 
 
 def _active_rows(
@@ -208,7 +223,7 @@ def load_hybrid_labels(
     if not csv_path.exists():
         raise FileNotFoundError(f"golden CSV not found at {csv_path}")
 
-    user = _load_label_state(db_path)
+    user = _training_label_state(db_path)
     outcomes = load_resolved_outcomes(db_path)
     out: dict[str, dict[str, Any]] = {}
 
@@ -268,7 +283,7 @@ def apply_hybrid(
     appended to ``gold_signal_tier`` — ``services.model.label_weights`` keys
     the "resolved observation" confidence weight on that segment.
     """
-    user = _load_label_state(db_path)
+    user = _training_label_state(db_path)
     outcomes = load_resolved_outcomes(db_path)
     out: list[dict[str, Any]] = []
     for row in _active_rows(_with_training_samples(rows, user), user):

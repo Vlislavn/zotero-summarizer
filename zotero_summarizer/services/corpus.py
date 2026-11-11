@@ -165,6 +165,8 @@ async def refresh_corpus_items_by_keys(item_keys: list[str]) -> tuple[int, int, 
     reader = getattr(app_state, "zotero_reader", None)
     if reader is None or getattr(app_state, "embedding_cache", None) is None:
         return 0, 0, 0
+    if not app_state.app_state.config.corpus.enabled:
+        return 0, 0, 0
 
     corpus_lock = getattr(app_state, "corpus_write_lock", None)
     if corpus_lock is None:

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { updateItemCollections } from '../../api/libraryApi.js';
 import { readStorage, writeStorage } from '../../utils/safeStorage.js';
+import useServerAvailable from '../../hooks/useServerAvailable.js';
+import ServerUnavailableNote from './ServerUnavailableNote.jsx';
 
 // The user files most papers into their "Read Next" reading list, so the picker
 // pre-selects it by default (one click "Add"). Matched by name — robust to the
@@ -28,6 +30,7 @@ function preferredKey(addable) {
 // as the syncs. `current` = [{key,name,path}] from the detail payload;
 // `collections` = the flat [{key,name,depth}] list Library already loads.
 export default function CollectionEditor({ itemKey, current = [], collections = [], onChanged }) {
+  const serverAvailable = useServerAvailable();
   const [target, setTarget] = useState('');
   const [busyKey, setBusyKey] = useState('');
   const [err, setErr] = useState(null);
@@ -73,10 +76,14 @@ export default function CollectionEditor({ itemKey, current = [], collections = 
     }
   }
 
+  if (!serverAvailable) {
+    return <ServerUnavailableNote what="Collection changes">{current.length > 0 && ` Cached collections: ${current.map(c => c.name).join(', ')}`}</ServerUnavailableNote>;
+  }
+
   return (
     <div className="text-xs">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">In</span>
+        <span className="text-[11px] uppercase tracking-wider font-medium text-slate-500">In</span>
         {current.length === 0 && <span className="text-slate-400">no collections yet</span>}
         {current.map((c) => (
           <span
@@ -115,7 +122,7 @@ export default function CollectionEditor({ itemKey, current = [], collections = 
           type="button"
           onClick={() => run({ add: [target] }, target)}
           disabled={!target || !!busyKey}
-          className="px-2 py-0.5 rounded-md bg-slate-700 text-white font-semibold hover:bg-slate-800 disabled:bg-slate-300 disabled:text-slate-500"
+          className="px-2 py-0.5 rounded-md bg-forest-800 text-white font-medium hover:bg-forest-900 disabled:bg-slate-200 disabled:text-slate-500"
         >
           {busyKey && busyKey === target ? 'Adding…' : 'Add'}
         </button>

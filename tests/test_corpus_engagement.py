@@ -65,7 +65,7 @@ async def _check_import_paths(tmp_path, monkeypatch, route):
     )
     runtime = SimpleNamespace(
         embedding_cache=cache, zotero_reader=reader,
-        app_state=SimpleNamespace(config=SimpleNamespace(corpus=SimpleNamespace(stale_days_for_weak_negative=30))),
+        app_state=SimpleNamespace(config=SimpleNamespace(corpus=SimpleNamespace(enabled=True, stale_days_for_weak_negative=30))),
     )
     monkeypatch.setattr(service, "state", lambda: runtime)
     monkeypatch.setattr(service.triage_db, "get_latest_results_for_items", lambda keys: {})

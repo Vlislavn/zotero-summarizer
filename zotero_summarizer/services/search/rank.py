@@ -67,14 +67,20 @@ def _lexical_score(query: str, cand: Candidate) -> float:
     return len(q_terms & doc_terms) / len(q_terms)
 
 
-def score_query_relevance(query: str, candidates: list[Candidate], *, reranker_model: str) -> str:
-    """Fill ``candidate.query_score`` for every candidate. Uses the local
-    cross-encoder; if it is still loading after a short wait, degrades to a lexical
-    score. Returns the mode used ("cross_encoder" | "lexical")."""
+def score_query_relevance(query: str, candidates: list[Candidate], *, reranker_model: str,
+                          reranker_enabled: bool = True) -> str:
+    """Fill ``candidate.query_score`` with cross-encoder or lexical relevance.
+    Explicitly disabled or still-loading rerankers use lexical scoring.
+    Returns the mode used ("cross_encoder" | "lexical")."""
     query = (query or "").strip()
     if not candidates or not query:
         for cand in candidates:
             cand.query_score = 0.0
+        return "lexical"
+
+    if not reranker_enabled:
+        for cand in candidates:
+            cand.query_score = _lexical_score(query, cand)
         return "lexical"
 
     reranker = get_reranker(reranker_model)

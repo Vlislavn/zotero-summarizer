@@ -91,11 +91,13 @@ def _maybe_refresh_app_rss(reader: ZoteroReader, feeds_cfg: dict[str, Any], tick
     enabled feed across successive ticks."""
     if hasattr(reader, "refresh_feeds"):
         max_feeds = int(feeds_cfg.get("max_feeds_per_pass", 10))
-        max_new = int(feeds_cfg.get("max_new_items_per_feed", 25))
+        backfill_days = int(feeds_cfg.get("backfill_days", 7))
+        max_pages = int(feeds_cfg.get("max_pages_per_feed", 10))
         timeout = float(feeds_cfg.get("per_feed_timeout_secs", 10.0))
         refreshed = reader.refresh_feeds(
             max_feeds=max_feeds,
-            max_new_items_per_feed=max_new,
+            backfill_days=backfill_days,
+            max_pages_per_feed=max_pages,
             per_feed_timeout=timeout,
         )
         LOGGER.info("[%s] app RSS refresh: %s", tick_id, refreshed)
@@ -120,44 +122,30 @@ def _maybe_rescue_l1(
     return triaged_results
 
 
-def _auto_review_slate(tick_id: str) -> None:
-    """In-place full-text review of the TOP Today slate candidates so Today cards show a
-    real quality grade — WITHOUT a Zotero write (the user asked: review in place, persist
-    if later added). Resolves each candidate by its ``stable_feed_key`` (``AppLibraryReader``,
-    decision-independent), acquires a PDF into the local cache, and reviews on the shared
-    deep_review pool (provider-aware: parallel remote, queued local). The review caches under
-    ``stable_feed_key`` — the Today quality bridge joins on it, and ``add_to_library`` copies it
-    onto the new library key. Already-cached feed keys are skipped so re-ticks stay cheap.
-    Gated by ``quality_review.auto_on_tick_k`` (0 disables). Daemon-tick boundary: a failure is
-    logged, never crashes the tick."""
+def _auto_prepare_today(tick_id: str) -> None:
+    """Start background Today preparation (``today_preparation``): analyze up to
+    ``quality_review.auto_on_tick_k`` new top-ranked feed papers in place, without a
+    Zotero write. 0 disables; a run already in progress is left alone. Daemon-tick
+    boundary: a failure is logged, never crashes the tick."""
     config = _load_config()
     k = int((config.get("quality_review") or {}).get("auto_on_tick_k") or 0)
     if k <= 0:
         return
     try:
-        from zotero_summarizer.services._common import rank_quality_first_enabled, settings
-        from zotero_summarizer.services.library import deep_review
-        from zotero_summarizer.services.library.app_library_reader import AppLibraryReader
-        from zotero_summarizer.services.triage.daily_select import assemble_daily_slate
+        from zotero_summarizer.services._common import settings
+        from zotero_summarizer.services.triage import today_preparation
 
-        db_path = settings().triage_db_path
-        slate = assemble_daily_slate(db_path=db_path, K=k, quality_first=rank_quality_first_enabled())  # explicit arm: the P3 interleave is user-facing-GET only — a daemon merge must never claim the day's interleave_log nor widen auto-review beyond the shipped arm (README)
-        done = deep_review.current_review_keys()
-        keys = [p.stable_feed_key for p in slate.papers
-                if p.stable_feed_key and p.stable_feed_key not in done][:k]
-        if not keys:
-            return
-        deep_review.start(item_keys=keys, acquire_missing=True, reader=AppLibraryReader(db_path))
-        LOGGER.info("[%s] auto-review (in-place): submitted %d slate pick(s)", tick_id, len(keys))
+        if today_preparation.start(settings().triage_db_path, limit=k):
+            LOGGER.info("[%s] today preparation started (limit=%d)", tick_id, k)
     except Exception:
-        LOGGER.exception("[%s] in-place auto-review submit failed", tick_id)
+        LOGGER.exception("[%s] today preparation start failed", tick_id)
 
 
 def _auto_render_slate(tick_id: str) -> None:
     """Build the full paper brief (presentation HTML / audit JSON / figures) for the
     TOP-``render_on_tick_k`` Today feed papers, so a top feed paper opens with the same brief
     as a library item. Renders only keys with a current review contract (so the
-    brief folds the cached review in, one tick after ``_auto_review_slate``, never racing it)
+    brief folds the cached review in, after Today preparation published it, never racing it)
     and NOT already rendered. Reuses ``paper_render.start_build`` (its own pool + single-flight;
     the PDF is a cache hit from the review, and the digest is cached → NO extra LLM). Resolves
     the feed key via the key-aware reader (``paper_render._item_detail`` → ``resolve_reader_for_key``).
@@ -173,7 +161,7 @@ def _auto_render_slate(tick_id: str) -> None:
         from zotero_summarizer.services.triage.daily_select import assemble_daily_slate
 
         db_path = settings().triage_db_path
-        slate = assemble_daily_slate(db_path=db_path, K=max(k, 5), quality_first=rank_quality_first_enabled())  # explicit arm — bypasses the P3 interleave (see _auto_review_slate)
+        slate = assemble_daily_slate(db_path=db_path, K=max(k, 5), quality_first=rank_quality_first_enabled())  # explicit arm — a daemon merge must never claim the day's interleave_log (README)
         reviewed = deep_review.current_review_keys()
         # Top-K by composite rank, restricted to reviewed feed keys (so the brief has the
         # review folded in). slate.papers is role-grouped, so sort by composite_score.
@@ -192,6 +180,21 @@ def _auto_render_slate(tick_id: str) -> None:
             LOGGER.info("[%s] auto-render: submitted %d top feed paper(s)", tick_id, submitted)
     except Exception:
         LOGGER.exception("[%s] auto-render submit failed", tick_id)
+
+
+def _auto_generate_cards(tick_id: str) -> None:
+    """Start background Today AI-card generation (Todo #92) for the top-ranked feed
+    papers, ahead of the owner's visit. Gated by processing-boundary consent and all
+    card spend guards; never blocks the tick. Daemon-tick boundary: a failure is
+    logged, never crashes the tick."""
+    try:
+        from zotero_summarizer.services._common import settings
+        from zotero_summarizer.services.card import background as card_background
+
+        if card_background.start(settings().triage_db_path):
+            LOGGER.info("[%s] card generation started", tick_id)
+    except Exception:
+        LOGGER.exception("[%s] card generation start failed", tick_id)
 
 
 def _maybe_auto_quality_gate(tick_id: str, dry_run: bool) -> None:
@@ -274,10 +277,11 @@ def run_daemon_tick(
         if flags.outcome_check_per_tick > 0 and zotero_reader is not None:
             report.outcomes_resolved = _resolve_due_outcomes(reader=zotero_reader, limit=flags.outcome_check_per_tick)
     # Only the explicit reviewed Add path may materialize a feed candidate.
-    # The daemon still reviews the Today slate in place, without Zotero writes.
+    # Today preparation analyzes top feed papers in place, without Zotero writes.
     if not dry_run:
-        _auto_review_slate(tick_id)
+        _auto_prepare_today(tick_id)
         _auto_render_slate(tick_id)
+        _auto_generate_cards(tick_id)
         _maybe_auto_quality_gate(tick_id, dry_run=False)
     report.elapsed_seconds = time.perf_counter() - started
     LOGGER.info("[%s] tick done: %s", tick_id, report.as_dict())

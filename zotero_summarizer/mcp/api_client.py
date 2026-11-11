@@ -199,6 +199,45 @@ async def _fetch_triage_row(item_key: str) -> tuple[dict[str, Any] | None, dict[
     return None, error
 
 
+TRIAGE_LOOKUP_BATCH = 100
+
+
+async def _fetch_triage_rows(
+    item_keys: list[str], concurrency: int = 8,
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    """Latest triage row per key via ``GET /api/results?item_keys=`` (≤100 keys per request).
+
+    Keys without a triage result are simply absent; per-batch/per-key failures are returned as
+    ``{"item_key(s)": ..., "error": ...}`` rows so callers can refuse an incomplete ranking."""
+    rows: dict[str, dict[str, Any]] = {}
+    errors: list[dict[str, Any]] = []
+    valid: list[str] = []
+    for key in item_keys:
+        safe_key, validation_error = _require_non_empty_text(key, "item_key")
+        if validation_error is None and "," in str(safe_key):
+            validation_error = _error("validation_error", "item_key must not contain a comma")
+        if validation_error is not None:
+            errors.append({"item_key": key, "error": validation_error["error"]})
+        else:
+            valid.append(str(safe_key))
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def lookup(batch: list[str]) -> None:
+        async with semaphore:
+            result = await _api_request("GET", "/api/results", params={"item_keys": ",".join(batch)})
+        data, error = _extract_data_or_error(result)
+        if error is not None:
+            errors.append({"item_keys": batch, "error": error.get("error") or error})
+            return
+        for row in (data or {}).get("items") or []:
+            if isinstance(row, dict) and row.get("item_id"):
+                rows[str(row["item_id"])] = row
+
+    await asyncio.gather(*(lookup(valid[i:i + TRIAGE_LOOKUP_BATCH])
+                           for i in range(0, len(valid), TRIAGE_LOOKUP_BATCH)))
+    return rows, errors
+
+
 async def _collect_status_snapshot() -> dict[str, Any]:
     status_result, pending_result, jobs_result, calibration_result = await asyncio.gather(
         _api_request("GET", "/api/zotero/status"),

@@ -28,6 +28,7 @@ from zotero_summarizer.services.search._relevance import attach_relevance
 from zotero_summarizer.services.search.dedup import to_version_families
 from zotero_summarizer.services.search.federate import federate
 from zotero_summarizer.services.search.intent import _as_str_list, build_query_plan
+from zotero_summarizer.services.search.pipeline import _annotate_library_coverage
 from zotero_summarizer.services.search.rank import rank_candidates, score_query_relevance
 from zotero_summarizer.settings import offline_requested
 
@@ -151,6 +152,7 @@ def run_agentic_rounds(session_id: str, *, deps: Any, max_rounds: int = 2) -> Re
             library_finder=deps.library_finder, quota=deps.quota,
             crossref_mailto=deps.crossref_mailto,
         )
+        _annotate_library_coverage(new_cands, getattr(deps, "reader", None))
         before_ids = {c.candidate_id for c in sess.candidates}
         unioned = to_version_families(sess.candidates + new_cands)
         score_query_relevance(query, unioned, reranker_model=deps.reranker_model)

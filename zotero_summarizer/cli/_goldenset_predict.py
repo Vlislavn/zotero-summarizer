@@ -12,7 +12,8 @@ from zotero_summarizer.cli._helpers import _resolve_feed_ids, progress_printer
 def _goldenset_predict_feed(args: argparse.Namespace) -> int:
     """Pull unread items from a feed, predict 4-class priority, save for review."""
     from zotero_summarizer.integrations.zotero_read import ZoteroReader
-    from zotero_summarizer.services._common import load_golden_rows, read_config
+    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.golden.csv_store import load_golden_rows
     from zotero_summarizer.services.golden.hybrid_gt import apply_hybrid
     from zotero_summarizer.services.model import classifier
 

@@ -4,7 +4,7 @@ Everything heavy is monkeypatched — no LLM, no real queue, no model dir, and t
 daemon thread is run INLINE so the job is fully synchronous and deterministic:
 
   - ``reading_queue.build_reading_queue``  -> a fixed top-K slice;
-  - ``deep_review.get_cached_review`` / ``deep_review.start`` / ``deep_review.status``
+  - ``deep_review.get_current_review`` / ``deep_review.start`` / ``deep_review.status``
     -> a cached-hit (no model load) or a one-poll settle;
   - ``verdict_store.upsert``               -> an in-memory spy;
   - ``_flight.run_in_background``          -> inline call (no thread).
@@ -37,11 +37,6 @@ def _reset_latch_and_inline_threads(monkeypatch):
             needs_library_login=0, needs_login_items=[], failed=0, started_at=None, progress={},
         )
     monkeypatch.setattr(fleet._flight, "run_in_background", lambda target: target())
-    monkeypatch.setattr(
-        fleet.deep_review, "review_is_current",
-        lambda entry, item_key="": bool(entry)
-        and entry.get("review_contract_version") == fleet.deep_review.REVIEW_CONTRACT_VERSION,
-    )
     yield
     fleet._LATCH.finish(None)
 
@@ -67,9 +62,10 @@ def _review(read_decision="read", grade="A", *, relevant=True):
         "review_contract_version": fleet.deep_review.REVIEW_CONTRACT_VERSION,
         "digest": {
             "read_decision": read_decision, "grade": grade, "writing_friction": "low",
-            "novelty": 4, "significance": 4,
+            "novelty": 4, "significance": 4, "basis": "full_text", "read_parts": ["Methods"],
+            "original_value": "The decisive comparison.",
         },
-        "quality": {"quality_band": "highlight"},
+        "quality": {"quality_band": "highlight", "basis": "full_text"},
         "goal_summaries": [GoalSummary(
             goal="Fixture goal", relevant=relevant,
             retrieval_state="hit" if relevant else "miss", abstained=not relevant,
@@ -82,7 +78,7 @@ def _review(read_decision="read", grade="A", *, relevant=True):
 
 def test_run_writes_a_proposal_per_top_k_item_from_cache(monkeypatch):
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A", "B"))
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: _review())
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: _review())
 
     def _no_model(**_kw):
         raise AssertionError("deep_review.start must not run when reviews are cached")
@@ -108,7 +104,7 @@ def test_run_slices_to_top_k(monkeypatch):
     monkeypatch.setattr(
         fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A", "B", "C", "D")
     )
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: _review())
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: _review())
     monkeypatch.setattr(fleet.deep_review, "start", lambda **_k: None)
     upserts: list = []
     monkeypatch.setattr(fleet.verdict_store, "upsert", lambda key, prop: upserts.append(key))
@@ -159,7 +155,7 @@ def test_run_only_proposes_for_undecided_picks(monkeypatch):
         ]
     }
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: queue)
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: _review())
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: _review())
     monkeypatch.setattr(fleet.deep_review, "start", lambda **_k: None)
     upserts: list = []
     monkeypatch.setattr(fleet.verdict_store, "upsert", lambda key, prop: upserts.append(key))
@@ -178,7 +174,7 @@ def test_explicit_item_keys_review_exactly_those_and_skip_selection(monkeypatch)
         raise AssertionError("explicit item_keys must NOT scan/select the queue")
 
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", _must_not_build)
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: _review())
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: _review())
     monkeypatch.setattr(fleet.deep_review, "start", lambda **_k: None)
     upserts: list = []
     monkeypatch.setattr(fleet.verdict_store, "upsert", lambda key, prop: upserts.append(key))
@@ -204,7 +200,7 @@ def test_cache_miss_triggers_deep_review_then_proposes(monkeypatch):
             cache[k] = _review(grade="C")
         return {"accepted": True}  # our job claimed the slot — the C1 contract
 
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: cache.get(key))
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: cache.get(key))
     monkeypatch.setattr(fleet.deep_review, "start", _start)
     # status settles immediately (not 'running') so the poll loop never sleeps
     monkeypatch.setattr(fleet.deep_review, "status", lambda: {"status": "ready"})
@@ -224,7 +220,7 @@ def test_cache_miss_that_never_materializes_reports_done_empty(monkeypatch):
     item is counted as PROCESSED and FAILED, the run proposes nothing, and the
     status is the honest ``done_empty`` (not a false ``ready``)."""
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A"))
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: None)  # always a miss
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: None)  # always a miss
     # Our job IS accepted but produces no cache entry → genuinely failed (C1: the
     # accepted-but-empty path stops, not an infinite re-claim loop).
     monkeypatch.setattr(fleet.deep_review, "start", lambda **_k: {"accepted": True})
@@ -251,7 +247,7 @@ def test_run_over_fulltextless_papers_reports_done_empty(monkeypatch):
 
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A", "B"))
     # cached review EXISTS but carries no usable full text (the deep_review needs_pdf case)
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: {
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: {
         "review_contract_version": fleet.deep_review.REVIEW_CONTRACT_VERSION,
         "needs_pdf": True, "digest": None,
     })
@@ -283,7 +279,7 @@ def test_needs_library_login_when_proxied_source_unreachable(monkeypatch):
     from zotero_summarizer.services.zotero import zotero as zmod
 
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A"))
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: {
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: {
         "review_contract_version": fleet.deep_review.REVIEW_CONTRACT_VERSION,
         "needs_pdf": True, "digest": None,
     })
@@ -313,7 +309,7 @@ def test_run_job_scans_the_whole_library_not_a_fixed_window(monkeypatch):
         return _queue("A")
 
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", _build)
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: _review())
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: _review())
     monkeypatch.setattr(fleet.deep_review, "start", lambda **_k: None)
     monkeypatch.setattr(fleet.verdict_store, "upsert", lambda key, prop: None)
 
@@ -346,7 +342,7 @@ def test_needs_pdf_pick_acquires_then_re_reviews_and_proposes(monkeypatch):
             }
         return {"accepted": True}
 
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: cache.get(key))
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: cache.get(key))
     monkeypatch.setattr(fleet.deep_review, "start", _start)
     monkeypatch.setattr(fleet.deep_review, "status", lambda: {"status": "ready"})
     monkeypatch.setattr(fleet.time, "sleep", lambda _s: None)
@@ -372,7 +368,7 @@ def test_stale_digestless_cache_is_recomputed_not_trusted(monkeypatch):
     to-review batch and is recomputed (deep review works now), rather than being
     trusted as-is and skipped forever."""
     # Stale failed entry: had a PDF (needs_pdf falsy) but produced no digest.
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review",
+    monkeypatch.setattr(fleet.deep_review, "get_current_review",
                         lambda key: {"needs_pdf": False, "digest": None})
     assert fleet._usable_cache("A") is None  # a miss -> goes into the to_review batch
 
@@ -385,7 +381,7 @@ def test_needs_pdf_cache_is_reused_without_re_reviewing(monkeypatch):
         "review_contract_version": fleet.deep_review.REVIEW_CONTRACT_VERSION,
         "needs_pdf": True, "digest": None,
     }
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: entry)
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: entry)
     assert fleet._usable_cache("A") == entry
 
 
@@ -417,7 +413,7 @@ def test_start_reports_accepted_true_when_it_claims_the_slot(monkeypatch):
     this call claimed the single-flight slot (vs a timestamp heuristic that can't tell a
     prewarm firing AFTER the click apart from our own run)."""
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A"))
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: _review())
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: _review())
     monkeypatch.setattr(fleet.deep_review, "start", lambda **_k: None)
     monkeypatch.setattr(fleet.verdict_store, "upsert", lambda key, prop: None)
 
@@ -428,7 +424,7 @@ def test_start_reports_accepted_true_when_it_claims_the_slot(monkeypatch):
 def test_serial_runs_after_finish_are_allowed(monkeypatch):
     """Once a run finishes, the slot frees and a fresh start runs again."""
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A"))
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: _review())
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: _review())
     monkeypatch.setattr(fleet.deep_review, "start", lambda **_k: None)
     monkeypatch.setattr(fleet.verdict_store, "upsert", lambda key, prop: None)
 
@@ -445,7 +441,7 @@ def test_job_writes_sidecar_but_never_label_verdicts(monkeypatch):
     """The defining safety property: a fleet run writes proposals to the sidecar and
     makes NO write to label_verdicts (the tripwire fixture would raise otherwise)."""
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A", "B"))
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: _review())
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: _review())
     monkeypatch.setattr(fleet.deep_review, "start", lambda **_k: None)
     sidecar: dict = {}
     monkeypatch.setattr(fleet.verdict_store, "upsert", lambda key, prop: sidecar.update({key: prop}))
@@ -459,7 +455,7 @@ def test_job_writes_sidecar_but_never_label_verdicts(monkeypatch):
 def test_per_item_failure_is_isolated_and_run_continues(monkeypatch):
     """A single bad item is logged and skipped; the rest of the batch still runs."""
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A", "B"))
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: _review())
+    monkeypatch.setattr(fleet.deep_review, "get_current_review", lambda key: _review())
     monkeypatch.setattr(fleet.deep_review, "start", lambda **_k: None)
 
     def _upsert(key, prop):

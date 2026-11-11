@@ -208,16 +208,20 @@ def _tick_report(**overrides):
 _GATE_SENTINEL = object()  # any non-None stands in for a live classifier gate
 
 
+@pytest.fixture
+def stage_client(monkeypatch):
+    from unittest.mock import Mock
+
+    client = Mock(return_value=object())
+    monkeypatch.setattr(triage_backlog.factory, "resolve_stage_client", client)
+    return client
+
+
 def _fake_state(*, gate_only: bool, classifier_gate: object = _GATE_SENTINEL):
     """Minimal RuntimeState stand-in for the drain: the config flag the worker
     reads, a live-gate stand-in (pass ``classifier_gate=None`` to simulate an
-    unavailable gate), and a resolve_stage_client hook to detect an LLM build."""
+    unavailable gate). Client resolution is patched at the factory seam."""
     from types import SimpleNamespace
-    calls = {"resolved": False}
-
-    def resolve_stage_client(stage):
-        calls["resolved"] = True
-        return object()
 
     return SimpleNamespace(
         app_state=SimpleNamespace(
@@ -226,8 +230,6 @@ def _fake_state(*, gate_only: bool, classifier_gate: object = _GATE_SENTINEL):
             ),
         ),
         classifier_gate=classifier_gate,
-        resolve_stage_client=resolve_stage_client,
-        _resolve_calls=calls,
     )
 
 
@@ -255,7 +257,7 @@ def test_drain_aborts_when_gate_only_but_gate_missing(monkeypatch):
     assert "gate" in (st["error"] or "").lower()
 
 
-def test_drain_stops_immediately_on_fatal_llm_error(monkeypatch):
+def test_drain_stops_immediately_on_fatal_llm_error(monkeypatch, stage_client):
     from unittest.mock import MagicMock
     import zotero_summarizer.services._common as common
     from zotero_summarizer.services.triage import feeds
@@ -343,7 +345,7 @@ def test_drain_rescores_slate_on_completion(monkeypatch):
     assert st["rescore_error"] is None
 
 
-def test_drain_does_not_rescore_on_fatal_error(monkeypatch):
+def test_drain_does_not_rescore_on_fatal_error(monkeypatch, stage_client):
     """A fatal LLM error aborts the drain early; the gate may be unusable, so the
     post-drain rescore must NOT fire."""
     from unittest.mock import MagicMock
@@ -399,7 +401,7 @@ def test_drain_records_rescore_error_but_still_finishes(monkeypatch):
     assert "rescore down" in (st["rescore_error"] or "")
 
 
-def test_drain_ml_only_is_gate_only_with_no_llm(monkeypatch):
+def test_drain_ml_only_is_gate_only_with_no_llm(monkeypatch, stage_client):
     """Default drain (bulk_drain_gate_only=True): gate_only tick, review_mode
     explicitly False (so rows are triaged_pending + marked read), and NO LLM
     client is ever resolved."""
@@ -423,7 +425,7 @@ def test_drain_ml_only_is_gate_only_with_no_llm(monkeypatch):
     assert kwargs["gate_only"] is True
     assert kwargs["review_mode"] is False
     assert kwargs["triage_llm"] is None
-    assert fake._resolve_calls["resolved"] is False  # no LLM built in the ML-only drain
+    stage_client.assert_not_called()  # no LLM built in the ML-only drain
     assert triage_backlog.status()["done"] is True
 
 

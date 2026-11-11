@@ -240,36 +240,39 @@ def materialize_pick(
         existing = feeds_storage.current_materialization_intent(conn, pick.row)
         if existing:
             feeds_storage.link_materialized_sibling(conn, pick.row, existing)
-            conn.commit()
-            return existing
-        writer.apply_feed_materialization(
-            new_item_key=new_key,
-            feed_payload=feed_payload,
-            inbox_collection_name=ctx.inbox_collection_name,
-            matched_collections=matched,
-            tags=tags,
-            note_title=f"Triage: {str(pick.row.get('title') or '')[:80]}",
-            note_html=note_html,
-            provenance_tag=pending_service.SYSTEM_TAG_FEEDS_V3,
-        )
-        if feeds_storage.record_materialization(
-            conn,
-            feed_library_id=int(pick.row["feed_library_id"]),
-            feed_item_id=int(pick.row["feed_item_id"]),
-            materialized_zotero_key=new_key,
-            outcome_window_days=ctx.outcome_window_days,
-        ):
-            feeds_storage.update_to_decision(
+            new_key = existing
+        else:
+            writer.apply_feed_materialization(
+                new_item_key=new_key,
+                feed_payload=feed_payload,
+                inbox_collection_name=ctx.inbox_collection_name,
+                matched_collections=matched,
+                tags=tags,
+                note_title=f"Triage: {str(pick.row.get('title') or '')[:80]}",
+                note_html=note_html,
+                provenance_tag=pending_service.SYSTEM_TAG_FEEDS_V3,
+            )
+            if feeds_storage.record_materialization(
                 conn,
                 feed_library_id=int(pick.row["feed_library_id"]),
                 feed_item_id=int(pick.row["feed_item_id"]),
-                decision=decision,
-                decision_reason=ctx.decision_reason
-                if not pick.is_black_swan
-                else "surprise_pick",
-                is_black_swan=pick.is_black_swan,
-            )
+                materialized_zotero_key=new_key,
+                outcome_window_days=ctx.outcome_window_days,
+            ):
+                feeds_storage.update_to_decision(
+                    conn,
+                    feed_library_id=int(pick.row["feed_library_id"]),
+                    feed_item_id=int(pick.row["feed_item_id"]),
+                    decision=decision,
+                    decision_reason=ctx.decision_reason
+                    if not pick.is_black_swan
+                    else "surprise_pick",
+                    is_black_swan=pick.is_black_swan,
+                )
         conn.commit()
+    from zotero_summarizer.services.golden import verdict_effects
+
+    verdict_effects.mirror_review_note(get_settings().triage_db_path, new_key)
     LOGGER.info(
         "[%s] materialized: %r  key=%s",
         run_id,

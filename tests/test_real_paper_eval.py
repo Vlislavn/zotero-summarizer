@@ -1,5 +1,7 @@
-"""Real-paper evaluation of the type-aware quality gates, with Opus 4.8 as the
-rubric-reader + judge.
+"""Historical annotation fixtures for the type-aware quality gates.
+
+No judge runs here; these deterministic tests do not reverify paper facts or
+scientific acceptance. The retained annotations were attributed to Opus 4.8.
 
 Three REAL papers, fetched 2026-06 and read by the judge, are run through the ACTUAL
 gates (`paper_type` structural detector, `_paper_type_checklists.coverage_grade`,
@@ -18,6 +20,9 @@ Papers:
 """
 from __future__ import annotations
 
+import pytest
+
+from tests._legacy_coverage import legacy_coverage_grade
 from zotero_summarizer.services.library import paper_type as pt
 from zotero_summarizer.services.library._paper_type_checklists import (
     Family, PaperType, coverage_grade, spec_for,
@@ -117,14 +122,44 @@ def test_ebai_before_after_old_empirical_rubric_would_have_flagged_it():
     empirical = spec_for(PaperType.GENERIC_EMPIRICAL)
     # A consensus guideline answers ~every empirical item 'no'/'na' (no experiments).
     old_rubric = {i.key: "na" for i in empirical.items}
-    old = coverage_grade(empirical, old_rubric, set())
+    old = legacy_coverage_grade(empirical, old_rubric, set())
     assert old.band == "flag"                    # the OLD nonsense: "rigor problems"
+    current = coverage_grade(empirical, old_rubric, set())
+    assert current.band == "uncertain" and current.fraction is None and current.grade == ""
 
     policy = spec_for(PaperType.POLICY)
     new_rubric = {"thesis": "yes", "evidence_cited": "yes", "consensus_process": "yes",
                   "scope_match": "yes", "counterarguments": "yes", "conflicts": "na"}
     new = coverage_grade(policy, new_rubric, _met(new_rubric))
     assert new.band == "highlight"               # the FIX: judged correctly, well-rated
+
+
+@pytest.mark.parametrize("paper_type", [PaperType.GENERIC_EMPIRICAL, PaperType.DIAGNOSTIC_ACCURACY])
+@pytest.mark.parametrize("unassessed", ["na", None])
+@pytest.mark.parametrize("has_red_flag", [False, True])
+def test_version_bound_empty_coverage_keeps_unknown_distinct_from_failure(paper_type, unassessed, has_red_flag):
+    spec = spec_for(paper_type)
+    rubric = {} if unassessed is None else {item.key: unassessed for item in spec.items}
+
+    old = legacy_coverage_grade(spec, rubric, set(), has_red_flag=has_red_flag)
+    current = coverage_grade(spec, rubric, set(), has_red_flag=has_red_flag)
+
+    assert old.band == "flag" and old.grade == "D" and old.fraction == 0.0
+    assert current.band == ("flag" if has_red_flag else "uncertain")
+    assert current.met == current.applicable == 0
+    assert current.fraction is None and current.grade == "" and current.missing_critical == []
+
+
+@pytest.mark.parametrize("paper_type", [PaperType.GENERIC_EMPIRICAL, PaperType.DIAGNOSTIC_ACCURACY])
+def test_explicit_failed_coverage_remains_a_failure(paper_type):
+    spec = spec_for(paper_type)
+    rubric = {item.key: "no" for item in spec.items}
+
+    current = coverage_grade(spec, rubric, set())
+
+    assert current.band == "flag" and current.grade == "D" and current.fraction == 0.0
+    assert current.applicable == len(spec.items) and current.met == 0
+    assert current.missing_critical == [item.key for item in spec.items if item.critical]
 
 
 def test_ebai_structural_detector_routes_to_review_family_on_fallback():

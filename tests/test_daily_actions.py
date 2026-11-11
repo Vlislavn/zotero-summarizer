@@ -35,13 +35,9 @@ class _FakeSettings:
 
 def _build_db(tmp_path: Path) -> Path:
     db = tmp_path / "triage_history.db"
-    conn = sqlite3.connect(str(db))
-    try:
-        fs.init_feeds_schema(conn)
-        conn.execute(repo._CREATE_LABEL_VERDICTS_TABLE)
-        conn.commit()
-    finally:
-        conn.close()
+    from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS, run_migrations
+
+    run_migrations(db, "triage", TRIAGE_MIGRATIONS)
     return db
 
 
@@ -115,7 +111,7 @@ def test_add_to_library_materializes_and_labels_should_read(env, monkeypatch):
     labels: list[str | None] = []
     monkeypatch.setattr(
         review, "materialize_row",
-        lambda row, *, writer, used_keys, reason="x", collection_name="Inbox", label_priority=None, review_proof=None:
+        lambda row, *, writer, used_keys, reason="x", collection_name="Inbox", label_priority=None, review_proof=None, mirror_note=True:
             (materialized.append(int(row["feed_item_id"])), labels.append(label_priority))[0] or "KEY1",
     )
     res = daily_actions.add_to_library([pk])
@@ -365,7 +361,7 @@ def test_materialize_feed_verdict_adds_without_relabelling(env, monkeypatch):
     materialized: list[tuple[int, str | None]] = []
     monkeypatch.setattr(
         review, "materialize_row",
-        lambda row, *, writer, used_keys, reason="x", collection_name="Inbox", label_priority=None, review_proof=None:
+        lambda row, *, writer, used_keys, reason="x", collection_name="Inbox", label_priority=None, review_proof=None, mirror_note=True:
             materialized.append((int(row["feed_item_id"]), label_priority)) or "ZKNEW",
     )
     monkeypatch.setattr(daily_actions.deep_review, "copy_review", lambda *a, **k: None)
@@ -373,7 +369,9 @@ def test_materialize_feed_verdict_adds_without_relabelling(env, monkeypatch):
     monkeypatch.setattr(daily_actions, "_carry_renders_best_effort", lambda pairs: None)
 
     res = daily_actions.materialize_feed_verdict(key, "must_read")
-    assert res == {"added": True, "zotero_key": "ZKNEW", "status": "added"}
+    assert res == {"added": True, "zotero_key": "ZKNEW", "status": "added",
+                   "review_note_mirror": {"id": pk, "note_written": False, "note_error": None,
+                                          "note_pending": False, "projection_revision": 0, "target_key": None}}
     # The verdict rides through to the label:<priority> tag write (feed_item_id, priority).
     assert materialized == [(300, "must_read")]
     assert appended == []  # anti-duplication: the add path records NO golden label
@@ -394,7 +392,9 @@ def test_materialize_feed_verdict_idempotent_when_already_in_library(env, monkey
     called: list[str] = []
     monkeypatch.setattr(review, "materialize_row", lambda *a, **k: called.append("x") or "NO")
     res = daily_actions.materialize_feed_verdict(key, "must_read")
-    assert res == {"added": False, "zotero_key": "EXIST", "status": "already_in_library"}
+    assert res == {"added": False, "zotero_key": "EXIST", "status": "already_in_library",
+                   "review_note_mirror": {"id": pk, "note_written": False, "note_error": None,
+                                          "note_pending": False, "projection_revision": 0, "target_key": "EXIST"}}
     assert called == []  # no second Zotero write for an already-materialized paper
 
 
@@ -490,7 +490,11 @@ def test_nonpositive_feed_resolves_existing_target_without_creating(
         daily_actions, "_open_optional_writer",
         lambda: (_ for _ in ()).throw(AssertionError("must not create a Zotero item")),
     )
+    mirror = {"id": 7, "note_written": False, "note_error": None, "note_pending": False,
+              "projection_revision": 0, "target_key": target}
+    monkeypatch.setattr(daily_actions, "_mirror_row_note", lambda _row: mirror)
     result = daily_actions.materialize_feed_verdict(
         "feed:77", "dont_read", create_if_missing=False,
     )
-    assert result == {"added": False, "zotero_key": target, "status": status}
+    assert result == {"added": False, "zotero_key": target, "status": status,
+                      **({"review_note_mirror": mirror} if existing else {})}

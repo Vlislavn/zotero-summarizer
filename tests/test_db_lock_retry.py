@@ -95,8 +95,10 @@ def test_mark_feed_items_read_retries_on_lock(tmp_path):
 
     with patch("zotero_summarizer.integrations.zotero_write.sqlite3.connect", side_effect=fake_connect):
         with patch("zotero_summarizer.integrations.zotero_write.time"):
-            result = writer.mark_feed_items_read([100])
+            with patch.object(writer, "backup_database", return_value="synthetic-backup") as backup:
+                result = writer.mark_feed_items_read([100])
 
+    backup.assert_called_once_with()
     assert result == 1
     assert lock_attempts[0] == 2
 

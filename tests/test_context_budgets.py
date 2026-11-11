@@ -120,8 +120,9 @@ def test_production_and_benchmark_retrieval_respect_the_same_cap(monkeypatch, bu
     monkeypatch.setattr(qa, "state", lambda: SimpleNamespace(
         app_state=SimpleNamespace(config=SimpleNamespace(
             quality_review=SimpleNamespace(max_text_chars=budget), llm_routing=None,
-        )), resolve_stage_client=lambda _: Model(),
+        )),
     ))
+    monkeypatch.setattr(qa.factory, "resolve_stage_client", lambda app, stage: Model())
     monkeypatch.setattr(qa, "resolve_stage", lambda *_: SimpleNamespace(model="fake"))
     response = qa.ask_paper("KEY", "What is described?", mode="retrieval")
     actual = _captured_context(prompts[-1])

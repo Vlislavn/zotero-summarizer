@@ -32,10 +32,10 @@ run_daemon_loop ─every N s→ run_daemon_tick (_tick)
 | `__init__.py` | facade: re-exports the public + test-accessed API |
 | `_common.py` | constants, `TriagedCandidate`/`DaemonTickReport`, conn + config helpers (leaf) |
 | `_triage.py` | abstract-only triage primitive + concurrent scoring + prestige re-score — incl. the cold-start author prior via `cold_start_policy_from_config` (an unknown author h-index stays `None`, including telemetry, and never becomes UI evidence); exact HackerNoon hosts select the practitioner prompt while retaining the common result/scoring path (accepts a `triage_llm` override — the backlog drain passes the optional `CUSTOM_*` provider) |
-| `_gate.py` | Phase 1.13 classifier gate, counterfactual audit, background retrain. In `gate_only` mode an item the gate cannot score (still no title+abstract after the OpenAlex backfill in `model.predict`) has no LLM fallback, so it is returned as a terminal gate-reject `(item, None)` instead of a predictionless survivor — `record_tick_decisions` records it `gate_rejected:gate_unscorable:no_abstract` and marks it read, so one no-abstract item no longer crashes the whole drain. `install_gate()` is the **single source of truth** for "a fresh gate is live": atomic swap + immediate Today-slate rescore — both the daemon retrain (`_gate_retrain_worker`) and the UI `POST /api/admin/retrain` install through it, so the in-memory gate and the slate never drift from the on-disk artifact. `schedule_slate_rescore_async()` re-scores on a background thread (used at startup when a cached gate loads with an unchanged sha → no retrain fires). `install_gate` clears `RuntimeState.classifier_gate_error` on success and the retrain worker records it on failure, so the readiness probe reports WHY the gate is `None`. The background `_gate_retrain_worker` now threads `triage_db_path` into `train_and_save`, so the daemon retrain applies the SAME `hybrid_gt` verdict/outcome overlay as `/admin/retrain` (without it it trained on raw-CSV labels, missing user verdicts + the unchecked-add downgrade) |
+| `_gate.py` | (gate-only rejects and near-threshold rejects now carry plain sentences instead of raw scores) Phase 1.13 classifier gate, counterfactual audit, background retrain. In `gate_only` mode an item the gate cannot score (still no title+abstract after the OpenAlex backfill in `model.predict`) has no LLM fallback, so it is returned as a terminal gate-reject `(item, None)` instead of a predictionless survivor — `record_tick_decisions` records it `gate_rejected:gate_unscorable:no_abstract` and marks it read, so one no-abstract item no longer crashes the whole drain. `install_gate()` is the **single source of truth** for "a fresh gate is live": atomic swap + immediate Today-slate rescore — both the daemon retrain (`_gate_retrain_worker`) and the UI `POST /api/admin/retrain` install through it, so the in-memory gate and the slate never drift from the on-disk artifact. `schedule_slate_rescore_async()` re-scores on a background thread (used at startup when a cached gate loads with an unchanged sha → no retrain fires). `install_gate` clears `RuntimeState.classifier_gate_error` on success and the retrain worker records it on failure, so the readiness probe reports WHY the gate is `None`. The background `_gate_retrain_worker` now threads `triage_db_path` into `train_and_save`, so the daemon retrain applies the SAME `hybrid_gt` verdict/outcome overlay as `/admin/retrain` (without it it trained on raw-CSV labels, missing user verdicts + the unchecked-add downgrade) |
 | `_daily.py` | advisory plateau selection: candidate scoring, black-swan allocation and full-text refine only; no automatic write, cutoff or rejection |
 | `_daily_materialize.py` | legacy daily write helper, now guarded by explicit approval plus current review before any key reservation:  restores the exact persisted summary after restarts (logged refined/persisted/legacy source plus shared rendered/HTML character counts, words, sections and actual generic headline fallback), commits a stable per-row key reservation, then writes Inbox + note + tags and flips the decision only on first materialization; legacy rows retain the sparse fallback. Returns the persisted key directly; failures propagate to the run boundary. The shared writer is backup-first, refuses while Zotero runs and treats a committed key as a whole-operation no-op on retry; outcome timing and later user changes survive retries |
-| `_tick.py` | the thin daemon-tick orchestrator — sequences triage, read sync and in-place slate review; no daily selection runs inside a tick. Undecided rows remain pending rather than being auto-rejected when the top picks change. `_resolve_tick_flags` derives the per-tick dedup/mark-read/outcome config; the tick accumulates counters directly in `DaemonTickReport` and logs its serialized result. Auto-review/render consume only the current versioned deep-review contract, so a prompt/policy upgrade refreshes stale cache entries instead of silently automating from them. Their assemblies pass an explicit `quality_first=rank_quality_first_enabled()` — the P3 interleave dispatch (`ZS_RANK_INTERLEAVE`) is for the user-facing GET only; a daemon-internal merge writing `interleave_log` first would claim the day with attribution the user never saw and widen auto-review beyond the shipped arm |
+| `_tick.py` | the thin daemon-tick orchestrator — sequences triage, read sync and the Today preparation start (`_auto_prepare_today`, a non-blocking background run; see `services/triage/README.md`); no daily selection runs inside a tick. Undecided rows remain pending rather than being auto-rejected when the top picks change. `_resolve_tick_flags` derives the per-tick dedup/mark-read/outcome config; the tick accumulates counters directly in `DaemonTickReport` and logs its serialized result. Preparation and render consume only the current versioned deep-review contract, so a prompt/policy upgrade refreshes stale cache entries instead of silently automating from them. The render assembly passes an explicit `quality_first=rank_quality_first_enabled()` — a daemon-internal merge writing `interleave_log` would claim the day with attribution the user never saw |
 | `_tick_setup.py` | `resolve_tick_adapters` — the per-tick reader/writer/zotero-reader resolution phase (app-RSS source reader vs the OPTIONAL Zotero read/write adapters, each degrading loudly when Zotero is absent) |
 | `_tick_phases.py` | the tick's non-dedup phases: round-robin pick, dedup-prep + **identity dedup** (`prepare_unprocessed`, same `feed_item_id`), triage stage, record decisions, mark-read + `_TickResults`. Auto-resolved feeds are filtered by `feeds.exclude_feeds` (non-paper feed NAMES, e.g. GitHub releases — never scored/materialised) |
 | `_rescue.py` · `_rescue_l1.py` | shared full-text acquire/re-score primitive + gate-reject and G10 L1-hide rescue policies. Keeping the primitive outside `_tick_phases` removes the old reverse import from rescue policy back into orchestration |
@@ -47,6 +47,10 @@ run_daemon_loop ─every N s→ run_daemon_tick (_tick)
 **Boundaries:** imports `model/` (gate, prestige, surprise), `zotero/` (pending),
 and `storage.feeds`; standard services rules. `_common` is the leaf — siblings
 import from it, never the reverse.
+
+Optional Zotero read-sync logs backup/retention filesystem failures and returns
+zero without interrupting the tick or replaying the batch. Markers may already be
+committed; the next tick rescans unread rows rather than assuming rollback.
 
 App-RSS refresh errors propagate out of the tick: the reader records the failing
 feed and rolls back that feed's item writes before raising. A failed refresh
@@ -60,6 +64,10 @@ cached loader: verdict-only, config, tuning, code and corpus changes can retrain
 without a CSV edit. Legacy models lacking input identity are stale. The worker
 uses the currently configured classifier name, not the predecessor's name.
 The existing live gate remains available while background retraining runs.
+With `ZS_AUTOMATIC_GATE_UPDATES=0`, the scheduler returns before inspecting
+training inputs or starting a worker. This covers per-tick retraining as well as
+startup; lifecycle separately suppresses its cached-gate rescore fallback.
+Explicit training/install/rescore and goal-change commands remain unchanged.
 Startup and gate installation share the same quality formatter. An undefined
 Spearman (`None`) logs as `quality=n/a`; measured zero remains `Spearman=0.000`.
 
@@ -86,3 +94,13 @@ automatic review/render work. Existing model/input caches may be read or warmed.
 Tick counts are accumulated in DaemonTickReport itself; dataclass serialization
 includes fatal_llm_error. The loop fails on exceptions or failed reports and
 removes its signal handlers on exit; zero ticks does no work.
+
+Weekly Feedback runs only when explicitly enabled for `feeds serve`. Owned
+SIGINT/SIGTERM during analysis drain the child and stop the daemon cleanly
+without starting a feed tick or advancing the cursor. Other failures propagate.
+
+The existing daemon training-ledger producer is retained with its original synthetic-trainer regression suite. It appends retained artifact identities only after install/rescore; this packaging adds no fitting, inference or new identity authority.
+
+Retain original RSS partition consumption of the producer-owned private prefilter outcome, not generated tags.
+
+The existing question/native source stack carries the original post-commit materialization/verdict/recovery mirror callers. No new delivery controller or source-derived action is designed here.

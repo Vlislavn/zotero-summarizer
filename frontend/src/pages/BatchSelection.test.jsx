@@ -7,6 +7,8 @@ import { MemoryRouter } from 'react-router-dom';
 import Today from './Today.jsx';
 import LibraryReadNext from './LibraryReadNext.jsx';
 
+vi.mock('../hooks/useServerAvailable.js', () => ({ default: () => true }));
+
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it.each([
@@ -20,17 +22,35 @@ it.each([
     feed_name: id === 1 ? 'arXiv' : 'PubMed', quality_grade: id === 1 ? 'A' : 'D',
     relevance_score: 4, has_pdf: false, review_ready: true,
   }));
-  vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} });
+  let members = papers.map(paper => ({ item_id: paper.item_id, item_key: paper.item_key,
+    available: true, decision: 'awaiting_review', review_ready: true }));
+  const stored = new Map();
+  vi.stubGlobal('localStorage', {
+    getItem: key => stored.get(key) ?? null,
+    setItem: (key, value) => stored.set(key, value),
+    removeItem: key => stored.delete(key),
+  });
   vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {
     const url = new URL(path, 'http://localhost');
     let data;
     if (options.method === 'POST') {
-      writes.push({ path: url.pathname, body: JSON.parse(options.body) });
-      data = { added: 1, trashed: 1, job_id: 'J1' };
+      const body = JSON.parse(options.body);
+      writes.push({ path: url.pathname, body });
+      if (surface === 'today') {
+        const outcome = action === 'trash'
+          ? { decision: 'user_rejected', user_priority: 'dont_read' }
+          : { decision: 'user_approved', zotero_sync_status: 'pending' };
+        members = members.map(member => body.item_ids.includes(member.item_id) ? { ...member, ...outcome } : member);
+        data = action === 'trash'
+          ? { trashed: 1, marked_read: 1, failed: [], failed_count: 0 }
+          : { added: 1, pending_sync: 1, failed: [], failed_count: 0 };
+      } else data = { added: 1, trashed: 1, job_id: 'J1' };
     } else if (url.pathname === '/api/setup/status') data = { configured: true, zotero: { db_found: true, feed_count: 2 } };
     else if (url.pathname === '/api/daily') data = { papers };
+    else if (url.pathname === '/api/daily/members') data = {
+      members: url.searchParams.getAll('item_id').map(id => members.find(member => member.item_id === Number(id))),
+    };
     else if (url.pathname === '/api/daily/triage-status') data = { running: false };
-    else if (url.pathname === '/api/feeds/review') data = { items: [] };
     else if (url.pathname === '/api/zotero/collections') data = { items: [{ key: 'C1', name: 'Reading' }] };
     else if (url.pathname === '/api/zotero/tags') data = { items: [] };
     else if (url.pathname === '/api/library/review-fleet/status') data = { status: 'idle' };
@@ -49,11 +69,12 @@ it.each([
   await screen.findByText('Alpha');
 
   if (surface === 'today') {
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Select all' }).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }));
     await screen.findByRole('option', { name: /^Reading/ });
     fireEvent.change(screen.getByTitle('Target Zotero collection'), { target: { value: 'C1' } });
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }));
-    fireEvent.change(screen.getByTitle('Show only papers from one feed source'), { target: { value: 'arXiv' } });
-    const button = screen.getByRole('button', { name: action === 'trash' ? 'Trash 1' : 'Add 1 to library' });
+    fireEvent.change(screen.getByLabelText('Feed source'), { target: { value: 'arXiv' } });
+    const button = screen.getByRole('button', { name: action === 'trash' ? 'Trash' : 'Add to library' });
     fireEvent.click(button);
   } else {
     fireEvent.click(screen.getByRole('button', { name: 'Select', exact: true }));
@@ -85,6 +106,7 @@ it.each([
     expect(writes[0].path).toBe('/api/zotero/items/P1/collections');
     expect(writes[0].body.add).toEqual([{ collection_key: 'C1' }]);
   } else expect(writes[0].body.item_keys).toEqual(['P1']);
+  await waitFor(() => expect(client.isMutating()).toBe(0));
   expect(unexpected).toEqual([]);
   client.clear();
 });

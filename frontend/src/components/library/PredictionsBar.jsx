@@ -1,5 +1,5 @@
-// The "Review cool papers" bar (Phase 2): one action that deep-reviews EVERY
-// undecided cool pick (high-relevance band) and proposes a verdict for each, so
+// The "Deep-review top picks" bar (Phase 2): one action that deep-reviews EVERY
+// undecided top pick (high-relevance band) and proposes a verdict for each, so
 // the human never clicks "Run deeper review" per paper. It loops the review fleet
 // down the queue in the background — Confirm/Override cards + quality chips stream
 // onto the rows as each paper settles — and a Stop ends the loop. Anchored at the
@@ -32,7 +32,7 @@ function stateLine(fleetStatus, proposedCount, coolCount, autoActive, stopping) 
     const cold = progress.deep_review?.status === 'running'
       ? ' — building its deep review first (a cold paper can take a few minutes)'
       : '';
-    const left = coolCount > 0 ? ` · ${coolCount} cool paper${coolCount === 1 ? '' : 's'} still undecided` : '';
+    const left = coolCount > 0 ? ` · ${coolCount} top pick${coolCount === 1 ? '' : 's'} still undecided` : '';
     return { tone: 'text-indigo-600', text: `Reviewing paper ${idx} of ${of}…${cold}${left}` };
   }
   if (status === 'error') {
@@ -56,15 +56,16 @@ function stateLine(fleetStatus, proposedCount, coolCount, autoActive, stopping) 
   // idle / never run — describe what the button will do (and note any proposals a
   // startup prewarm already left on the rows, so the cards aren't a surprise).
   if (coolCount === 0 && proposedCount > 0) {
-    return { tone: 'text-slate-600', text: 'All cool papers reviewed — Confirm or Override on the rows below.' };
+    return { tone: 'text-slate-600', text: 'All top picks reviewed — Confirm or Override on the rows below.' };
   }
   if (coolCount > 0) {
     // State, not instructions — the "what it does" explanation lives in the
     // button's title (Paradox of the Active User: don't re-teach daily users).
-    const ready = proposedCount > 0 ? ` · ${proposedCount} ready below` : '';
-    return { tone: 'text-slate-500', text: `${coolCount} cool paper${coolCount === 1 ? '' : 's'} undecided${ready}` };
+    // The button already carries the undecided count; the line adds only what is new.
+    const ready = proposedCount > 0 ? `${proposedCount} ready below` : '';
+    return { tone: 'text-slate-500', text: ready };
   }
-  return { tone: 'text-slate-500', text: 'No undecided cool papers.' };
+  return { tone: 'text-slate-500', text: 'No undecided top picks.' };
 }
 
 export default function PredictionsBar({ fleetStatus, onRun, onStop, autoActive = false, stopping = false, coolCount = 0, proposedCount = 0, queueAtLimit = false }) {
@@ -80,9 +81,6 @@ export default function PredictionsBar({ fleetStatus, onRun, onStop, autoActive 
     // the Confirm/Override cards it spawns.
     <div className="border-l-2 border-indigo-200 pl-3 py-1">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <span className="text-[11px] uppercase tracking-[0.06em] font-semibold text-indigo-500">
-          ✨ Review cool papers
-        </span>
         {stopping ? (
           <button
             type="button"
@@ -107,16 +105,16 @@ export default function PredictionsBar({ fleetStatus, onRun, onStop, autoActive 
             onClick={onRun}
             disabled={coolCount === 0}
             className="px-3 py-1 rounded-lg border border-indigo-300 bg-white text-indigo-700 text-[13px] font-semibold hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Deep-review every undecided high-relevance paper and propose a verdict for each. Suggestions only — nothing is written until you Confirm. Results stream in; click Stop to end early."
+            title="Top picks = papers the model rates must/should read that you have not decided yet. Deep-review each and propose a verdict. Suggestions only — nothing is written until you Confirm. Results stream in; click Stop to end early."
           >
-            {coolCount > 0 ? `Review cool papers (${coolCount})` : 'All reviewed'}
+            {coolCount > 0 ? `Deep-review top picks (${coolCount})` : 'All reviewed'}
           </button>
         )}
       </div>
       {/* Live region (matches the app's StatusBanner pattern): the auto-review
           streams progress for minutes — announce each state change to screen
           readers, who otherwise get no feedback during the long-running op. */}
-      <p role="status" aria-live="polite" className={`mt-1.5 text-[11px] ${line.tone}`}>{line.text}</p>
+      <p role="status" aria-live="polite" className={`${line.text ? 'mt-1.5' : ''} text-[11px] ${line.tone}`}>{line.text}</p>
       {queueAtLimit && (
         <p className="mt-1 text-[11px] text-amber-800">
           The queue is at its 5,000-paper limit. This run covers the loaded rows; more papers may remain outside this queue.

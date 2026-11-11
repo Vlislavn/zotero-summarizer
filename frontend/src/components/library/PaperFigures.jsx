@@ -3,6 +3,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { buildPaperRender, fetchPaperRender, paperFigureUrl } from '../../api/libraryApi.js';
 import Spinner from '../ui/Spinner.jsx';
 
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Extracted captions repeat their own label ("Figure 1: …" under label "Figure 1").
+const captionText = (fig) => {
+  const caption = (fig.caption || '').trim();
+  if (!fig.label) return caption;
+  return caption.replace(new RegExp(`^${escapeRegExp(fig.label.trim())}\\s*[:.\\-–—]?\\s*`, 'i'), '');
+};
+const isTable = (fig) => /^table\b/i.test(fig.label || '');
+
 // Always-visible figure strip for the full-page story view (the inline Library
 // card keeps PaperReaderPane's disclosure + build controls — a different surface
 // with a different presentation, so the ~15 lines of query/build duplication here
@@ -33,7 +42,13 @@ export default function PaperFigures({ itemKey, hasPdf = true, canBuild = hasPdf
   const status = render?.status;
   const completed = status === 'completed';
   const running = status === 'running' || buildMutation.isPending;
-  const figures = (render?.figures || []).filter((f) => f && f.name);
+  // A stale artifact's files are refused by the server (404 not_ready): never draw them.
+  const stale = Boolean(render?.stale);
+  const figures = stale ? [] : (render?.figures || []).filter((f) => f && f.name);
+  const groups = [
+    ['Figures', figures.filter((f) => !isTable(f))],
+    ['Tables', figures.filter(isTable)],
+  ].filter(([, items]) => items.length);
 
   // Build the brief ONCE per item when it's missing (or rebuild a stale artifact),
   // so the figures render without a manual click. Ref guard survives StrictMode.
@@ -61,40 +76,61 @@ export default function PaperFigures({ itemKey, hasPdf = true, canBuild = hasPdf
   if (renderQuery.error) {
     return <p className="text-[12px] text-rose-700">Figures unavailable: {renderQuery.error.message || String(renderQuery.error)}</p>;
   }
-  if (!running && !figures.length && status !== 'completed') return null;
+  if (!running && !stale && !figures.length && status !== 'completed') return null;
 
   return (
     <div className="space-y-2.5">
       {running && !figures.length && (
         <div className="flex items-center gap-2 text-[13px] text-slate-500" role="status" aria-live="polite">
-          <Spinner size="sm" color="slate" /> Rendering figures…
+          <Spinner size="sm" color="slate" /> {stale ? 'Rebuilding figures…' : 'Rendering figures…'}
         </div>
       )}
-      {figures.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-          {figures.map((fig, i) => (
+      {stale && !running && (
+        <div className="flex flex-wrap items-center gap-2 text-[13px] text-slate-600" role="status">
+          <span>Figures are outdated{buildMutation.isError ? ` — rebuild failed: ${buildMutation.error?.message || 'error'}` : ''}.</span>
+          {canBuild && (
             <button
-              key={fig.name}
               type="button"
-              onClick={() => setZoom(fig)}
-              className="group block overflow-hidden rounded-lg border border-slate-200 bg-white text-left hover:border-teal-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 focus-visible:ring-offset-1"
-              title={fig.caption || fig.label || `Figure ${i + 1}`}
+              onClick={() => buildMutation.mutate({ force: true })}
+              className="min-h-11 rounded-md border border-slate-300 bg-white px-3 text-[13px] font-medium text-slate-700 hover:border-teal-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
             >
-              <img
-                src={paperFigureUrl(itemKey, fig.name)}
-                alt={fig.caption || `Figure ${i + 1}`}
-                loading="lazy"
-                className="w-full h-32 object-contain bg-slate-50"
-              />
-              <div className="px-2 py-1 text-[11px] text-slate-500 line-clamp-2 group-hover:text-slate-700">
-                {fig.label && <span className="font-semibold text-slate-600">{fig.label} </span>}
-                {fig.caption || (!fig.label ? `Figure ${i + 1}` : '')}
-              </div>
+              {buildMutation.isError ? 'Retry' : 'Rebuild'}
             </button>
-          ))}
+          )}
         </div>
       )}
-      {completed && figures.length === 0 && (
+      {groups.map(([heading, items]) => (
+        <section key={heading} aria-label={heading} className="space-y-1.5">
+          {groups.length > 1 && <h3 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{heading}</h3>}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+            {items.map((fig) => {
+              const caption = captionText(fig);
+              const fallback = fig.label || heading.slice(0, -1);
+              return (
+                <button
+                  key={fig.name}
+                  type="button"
+                  onClick={() => setZoom(fig)}
+                  className="group block overflow-hidden rounded-lg border border-slate-200 bg-white text-left hover:border-teal-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 focus-visible:ring-offset-1"
+                  title={fig.caption || fallback}
+                >
+                  <img
+                    src={paperFigureUrl(itemKey, fig.name)}
+                    alt={caption || fallback}
+                    loading="lazy"
+                    className="w-full h-32 object-contain bg-slate-50"
+                  />
+                  <div className="px-2 py-1 text-[11px] text-slate-500 line-clamp-2 group-hover:text-slate-700">
+                    <span className="font-semibold text-slate-600">{fallback} </span>
+                    {caption}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+      {completed && !stale && figures.length === 0 && (
         <p className="text-[12px] text-slate-400">No figures were detected in this paper.</p>
       )}
       <dialog
@@ -107,13 +143,13 @@ export default function PaperFigures({ itemKey, hasPdf = true, canBuild = hasPdf
           <figure className="p-4" onClick={(e) => e.stopPropagation()}>
             <img
               src={paperFigureUrl(itemKey, zoom.name)}
-              alt={zoom.caption || zoom.label || 'Figure'}
+              alt={captionText(zoom) || zoom.label || 'Figure'}
               className="mx-auto max-h-[70vh] w-auto"
             />
             {(zoom.caption || zoom.label) && (
               <figcaption className="mt-3 max-w-[66ch] text-[13px] leading-relaxed text-slate-600">
                 {zoom.label && <span className="font-semibold text-slate-800">{zoom.label}. </span>}
-                {zoom.caption}
+                {captionText(zoom)}
               </figcaption>
             )}
           </figure>

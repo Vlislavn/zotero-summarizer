@@ -22,7 +22,7 @@ def _full_row() -> dict:
 def test_from_row_round_trips_to_legacy_dict_shape():
     raw = _full_row()
     out = PendingChangeRow.from_row(raw).to_dict()
-    assert out == raw  # byte-for-byte legacy contract preserved
+    assert out == {**raw, "audit": [], "backup_path": None}
 
 
 def test_payload_property_parses_json_string():
@@ -41,6 +41,13 @@ def test_from_row_fails_loud_on_missing_column():
     del raw["status"]
     with pytest.raises(KeyError, match="status"):
         PendingChangeRow.from_row(raw)
+
+
+@pytest.mark.parametrize("audit", ["{}", "[1]", "null", "not-json"])
+def test_pending_audit_is_not_defaulted_on_corruption(audit):
+    raw = {**_full_row(), "audit_json": audit}
+    with pytest.raises(ValueError):
+        PendingChangeRow.from_row(raw).to_dict()
 
 
 def test_id_coerced_to_int():

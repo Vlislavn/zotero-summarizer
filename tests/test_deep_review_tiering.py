@@ -24,7 +24,7 @@ def _cfg() -> types.SimpleNamespace:
             lean_max_text_chars=1000, max_text_chars=5000, self_verification=True,
             shadow_claim_check=False, claim_check_model="x", batch_goal_summaries=True,
         ),
-        research_goals=["goal A"],
+        research_goals=["goal A"], review_depth="thorough", checklist_engine="off", checklist_local_url="",
     )
 
 
@@ -38,7 +38,7 @@ def test_extra_layers_routes_cheap_calls_to_light_llm(monkeypatch):
     )
     monkeypatch.setattr(
         _paper_section_summaries, "summarize_sections",
-        lambda sections, llm: got.__setitem__("section", llm) or {},
+        lambda sections, llm: got.__setitem__("section", llm) or {},  # on-open job only: never called at review time
     )
     monkeypatch.setattr(
         _paper_goal_summaries, "summarize_for_goals",
@@ -51,9 +51,9 @@ def test_extra_layers_routes_cheap_calls_to_light_llm(monkeypatch):
     )
     _deep_review_layers.extra_layers(ctx)
 
-    assert got["quality"] is light   # rubric / overstatement / self-verify → feed light
-    assert got["section"] is light   # section one-liners → feed light
-    assert got["goals"] is strong    # goal summaries stay on the strong model
+    assert got["quality"].client is light   # rubric / overstatement / self-verify → feed light
+    assert "section" not in got             # section one-liners are built on open, not at review time
+    assert got["goals"].client is strong    # goal summaries stay on the strong model
 
 
 def test_extra_layers_falls_back_to_strong_when_no_light(monkeypatch):
@@ -74,4 +74,4 @@ def test_extra_layers_falls_back_to_strong_when_no_light(monkeypatch):
     )
     _deep_review_layers.extra_layers(ctx)
 
-    assert got["quality"] is strong
+    assert got["quality"].client is strong

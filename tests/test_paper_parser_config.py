@@ -160,8 +160,9 @@ def test_qa_rebuilds_for_the_selected_parser_before_model_call(paper, monkeypatc
             return json.dumps({"answer": "OMEGA", "quote": _DOCLING_TEXT})
 
     monkeypatch.setattr(qa, "state", lambda: SimpleNamespace(
-        app_state=SimpleNamespace(config=paper.config), resolve_stage_client=lambda stage: Model(),
+        app_state=SimpleNamespace(config=paper.config),
     ))
+    monkeypatch.setattr(qa.factory, "resolve_stage_client", lambda app, stage: Model())
     monkeypatch.setattr(qa, "resolve_stage", lambda *args: SimpleNamespace(model="fake"))
     answer = qa.ask_paper("KEY", "Which dataset is used?", mode=mode)
     assert answer["answer"] == "OMEGA"

@@ -10,6 +10,7 @@ import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import yaml
 
@@ -36,14 +37,16 @@ class _Reader:
 def _write_valid_goals(config_path: Path) -> None:
     with open("goals.example.yaml", "r", encoding="utf-8") as fh:
         raw = yaml.safe_load(fh)
-    raw["llm"]["api_base"] = "http://localhost:11434/v1"
-    raw["llm"]["api_key_env"] = "ZS_TEST_KEY"
+    # Admitted preset identity; custom secret-bearing routes require a task receipt.
+    raw["llm"]["api_base"] = "https://api.openai.com/v1"
+    raw["llm"]["api_key_env"] = "OPENAI_API_KEY"
     raw["research_goals"] = ["Reliable multimodal evidence synthesis"]
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
 
 def _fake_verified_doctor(settings: Settings) -> None:
-    payload = {"status": "ready", "ready": True, "config_signature": doctor._config_signature(settings),
+    payload = {"status": "ready", "ready": True, "verification_revision": doctor.ADMISSION_REVISION,
+               "config_signature": doctor._config_signature(settings),
                "checks": [doctor._row(check_id, "ready", "ok") for check_id in doctor._CHECKS]}
     (settings.data_dir / "setup_doctor.json").write_text(json.dumps(payload))
 
@@ -56,7 +59,8 @@ def _seed(
     settings = Settings.load(project_root=tmp_path)
     _write_valid_goals(settings.config_path)
     settings.data_dir.mkdir()
-    _fake_verified_doctor(settings)
+    with patch.dict("os.environ", {"OPENAI_API_KEY": key_value or ""}):
+        _fake_verified_doctor(settings)
 
     state = RuntimeState()
     state.app_state = AppState(config=read_config(settings.config_path))
@@ -67,9 +71,9 @@ def _seed(
 
 def _patch_externals(monkeypatch, *, key_value: str | None, db_found: bool, feeds: int):
     if key_value is None:
-        monkeypatch.delenv("ZS_TEST_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     else:
-        monkeypatch.setenv("ZS_TEST_KEY", key_value)
+        monkeypatch.setenv("OPENAI_API_KEY", key_value)
 
     # Reachability + classifier are advisory; stub them so the test is offline.
     async def _reach():
@@ -112,7 +116,7 @@ def test_status_shape_and_ready_true(tmp_path, monkeypatch):
     assert resp.ready is True
     assert resp.config.present and resp.config.valid
     assert resp.config.research_goals_count > 0
-    assert resp.llm.api_key_env == "ZS_TEST_KEY"
+    assert resp.llm.api_key_env == "OPENAI_API_KEY"
     assert resp.llm.api_key_present is True
     assert resp.zotero.db_found is True
     assert resp.zotero.feed_count == 3
@@ -128,7 +132,7 @@ def test_no_secret_value_anywhere_in_response(tmp_path, monkeypatch):
 
     blob = json.dumps(resp.model_dump())
     assert _SECRET not in blob  # the secret value never appears
-    assert "ZS_TEST_KEY" in blob  # the env-var NAME does
+    assert "OPENAI_API_KEY" in blob  # the env-var NAME does
     assert '"api_key_present": true' in blob
 
 

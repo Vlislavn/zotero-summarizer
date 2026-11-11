@@ -8,6 +8,7 @@ registration in one focused module.
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 
@@ -37,9 +38,18 @@ def _goldenset_restore_model(args: argparse.Namespace) -> int:
     from zotero_summarizer.services.model.classifier_backup import restore_snapshot
 
     model_dir = Path(args.output_dir) if args.output_dir else settings().model_dir
-    joblib_path = restore_snapshot(model_dir, args.classifier, args.snapshot)
+    try:
+        joblib_path = restore_snapshot(model_dir, args.classifier, args.snapshot)
+    except FileNotFoundError:
+        print(
+            f"error: no snapshot {args.snapshot!r} for {args.classifier} in {model_dir}/history/ — "
+            f"list names with: goldenset model-history --classifier {args.classifier}",
+            file=sys.stderr,
+        )
+        return 2
     print(f"Restored {args.snapshot} -> {joblib_path}")
     print("(the prior live model was snapshotted first — restore is reversible)")
+    print("Restart the daemon to load the restored model.")
     return 0
 
 

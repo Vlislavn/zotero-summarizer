@@ -10,6 +10,7 @@ vi.mock('./pages/Today.jsx', () => ({ default: () => <p>Today destination</p> })
 vi.mock('./pages/Settings.jsx', () => ({ default: () => <p>Settings destination</p> }));
 vi.mock('./pages/Library.jsx', () => ({ default: () => <p>Library destination</p> }));
 vi.mock('./pages/Search.jsx', () => ({ default: () => <p>Search destination</p> }));
+vi.mock('./pages/Weekly.jsx', () => ({ default: () => <p>Weekly destination</p> }));
 vi.mock('./pages/PaperReviewPage.jsx', () => ({ default: () => <p>Paper destination</p> }));
 vi.mock('./pages/Ops.jsx', () => ({ default: () => <p>Ops destination</p> }));
 vi.mock('./pages/SetupFlow.jsx', () => ({ default: () => <p>Setup destination</p> }));
@@ -23,6 +24,12 @@ function CurrentLocation() {
 }
 
 describe('legacy route compatibility', () => {
+  it('opens the Weekly route without dropping the selected saved run', async () => {
+    render(<MemoryRouter initialEntries={['/weekly?run=weekly-retained']}><CurrentLocation /><App /></MemoryRouter>);
+    await screen.findByText('Weekly destination');
+    expect(screen.getByTestId('location').textContent).toBe('/weekly?run=weekly-retained');
+  });
+
   it('redirects Feed Review to Ops while preserving the pile filter and other query values', async () => {
     render(
       <MemoryRouter initialEntries={['/review?state=gate_rejected&from=bookmark']}>

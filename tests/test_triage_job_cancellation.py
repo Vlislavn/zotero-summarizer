@@ -143,7 +143,7 @@ def test_startup_finalizes_cancellation_instead_of_resuming_it(monkeypatch, tmp_
     assert repositories.get_triage_job("cancel")["status"] == "cancelled"
 
 
-@pytest.mark.parametrize("text", ["paper", "paper " * 14000], ids=["direct", "chunked"])
+@pytest.mark.parametrize("text", ["paper", "paper " * 14000], ids=["direct", "above-80k"])
 @pytest.mark.parametrize("stop_requested", [False, True], ids=["complete", "stop"])
 def test_pipeline_stop_after_first_llm_call_prevents_more_calls(monkeypatch, text, stop_requested):
     stop = threading.Event()
@@ -159,9 +159,11 @@ def test_pipeline_stop_after_first_llm_call_prevents_more_calls(monkeypatch, tex
     config = GoalsConfig(relevance_scale={i: str(i) for i in range(1, 6)}, llm={
         "draft_model": "stub", "refine_model": "stub", "api_base": "http://stub", "api_key_env": "STUB_KEY",
     })
-    app = SimpleNamespace(app_state=SimpleNamespace(config=config), resolve_stage_client=lambda stage: llm)
+    app = SimpleNamespace(app_state=SimpleNamespace(config=config))
+    monkeypatch.setattr(summarization.factory, "resolve_stage_client", lambda app, stage: llm)
     monkeypatch.setattr(summarization, "state", lambda: app)
-    monkeypatch.setattr(summarization, "_extract_pdf_text", lambda path: text)
+    monkeypatch.setattr(summarization, "_extract_pdf_source", lambda path: summarization.PdfSource(
+        text, (), "a" * 64))
     monkeypatch.setattr(summarization.corpus, "run_corpus_match", lambda *a: {})
 
     request = SummarizeRequest(title="paper", pdf_path="/stub.pdf")
@@ -173,9 +175,8 @@ def test_pipeline_stop_after_first_llm_call_prevents_more_calls(monkeypatch, tex
     else:
         result = summarization.run_pipeline(request)
         assert result.executive_summary == "grounded summary" and result.relevance_score == 3
-        from zotero_summarizer.services.library._map_reduce import split_chunks
-        maps = len(split_chunks(text, config.quality_review.map_chunk_chars)) if len(text) > 80000 else 0
-        assert llm.prompt.call_count == maps + 1
+        # The stub provider is remote: 84k chars fit its window, so the paper goes whole (no map calls).
+        assert llm.prompt.call_count == 1
         llm.pydantic_prompt.assert_called_once()
 
 

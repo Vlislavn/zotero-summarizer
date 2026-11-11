@@ -133,7 +133,7 @@ def test_worker_starts_review_for_missing_keys(monkeypatch):
     captured = {}
     monkeypatch.setattr(prewarm.deep_review, "start", lambda **kw: captured.update(kw))
     prewarm._prewarm_worker(5, _config(), _app_state())
-    assert captured == {"item_keys": ["A", "C"]}
+    assert captured == {"item_keys": ["A", "C"], "background": True}
 
 
 def test_worker_noop_when_all_cached(monkeypatch):

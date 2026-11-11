@@ -17,6 +17,13 @@ def read_snapshot(path: Path) -> tuple[list[dict[str, str]], str]:
     return rows, hashlib.sha256(raw).hexdigest()
 
 
+def load_golden_rows(csv_path: Path) -> list[dict[str, str]]:
+    """Read the golden CSV into a list of row dicts. Fail-fast if missing."""
+    if not csv_path.exists():
+        raise FileNotFoundError(f"golden CSV not found at {csv_path}")
+    return read_snapshot(csv_path)[0]
+
+
 @contextmanager
 def edit_csv(
     path: Path, *, create_fields: list[str] | None = None,

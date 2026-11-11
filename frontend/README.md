@@ -1,327 +1,251 @@
 # Zotero Summarizer frontend
 
-React 18 + Vite 5 + Tailwind 3, served by FastAPI at the app root.
-Public tests use generic provider/model fixtures; private deployment identities
-and live-library screenshots do not belong in the shared source.
+React 18 + Vite 5 + Tailwind 3 single-page app, served by FastAPI at the app root.
+This README is the contract for people changing `frontend/`; user-facing behavior
+lives in [docs/features.md](../docs/features.md), system structure in
+[docs/architecture.md](../docs/architecture.md), the visual system in
+[DESIGN.md](DESIGN.md), test running in [tests/README.md](../tests/README.md).
+
+## Run and build
 
 ```bash
-cd frontend
-npm install
-npm run dev
+make dev     # repo root: backend :8000 + Vite hot reload :5173
+make run     # serves the built frontend/dist through FastAPI; rebuilds when sources change
+make check   # lint, Python + frontend tests, build into a disposable dir, smoke test
+cd frontend && npm run lint | test | build
 ```
 
-Vite proxies `/api/*` to `http://localhost:8000`; `npm run build` writes
-`dist/` for FastAPI.
+- Vite proxies `/api` to `http://localhost:8000` (override: `VITE_API_TARGET`) with
+  `changeOrigin: false`, so the browser Host/Origin reaches the backend's local-admission
+  check. Never expose Vite as a remote proxy.
+- The SPA calls relative `/api/...` URLs at whatever origin served it (loopback or the
+  approved gateway, see [remote access](../docs/features.md#remote-access)); it holds no
+  credentials and has no mode selector.
+- Backend and frontend ship together: wrappers validate response shapes strictly.
+- Publishing flow: [CONTRIBUTING](../CONTRIBUTING.md#check-and-publish).
 
-## Product surfaces
-
-- **Library** — Read next, labels, reviews, figures, paper Q&A, and acquisition.
-- **Search** — query-driven discovery and review.
-- **Today** — feed triage and Zotero filing. Author h-index badges render only for positive OpenAlex evidence; unresolved author metadata is not shown as `h=0`.
-- **Settings** — AI, research profile, Zotero, sources, and advanced controls.
-- **Ops** — feeds, jobs, pending writes, diagnostics, and retraining.
-
-Legacy `/annotate`, `/review`, `/triage`, and `/pending` links redirect without
-dropping query parameters. `/review?state=gate_rejected` reaches the Feed Review
-tab in Ops with its pile filter intact.
-
-Library and Today share `todayHelpers.fulltextMessage` for unavailable-PDF
-accounting from per-item outcomes. The full-text API no longer exposes partial
-per-reason counters; deploy frontend and backend together. Library reports a
-missing/failed result explicitly. A failed status request stops local polling
-and reports that the server job may still be running; it never implies success
-or silently retries forever.
-
-Ops' Triage Monitor lists every `active_items` entry from the job API, rather
-than displaying the last completed paper as current. Polling continues through
-`cancelling` until workers drain; only the terminal transition refreshes
-calibration. The singular current-item fields are removed from the shared
-API/MCP/UI contract, so server and client must be updated together.
-
-The monitor's **Triage feedback** panel reports observed agreement/recall and
-false-negative counts against saved at-decision triage predictions. It shows
-matched-prediction / feedback coverage and explicitly limits the claim to
-reviewed items; the former “Gate recall” / counterfactual-audit labels are removed.
-Unknown ratios render `n/a`, distinct from measured `0%`. This does not turn
-ordinary approve/reject feedback into an unbiased ML-gate audit.
-The monitor restores each selected job's saved approve/reject decisions from the
-feedback endpoint, so reviewed cards remain marked after reload.
-
-Settings' Current model card describes the loaded gate, not the newest artifact
-or evaluation run. Its API exposes only the four displayed fields; no gate loaded
-is an explicit empty state even if trained artifacts exist on disk.
-Settings deep links to `#university-access` open the matching disclosure, and
-saving an AI-mode change round-trips unsurfaced config fields unchanged.
-
-Search coverage hits reuse their existing Zotero key: the card says In library
-and the server command cannot create a duplicate even if called directly.
-Search keys cards and Add requests by the server's persisted candidate ID, never
-by title. The query panel consumes `plan.display` so tight/broad variants and
-OpenReview are not omitted. Backend and frontend must be deployed together.
-Today/Search's shared collection picker consumes the API's `items` tree, including
-nested collections; it does not mistake the response envelope for the tree.
-
-## Setup and AI
-
-`/setup` is a skippable Mode (Full local / Hosted / No LLM) → Zotero → AI
-profile (skipped for No LLM) → research wizard. Local mode shows no API-key
-control; hardware-incompatible profiles cannot be selected. Saving unlocks
-Today only after explicit Doctor verification passes; saving alone never
-claims the configured pipeline works. The wizard and Settings
-share the compact server-side Doctor checklist. The gate uses backend
-`configured`; stricter operational `ready` remains diagnostic.
-
-The shared AI editor supports hosted presets, Local, and Custom. Secrets go to
-the OS credential store; the UI receives only presence/source metadata. Local
-profiles are hardware-gated and show an explicit pull command—the app never
-starts a download. Advanced routing and unsurfaced config round-trip through
-`utils/configForm.js`. Provider/model saves hot-swap; path changes need restart.
-ML-only mode is a first-class classifier/search-only setup state: AI reviews,
-Ask Paper and new feed Adds to Zotero remain unavailable without a prior
-full-text review; manual Zotero imports and immediate Trash still work. Today
-links directly to Settings to enable AI instead of offering an impossible
-Generate review action. Settings can re-enable AI later.
-Wizard progress exposes the current step and completion state in text, and each
-step change is announced politely to assistive technology.
-Optional browser preferences use guarded storage access, so privacy settings that
-block Web Storage do not prevent setup, Today, Library, or Search views from rendering.
-Search session pointers/drafts are best-effort in `sessionStorage`; blocked storage
-simply disables reload restoration for that tab.
-
-Offline sync pulls use the complete paper snapshot and revision cursor; the
-protocol's legacy `changes` field is empty because the PWA does not consume history.
-
-## Paper review
-
-Library keeps Rescore available after a queue-read error, including when the
-display retains a previously scored list. Rescore can rebuild a corrupt score
-cache; the existing status poll reloads the new snapshot after completion.
-The progress notice promises a complete result, not streaming partial scores.
-
-Library band filters and the automatic review work list share one effective-band
-calculation, matching the server's demote-one-band prestige policy. Only known
-citation prestige below the supplied floor demotes top bands; missing evidence
-does not. The displayed count uses the current queue's floor, and each fleet
-round uses its freshly fetched snapshot's floor. One click drains every undecided
-cool item in the fetched queue (up to the server's 5,000-row queue limit), in
-five-item fleet batches. A cross-language matrix checks
-the client filters/work list against the server rule without new API fields.
-
-Provenance shows the explicit `label:*` source when it determines the exported
-priority, replacing the inapplicable additive table. A separately edited final
-priority remains visible as a manual override.
-
-Library rows share `PaperDetailView`; `/paper/:key` adds located findings,
-Paper map, figures, actions, and grounded Q&A. Independent Idea/Evidence/Writing
-signals cap recommendations while provenance retains raw output. HTML briefs and
-figures live beside source PDFs for Zotero compatibility.
-
-Compact cards and the full paper page share the explicit verdict editor. Picking
-a priority changes a draft; Save/Update is the write boundary, and Cancel restores
-the saved priority and comment. The mobile bar jumps to this same editor instead
-of issuing a second, comment-erasing write. Clearing a comment remains an explicit edit.
-
-The paper reader's stale notice covers changes to the PDF source, parser setting
-or renderer; the existing one-shot rebuild uses the backend's extraction identity.
-Blocking or unverified audits arrive as errors: the reader shows the failure and
-rebuild action without exposing old figures or artifact links. Build notices
-describe audited HTML/figures, not Markdown notes (which are no longer generated).
-
-Missing-full-text recovery is one shared notice on every review surface. A missing
-optional browser package links to Settings; an attempted authenticated fetch links
-to the University access control that opens the app's persistent browser profile.
-Opening the publisher in an unrelated default profile is never presented as recovery.
-
-Fleet suggestions are proposals only: Confirm/Override writes them, and
-low-confidence or flagged proposals offer Override only.
-The fleet API wrapper preserves an explicit `itemKeys: []` as an empty selection;
-only omitted/null keys request automatic top-K selection. The server deduplicates
-explicit keys and treats an empty list as a no-op without changing job status.
-Native paper review consumes the server's policy-projected cached decision. An
-absent decision renders REVIEW with its reason; it no longer synthesizes SKIP or
-DEEP-READ from goal counts and quality bands. Confirmed goal counts exclude hits
-whose summary was withheld. The unused alternative verdict helpers are removed.
-
-Feed Review bulk confirmation sends only the visible, not-yet-actioned row IDs,
-shows the saved-verdict count and removes acknowledged rows from the queue.
-The active pile is encoded in `?state=`; switching piles updates the URL and
-same-mounted query-string navigation updates the view.
-Individual Review actions acknowledge the saved decision without claiming a CSV
-append or pending-change enqueue; the server stores training metadata atomically
-with the verdict and returns only the processed ID and state.
-Pending treats a partially failed HTTP-200 batch as an error and points to the Failed tab.
-Today, Library and Pending derive batch counts and write IDs from the same current
-filtered selection. Hidden selections cannot enter Add/Trash/Triage/Apply/Reject;
-an empty filtered selection is a no-op. Library/Pending also block retained rows
-during loading or a failed read. A started batch keeps its captured IDs through retries.
-Shared list shortcuts operate outside interactive controls only. Native inputs
-(including checkboxes), selectors, links/buttons, rich-text editors and ARIA
-widgets keep their own keys; composition and already-handled events are ignored.
-Pending's collection selector cannot issue Apply/Reject, while the explicit batch
-buttons and shortcuts on the non-interactive list surface remain available.
-
-Today now reports top-level full-text attachment failures as unavailable
-(in addition to typed per-paper outcomes), rather than silently omitting them.
-Spot-check distinguishes a saved label with pending Zotero sync or failed
-mark-read from a successful Zotero write and leaves its warning visible after
-the last card is dismissed.
-Today shows `review_ready` only after a current, non-empty deep review. Add is
-disabled when every selected paper needs review; mixed batches surface per-item
-`review_required` errors without claiming blocked papers were added. A full-review
-link provides the existing Generate review flow; Trash is always available.
-Feed Review similarly disables only positive relabels on unreviewed rows,
-leaving `dont_read` available. Switching hosted/local resets per-stage routing;
-Finish checks every resolved stage endpoint (not just the default provider).
-The existing-local-endpoint profile can use a custom loopback URL without
-adding an API-key field. A hosted provider sharing a local model name does not
-automatically select a local profile. Doctor success is re-fetched after Save;
-credential replacement immediately clears cached Ready in Settings, even if a
-previous verification mutation had completed. Missing Zotero/RSS prerequisites
-link to Settings.
-Relevance conclusions in both interactive Review and the HTML brief are
-case/punctuation deduplicated across goals, capped on first view and disclosed
-on demand; goal labels, evidence quotes and accessible score meters remain.
-Located evidence is not automatically a positive match: a `hit` with
-`relevant=false` now reads as not supported in both React and the HTML brief.
-Header/badge/tile counts share the supported-goal rule, including legacy rows
-without an explicit abstention flag. When a page has no TOC, its desktop review
-uses the freed column instead of squeezing goal cards into the TOC width.
-
-The full paper reader puts contribution, material caveats/coverage, findings,
-methods and limitations before the folded assessment/reference tail. Findings and
-reading rationale have one displayed home; original goal summaries, evidence and
-all secondary digest fields remain available. The page header does not repeat review
-grades. Full-page prose uses 16px text and a 66ch measure; sidebars yield below 1280px.
-Semantic headings and native keyboard disclosures are reused. Compact cards remain
-folded; explicit abstention is separate from unsupported and not-retrieved evidence.
-Synthetic browser checks exercise 390/1024/1440px, 320px reflow, text resizing,
-spacing and computed contrast. They are not native-user comprehension acceptance.
-
-## Offline boundary
-
-The installable local-first PWA caches only its shell. IndexedDB holds compact
-snapshots, a sync cursor, and a UUID mutation outbox. Verdicts/notes queue only
-on network failure; conflicts require Keep mine / Use server. PDFs, AI,
-annotation, acquisition, and rescoring remain server-only.
-
-After reconnect, the server gives queued verdicts and notes the same training,
-feed-materialization, and Zotero-mirror effects as online saves. Once a snapshot
-is reconciled, open paper details refetch: a rejected optimistic verdict no
-longer appears as a saved priority, and the transient green device-save notice
-clears when that verdict is acknowledged or rejected. Rejected drafts and
-conflicts break long stable paper keys inside the mobile header instead of
-expanding the page horizontally. The primary tabs wrap below narrow mobile
-widths instead of pushing the viewport beyond its edge. An offline or unchecked review model cannot
-activate Generate or auto-review; a status transport error is not called a failed
-review job. This is a
-same-machine loopback PWA boundary; remote mobile needs a future authenticated
-HTTPS deployment rather than exposing `/api/sync` directly.
-
-Sequence allocation, mutation insert, optimistic paper state, and cached-detail
-update share one IndexedDB transaction; each full pull replaces the compact
-paper snapshot while retaining local papers with unresolved mutations, and
-refreshes cached review details. A 15-second sync deadline releases a stuck focus sync,
-and protocol incompatibility explicitly asks for an app refresh. The IndexedDB
-test kills/reimports the client module and proves cached context
-plus ordered concurrent mutations survive while the server is absent. Ask Paper sends a
-bounded session history; the backend compacts older evidence to verified
-extraction handles, and the UI labels verified quotes without inventing pages.
-
-Sync sends ordered batches of at most 100 with acknowledged predecessor UUIDs.
-Receipt storage and outbox retirement share an IndexedDB transaction; restart
-or timeout preserves the unsent tail and its causal base without rewriting UUID
-bodies. Input bounds are checked before optimistic saves. Invalid legacy drafts
-are retained as rejected, with copyable text and paper links in the navigation
-status, while valid rows continue. Unknown acknowledgement IDs/status/revisions
-cannot retire pending rows; HTTP rejections are distinct from connection failure.
-The 15-second deadline still bounds one sync attempt, not all future attempts.
-
-Targeted Search polls one session at a time; transient poll errors keep the last
-session visible and retry, while terminal status and unmount stop further polls.
-Verdict saves remain successful when the separate best-effort reject-tag request
-fails; the page refreshes the saved verdict and displays a warning for the tag.
-Deploy this build with the matching backend; earlier protocol-v1 servers do not
-understand predecessor receipts.
-
-## Structure and conventions
-
-Both paper-review surfaces reuse `useDeepReviewRunner` and a per-item React Query
-poll. Status requests time out after 15 seconds, start requests after 30 seconds;
-poll errors end the spinner and expose retry, without cancelling the server job.
-Late start/status responses cannot replace another paper's state after navigation.
-Auto-run waits for the initial status and never restarts a resumed completed job.
-
-Targeted Search offers Recommended, Relevance, and Relevance + prestige orders,
-persisted with the tab's session. The optional blend uses 85% query relevance and
-15% log-normalized citation count, with median-known citations for missing values;
-when citations are absent/zero throughout, it reduces to relevance. Counts are a
-limited prestige proxy (field/age bias), disclosed beside the selector. Explicit
-sorts show the whole pool in that order; only Recommended collapses weak matches.
-Retracted and unscored candidates stay last. This display preference does not
-change server review selection. RSS refresh messages include partial failures.
+## Source map
 
 ```text
 src/
-  api/          thin fetch wrappers
-  components/   shared UI and workflows
-  hooks/        server state
-  pages/        route orchestration
-  utils/        config and presentation helpers
-  offlineStore.js / syncClient.js
+  main.jsx            QueryClient + createBrowserRouter (one data router) + service worker + startSync
+  App.jsx             routes (`/` → Today), legacy redirects (RedirectTo), SetupGate, NavBar
+  components/NavBar.jsx + OfflineStatus.jsx (conflicts name the cached paper title, or “this paper” when none; Keep mine/Use server re-read the open paper) + ConnectionGuide.jsx
+                      app chrome: ≥44 px tabs and one status line (sync state · `/api/pending/count`
+                      via hooks/usePendingCount.js · unsent device outbox); details/Sync now/install
+                      guide collapse, and open by themselves on outage, error or conflict
+  pages/              route orchestration: Library(+ReadNext/AnnotationVerdict batch mode), Search,
+                      Today, Weekly, Settings, Ops (Feed review / Triage jobs / Pending changes / System tabs),
+                      PaperReviewPage (/paper/:itemKey), SetupFlow (/setup); *Helpers.js beside pages
+  components/         shared UI and workflows by domain: paper/ (review, RelatedPapers), library/,
+                      today/, search/, settings/ (task pages), setup/, form/Fields, ui/ primitives
+  hooks/              usePaperReview, useDeepReviewRunner, useConnectionTask, useTodayVisit,
+                      useReviewCoolLoop, useServerAvailable, useKeyboardNav, useOptimisticAction, …
+  api/                one thin wrapper per backend area on api/client.js `request` (quietly retries a 503 `database_busy` ≤2× for GETs and `idempotent: true` writes)
+  utils/              pure helpers: configForm, settingsNavigation, todayVisit, relevanceBands,
+                      setupDoctorState, safeStorage, humanizeError, searchSort
+  offlineStore.js     IndexedDB papers / mutations (outbox) / meta
+  syncClient.js       typed sync protocol over /api/sync/push|pull
+  searchPolling.js, questionSubmission.js
+public/               sw.js (app-shell cache; never caches /api), manifest.webmanifest
 ```
 
-Use React Query for server state and component state for transient UI. Reuse
-`Button`, form primitives, and `CHIP_TONE`; avoid ad-hoc status colors. Keep API
-tests beside wrappers and run `npm run build` for every UI change. Page tests
-cover route/query compatibility, setup validation and completion, Today’s
-source-filtered batch selection, Library mode deep links, settings save errors,
-Ops tab state, paper-review writes, and Search materialization; hook/component
-tests cover keyboard isolation and verdict comment editing.
+Routes: `/` → `/today` (default), `/library` (`?mode=batch`), `/search`, `/weekly`, `/settings`,
+`/ops` (`?tab=`), `/setup`, `/paper/:itemKey`. `/annotate`, `/review`, `/triage`, `/pending`
+redirect through `RedirectTo` in `src/App.jsx`, carrying the query string. Settings and
+source tasks open with `?task=`; the old Settings hashes resolve through `LEGACY` in
+`utils/settingsNavigation.js`.
 
-The optional built-app check runs real Chromium → FastAPI → temporary SQLite:
-`ZS_APPLICATION_BROWSER_SMOKE=1 .venv/bin/pytest -q --forked tests/test_application_browser_live.py`
-from the repository root after building. It uses the installed browser, blocks
-service workers/external requests, and disables AI, training and background jobs.
-No live Zotero/profile is used; the missing integration's collections/tags 503s
-are asserted explicitly. It covers first-save/reload, mobile verdict editing,
-setup/route navigation, keyboard isolation and filtered pending persistence—not
-model quality, actual Zotero delivery or full offline service-worker behavior.
-The Search journey also verifies the full query projection and independent Adds
-for two identical-title cards through real HTTP/session persistence and reload;
-only the external Zotero writer is substituted.
+## Invariants
 
-Deep-review failures on both paper review surfaces share `ReviewFailure`: show
-the server's typed recovery and disclose code/stage/original error under Technical
-details. Legacy string-only failures still render normally. The keyed runner
-passes diagnostics through without interpreting model prose as HTTP/login state.
-Sensitive attempt capture is CLI-only; no capture switch or new dashboard appears.
+**State**
+- React Query is the only client cache; component state is transient UI. No second store.
+  Browser storage goes through `utils/safeStorage.js` so blocked storage degrades, not breaks.
+- Today's shortlist lives under `zs.todayVisit.v1` (`utils/todayVisit.js`, QueryClient-backed).
+  Reads never replay writes; clearing site data loses it. The checkbox SELECTION persists
+  in the same visit (survives a round trip to a paper and reload; a new shortlist starts
+  empty). Members do NOT refetch on window focus, so returning from another app never flips
+  the cards to "Status not current". The members result is kept 5 min (`gcTime`), so a return to
+  Today renders it at once and revalidates on mount; only a first load or an invalidated entry
+  (verdict/review finished elsewhere, Refresh) shows "Checking…"/disabled until the reply. A review already seen stays ready during that refresh (`reviewReady`); the "needs a review" hint needs `reviewKnown`.
+  A verdict saved on the paper page opened from Today is written into the retained visit and the cached members reply at once (`finishTodayReviewAction`), so the card shows "Decision: X" on return; a skip of a feed-only paper (`feed:…`) does not call reject-tag.
+- Today per-card decision (#37): `PaperCard` shows must/should/could/skip with undo and an
+  optional one-tap reason chip; it posts to `POST /api/daily/verdict` (undo: `/verdict/undo`)
+  and reflects the saved verdict from the member facts. The bulk Add/Trash bar appears only
+  once ≥1 card is ticked (no always-on 210 px toolbar). **Owner decision (supersedes "keep
+  `require_review` current-only"):** must/should/could (and bulk Add) still require a full-text
+  review, but a current **or** outdated-same-PDF review now counts — the `require_review`
+  service gate guards a write to the owner's real Zotero, so it is KEPT; an outdated-but-valid
+  review keeps the card recommended with a “review outdated” badge and enabled buttons, while a
+  missing/invalid/`pdf_changed` review still shows the "needs a review first — Generate" note,
+  and skip is always available.
+  Reason chips are never pre-ticked and are captured per item, never in a batch.
+- Card on Today + paper page (#98, redesigned #124, English + terse TL;DR #127): `components/card/PaperFactsCard.jsx`
+  (+ `AiSummary.jsx`, `FactStrip.jsx`, pure `cardModel.js`, `api/cardApi.js`) renders `GET /api/card/{key}` under the
+  title. Order: **AI TL;DR** → **fact icon row** → one quiet who-is-behind line. The TL;DR is ≤4 labelled one-line
+  bullets (`New` / `Take` / `Caveat`; `card.ai.bullets`, never prose — a card without `bullets` is treated as
+  not generated) in a label column + text; the `Caveat` label is ochre. The server's `Code` bullet is not shown (#308: it
+  repeated the code mark). On the paper page, where a review exists, a last `Not found` line (`cardModel.notFoundLine`)
+  names what is absent in the card facts AND answered "no" in the review checklist (`quality.rubric`); Today cards have no such line. Facts are 10 small icons + the code mark from the shared
+  inline-SVG set `components/ui/Icon.jsx` (lucide-style, stroke 1.5): *Published* (prompts, protocol, judge-vs-human,
+  contracts, data) | *Method* (baselines, ablation, uncertainty, external validation, reproducibility) | the GitHub mark
+  with a ✓/✗ dot (a link when the repo exists). The row shows **only the facts that were found** (#231), in that
+  order; with none it is one quiet line («Code, data, method: full text not read» / «… nothing found»), never empty
+  circles. Present = Forest on Mint, absent = faint outline, unknown (no full text read) = dashed circle; each has an
+  English `aria-label`+`title`, and the legend in the card's single “more” keeps all 11 with their state + words. With no TL;DR the row reads «AI TL;DR» + «Generate AI TL;DR»; the first use shows
+  ONE consent line («The paper text will be sent to an external model (<provider>) to make the AI TL;DR. Allow?»,
+  posts the GET's `boundary.token`), later taps generate at once (`POST /api/card/{key}/generate`). The fetch is
+  additive and fail-soft; unavailability reasons (`cardModel.js` `AI_REASON_MESSAGE`) use the backend's keys
+  (`call_cap`, `daily_token_cap`, `circuit_open`, …).
+- Today "Not reviewed yet (N)" shelf: `components/today/NotReviewedShelf.jsx` under the cards, fed by the
+  `unreviewed` field of `/api/daily` kept in the retained visit (`todayVisit.js`). One tap row per paper
+  (title, source, ≤2 why chips, cached TL;DR bullets) → `/paper/<key>`; no verdict/Add controls.
+- Today page (#124): one ≤760 px reading column (the cards are a one-at-a-time cull queue, so no master/list);
+  header = title + ONE Forest **New shortlist** + **More** (Refresh status, Triage backlog, Article selection,
+  RSS sources, Telegram today; it opens by itself while triage runs or fails). Card order: pills + quiet *Source ↗* → headline (a link to the full review at
+  `/paper/<key>`, feed or Zotero key) → AI TL;DR + icons + who → ONE why line → verdict buttons → “more” (authors, venue,
+  abstract, icon legend, selection details). Verdict tints (`decisionVocab.js` `DECISION_TINT`): must Forest solid,
+  should Sage, could Mint, skip hairline outline; the chosen one shows ✓ + Forest border. Buttons are compact
+  content-sized pills grouped left (`DECISION_BTN`: 40 px on phones with a 44 px tap target via an invisible
+  `::before`, 32 px on desktop) — the same look on the paper-page sticky bar and the rail's `VerdictPanel` edit row. Loading shows card skeletons.
+  **New shortlist** shows a pending state, then one result line under the header («N new papers» /
+  «Same papers — nothing new since <time>», client-side id compare; the visit stores `createdAt`); an outdated card's
+  *Regenerating · step · elapsed · #N in queue* reads the runner's 3 s status poll and flips to the new review when
+  the members refetch ends.
+- **Language rule (#127, supersedes #108):** the whole UI is English — chrome, buttons (`must/should/could/skip`,
+  `Undo`), reason prompt + chips (`components/decisionVocab.js`; `NEG_CHIPS` and the shared chip style `chipClass` live there), the one-line “why selected”,
+  tooltips, errors, empty states and the AI TL;DR itself. **Only exception: Telegram post/discussion summaries and
+  trend labels stay in the language of the source chats** (they summarise that text); Telegram chrome is English too.
+  Stored paper content is shown as stored. New strings follow this split.
+- Today card leftovers (#108): the selection explanation is ONE plain line (`Close to your goal “…” · …`) with
+  the honesty facts (policy, keys, review evidence) behind “more”; the review chip is hidden when the
+  evidence is unknown/unrecorded (the detail stays in “more”); once the card has an AI TL;DR the abstract
+  collapses (`abstract`); `Random check` uses the solid badge style of the relevance badges.
+- Paper page decision (#94): the verdict (`components/paper/review/PaperVerdict.jsx`, shared
+  by the desktop rail and the mobile sticky bar) uses the same must/should/could/skip vocabulary
+  and one-tap reason chips as Today; a resting verdict reads `Yours:`/`Auto:` by its `source`.
+  Auto deep review on open is opt-in: `useDeepReviewRunner` only auto-fires when
+  `GET /api/paper/prefs` reports `auto_review:true` (`ZS_PAPER_AUTO_REVIEW`, default OFF).
+  `usePaperReview` fetches `review-detail` once per open. Related-in-library sits below the
+  abstract, collapsed.
+- Paper page layout (#125): the whole page is a centred `max-w-[76rem]` frame (TOC / reading column / rail),
+  with one ≤68ch reading column inside it. Order: title/authors/links →
+  ONE at-a-glance card (#308, `review/Recommendation.jsx`, the same on the paper page, the Library expanded row and
+  Annotate: verdict chip, minutes → what the paper does (`digest.tldr`) + the one-line `digest.verdict` →
+  `review/Glance.jsx`: Quality tile (grade letter, «n of m checks», one segment per check, red-flag count), Metrics tile
+  («as reported»: the first `digest.parameters.metrics` string leads with its number large and the full string under it;
+  a bar/pair/range is drawn by `review/metricModel.js` only when that number is the only one in the string), one
+  strength and one weakness → the why → `ReadingPlan` «Read first / Skip / What the original adds» → policy reasons → code row
+  `review/CodeLink.jsx`) → `PaperFactsCard` → `Fold` sections (`review/primitives.jsx`: serif title + one-line summary while
+  closed). Order: Findings, **Assessment** (`review/StudyMap.jsx`: Data → Method → Compared with → External validation
+  rail, then Impact / Industry / Academia / Unknowns, then the remaining digest rows) and Caveats and coverage (red flags =
+  clay left rule + quiet «verify» badge) start open; Evidence, Relevance, Methods and limitations, **Reference** (summary,
+  checklist, source basis), Figures, Paper map, Abstract and Related are closed folds with their content in the DOM. The
+  Library row shows the same card and keeps everything else behind one «Details». The closed **Evidence** fold (`review/EvidenceFold.jsx`, #40) reads `GET /api/library/review-audit/{key}` and lists, per verified claim (Contribution, Findings), the verbatim quotes from the paper (the best-matching sentence ±1 of the verified passage + «Show full passage»; «…» marks an excerpt); `not_established_fields` show as «could not be grounded this time»; legacy / stale / PDF-changed states are one plain sentence; older-rules audits carry a note. An outdated review is one line +
+  `Regenerate` (`onRegenerate` → `runner.run()`). The mobile verdict bar uses graded tints (must Forest
+  solid, should Sage, could Mint, skip outline), no black fills.
+- Today exposure (card shown/dwell, review and link opens) is reported best-effort to
+  `/api/daily/events` by `hooks/useCardExposure.js` and `utils/todayEvents.js`, keyed by
+  the retained visit id (= the logged `slate_id`); a failed send is dropped. Cards with
+  `role: "exploration"` are marked "Random check".
+- The client does not recompute server policy: verdict/action, reading plan and scientific
+  grade are rendered from the server projection (`digest.grade`, projected decision).
+  Every printed letter carries what it rests on (`tones.js` `qualityBasis`/`gradeBasis`): `A · 3 of 5 checks`
+  from stored `coverage_met`/`coverage_applicable` (old reviews → letter only).
+  The one client mirror, the effective relevance band with prestige demotion
+  (`utils/relevanceBands.js`), is shared by Library filters and the cool-review loop.
 
-Targeted Search folds confirmed exact-phrase/type constraints into one optional
-panel. Topic-derived restrictions appear as confirmation-required plan rows;
-confirm by entering the desired filters and searching again. The existing plan
-panel also shows authority, observed retrieval accounting and coverage limits.
+**Visual hierarchy**
+- `tailwind.config.js` maps `font-semibold`/`font-bold` to 500 and `index.css` sets bare
+  `<b>`/`<strong>` to 500 (DESIGN.md: no weight ≥600). Use `font-medium` in new code.
+- Paper page order on iPhone: title → byline (first 3 + last author, `+N more`) → outdated
+  line → verdict card → facts strip; secondary detail lives in folds, never deleted.
+- One disclosure look: a plain `<summary>` gets the shared chevron from `index.css` (no native ▶; a summary
+  with its own `flex`/`grid`/`list-none` layout draws its own, e.g. `Disclosure`). Rail headings (`Your verdict`,
+  `My notes`, `Ask this paper`) use `SectionLabel` (`className` for spacing). `NavBar` status row is 36 px on
+  iPhone; its Details tap area is 44 px via `after:`.
+- Settings states a fact once: `StepModelsTable` rows carry model, `provider · Local/Hosted`, speed and a
+  short status; each provider's address and the status footnote sit in the closed «Providers and status
+  checks» disclosure; the failure reason is one line per provider on AI models / Setup and lives in
+  `ReadinessStrip` on the overview (the strip lists only open issues, pill + reason). Overview rows show a
+  short «Change» whose `aria-label` is the full action. Measurements go behind the shared `Disclosure`
+  («What was measured»); the task footer speaks only when there is an unsaved draft.
 
-Targeted Search's folded explicit constraints are forwarded through `searchApi`
-only when supplied; the natural-language topic alone never submits confirmed
-filters. The existing plan panel shows confirmation proposals and unknown
-zero-result retrieval states.
+**Navigation and drafts**
+- The data router installed in `main.jsx` owns navigation admission. Dirty/pending drafts block
+  through `useBlocker` + `useBeforeUnload`: `components/settings/TaskPage.jsx` (one blocker per
+  task page) and `pages/PaperReviewPage.jsx` (unsaved notes). Do not add callback-only guards;
+  tests needing a router use `src/testRouter.jsx`.
+- `autoRun=false` paper links (Today, Weekly, Settings returns) never start a review;
+  generation is an explicit action. `useDeepReviewRunner` defaults `autoRun` to false.
+- `components/library/PaperFigures.jsx` draws images only from a current render; a stale artifact
+  shows "Rebuilding figures…" / "Figures are outdated" + Rebuild (the server 404s stale files). Figures and Tables are separate groups; a caption's repeated leading label is dropped.
+- Page headers: `components/ui/PageTitle.jsx` is the one title style (Library, Search, Weekly; routes unchanged) and holds the one-line purpose of Today / Library / Search / Weekly (`PAGE_PURPOSE`; Today's owner can adopt it). Read next's Browse lists use `ExpandableList` (fade at the cut edge + "Show all N"); its selection bar adds `BulkVerdictBar` — per-paper verdict (dont_read also queues ❌) and "Mark read" (the 👀 skimmed tag; the paper leaves the queue), stopping at the first failure with "N of M" — next to the existing Run triage / Add to collection. Empty Ops Feed review offers `FeedReviewEmpty` (fetch RSS, then score the backlog: the in-app `feeds run`).
+- Weekly (Todo #128 rethink) renders `components/TelegramToday.jsx`: title row **Channels** (Fraunces light) + ONE Forest **Check channels** button (`TelegramRunButton.jsx` `RunButton`; until the collection consent is given it reads **Allow & check channels** and a one-paragraph consent line sits below it; `useTelegramRun.js` polls `GET /telegram/status` and starts `POST /telegram/runs`), then ONE quiet line «Updated 12 min ago · 23 channels · Sources ⓘ» — the ⓘ disclosure holds the scope/not-fact-checked note and the marker legend (no other caption lines). `RunStatus` shows the 3-segment `Step n of 3` progress and English error/partial panels from `telegramRunText.js` (the `zotero-summarizer research-feed telegram-auth` command only for a missing/unauthorized session). **Trends** (`TelegramTrends.jsx`, collapsible, no outer box): hairline-divided rows — topic label (chat language) · one-line gist · marker pill (**↗ more discussion** / **new** / **hot thread**, tooltip = meaning; «steady» has none); a row with ideas/examples opens to ideas + post counts + channel links. **Discussions** (`TelegramPost.jsx`): Linen-white 14 px hairline cards — ONE headline (first line of the post, cut at a word boundary ≤110 chars), 2–3 terse bullets in the thread's language (citations `[c…]`/list markers stripped), a small count chevron after each bullet expands the comments it cites (`TelegramThread.jsx` fetches them when opened — `GET /telegram/thread/{source_id}`, cached per post; the digest carries only the points: full text in thread order, a reply shows its parent's first words), a «Continues @channel: …» line above a series continuation, «Also in: topic · n channels», meta line «@channel · 3 d ago · 76 comments», quiet **Highlights (n)** / **All comments (n)** / **Details** disclosures (rest of the text, link, one **Your feedback** group, see below). **Past digests** (`TelegramHistory.jsx`, `?past=list` / `?past=<run_id>`, linked from the status line): runs by date with a second line (first trend label or busiest channel) + chevron · discussions · unread, **Export feedback**, and one saved run (note «Marks and feedback apply to the discussion everywhere.») rendered by the shared `TelegramFeed.jsx` (trends + discussions, unread first, read ones behind a collapsed **n read**, **Mark all read (n)** → «Marked n read · Undo» for 10 s). `TelegramPost` has **Done** (collapses to one line with its feedback state, e.g. «marked useful» / «not a fit», Undo); under **Details** `PostFeedback.jsx` is ONE **Your feedback** group on one 13 px chip style: Useful / New to me / Want to try / Good discussion (`POST /telegram/feedback`, rolled back if saving fails) · **Not a fit** (`POST /telegram/reasons`, opens its optional reason chips; it and the positive chips exclude each other — picking one clears the other) · a note («Saved» clears after 3 s); Trends shows 5 with **Show all N trends**. **Saved digests** (options read «1 Nov 2026 – 9 Nov 2026 · saved 10 Nov, 22:33 · 8 cards», never the run slug) is a collapsed section at the bottom, hidden when there are none (open when `?run=` is set). A saved digest (`WeeklyDigest.jsx`, wording in `weeklyDigestText.js`) reads in plain words at display time, because stored digests keep the generator's text: date range «14–20 Oct 2026», «Worth a skim» (not `skim`), gate-only rationale «Picked by the relevance model alone…» (no raw scores/SHAP), snake_case evidence flags (`weak_evidence`, `uncertainty`, `no_leakage`…) as sentences, «Read in full text» instead of `Source basis: full_text · model: …` (the model name stays under **Technical details**), «Not checked» for unassessed lists, snake_case reproduction inputs and the reproducibility rationale spelled out («Dataset provenance»; Markdown export too), «1 card» singular, Not-a-fit reason chips capitalised like the positive ones, RSS rows «Last checked: 9 Nov, 11:07» (local time), and an identical project-use sentence said once for all its projects. A Telegram post whose first line is a bare link takes its first text line as the headline (or «Link post from @channel»); the number after a bullet reads «2 comments». The block is capped at `max-w-3xl`; the old page title/«Read-only snapshots…» text is gone. `components/settings/TelegramSources.jsx` (Weekly → Sources) is English editing only: connection line, **Channels** (two-column hairline list, one compact row per channel + ✕, add field, scope/link edits behind **Edit**), **Summaries** (provider/model; a non-local provider needs an explicit **Allow sending text to …** consent, `POST /telegram/processing`; bounded limits), **Access** (the collection-consent checkbox; the line below it names the button as it currently reads, «Allow & check channels» until consent is given). Saving sources without a model is allowed; limit fields clamp to sane ranges and surface human-readable `422`s via `humanizeError`. When unverified it shows one copyable `zotero-summarizer research-feed telegram-auth` command.
+- Decision (Select & label default): the filter stays **Must read** (the owner's labelling queue), but the chips now start with **All**, the active chip carries a ✓ and a ring (`aria-pressed`), and the header/progress name the filter ("Must read: 143 of 160"). Revisit only if opening on All proves wanted.
+- Paper figures: "+ Attach to Zotero" (`PaperReviewPage`) is hidden unless the render is completed and current — never while figures are outdated or rebuilding.
+- Library Read next: the server sorts papers with the owner's own verdict (`decided`) after the undecided ones; `ReadNextView` states one set of counts (`components/library/readNextCopy.js` — to decide · decided · read hidden), the score age/staleness next to Rescore, and a divider before the decided group (default order only). "Cool papers" is called "top picks".
 
-The flat full review leads with Contribution before recommendation/grade/rationale;
-compact and legacy assessment presentation is unchanged. Exact key-finding strings
-also present as overstated claims appear only in the explicitly qualified critique
-panel; near-paraphrases remain untouched. Goal reasons live inside the native
-Evidence disclosure, while states, citations and quotes remain available. The
-mobile verdict-editor link stays in document flow rather than covering prose.
+**Configuration writes**
+- `components/settings/ConfigTask.jsx` captures the saved snapshot and its `_revision`, PUTs
+  only the task's owned fields (`scopedFormStateToConfig` in `utils/configForm.js`), and
+  rejects partial/malformed snapshots or ACKs instead of defaulting them.
+- Uncertain or conflicting writes are never replayed or rebased on a fresh revision; the
+  user reads back explicitly and compares. Unowned config branches round-trip untouched.
+- Settings shows one task at a time (`pages/Settings.jsx`); there is no global Save.
+- `StepModelsTable` (Settings overview + AI models task) is the one "which model does each step" table: saved routing + `/api/llm/step-history` (median time, last success from run logs) + `/api/admin/llm-reachability` (provider check) + the Test result shown in the tested row (`utils/stepModelStatus.js` verdicts). Goal lines are tidied for display only (`cleanGoal`) and edited one per row (add/remove, one Save, same `research_goals` write); the Settings overview shows the resolved Zotero path (`status.paths.zotero_data_dir.value`, "default location" when the env var is unset); Setup shows only the "All steps" model row (`StepModelsTable summary`) with per-step models under "Advanced", hides the app nav (`App.jsx`), reads "Step N of M" on phones and has a real Skip button; Setup warns while no Test has answered.
+- **Review depth** (`settings/ReviewDepthChoice.jsx`, task `?task=depth`, saved through `ConfigTask` as `review_depth`): one Thorough (default) / Fast choice on the Processing card with the measured cost in plain words; Fast turns off digest reasoning and runs the quality rubric once, so reviews made under the other depth show as outdated.
+- **Background processing** (`settings/BackgroundProcessingChoice.jsx`, task `?task=processing`, `ConfigTask`): four number fields — papers reviewed at once / calls per paper (`quality_review.fleet_papers`/`calls_per_paper`) and feed catch-up days / pages per feed (`feeds.backfill_days`/`max_pages_per_feed`). Ranges live in `PROCESSING_KNOBS` (`utils/configForm.js`) and mirror the backend models; out-of-range blocks Save. The backend persists only these fields (`models.config.USER_KNOBS`) when non-default.
+- Connection changes belong to `ConnectionTask` (`components/settings/`), `useConnectionTask`
+  and `api/connectionsApi.js`; Setup reuses the same task. The hook's `publish` fences both
+  `llm-connections` and `runtime-config` revisions, retires obsolete work and rereads; a
+  mismatched revision invalidates instead of adopting. Malformed ACKs stay unconfirmed
+  (`requireReceipt`) and offer readback, not a retry.
+- Doctor state is owned per QueryClient by `utils/setupDoctorState.js`; config/RSS writes
+  report outcomes there so a stale Ready cannot survive an edit.
 
-Non-paper findings stay visible when the scientific overstated-claims panel is
-suppressed; exact-repeat exclusion applies only when that replacement renders.
+**Offline / PWA**
+- One IndexedDB database (`offlineStore.js`: `papers`, `mutations` = outbox, `meta`) and one
+  typed sync protocol (`syncClient.js`, protocol 1). Pull replaces the snapshot atomically;
+  push sends ordered batches with predecessor UUIDs; unknown ACKs never retire rows.
+- Local capture happens only on fetch transport failure or an already-reported outage.
+  HTTP refusals, malformed ACKs and decode failures after a response stay errors.
+- `api/offlineTransport.js` bounds offline-capable requests with build-time
+  `VITE_SYNC_TIMEOUT_MS` (default 15000, max 60000). Server-only features (PDF, AI,
+  annotations, native Zotero) gate on `hooks/useServerAvailable.js`.
+- A sync deadline with no answer, or a 502/503/504 (incl. `database_busy`), is phase `busy`, not
+  `unavailable`: the header says "Server is busy — retrying…", `publishStatus` re-requests a sync
+  (5 s, then 15 s) and recovery re-checks the AI model. "Server unreachable" is only a refused
+  connection (fetch `TypeError`) or `navigator.onLine === false`, or 3 consecutive no-response SYNC timeouts
+  with no HTTP response between (blackholed network: Mac asleep, VPN off — `publishNoResponse`; any HTTP
+  response resets the count in `fetchTransport`; page-read timeouts only say `busy`; 502/503/504 stay `busy`). Today's "AI not connected" needs a successful
+  model check with `reachable === false` (or disabled); an unknown state says nothing;
+  the setup status check re-asks every 5 s after a failure and the gate renders children meanwhile.
+- Header counts are two different queues: "N pending changes" = Zotero changes awaiting approval
+  (server, same as Ops → Pending changes; the Pending page refreshes it after Apply/Reject via `notifyPendingChanged`); "N unsent on this device" = the offline outbox. The
+  outage message lists what still works (synced papers, local verdicts/notes) and what does not
+  (Today decisions, PDFs, AI, rescoring); install copy assumes the Tailscale HTTPS address.
+- Ops lists stay compact (apply result reads «6 changes applied.» / «5 applied, 1 failed — see the Failed tab»; `appliedMessage`): Pending changes show one line per change (paper title — «Untitled paper» if unknown, never the Zotero key —, plain action label such as «Add or update note», target) with
+  payload JSON/audit/editor under "Details"; Triage jobs hide finished jobs over 7 days behind a toggle;
+  System → Retrain asks first (`components/RetrainConfirm.jsx`: what is replaced, that the previous model is snapshotted and restorable with `goldenset model-history`/`restore-model`, 1–5 min); a note generated for another Zotero library says so instead of «reselect»; the Gate-rejected pile explains once that only «Remove» can be set without a review and shows the feed name and `Score`; Setup health names checks in words (`CHECK_LABELS`); `/ops?task=`
+  alone opens System. RSS rows (`settings/RssFeedRow.jsx`) show name · host (full URL on hover/Edit) · last check · item
+  count and a plain-language reading of the last error (`plainFeedIssue`; raw text on hover), with Delete in a "⋯" menu (still confirms).
+- Never expose `/api/sync` as unauthenticated LAN HTTP.
 
-Full-page caveats factor only exact contiguous shared introductions in adjacent
-warnings. Complete suffixes remain initially visible with their own source links;
-joining each prefix and suffix reconstructs the original warning. Internal words,
-negations and scope are never deleted or inferred equivalent from a criterion or
-approximate location. Original wording is retained for audit. Identical goal sets
-share one finding heading. No semantic classifier, rewritten summary, rubric or
-scoring change is introduced; compact presentation remains unchanged.
+## Extension points
 
-Full reading views fold goal findings into one native disclosure; states and citations remain visible. Saved quality/digest source basis is shown literally, with reviewed extent explicitly unrecorded. Rubric-literal warning frames preserve each modifier, complete suffix, and original wording.
+- New backend call: add a function to the matching `api/*Api.js` using `request`; validate
+  the receipt for writes and keep tests beside the wrapper.
+- Loading/error/empty panes: `components/ui/Async.jsx`; status colors: `Badge`/`CHIP_TONE`
+  and the palette in [DESIGN.md](DESIGN.md); form controls: `components/form/Fields.jsx`.
+- New Settings task: add it to `pages/Settings.jsx`, wrap in `TaskPage`, and, if it writes
+  config, reuse `ConfigTask`'s `TASKS` spec rather than a separate PUT path.
+- Optimistic writes: `hooks/useOptimisticAction.js`; list shortcuts: `hooks/useKeyboardNav.js`
+  (ignores interactive controls).
+- Features with browser evidence are documented with their code/test links in
+  [docs/features.md](../docs/features.md); update the matching paragraph with the change.
+- Search / Find similar (#250): result chips use plain labels (`Crossref`, `Published article`, `needs checking` + one-line legend), abstracts go through `cleanAbstract`, the header row wraps at 390 px, a saved session fills the query box, the discovery status line is plain words (`STATUS_LINE`), and Related shows its own «Related in my library» heading and «Comments would be sent to: <provider>» only as the consent target.
+- Paper page and Today in plain words (#252): Today's first load says «Loading today's papers…» (not «Selecting…»); a paper opened from the Today shelf keeps «← Back to Today» (other entries say «← Back»); stale-status states read «Updating status…»; the unknown note-delivery state reads «Not yet saved to Zotero.»; red-flag lists drop near-identical variants at display (`briefModel.dedupeFlags`, negation must match); dataset checklist keys and standard names, the method line and the FLAG/NEUTRAL/HIGHLIGHT legend use plain sentences; the phone sticky bar names the verdict like the rail (`pretty()`: «Yours: Should read»); the phone page keeps `pb-44` so the sticky verdict bar never covers text.
+- Library, Setup and connection approval in plain words (#253): `cleanAbstract` turns block ends (`</p>`) into a space (feed text `…-5</a></p>An agentic…` was glued); the Select & label chip says «Not interested» and the active-learning chip «Papers the model is unsure about»; the score-band formula sits behind «About the priority bins»; `/setup` on a configured install preselects the current mode, opens with «Already set up», and credits steps as done (Zotero step only when the DB is found). `ConnectionTask` says which saved connection «Load models» reuses (same address + authorization) and `useConnectionTask.publish` re-probes `llm-reachability` after every save while `StepModelsTable` shows «Checking provider…» (#281). `settings/ConnectionApproval.jsx` shows «Approve this connection» at the top of AI models when a stage reports `provider_approval_required`; it calls the same register flow as Change → Load models (`approved: true`, no key typed or shown), one provider per click.
+- Remaining plain-words fixes (#270): `cleanAbstract` also drops a leading «Journal, Published online: …; doi:…» notice; one band vocabulary «Not interested» (score-band bar, Select & label intro) and the bins line reads «Not interested below 2.0 · Could read 2.0–3.5 · …»; queued notes/verdicts say `QUEUED_FOR_ZOTERO` (`hooks/useNoteDelivery.js`) and a confirmed one «Saved to Zotero.»; the Evidence quote picker ranks licence/preprint boilerplate last; red-flag groups (`CritiqueViews`) are not formed when a remainder would start mid-sentence («for…», «a…»); the paper page suppresses the «Outdated review» line for the moment between a finished regeneration and the refreshed review; Ops → Pending folds identical older pending rows behind «N older versions» and shows «Queued/Applied 11 Nov, 05:59» in local time; the Gate-rejected pile shows «loading…» instead of «0 shown»; connections named `connection_<id>` are shown by address.
+- Search clarity (#274): while reviewing, `Search.jsx` shows «Reviewed N of 10» from the session's `screened_count` (total = `min(10, candidates)`, = `LIGHT_REVIEW_N`) with the waiting sentence as sub-line, «Refining the search…» during refinement; `retrieval <source>` plan rows and discovery provider receipts render as plain lines (`retrievalLine`, `providerLine`) plus one «Some sources failed» line; `cleanAbstract` decodes entities (`decodeEntities`, also used for Search titles) and ends a heading with «: »; version and source are one chip.

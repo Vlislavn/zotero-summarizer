@@ -1,7 +1,7 @@
 """HTTP request/response + app-state models for the API and write path."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -29,6 +29,7 @@ __all__ = [
     "TriageRunResponse",
     "PendingChangesResponse",
     "PendingChangeMutationRequest",
+    "PendingChangeApplyRequest",
     "PendingPriorityOverrideRequest",
     "PendingChangeUpdateRequest",
     "ZoteroItemPriorityUpdateRequest",
@@ -120,6 +121,8 @@ class PendingChangeMutationRequest(BaseModel):
     # When True, apply re-attempts FAILED rows (instead of PENDING) via the same
     # writer path — re-trying a failed Zotero write without re-queuing.
     retry: bool = False
+    # Apply requires its stricter subtype; rejection needs only selected IDs.
+    previews: Dict[int, str] = Field(default_factory=dict)
 
     @field_validator("change_ids")
     @classmethod
@@ -137,6 +140,18 @@ class PendingChangeMutationRequest(BaseModel):
         if not normalized:
             raise ValueError("change_ids must contain at least one positive integer")
         return normalized
+
+
+class PendingChangeApplyRequest(PendingChangeMutationRequest):
+    previews: Dict[int, Annotated[str, Field(strict=True, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")]] = Field(
+        ..., min_length=1, max_length=1000,
+    )
+
+    @model_validator(mode="after")
+    def _selected_previews(self) -> PendingChangeApplyRequest:
+        if set(self.previews) != set(self.change_ids):
+            raise ValueError("Every selected ID requires exactly one displayed preview")
+        return self
 
 
 class PendingPriorityOverrideRequest(BaseModel):

@@ -19,6 +19,7 @@ from typing import Any
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models.providers import resolve_stage
 from zotero_summarizer.services._common import state
+from zotero_summarizer.services.llm import factory
 from zotero_summarizer.services.library._prompt_security import untrusted_input
 from zotero_summarizer.services.faithbench import (
     ANSWER_PROMPT,
@@ -28,6 +29,7 @@ from zotero_summarizer.services.faithbench import (
 from zotero_summarizer.services.faithbench._constants import RETRIEVAL_TOP_K
 from zotero_summarizer.services.faithbench._corpus import _CONTEXT_SEPARATOR, _clip_chunks
 from zotero_summarizer.services.library import paper_render, qa_context
+from zotero_summarizer.storage.feed_identity import is_legacy_feed_key, is_stable_feed_key
 from zotero_summarizer.services.library._grounding import (
     answer_is_supported_by_quote as _answer_is_supported,
     quote_is_grounded as _quote_is_grounded,
@@ -55,6 +57,27 @@ _WHOLE_PAPER_COUNT_PATTERNS = tuple(
     )
 )
 
+def needs_pdf_error(item_key: str, exc: APIError) -> APIError:
+    """Plain-words ``needs_pdf`` (feed-only vs library paper); any other error passes through."""
+    if exc.error != "needs_pdf":
+        return exc
+    message = (
+        "Add it to your library to ask questions."
+        if is_stable_feed_key(item_key) or is_legacy_feed_key(item_key)
+        else "This paper has no PDF yet — attach one in Zotero or use Fetch full text."
+    )
+    return APIError(error="needs_pdf", message=message, status_code=exc.status_code)
+
+
+def require_pdf(item_key: str) -> None:
+    """Fail fast (before any save/mirror/model work) when the paper has no PDF."""
+    try:  # availability only: never builds or acquires
+        paper_render._state_path(item_key)
+        paper_render._pdf_for_item_or_acquire(item_key, allow_acquire_missing=False)
+    except APIError as exc:
+        raise needs_pdf_error(item_key, exc) from exc
+
+
 def ask_paper(
     item_key: str, question: str, *, mode: str = "comprehensive",
     history: list[dict[str, Any]] | None = None,
@@ -72,7 +95,10 @@ def ask_paper(
             error="validation_error", message=f"mode must be one of {MODES}", status_code=422
         )
 
-    artifact = paper_render.build_paper_read(item_key)
+    try:
+        artifact = paper_render.build_paper_read(item_key)
+    except APIError as exc:
+        raise needs_pdf_error(item_key, exc) from exc
     deterministic = _answer_from_artifact_counts(artifact, question)
     if deterministic is not None:
         return _with_evidence(
@@ -109,7 +135,7 @@ def ask_paper(
     )
     prompt = ANSWER_PROMPT.format(
         context=untrusted_input(context), question=untrusted_input(contextual_question))
-    llm = app.resolve_stage_client("deep_review")
+    llm = factory.resolve_stage_client(app, "deep_review")
     t0 = perf_counter()
     parsed, _raw = answer_with_retry(llm, prompt)
     latency = round(perf_counter() - t0, 2)

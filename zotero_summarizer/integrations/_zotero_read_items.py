@@ -281,6 +281,41 @@ class ZoteroItemsMixin:
         ]
 
     @staticmethod
+    def _read_item_annotations(conn: sqlite3.Connection, item_id: int) -> list[dict[str, Any]]:
+        rows = conn.execute(
+            """
+            SELECT a.itemID, a.text, a.comment, a.pageLabel, a.type,
+                   a.color, ann.dateAdded, ann.key AS annotation_key,
+                   ai.key AS attachment_key, ann.dateModified
+            FROM itemAnnotations a
+            JOIN items ann ON ann.itemID = a.itemID
+            JOIN itemAttachments att ON att.itemID = a.parentItemID
+            JOIN items ai ON ai.itemID = att.itemID
+            WHERE att.parentItemID = ?
+              AND ann.itemID NOT IN (SELECT itemID FROM deletedItems)
+              AND att.itemID NOT IN (SELECT itemID FROM deletedItems)
+            ORDER BY ann.dateAdded ASC
+            """,
+            (item_id,),
+        ).fetchall()
+        return [
+            {
+                "text": str(row["text"] or ""),
+                "comment": str(row["comment"] or ""),
+                "page_label": str(row["pageLabel"] or ""),
+                "type": _ANNOTATION_TYPE_NAMES.get(
+                    int(row["type"]), f"unknown_{int(row['type'])}"
+                ),
+                "color": str(row["color"] or ""),
+                "date_added": str(row["dateAdded"] or ""),
+                "annotation_key": str(row["annotation_key"]),
+                "attachment_key": str(row["attachment_key"]),
+                "date_modified": str(row["dateModified"] or ""),
+            }
+            for row in rows
+        ]
+
+    @staticmethod
     def _read_item_authors(conn: sqlite3.Connection, item_id: int) -> list[str]:
         """Ordered author display names for an item."""
         rows = conn.execute(
@@ -351,24 +386,38 @@ class ZoteroItemsMixin:
             })
         return attachments, pdf_path
 
+    @staticmethod
+    def _read_item_annotations(conn: sqlite3.Connection, item_id: int) -> list[dict[str, Any]]:
+        rows = conn.execute(
+            """
+            SELECT a.itemID, a.text, a.comment, a.pageLabel, a.type,
+                   a.color, ann.dateAdded, ann.dateModified, ann.key AS annotation_key,
+                   attachment.key AS attachment_key
+            FROM itemAnnotations a
+            JOIN items ann ON ann.itemID = a.itemID
+            JOIN itemAttachments att ON att.itemID = a.parentItemID
+            JOIN items attachment ON attachment.itemID = att.itemID
+            WHERE att.parentItemID = ?
+              AND ann.itemID NOT IN (SELECT itemID FROM deletedItems)
+              AND att.itemID NOT IN (SELECT itemID FROM deletedItems)
+            ORDER BY ann.dateAdded ASC
+            """, (item_id,),
+        ).fetchall()
+        return [
+            {"annotation_key": str(row["annotation_key"]), "attachment_key": str(row["attachment_key"]),
+             "text": str(row["text"] or ""), "comment": str(row["comment"] or ""),
+             "page_label": str(row["pageLabel"] or ""),
+             "type": _ANNOTATION_TYPE_NAMES.get(int(row["type"]), f"unknown_{int(row['type'])}"),
+             "color": str(row["color"] or ""), "date_added": str(row["dateAdded"] or ""),
+             "date_modified": str(row["dateModified"] or "")}
+            for row in rows
+        ]
+
     def get_item_detail(self, item_key: str) -> dict[str, Any] | None:
         """Return rich metadata, notes, tags, collections, and attachments for one item."""
 
         def _read(conn: sqlite3.Connection) -> dict[str, Any] | None:
-            item_row = conn.execute(
-                f"""
-                SELECT i.itemID, i.key, i.dateAdded, i.dateModified, i.libraryID, it.typeName AS item_type
-                FROM items i
-                JOIN itemTypes it ON it.itemTypeID = i.itemTypeID
-                LEFT JOIN deletedItems di ON di.itemID = i.itemID
-                WHERE i.key = ?
-                  AND i.libraryID = ({_USER_LIBRARY_ID_SELECT})
-                  AND di.itemID IS NULL
-                  AND it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
-                LIMIT 1
-                """,
-                (item_key,),
-            ).fetchone()
+            item_row = self._bibliographic_item_row(conn, item_key)
             if not item_row:
                 return None
 
@@ -405,35 +454,7 @@ class ZoteroItemsMixin:
 
             notes = self._read_item_notes(conn, item_id)
 
-            # PDF annotations live in itemAnnotations, keyed by attachment.itemID.
-            # The dateAdded column is on items, not itemAnnotations — join items.
-            annotation_rows = conn.execute(
-                """
-                SELECT a.itemID, a.text, a.comment, a.pageLabel, a.type,
-                       a.color, ann.dateAdded
-                FROM itemAnnotations a
-                JOIN items ann ON ann.itemID = a.itemID
-                JOIN itemAttachments att ON att.itemID = a.parentItemID
-                WHERE att.parentItemID = ?
-                  AND ann.itemID NOT IN (SELECT itemID FROM deletedItems)
-                  AND att.itemID NOT IN (SELECT itemID FROM deletedItems)
-                ORDER BY ann.dateAdded ASC
-                """,
-                (item_id,),
-            ).fetchall()
-            annotations = [
-                {
-                    "text": str(row["text"] or ""),
-                    "comment": str(row["comment"] or ""),
-                    "page_label": str(row["pageLabel"] or ""),
-                    "type": _ANNOTATION_TYPE_NAMES.get(
-                        int(row["type"]), f"unknown_{int(row['type'])}"
-                    ),
-                    "color": str(row["color"] or ""),
-                    "date_added": str(row["dateAdded"] or ""),
-                }
-                for row in annotation_rows
-            ]
+            annotations = self._read_item_annotations(conn, item_id)
 
             return {
                 "item_key": str(item_row["key"]),

@@ -6,7 +6,7 @@ import asyncio
 import pydantic
 
 from zotero_summarizer.models.config import GoalsConfig
-from zotero_summarizer.models.providers import resolve_stage
+from zotero_summarizer.models.providers import LLMCapability, resolve_stage
 from zotero_summarizer.models.setup import (
     ConnectionResult,
     FieldError,
@@ -30,6 +30,9 @@ def has_personal_goals(config: GoalsConfig) -> bool:
 
 def _probe_connection(config: GoalsConfig) -> ConnectionResult:
     """Probe the default model; failures remain user-facing data."""
+    if not config.llm_enabled:
+        return ConnectionResult(tested_provider="", tested_model="", status="disabled",
+                                detail="AI features are disabled by choice", hardware_safe="not_applicable")
     resolved = resolve_stage(config.llm_routing, "deep_review")
     provider, model = resolved.provider, resolved.model
 
@@ -37,9 +40,11 @@ def _probe_connection(config: GoalsConfig) -> ConnectionResult:
 
     models_discovered = 0
     try:
-        models_discovered = len(model_list.list_models_for_provider(provider))
+        models = model_list.list_models_for_provider(provider)
+        models_discovered = len(models)
     except Exception:  # noqa: BLE001 — advisory count only; the probe detail is authoritative
         models_discovered = 0
+        models = None
 
     return ConnectionResult(
         tested_provider=provider.name,
@@ -47,6 +52,11 @@ def _probe_connection(config: GoalsConfig) -> ConnectionResult:
         status=str(probe["status"]),
         detail=str(probe["detail"]),
         models_discovered=models_discovered,
+        listed=model in models if models is not None else None,
+        capable=LLMCapability.text in provider.available_capabilities,
+        observed_operational=probe["status"] == "operational",
+        hardware_safe=probe.get("hardware_safe", "unknown"),
+        reason_code=probe.get("reason_code"),
     )
 
 

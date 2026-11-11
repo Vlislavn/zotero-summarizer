@@ -7,10 +7,31 @@ from pydantic import ValidationError
 from zotero_summarizer.models import (
     CorpusImportRequest,
     CorpusItem,
+    PendingChangeApplyRequest,
+    PendingChangeMutationRequest,
     PendingPriorityOverrideRequest,
     ZoteroItemPriorityUpdateRequest,
     ZoteroItemTagUpdateRequest,
 )
+
+
+@pytest.mark.parametrize("previews", [None, {}, {8: "a" * 64}, {7: 1}, {7: "A" * 64},
+                                     {7: "a" * 63}, {7: "a" * 64 + "\n"}, {7: "a" * 64, 8: "b" * 64}])
+def test_pending_apply_requires_exact_explicit_hash_map(previews):
+    body = {"change_ids": [7]}
+    if previews is not None:
+        body["previews"] = previews
+    with pytest.raises(ValidationError):
+        PendingChangeApplyRequest.model_validate(body)
+
+
+def test_pending_apply_http_map_keys_and_reject_contract():
+    req = PendingChangeApplyRequest.model_validate_json(
+        '{"change_ids":[7],"previews":{"7":"' + "a" * 64 + '"}}',
+    )
+    assert req.previews == {7: "a" * 64}
+    assert req.force is False and req.retry is False
+    assert PendingChangeMutationRequest(change_ids=[7]).previews == {}
 
 
 def test_corpus_import_request_rejects_oversized_batches():

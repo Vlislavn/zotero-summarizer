@@ -82,6 +82,21 @@ class BootstrapResult:
     migrated_db: bool
 
 
+def connection_goals_config(provider, model: str) -> GoalsConfig:
+    """First explicit connection uses its real model, never a placeholder default."""
+    from zotero_summarizer.models.providers import LLMRoutingConfig, DefaultModelConfig
+
+    return GoalsConfig(research_goals=list(_DEFAULT_RESEARCH_GOALS),
+                       triage_criteria=list(_DEFAULT_TRIAGE_CRITERIA),
+                       relevance_scale=dict(_DEFAULT_RELEVANCE_SCALE),
+                       summary_structure=list(_DEFAULT_SUMMARY_STRUCTURE),
+                       llm=LLMConfig(draft_model=model, refine_model=model,
+                                     api_base=provider.base_url or 'https://api.anthropic.com',
+                                     api_key_env=provider.api_key_env),
+                       llm_routing=LLMRoutingConfig(providers=[provider],
+                                                   default=DefaultModelConfig(provider=provider.name, model=model)))
+
+
 def _default_goals_config() -> GoalsConfig:
     """A valid default ``GoalsConfig`` from defaults + neutral placeholders.
 

@@ -11,10 +11,12 @@ from tests._zotero_fixtures import add_feed_item, build_zotero_db
 from zotero_summarizer.models import MethodAndCode, SummarizeResponse
 from zotero_summarizer.services.triage.feeds._gate import _pack_review_payload
 from zotero_summarizer.storage import feeds, repositories
+from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS, run_migrations
 
 
 def test_restart_materializes_persisted_summary_verbatim(tmp_path):
     triage_db = tmp_path / "triage.db"
+    run_migrations(triage_db, "triage", TRIAGE_MIGRATIONS)
     zotero_dir = tmp_path / "zotero"
     zotero_db = build_zotero_db(zotero_dir)
     add_feed_item(

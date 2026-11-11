@@ -8,6 +8,7 @@ vi.mock('./Triage.jsx', () => ({ default: () => <p>Triage job tools</p> }));
 vi.mock('./Pending.jsx', () => ({ default: () => <p>Pending change tools</p> }));
 vi.mock('../components/AdminSection.jsx', () => ({ default: () => <p>Admin controls</p> }));
 vi.mock('../components/ModelCard.jsx', () => ({ default: () => <p>Model status</p> }));
+vi.mock('../components/FeedbackAnalysisCard.jsx', () => ({ default: () => <p>Your decisions</p> }));
 
 import Ops from './Ops.jsx';
 
@@ -15,6 +16,15 @@ function CurrentSearch() {
   const location = useLocation();
   return <output data-testid="current-search">{location.search}</output>;
 }
+
+it('provides the System section h2 before its reusable cards', () => {
+  const view = render(<MemoryRouter initialEntries={['/ops?tab=system']}><Ops /></MemoryRouter>);
+  try {
+    expect(screen.getByRole('heading', { name: 'System', level: 2 })).toBeTruthy();
+  } finally {
+    view.unmount();
+  }
+});
 
 it('opens the deep-linked Ops tab and retains unrelated query state when switching tabs', async () => {
   render(

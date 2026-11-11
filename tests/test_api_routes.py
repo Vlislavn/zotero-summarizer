@@ -111,7 +111,13 @@ def test_build_paper_render_route_passes_flags(monkeypatch):
     assert seen == {"item_key": "K1", "force": True, "allow": True, "acquire": True}
 
 
-def test_ask_paper_route_returns_grounded_and_abstained(monkeypatch):
+def test_ask_paper_route_returns_grounded_and_abstained(monkeypatch, tmp_path):
+    from zotero_summarizer.services._common import settings
+    from zotero_summarizer.storage.migrations import migrate_existing
+
+    current_settings = settings()
+    assert current_settings.triage_db_path.is_relative_to(tmp_path)
+    migrate_existing(current_settings)
     seen: dict = {}
 
     def _ask(item_key, question, *, mode, history):
@@ -133,6 +139,13 @@ def test_ask_paper_route_returns_grounded_and_abstained(monkeypatch):
         library_routes.ask_paper(library_routes.AskPaperRequest(item_key="K1", question="cohort size?"))
     )
     assert abstained["abstained"] is True and abstained["answer"] is None
+    assert grounded["question_saved"] is abstained["question_saved"] is True
+    rows = library_routes.review_questions.list_questions("K1")
+    assert len(rows) == 2
+    assert {row["submission_id"] for row in rows} == {
+        grounded["question_submission"]["submission_id"], abstained["question_submission"]["submission_id"],
+    }
+    assert {row["question"] for row in rows} == {"dataset?", "cohort size?"}
 
 
 # --- reading-queue route: whole-library limit cap (the 422 the user hit) -------

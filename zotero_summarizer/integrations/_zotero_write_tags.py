@@ -1,6 +1,7 @@
 """Tag/note appliers + low-level write helpers of ZoteroWriter (mixin)."""
 from __future__ import annotations
 
+import html
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -82,7 +83,26 @@ def _metadata_marker(text: str, *, footer: bool) -> str | None:
     return fields[0]
 
 
+# Legacy writer bug: the whole note (comment marker + markup) was stored HTML-escaped inside ONE
+# paragraph, so it renders as literal text. Owned only when that text is exactly an app-rendered
+# note (marker comment immediately followed by the app's ``<h2>``); a lone escaped comment, extra
+# paragraphs/markup (user edits) or another marker are never adopted.
+_LEGACY_ESCAPED_NOTE = re.compile(r'<div class="zotero-note znv[0-9]+"><p>([^<]+)</p></div>')
+_LEGACY_ESCAPED_HEAD = re.compile(r"<!-- ([^<>]*?) --><h2>")
+
+
+def _owns_legacy_escaped_note(note: str, marker: str) -> bool:
+    outer = _LEGACY_ESCAPED_NOTE.fullmatch(note)
+    text = html.unescape(outer.group(1)) if outer else ""
+    # The app's rendered note always ends with a closing tag; plain text a user typed into the
+    # paragraph after it ends with text, so such an edited note is never adopted.
+    head = _LEGACY_ESCAPED_HEAD.match(text) if text.rstrip().endswith(">") else None
+    return bool(head) and _metadata_marker(head.group(1), footer=False) == marker
+
+
 def _owns_note(note: str, marker: str) -> bool:
+    if _owns_legacy_escaped_note(note, marker):
+        return True
     parser = _OwnershipHTML()
     parser.feed(note)
     parser.close()
@@ -224,9 +244,12 @@ class ZoteroTagMixin:
         item_columns: set[str],
         note_columns: set[str],
     ) -> None:
-        """Insert OR update a single marked note on an item.
+        """Insert OR update the single marked note on an item.
 
-        The marker must be present in the new HTML so later saves can find it.
+        The marker must be present in the new HTML so later saves can find it. The first
+        structurally owned note (including legacy HTML-escaped ones) is rewritten in place;
+        further owned notes with the same marker are duplicates and go to the Zotero trash
+        (restorable). Notes the app does not own are never touched.
         """
         marker = str(payload.get("marker") or "").strip()
         note_html = str(payload.get("note_html") or "").strip()
@@ -240,10 +263,12 @@ class ZoteroTagMixin:
 
         existing = conn.execute(
             "SELECT itemID, note FROM itemNotes WHERE parentItemID = ? "
-            "AND itemID NOT IN (SELECT itemID FROM deletedItems)",
+            "AND itemID NOT IN (SELECT itemID FROM deletedItems) ORDER BY itemID",
             (parent_item_id,),
         ).fetchall()
-        existing = next((row for row in existing if _owns_note(row["note"], marker)), None)
+        # Oldest owned note survives (deterministic); NULL bodies are never owned.
+        owned = [row for row in existing if row["note"] and _owns_note(row["note"], marker)]
+        existing = owned[0] if owned else None
         if existing is None:
             self._apply_note_change(
                 conn,
@@ -267,6 +292,10 @@ class ZoteroTagMixin:
             tuple(params),
         )
         self._touch_item(conn, note_item_id, item_columns)
+        for duplicate in owned[1:]:
+            duplicate_id = int(duplicate["itemID"])
+            conn.execute("INSERT OR IGNORE INTO deletedItems (itemID) VALUES (?)", (duplicate_id,))
+            self._touch_item(conn, duplicate_id, item_columns)
         self._touch_item(conn, parent_item_id, item_columns)
 
     # Map of payload key -> Zotero field name; only fields present in the

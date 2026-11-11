@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchConfig, updateConfig } from '../api/settingsApi.js';
-import { configToFormState, formStateToConfig } from '../utils/configForm.js';
+import { configToFormState, formStateToConfig, rebaseConnectionForm, isLocalProvider, localProfileForStage, resolveStage } from '../utils/configForm.js';
+import { useFocusOnChange } from '../hooks/useFocusOnChange.js';
 import { humanizeError } from '../utils/humanizeError.js';
+import { invalidateSetupDoctor } from '../utils/setupDoctorState.js';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import { dismissSetup } from '../components/setup/SetupGate.jsx';
 import StepProgress from '../components/setup/StepProgress.jsx';
@@ -15,7 +17,7 @@ import StepDescribeResearch from '../components/setup/StepDescribeResearch.jsx';
 import StepDone from '../components/setup/StepDone.jsx';
 import { Banner } from '../components/form/Fields.jsx';
 import Button from '../components/ui/Button.jsx';
-import { validateSetup } from '../api/setupApi.js';
+import { fetchAiPresets, validateSetup } from '../api/setupApi.js';
 import { readStoredJson, writeStorage } from '../utils/safeStorage.js';
 
 const DEFAULT_TRIAGE_CRITERIA = [
@@ -33,20 +35,12 @@ function savedProgress() {
 function modeMatchesStages(routing, mode) {
   if (mode === 'none') return true;
   if (!routing?.default?.model) return false;
-  const providers = new Map((routing.providers || []).map((provider) => [provider.name, provider]));
   return ['default', 'feed', 'backlog', 'deep_review'].every((stage) => {
-    const selection = routing[stage] || {};
-    const provider = providers.get(selection.provider || routing.default.provider);
-    const model = selection.model || routing.default.model;
-    if (!provider || !model) return false;
+    const { provider, model } = resolveStage(routing, stage);
+    if (!provider || !String(model || '').trim()) return false;
     if (!provider.base_url && provider.type !== 'anthropic') return false;
-    let local = false;
-    if (provider.base_url) {
-      try {
-        const host = new URL(provider.base_url).hostname.replace(/^\[|\]$/g, '').toLowerCase();
-        local = ['localhost', '127.0.0.1', '::1'].includes(host);
-      } catch { return false; }
-    }
+    if (mode === 'hosted' && !String(provider.api_key_env || '').trim()) return false;
+    const local = isLocalProvider(provider);
     return mode === 'local' ? local : !local;
   });
 }
@@ -54,7 +48,8 @@ function modeMatchesStages(routing, mode) {
 export default function SetupFlow() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { status } = useSetupStatus();
+  const { status, isConfigured } = useSetupStatus();
+  const zoteroConnected = Boolean(status?.zotero?.db_found);
 
   const configQuery = useQuery({ queryKey: ['runtime-config'], queryFn: fetchConfig });
 
@@ -63,12 +58,16 @@ export default function SetupFlow() {
   const [step, setStep] = useState(saved.mode ? (saved.step || 0) : 0);
   const [maxStepReached, setMaxStepReached] = useState(saved.mode ? (saved.maxStepReached || 0) : 0);
   const [draft, setDraft] = useState(saved.draft || null);
-  const [llmTestedOk, setLlmTestedOk] = useState(false);
+  const [draftRevision, setDraftRevision] = useState(saved.revision);
+  const [baseConfig, setBaseConfig] = useState(saved.baseConfig || null);
   const [fieldErrors, setFieldErrors] = useState([]);
   const [finishError, setFinishError] = useState('');
   const [pathsChanged, setPathsChanged] = useState(Boolean(saved.pathsChanged));
 
   const [draftPaths, setDraftPaths] = useState(saved.draftPaths || { zotero_data_dir: '', pdf_root: '' });
+  const headingRef = useFocusOnChange(step);
+  const presetsQuery = useQuery({ queryKey: ['ai-presets'], queryFn: fetchAiPresets, enabled: mode === 'local' });
+  const localCatalog = presetsQuery.data?.local_profiles;
 
   useEffect(() => {
     if (configQuery.data && draft === null) {
@@ -78,8 +77,20 @@ export default function SetupFlow() {
         seeded.triage_criteria_text = DEFAULT_TRIAGE_CRITERIA;
       }
       setDraft(seeded);
+      setDraftRevision(configQuery.data._revision);
+      setBaseConfig(configQuery.data);
     }
   }, [configQuery.data, draft]);
+
+  // An already-configured install opens showing its current choices, not a blank wizard.
+  useEffect(() => {
+    if (!isConfigured || !draft || mode !== null || saved.mode) return;
+    const stages = ['default', 'feed', 'backlog', 'deep_review'].map((s) => resolveStage(draft.llm_routing, s).provider);
+    const current = draft.llm_enabled === false ? 'none'
+      : !draft.llm_routing?.default?.model ? null
+        : stages.every((p) => p && isLocalProvider(p)) ? 'local' : 'hosted';
+    if (current) { setMode(current); setMaxStepReached(3); }
+  }, [isConfigured, draft, mode, saved.mode]);
 
   useEffect(() => {
     if (status?.paths) {
@@ -95,20 +106,14 @@ export default function SetupFlow() {
 
   const validity = useMemo(() => {
     const zoteroOk = true;
-    const provider = (draft?.llm_routing?.providers || [])[0];
-    const llmOk = draft?.llm_enabled === false || Boolean(
-      provider
-        && provider.api_key_env && String(provider.api_key_env).trim()
-        && (provider.type !== 'openai' || (provider.base_url && String(provider.base_url).trim()))
-        && draft?.llm_routing?.default?.model
-        && String(draft.llm_routing.default.model).trim(),
-    );
+    const profilesOk = mode !== 'local' || ['default', 'feed', 'backlog', 'deep_review']
+      .every((stage) => localProfileForStage(draft?.llm_routing, localCatalog, stage)?.compatible === true);
     const goalsOk = Boolean(
       draft && draft.research_goals_text && draft.research_goals_text.trim().length > 0,
     );
     return [Boolean(mode), zoteroOk,
-      mode === 'none' || (llmOk && modeMatchesStages(draft?.llm_routing, mode)), goalsOk];
-  }, [draft, mode]);
+      mode === 'none' || (profilesOk && modeMatchesStages(draft?.llm_routing, mode)), goalsOk];
+  }, [draft, mode, localCatalog]);
 
   const allValid = validity.every(Boolean);
 
@@ -116,12 +121,17 @@ export default function SetupFlow() {
 
   useEffect(() => {
     if (draft) writeStorage(PROGRESS_KEY, JSON.stringify({
-      step, maxStepReached, draft, draftPaths, pathsChanged, mode,
+      step, maxStepReached, draft, revision: draftRevision, baseConfig, draftPaths, pathsChanged, mode,
     }));
-  }, [step, maxStepReached, draft, draftPaths, pathsChanged, mode]);
+  }, [step, maxStepReached, draft, draftRevision, baseConfig, draftPaths, pathsChanged, mode]);
 
   const finishMutation = useMutation({
-    mutationFn: (payload) => updateConfig(payload),
+    mutationFn: async (payload) => {
+      const response = await updateConfig(payload);
+      if (!response?.config?.llm_routing) throw new Error('Configuration save unconfirmed. Read saved settings before retrying.');
+      return response;
+    },
+    onSettled: (_response, error) => invalidateSetupDoctor(queryClient, error),
     onSuccess: (resp) => {
       if (resp?.config) {
         queryClient.setQueryData(['runtime-config'], resp.config);
@@ -129,7 +139,6 @@ export default function SetupFlow() {
         queryClient.invalidateQueries({ queryKey: ['runtime-config'] });
       }
       queryClient.invalidateQueries({ queryKey: ['setup-status'] });
-      queryClient.removeQueries({ queryKey: ['setup-doctor'] });
       setStep(4);
     },
     onError: (err) => setFinishError(humanizeError(err)),
@@ -143,14 +152,27 @@ export default function SetupFlow() {
     setDraft((prev) => (prev ? { ...prev, ...fields } : prev));
   }
 
-  function patchRouting(nextRouting) {
-    setDraft((prev) => (prev ? { ...prev, llm_routing: nextRouting } : prev));
+  function connectionSaved(next, metadata) {
+    queryClient.setQueryData(['runtime-config'], next);
+    if (draft && draftRevision !== metadata?.previousRevision) {
+      setFinishError('Setup draft belongs to an older configuration. Discard/load saved settings before finishing; the connection was saved separately.');
+      return;
+    }
+    setDraft(prev => prev ? rebaseConnectionForm(prev, baseConfig || configQuery.data, next) : configToFormState(next));
+    setBaseConfig(next); setDraftRevision(next._revision);
   }
 
   async function handleFinish() {
     if (!draft || !configQuery.data) return;
     setFinishError('');
-    const payload = formStateToConfig(draft, configQuery.data);
+    const baseline = baseConfig || configQuery.data;
+    if (mode !== 'none' && JSON.stringify(draft.llm_routing) !== JSON.stringify(baseline.llm_routing)) {
+      setFinishError('Connection changes must be saved through Connect, impact and Use as default before finishing Setup.');
+      setStep(2);
+      return;
+    }
+    // Finish owns research/AI preference, never an old browser DTO's connection edits.
+    const payload = { ...formStateToConfig(draft, baseline), llm_routing: baseline.llm_routing, _revision: draftRevision };
     // Field-level validation first; show inline errors and stop if invalid.
     const res = await validateMutation.mutateAsync(payload).catch(() => null);
     if (res && res.valid === false) {
@@ -167,6 +189,17 @@ export default function SetupFlow() {
     navigate('/library');
   }
 
+  if (configQuery.isError && !draft) {
+    return <div className="glass rounded-2xl border border-slate-200 p-5 space-y-3">
+      <h2 className="font-medium">Setup needs configuration recovery</h2>
+      <Banner kind="error">{humanizeError(configQuery.error)}</Banner>
+      <p>Missing configuration can be created only with an explicit real model. Existing invalid configuration is never overwritten; repair the complete configuration and reload.</p>
+      <a className="underline" href="/settings#ai-models">Open connection and configuration recovery</a>
+      <Button type="button" variant="secondary" onClick={() => configQuery.refetch()}>Retry saved configuration</Button>
+      <Button type="button" variant="secondary" onClick={handleSkip}>Skip for now</Button>
+    </div>;
+  }
+
   if (configQuery.isLoading || !draft) {
     return (
       <div className="glass rounded-2xl border border-slate-200 p-6 text-sm text-slate-500">
@@ -178,31 +211,33 @@ export default function SetupFlow() {
   const stepValid = step < 4 ? validity[step] : true;
   const isLast = step === 3;
   const labels = mode === 'none' ? STEP_LABELS.filter((_, i) => i !== 2) : STEP_LABELS;
+  const progressValidity = validity.map((ok, i) => (i === 1 ? ok && zoteroConnected
+    : i === 2 ? ok || (isConfigured && Boolean(draft.llm_routing?.default?.model)) : ok));
   const progressStep = mode === 'none' && step === 3 ? 2 : step;
 
   return (
     <div className="max-w-2xl mx-auto pb-10">
       <div className="glass rounded-2xl border border-slate-200 p-5 space-y-5">
         <header className="space-y-3">
-          <div className="flex items-baseline justify-between gap-3">
-            <h2 className="text-lg font-bold text-slate-900">Set up Zotero Summarizer</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 ref={headingRef} tabIndex={-1} className="text-lg font-medium text-slate-900">Set up Zotero Summarizer</h2>
             {step < 4 && (
-              <button
-                type="button"
-                onClick={handleSkip}
-                className="text-xs text-slate-500 hover:text-slate-800 underline"
-              >
-                Skip for now
-              </button>
+              <Button variant="secondary" onClick={handleSkip} className="shrink-0">Skip for now</Button>
             )}
           </div>
           {step < 4 && (
-            <StepProgress current={progressStep} validity={mode === 'none' ? validity.filter((_, i) => i !== 2) : validity}
+            <StepProgress current={progressStep} validity={mode === 'none' ? progressValidity.filter((_, i) => i !== 2) : progressValidity}
               maxReached={mode === 'none' && maxStepReached >= 3 ? 2 : maxStepReached} labels={labels} />
           )}
+          {step < 4 && isConfigured && (
+            <p className="text-sm text-slate-600">
+              Already set up{zoteroConnected ? ' — Zotero is connected' : ''}. Your current choices are shown;
+              change any step, or Skip. Nothing changes until you press Finish.
+            </p>
+          )}
           {step < 4 && (
-            <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-              Step {progressStep + 1} of {labels.length}: {STEP_LABELS[step]}
+            <p className="text-sm font-medium text-slate-700 sm:sr-only" role="status" aria-live="polite" aria-atomic="true">
+              Step {progressStep + 1} of {labels.length}: {labels[progressStep]}
             </p>
           )}
         </header>
@@ -234,8 +269,7 @@ export default function SetupFlow() {
           />
         )}
         {step === 2 && mode !== 'none' && (
-          <StepConnectLlm status={status} routing={draft.llm_routing} mode={mode}
-            onPatchRouting={patchRouting} testedOk={llmTestedOk} onTested={setLlmTestedOk} />
+          <StepConnectLlm mode={mode} onSaved={connectionSaved} />
         )}
         {step === 3 && (
           <StepDescribeResearch
@@ -246,7 +280,21 @@ export default function SetupFlow() {
         )}
         {step === 4 && <StepDone pathsChanged={pathsChanged} />}
 
-        {finishError && <Banner kind="error">{finishError}</Banner>}
+        {mode === 'local' && presetsQuery.isError && <Banner kind="error">
+          Local profile compatibility is unknown because the catalog could not be loaded.
+          <Button type="button" variant="secondary" onClick={() => presetsQuery.refetch()}>
+            Retry loading profiles
+          </Button>
+        </Banner>}
+        {finishError && <Banner kind="error">{finishError}
+          <Button type="button" variant="secondary" onClick={async () => {
+            const result = await configQuery.refetch();
+            if (result.data) {
+              setDraft(configToFormState(result.data)); setDraftRevision(result.data._revision);
+              setBaseConfig(result.data); setFinishError('');
+            }
+          }}>Discard setup draft and load saved settings</Button>
+        </Banner>}
 
         {step < 4 && (
           <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">

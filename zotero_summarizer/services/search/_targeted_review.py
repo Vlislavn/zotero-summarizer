@@ -17,6 +17,7 @@ from typing import Any
 from zotero_summarizer.models import GoalsConfig
 from zotero_summarizer.services.library._paper_goal_summaries import summarize_for_goals
 from zotero_summarizer.services.library.quality_review import assess_digest
+from zotero_summarizer.services.library.review_fleet.propose import project_review
 from zotero_summarizer.services.search._models import Candidate
 
 # Brief fields worth carrying into the session card (the rest of PaperDigest is
@@ -57,20 +58,24 @@ def targeted_review(
     digest = assess_digest(
         title=cand.title, full_text=full_text, config=config, llm=llm, focus_prompt=query,
     )
-    brief = {k: getattr(digest, k) for k in _BRIEF_FIELDS}
+    model_digest = digest.model_dump()
 
     goals = [query] + [q for q in (questions or []) if str(q).strip()]
     summaries = summarize_for_goals(
         goals=goals, sections=[], full_text=full_text, llm=llm,
     )
-    lens = _summary_row(summaries[0]) if summaries else {}
+    rows = [_summary_row(summary) for summary in summaries]
+    projected = project_review({"model_digest": model_digest, "quality": cand.quality, "goal_summaries": rows})
+    brief = {key: projected["digest"][key] for key in _BRIEF_FIELDS}
+    lens = rows[0] if rows else {}
     valid_questions = [q for q in (questions or []) if str(q).strip()]
     answers = [
-        {"question": q, **_summary_row(s)}
-        for q, s in zip(valid_questions, summaries[1:])
+        {"question": q, **row}
+        for q, row in zip(valid_questions, rows[1:])
     ]
 
-    cand.review = {"state": "reviewed", "brief": brief, "query_lens": lens, "question_answers": answers}
+    cand.review = {"state": "reviewed", "brief": brief, "query_lens": lens, "question_answers": answers,
+                   "model_digest": model_digest, "reading_policy_flags": projected["reading_policy_flags"]}
 
 
 __all__ = ["targeted_review"]

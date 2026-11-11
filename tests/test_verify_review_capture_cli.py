@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from zotero_summarizer.cli import build_parser
+from zotero_summarizer.models import PaperDigest
 
 
 def test_sensitive_capture_is_explicit_cli_only():
@@ -25,7 +26,7 @@ def test_readonly_cli_captures_actual_strategy_and_keeps_source_unchanged(tmp_pa
 
     class Client(_Verifier):
         def pydantic_prompt(self, *, prompt, pydantic_model, **kwargs):
-            if pydantic_model.__name__ == 'PaperDigest':
+            if issubclass(pydantic_model, PaperDigest):
                 return _digest()
             return super().pydantic_prompt(prompt=prompt, pydantic_model=pydantic_model, **kwargs)
 

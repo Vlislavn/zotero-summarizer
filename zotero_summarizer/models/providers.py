@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 from enum import Enum
+import hashlib
+import json
+from ipaddress import ip_address
+from socket import inet_aton
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 __all__ = [
     "STAGES",
+    "ROUTABLE_STAGES",
     "DefaultModelConfig",
     "LLMRoutingConfig",
+    "LLMCapability",
     "ProviderConfig",
     "ProviderType",
     "ResolvedStage",
@@ -19,16 +25,20 @@ __all__ = [
     "resolve_stage",
 ]
 
+# User-routable stages shown in Settings / connection / setup surfaces.
 STAGES = ("feed", "backlog", "deep_review")
-
-# Loopback hosts that mark a provider as "local" — its stage runs serially to
-# protect host RAM (one big local model can't absorb concurrent inference).
-_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
-
+# Every resolvable stage, including the operational ``card`` stage (Todo #92),
+# which is deliberately NOT a user-facing connection/admission stage.
+ROUTABLE_STAGES = STAGES + ("card",)
 
 class ProviderType(str, Enum):
     openai = "openai"  # OpenAI-compatible chat (reuses build_llm / OnPrem)
     anthropic = "anthropic"  # native Anthropic messages API
+
+
+class LLMCapability(str, Enum):
+    text = "text"
+    native_json_schema = "native_json_schema"
 
 
 class ProviderConfig(BaseModel):
@@ -40,6 +50,7 @@ class ProviderConfig(BaseModel):
     api_key_env: str = Field(
         ..., min_length=1
     )  # env var NAME (never the secret itself)
+    auth_mode: Literal['legacy', 'none'] = 'legacy'
     extra_body: dict[str, Any] | None = None
     max_tokens: int = Field(default=4096, ge=1)
     temperature: float = Field(default=0.0, ge=0, le=2)
@@ -49,6 +60,26 @@ class ProviderConfig(BaseModel):
     num_ctx: int | None = Field(default=None, ge=512)
     keep_alive: int | None = Field(default=None)
     structured_output: bool = Field(default=False)
+    capabilities: frozenset[LLMCapability] | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_capabilities(self, handler) -> dict[str, Any]:
+        payload = handler(self)
+        if self.capabilities is None:
+            payload.pop("capabilities", None)
+        if self.auth_mode == 'legacy':
+            payload.pop('auth_mode', None)  # retain legacy serialized identities
+        return payload
+
+    @property
+    def available_capabilities(self) -> frozenset[LLMCapability]:
+        """Declared adapter paths, not observed model support or hardware safety."""
+        enabled = {LLMCapability.text}
+        if self.capabilities is None:
+            return frozenset(enabled)
+        if self.type == ProviderType.anthropic or self.structured_output:
+            enabled.add(LLMCapability.native_json_schema)
+        return self.capabilities & enabled
 
     @model_validator(mode="after")
     def _require_base_url_for_openai(self) -> ProviderConfig:
@@ -65,9 +96,7 @@ class ProviderConfig(BaseModel):
 
     @property
     def is_local(self) -> bool:
-        """Whether the endpoint is loopback and must use local concurrency limits."""
-        if self.type is ProviderType.anthropic:
-            return False
+        """Literal local endpoints share concurrency, credential and admission rules."""
         raw = (self.base_url or "").strip()
         if not raw:
             return False
@@ -75,8 +104,18 @@ class ProviderConfig(BaseModel):
         # to populate .hostname, so prepend a dummy scheme when absent.
         if "://" not in raw:
             raw = "http://" + raw
-        host = (urlsplit(raw).hostname or "").lower()
-        return host in _LOCAL_HOSTS
+        host = (urlsplit(raw).hostname or "").lower().rstrip(".")
+        if host == "localhost" or host.endswith(".localhost"):
+            return True
+        try:
+            address = ip_address(host)
+        except ValueError:
+            try:
+                address = ip_address(inet_aton(host))  # numeric shorthand only; no DNS
+            except OSError:
+                return False
+        address = getattr(address, "ipv4_mapped", None) or address
+        return address.is_loopback or address.is_unspecified
 
 
 class StageModelConfig(BaseModel):
@@ -105,6 +144,9 @@ class LLMRoutingConfig(BaseModel):
     feed: StageModelConfig = Field(default_factory=StageModelConfig)
     backlog: StageModelConfig = Field(default_factory=StageModelConfig)
     deep_review: StageModelConfig = Field(default_factory=StageModelConfig)
+    # Operational Today-card stage (Todo #92). Not part of the deep-review
+    # identity allowlist (#88): a card-model change must never stale a review.
+    card: StageModelConfig = Field(default_factory=StageModelConfig)
 
     @model_validator(mode="after")
     def _validate_refs(self) -> LLMRoutingConfig:
@@ -116,7 +158,7 @@ class LLMRoutingConfig(BaseModel):
             raise ValueError(
                 f"default.provider {self.default.provider!r} is not in the providers registry"
             )
-        for stage in STAGES:
+        for stage in ROUTABLE_STAGES:
             sm: StageModelConfig = getattr(self, stage)
             if sm.provider is not None and sm.provider not in known:
                 raise ValueError(
@@ -134,16 +176,23 @@ class LLMRoutingConfig(BaseModel):
 class ResolvedStage(BaseModel):
     """A stage's effective provider profile + model after inheritance."""
 
+    model_config = ConfigDict(extra="forbid")
+
     stage: str
     provider: ProviderConfig
     model: str
 
+    def fingerprint(self) -> str:
+        """Effective processing identity, without reading any credential value."""
+        payload = json.dumps(self.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(payload.encode()).hexdigest()
+
 
 def resolve_stage(routing: LLMRoutingConfig, stage: str) -> ResolvedStage:
-    """Resolve ``stage`` (one of :data:`STAGES`) to its effective provider+model,
-    inheriting any unset field from ``routing.default``."""
-    if stage not in STAGES:
-        raise ValueError(f"unknown stage {stage!r}; expected one of {STAGES}")
+    """Resolve ``stage`` (one of :data:`ROUTABLE_STAGES`) to its effective
+    provider+model, inheriting any unset field from ``routing.default``."""
+    if stage not in ROUTABLE_STAGES:
+        raise ValueError(f"unknown stage {stage!r}; expected one of {ROUTABLE_STAGES}")
     selection: StageModelConfig = getattr(routing, stage)
     provider_name = selection.provider or routing.default.provider
     model = selection.model or routing.default.model

@@ -65,7 +65,7 @@ export default function ActiveModelsSummary({ routing, onEdit }) {
   return (
     <div className="space-y-2">
       <div className="flex items-baseline justify-between">
-        <h4 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Active models</h4>
+        <h4 className="text-sm font-medium uppercase tracking-wider text-slate-600">Active models</h4>
         <span className="text-xs text-slate-400">resolved per stage · click a row to edit</span>
       </div>
       <ul className="space-y-1.5">
@@ -82,7 +82,7 @@ export default function ActiveModelsSummary({ routing, onEdit }) {
                 className="w-full text-left flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-slate-200 bg-white/60 px-3 py-2 hover:bg-slate-50 transition-colors"
               >
                 <LiveDot status={liveStatus} />
-                <span className="text-sm font-semibold text-slate-700 w-24">{label}</span>
+                <span className="text-sm font-medium text-slate-700 w-24">{label}</span>
                 <span className="text-sm text-slate-800 font-mono">
                   {providerName || <span className="text-rose-600">unset</span>}
                   {model ? ` · ${model}` : ''}

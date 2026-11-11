@@ -27,7 +27,7 @@ _BASE = "https://github.com"
 # repo page. Named constant + env override, never a bare wall-clock literal.
 _DEFAULT_TIMEOUT = 6.0
 # A realistic UA — github serves a stripped page (no OG tags) to an empty UA.
-_UA = "Mozilla/5.0 (compatible; zotero-summarizer/1.0; +https://github.com)"
+BROWSER_UA = "Mozilla/5.0 (compatible; zotero-summarizer/1.0; +https://github.com)"
 _OG_DESC_RE = re.compile(
     r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']*)["\']', re.I
 )
@@ -71,7 +71,7 @@ def check_repo(owner: str, repo: str, *, timeout: float | None = None) -> RepoCh
     try:
         resp = httpx.get(
             url, follow_redirects=True, timeout=timeout or _timeout(),
-            headers={"User-Agent": _UA, "Accept": "text/html"},
+            headers={"User-Agent": BROWSER_UA, "Accept": "text/html"},
         )
     except httpx.HTTPError:
         return RepoCheck(exists=None, status=None)

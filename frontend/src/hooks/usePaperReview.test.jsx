@@ -5,12 +5,12 @@ import { createElement } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import usePaperReview from './usePaperReview.js';
 
-const { submitVerdict, queueRejectTag, fetchReviewDetail, invalidateQueries } = vi.hoisted(() => ({
-  submitVerdict: vi.fn(), queueRejectTag: vi.fn(), fetchReviewDetail: vi.fn(), invalidateQueries: vi.fn(),
+const { submitVerdict, deleteVerdict, queueRejectTag, fetchReviewDetail, invalidateQueries } = vi.hoisted(() => ({
+  submitVerdict: vi.fn(), deleteVerdict: vi.fn(), queueRejectTag: vi.fn(), fetchReviewDetail: vi.fn(), invalidateQueries: vi.fn(),
 }));
 
 vi.mock('../api/goldenApi.js', () => ({
-  fetchReviewDetail, submitVerdict, deleteVerdict: vi.fn(),
+  fetchReviewDetail, submitVerdict, deleteVerdict,
 }));
 vi.mock('../api/libraryApi.js', () => ({ queueRejectTag }));
 
@@ -36,6 +36,33 @@ it('removes the green device-save notice after its offline verdict is rejected o
   client.clear();
 });
 
+it('fences related context only on server verdict and deletion ACKs, not device drafts', async () => {
+  fetchReviewDetail.mockResolvedValue({ verdict: null });
+  const onVerdictAcknowledged = vi.fn();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const wrapper = ({ children }) => createElement(QueryClientProvider, { client }, children);
+  const { result } = renderHook(() => usePaperReview('P1', { onVerdictAcknowledged }), { wrapper });
+
+  submitVerdict.mockResolvedValueOnce({ saved_offline: true });
+  act(() => result.current.verdict.onSubmit({ user_priority: 'dont_read', comment: '' }));
+  await waitFor(() => expect(result.current.verdict.submitNotice).toContain('Saved on this device'));
+  expect(queueRejectTag).not.toHaveBeenCalled();
+  expect(onVerdictAcknowledged).not.toHaveBeenCalled();
+
+  submitVerdict.mockResolvedValueOnce({ verdict: { user_priority: 'must_read' } });
+  act(() => result.current.verdict.onSubmit({ user_priority: 'must_read', comment: '' }));
+  await waitFor(() => expect(onVerdictAcknowledged).toHaveBeenCalledTimes(1));
+
+  deleteVerdict.mockResolvedValueOnce({ saved_offline: true }).mockResolvedValueOnce({ deleted: true });
+  act(() => result.current.verdict.onDelete());
+  await waitFor(() => expect(result.current.verdict.deleting).toBe(false));
+  expect(deleteVerdict).toHaveBeenCalledTimes(1);
+  expect(onVerdictAcknowledged).toHaveBeenCalledTimes(1);
+  act(() => result.current.verdict.onDelete());
+  await waitFor(() => expect(onVerdictAcknowledged).toHaveBeenCalledTimes(2));
+  client.clear();
+});
+
 it('keeps a saved verdict successful when the secondary reject tag fails', async () => {
   fetchReviewDetail.mockResolvedValue({ verdict: null });
   submitVerdict.mockResolvedValue({ verdict: { user_priority: 'dont_read' } });
@@ -49,5 +76,5 @@ it('keeps a saved verdict successful when the secondary reject tag fails', async
 
   await waitFor(() => expect(result.current.verdict.submitWarning).toContain('reject tag was not queued'));
   expect(result.current.verdict.submitError).toBeNull();
-  expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['review-detail', 'P1'] });
+  expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['paper-detail', 'P1'] });
 });

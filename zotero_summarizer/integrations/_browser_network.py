@@ -9,6 +9,7 @@ or a decoded-response memory limit (see audit A111).
 from __future__ import annotations
 
 import base64
+import logging
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import secrets
@@ -19,6 +20,11 @@ import threading
 from time import monotonic
 
 from zotero_summarizer.integrations.app_rss import RssHostUnresolved, RssUrlRejected, _resolve_public_url
+
+LOGGER = logging.getLogger(__name__)
+_MAX_CONNECTIONS = 32
+# A heavy page bursts past the cap; surplus connections queue for a free slot this long.
+_SLOT_WAIT_SECONDS = 15.0
 
 
 def _relay(client: socket.socket, upstream: socket.socket, server: _Proxy) -> None:
@@ -89,22 +95,24 @@ class _Proxy(ThreadingHTTPServer):
         self.stopping = threading.Event()
         self.errors: list[BaseException] = []
         # ponytail: bounded sockets for the single browser, not a general proxy service.
-        self.slots = threading.BoundedSemaphore(32)
+        self.slots = threading.BoundedSemaphore(_MAX_CONNECTIONS)
         super().__init__(("127.0.0.1", 0), _Request)
 
-    def process_request(self, request, client_address):
-        if not self.slots.acquire(blocking=False):
-            self.shutdown_request(request)
-            if not self.errors:
-                self.errors.append(RuntimeError("Browser proxy connection limit exceeded"))
-            return
-        try:
-            super().process_request(request, client_address)
-        except BaseException:
-            self.slots.release()
-            raise
+    def _wait_for_slot(self) -> bool:
+        deadline = monotonic() + _SLOT_WAIT_SECONDS
+        while not self.slots.acquire(timeout=0.1):
+            if self.stopping.is_set() or monotonic() >= deadline:
+                return False
+        return True
 
     def process_request_thread(self, request, client_address):
+        # Queue in the per-request thread (never the accept loop). A connection still without a
+        # slot after the wait is dropped like any refused connection, which the browser retries;
+        # it does not fail the whole session.
+        if not self._wait_for_slot():
+            LOGGER.warning("browser proxy: dropped a connection, all %d slots busy", _MAX_CONNECTIONS)
+            self.shutdown_request(request)
+            return
         try:
             super().process_request_thread(request, client_address)
         finally:

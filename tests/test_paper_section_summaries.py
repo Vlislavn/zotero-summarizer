@@ -266,17 +266,11 @@ def test_verifier_provider_failure_propagates_without_unverified_summary():
     assert llm.calls == 2
 
 
-def test_verifier_provider_failure_degrades_optional_paper_map_summary(monkeypatch):
+def test_verifier_provider_failure_degrades_optional_paper_map_summary(monkeypatch, tmp_path):
+    """The on-open job swallows a verifier failure: no sidecar, the failure is remembered, the review is untouched."""
     from types import SimpleNamespace
 
-    from zotero_summarizer.services.library import (
-        _code_link,
-        _deep_review_layers,
-        _paper_goal_summaries,
-        _paper_read_pdf,
-        paper_type,
-        quality_eval,
-    )
+    from zotero_summarizer.services.library import _paper_read_pdf, section_summaries_job as job
 
     section = {
         "id": "trial-results", "title": "Results", "page": 2,
@@ -290,32 +284,26 @@ def test_verifier_provider_failure_degrades_optional_paper_map_summary(monkeypat
         }]},
         RuntimeError("verifier unavailable"),
     )
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF")
+    monkeypatch.setattr(job, "_source_sha", lambda _path: "sha")
+    monkeypatch.setattr(job, "settings", lambda: SimpleNamespace(paper_render_dir=tmp_path))
+    from zotero_summarizer.models.providers import DefaultModelConfig, LLMRoutingConfig, ProviderConfig
+    monkeypatch.setattr(job, "state", lambda: SimpleNamespace(
+        pdf_extractor=SimpleNamespace(extract_text=lambda _path: section["text"]),
+        app_state=SimpleNamespace(config=SimpleNamespace(
+            llm_routing=LLMRoutingConfig(providers=[ProviderConfig(name="p", base_url="https://example.test/v1", api_key_env="K")], default=DefaultModelConfig(provider="p", model="m")),
+            quality_review=SimpleNamespace(use_docling=False, chunk_strategy="rank", max_text_chars=60_000,
+                                           context_window_tokens=256_000)))))
+    monkeypatch.setattr(job.factory, "resolve_stage_client", lambda *_a, **_k: llm)
     monkeypatch.setattr(
         _paper_read_pdf, "extract_pdf_content",
         lambda *_args, **_kwargs: {"sections": [section], "full_text": section["text"], "link_uris": []},
     )
-    monkeypatch.setattr(paper_type, "detect_safe", lambda *_args, **_kwargs: {"type": "generic_other"})
-    monkeypatch.setattr(
-        quality_eval, "evaluate_quality",
-        lambda **_kwargs: SimpleNamespace(model_dump=lambda: {}),
-    )
-    monkeypatch.setattr(_paper_goal_summaries, "summarize_for_goals", lambda **_kwargs: [])
-    monkeypatch.setattr(_code_link, "find_code_link", lambda *_args: {"found": False})
-    config = SimpleNamespace(
-        quality_review=SimpleNamespace(
-            use_docling=False, lean_self_consistency_runs=1, self_consistency_runs=1,
-            lean_max_text_chars=1000, max_text_chars=1000, self_verification=False,
-            shadow_claim_check=False, claim_check_model="x", batch_goal_summaries=True,
-        ),
-        research_goals=[],
-    )
-    ctx = _deep_review_layers.ExtraLayersCtx(
-        item_key="K1", title="Trial", pdf_path="paper.pdf", text=section["text"],
-        digest_dump={}, llm=llm, config=config, prestige=None, prestige_floor_value=None,
-    )
+    job._RUNNING.add("K1")
 
-    quality_dump, goal_dump, _, overlay, code_link = _deep_review_layers.extra_layers(ctx)
+    job._generate("K1", {"review_identity": {"source_path": str(pdf), "source_sha256": "sha"},
+                         "section_overlay": {"sections": [{"id": "trial-results", "title": "Results", "page": 2}]}}, "stamp")
 
-    assert quality_dump == {} and goal_dump is None and code_link == {"found": False}
-    assert overlay["sections"][0]["summary"] == ""
     assert llm.calls == 2
+    assert job._read("K1", "stamp") is None and "K1" in job._FAILED and "K1" not in job._RUNNING

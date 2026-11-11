@@ -10,9 +10,9 @@ from tests._zotero_fixtures import add_library_item, build_zotero_db
 from tests.test_note_render import _summary
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.models import PaperDigest
+from zotero_summarizer.models.zotero_actions import build_verdict_note_html
 from zotero_summarizer.services.zotero._notes import (
-    build_digest_note_html, build_triage_note_html,
-    build_user_note_html, build_verdict_note_html,
+    build_digest_note_html, build_triage_note_html, build_user_note_html,
 )
 
 

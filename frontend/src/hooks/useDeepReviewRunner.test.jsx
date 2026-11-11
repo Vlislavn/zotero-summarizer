@@ -6,7 +6,10 @@ import useDeepReviewRunner from './useDeepReviewRunner.js';
 import { fetchDeepReviewStatus, runDeepReview } from '../api/libraryApi.js';
 
 vi.mock('../api/libraryApi.js', () => ({ fetchDeepReviewStatus: vi.fn(), runDeepReview: vi.fn() }));
-vi.mock('../api/settingsApi.js', () => ({ fetchLlmReachability: async () => ({ stages: [] }) }));
+vi.mock('../api/settingsApi.js', () => ({ fetchLlmReachability: async () => ({
+  stages: [{ stage: 'deep_review', enabled: true, reachable: true }],
+}) }));
+vi.mock('./useServerAvailable.js', () => ({ default: () => true }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 function setup() {
@@ -43,6 +46,67 @@ it('stops the spinner on polling failure and resumes the same job on explicit re
   await waitFor(() => expect(onDone).toHaveBeenCalledOnce());
   expect(result.current.running).toBe(false);
   expect(runDeepReview).toHaveBeenCalledOnce();
+});
+
+it('retries only the current status GET and completes the resumed job once', async () => {
+  const { client, onDone, wrapper } = setup();
+  fetchDeepReviewStatus.mockResolvedValue({ status: 'running' });
+  const { result } = renderHook(() => useDeepReviewRunner('A', { onDone, autoRun: true }), { wrapper });
+  await waitFor(() => expect(result.current.running).toBe(true));
+  fetchDeepReviewStatus.mockRejectedValue(new Error('HTTP 503'));
+  await act(async () => { await client.refetchQueries({ queryKey: ['deep-review-status', 'A'] }); });
+  await waitFor(() => expect(result.current.status.status).toBe('unavailable'));
+  expect(result.current.running).toBe(false);
+  expect(onDone).not.toHaveBeenCalled();
+
+  let finish;
+  fetchDeepReviewStatus.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  act(() => { void result.current.retryStatus(); });
+  await waitFor(() => expect(result.current.checkingStatus).toBe(true));
+  expect(fetchDeepReviewStatus.mock.calls).toEqual([['A'], ['A'], ['A']]);
+  await act(async () => { finish({ status: 'running' }); });
+  await waitFor(() => expect(result.current.running).toBe(true));
+  fetchDeepReviewStatus.mockResolvedValue({ status: 'ready' });
+  await act(async () => { await client.refetchQueries({ queryKey: ['deep-review-status', 'A'] }); });
+  await waitFor(() => expect(onDone).toHaveBeenCalledOnce());
+  expect(result.current.running).toBe(false);
+  expect(runDeepReview).not.toHaveBeenCalled();
+});
+
+it('an idle status retry after an initial failure never becomes automatic generation', async () => {
+  const { wrapper } = setup();
+  fetchDeepReviewStatus.mockRejectedValue(new Error('HTTP 503'));
+  runDeepReview.mockResolvedValue({ status: 'running' });
+  const { result } = renderHook(() => useDeepReviewRunner('A', { autoRun: true }), { wrapper });
+  await waitFor(() => expect(result.current.llmAvailable).toBe(true));
+  await waitFor(() => expect(result.current.status.status).toBe('unavailable'));
+
+  fetchDeepReviewStatus.mockResolvedValue({ status: 'idle' });
+  await act(async () => { await result.current.retryStatus(); });
+  await waitFor(() => expect(result.current.status.status).toBe('idle'));
+  expect(fetchDeepReviewStatus.mock.calls).toEqual([['A'], ['A']]);
+  expect(runDeepReview).not.toHaveBeenCalled();
+});
+
+it('a late status retry cannot replace the next paper query or announce its completion', async () => {
+  const { client, onDone, wrapper } = setup();
+  fetchDeepReviewStatus.mockRejectedValue(new Error('HTTP 503'));
+  const { result, rerender } = renderHook(({ key }) => useDeepReviewRunner(key, { onDone }), {
+    wrapper, initialProps: { key: 'A' },
+  });
+  await waitFor(() => expect(result.current.status.status).toBe('unavailable'));
+  let finish;
+  fetchDeepReviewStatus.mockImplementation(key => key === 'A'
+    ? new Promise(resolve => { finish = resolve; }) : Promise.resolve({ status: 'idle' }));
+  act(() => { void result.current.retryStatus(); });
+  await waitFor(() => expect(finish).toBeTypeOf('function'));
+  rerender({ key: 'B' });
+  await waitFor(() => expect(result.current.status.status).toBe('idle'));
+  await act(async () => { finish({ status: 'ready' }); });
+  expect(client.getQueryData(['deep-review-status', 'B'])).toEqual({ status: 'idle' });
+  expect(result.current.running).toBe(false);
+  expect(onDone).not.toHaveBeenCalled();
+  expect(runDeepReview).not.toHaveBeenCalled();
 });
 
 it('a late response from the previous paper cannot start a spinner on the next paper', async () => {

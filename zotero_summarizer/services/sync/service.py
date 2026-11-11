@@ -6,10 +6,13 @@ from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK
+from zotero_summarizer.runtime import request_memo
 from zotero_summarizer.services.golden import label_verdicts, verdict_effects
 from zotero_summarizer.services.library import deep_review, reading_queue
 from zotero_summarizer.services.library.review_eligibility import ReviewRequired, require_feed_review
-from zotero_summarizer.storage import repositories
+from zotero_summarizer.services._common import settings
+from zotero_summarizer.storage import item_titles, question_sync, repositories
+from zotero_summarizer.storage.question_sync import validate_mutation as validate_question_mutation
 
 _PAPER_FIELDS = (
     "item_key",
@@ -42,8 +45,13 @@ def _paper_snapshots(db_path: Path) -> list[dict[str, Any]]:
     }
     fields = repositories.sync_current_fields(db_path)
     reviews = deep_review.current_reviews()
-    for item_key, _field in fields:
-        papers.setdefault(item_key, {"item_key": item_key, "title": item_key})
+    missing = {item_key for item_key, _field in fields} - papers.keys()
+    titles = {
+        **item_titles.feed_titles_for_keys(db_path, list(missing)),
+        **item_titles.titles_for_keys(settings().corpus_db_path, list(missing)),
+    }
+    for item_key in missing:  # label/note rows outside the queue still need a readable title
+        papers[item_key] = {"item_key": item_key, "title": titles.get(item_key, item_key)}
     for item_key, paper in papers.items():
         verdict = fields.get((item_key, "verdict"))
         note = fields.get((item_key, "review_note"))
@@ -59,6 +67,7 @@ def _paper_snapshots(db_path: Path) -> list[dict[str, Any]]:
         paper["review_note"] = (
             None if note is None or note["value"] is None else note["value"]
         )
+        paper["questions"] = (fields.get((item_key, "review_question")) or {}).get("value", [])
         paper["model_priority"] = (
             verdict.get("model_priority") if verdict else None
         ) or paper.get("reading_priority")
@@ -76,7 +85,7 @@ def _paper_snapshots(db_path: Path) -> list[dict[str, Any]]:
         )
         paper["revisions"] = {
             field: (fields.get((item_key, field)) or {}).get("revision", 0)
-            for field in ("verdict", "review_note")
+            for field in ("verdict", "review_note", "review_question")
         }
     return list(papers.values())
 
@@ -85,15 +94,27 @@ def pull(db_path: Path, since: int) -> dict[str, Any]:
     if since < 0:
         raise ValueError("since must be non-negative")
     delta = repositories.pull_sync_changes(db_path, since)
-    return {"protocol": 1, **delta, "papers": _paper_snapshots(db_path)}
+    with request_memo():  # the queue and the snapshots share one review-currentness pass
+        return {"protocol": 1, **delta, "papers": _paper_snapshots(db_path)}
+
+
+def questions_for_paper(db_path: Path, item_key: str) -> list[dict[str, Any]]:
+    return question_sync.list_for_paper(db_path, item_key)
 
 
 def _validate_mutation(mutation: dict[str, Any]) -> None:
+    if mutation["field"] == "review_question":
+        mutation.update(validate_question_mutation(mutation))
+        return
     for field in ("device_id", "item_key"):
         value = mutation.get(field)
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{field} must contain non-whitespace characters")
         mutation[field] = value.strip()
+    if mutation["operation"] == "keep_server" and (
+        not mutation.get("resolves_mutation_id") or mutation.get("value") is not None or mutation.get("comment") is not None
+    ):
+        raise ValueError("keep_server requires a conflict reference and no new content")
     if mutation["operation"] == "set" and mutation["field"] == "verdict":
         if mutation.get("value") not in READING_PRIORITY_SORT_RANK:
             raise ValueError("verdict value must be a reading priority")
@@ -103,7 +124,7 @@ def _validate_mutation(mutation: dict[str, Any]) -> None:
 
 
 def _log_applied_verdict(mutation: dict[str, Any], result: dict[str, Any]) -> None:
-    if result["status"] != "applied":
+    if result["status"] != "applied" or mutation["operation"] == "keep_server":
         return
     previous = result["previous"]
     current = result["canonical"]
@@ -123,10 +144,12 @@ def _log_applied_verdict(mutation: dict[str, Any], result: dict[str, Any]) -> No
 
 
 def _run_post_commit_effects(db_path: Path, mutation: dict[str, Any], result: dict[str, Any]) -> None:
-    if result["status"] not in {"applied", "already_applied"}:
+    if result["status"] not in {"applied", "already_applied"} or mutation["operation"] == "keep_server":
         return
-    if mutation["field"] == "review_note":
-        verdict_effects.mirror_review_note(db_path, mutation["item_key"])
+    if mutation["field"] in {"review_note", "review_question"}:
+        mirror = verdict_effects.mirror_review_note(db_path, mutation["item_key"])
+        mirror_field = "question_mirror" if mutation["field"] == "review_question" else "review_note_mirror"
+        result[mirror_field] = mirror
         return
     if mutation["operation"] != "set":
         verdict_effects.mirror_current_verdict(db_path, mutation["item_key"])
@@ -143,12 +166,15 @@ def push(db_path: Path, mutations: list[dict[str, Any]], predecessors: list[str]
     results: list[dict[str, Any]] = []
     last_applied = repositories.sync_applied_revisions(db_path, predecessors or [])
     for mutation in mutations:
-        key = (mutation["device_id"], mutation["item_key"], mutation["field"])
         effective = dict(mutation)
-        if key in last_applied and effective["base_revision"] < last_applied[key]:
-            effective["_effective_base_revision"] = last_applied[key]
+
         try:
             _validate_mutation(effective)
+            identity = effective if effective["field"] == "review_question" else mutation
+            key = (identity["device_id"], identity["item_key"], identity["field"])
+            if (effective["operation"] != "keep_server" and key in last_applied
+                    and effective["base_revision"] < last_applied[key]):
+                effective["_effective_base_revision"] = last_applied[key]
             if (effective["field"] == "verdict" and effective["operation"] == "set"
                     and effective.get("value") != "dont_read"
                     and effective["item_key"].startswith("feed:")
@@ -167,7 +193,9 @@ def push(db_path: Path, mutations: list[dict[str, Any]], predecessors: list[str]
                 _log_applied_verdict(effective, result)
             _run_post_commit_effects(db_path, effective, result)
             if result["status"] in {"applied", "already_applied"}:
-                last_applied[key] = result["applied_revision"]
+                last_applied[key] = max(
+                    last_applied.get(key, 0), result["applied_revision"]
+                )
         results.append(result)
     return {"protocol": 1, "results": results, **repositories.sync_status(db_path)}
 

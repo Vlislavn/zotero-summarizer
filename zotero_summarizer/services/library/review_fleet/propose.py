@@ -9,18 +9,20 @@ into one reading verdict the human can Confirm/Override.
 Truth table (effective digest ``read_decision`` × ``grade``):
 
     read  + grade A/B   -> must_read        skim -> should/could (by grade)
-    read  + grade C/D/? -> should_read      skip -> could (match/unknown) / dont (real miss)
-    (no digest)         -> could_read       (a safe "look later", never a hide)
+    read  + grade C/D/? -> should_read      skip + grade D -> dont_read
+    (no digest)         -> could_read       skip otherwise -> could_read
+                                            (a safe "look later", never a hide)
 
 ASYMMETRY (the load-bearing rule): a wrong HIDE costs more than a wrong KEEP, so a
-``skip`` may propose ``dont_read`` ONLY on a REAL goal-MISS — the goal board was
-evaluated and no standing goal fired. A goal MATCH, or an UNKNOWN board (the
-goal-summary layer was skipped or its LLM call errored, which ``deep_review``
-swallows to ``None``), keeps ``could_read``: absence of evidence is never evidence
-to hide. CONFIDENCE is lowered and a flag added whenever the underlying quality
-signal is shaky (``quality_band == "uncertain"`` or any overstatement); an
-unknown-goal skip is also kept below the card's one-tap-Confirm floor, so the UI
-foregrounds exactly the proposals a human should double-check.
+``skip`` may propose ``dont_read`` ONLY on an explicit grade D — the quality rubric
+found the paper weak on its own terms. The GOAL BOARD IS NOT A GATE: measured against
+the owner's 3,173 library verdicts, "any goal relevant" was true for 89% of the
+papers he wanted and 89% of the ones he rejected (AUC 0.50, see
+``data/perf-20261107/speed/goal-gate.md``), and hiding on ``skip + goal-miss`` was no
+more precise than hiding on ``skip + grade D`` while costing 6 LLM calls a paper. The
+board therefore only informs — it is shown as a badge and never changes a verdict, a
+read decision or Today eligibility. CONFIDENCE is lowered and a flag added whenever
+the underlying quality signal is shaky (``quality_band == "uncertain"``; overstatements are display-only), so the UI foregrounds exactly the proposals a human should check.
 
 Deterministic + side-effect-free → fully unit-testable without any model or I/O.
 """
@@ -28,7 +30,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from zotero_summarizer.models.triage import ProposedVerdict
+from zotero_summarizer.models.triage import ProposedVerdict, QualityEval
 from zotero_summarizer.services._common import now_iso_z
 
 # Grades that read as "this is a strong paper" for the verdict lift.
@@ -55,21 +57,21 @@ def _goal_evidence(goal_summaries: Any) -> str:
 
 
 def _grade(digest: dict[str, Any] | None, quality: dict[str, Any] | None) -> str:
-    """The A-D grade, preferring the digest's then the quality_eval's (they echo
-    each other); ``""`` when neither assessed it."""
-    for src in (digest, quality):
-        grade = str((src or {}).get("grade") or "").strip().upper()[:1]
-        if grade in {"A", "B", "C", "D"}:
-            return grade
-    return ""
+    """Independent quality owns the grade, including an explicit ungraded result."""
+    if (quality or {}).get("basis") in {"non_paper", "not_assessed"}:
+        return ""
+    independent = quality is not None and "grade" in quality
+    src = quality if independent else digest
+    grade = str((src or {}).get("grade") or "").strip().upper()[:1]
+    return grade if grade in {"A", "B", "C", "D"} else ""
 
 
-def _base_verdict(read_decision: str, grade: str, *, goal_evidence: str) -> str:
+def _base_verdict(read_decision: str, grade: str) -> str:
     """Map (read_decision, grade) -> a reading priority BEFORE quality adjustment.
 
     ``read``  -> must (strong grade) / should
     ``skim``  -> should (strong grade) / could
-    ``skip``  -> dont ONLY on a REAL goal-miss; could on a match OR unknown board
+    ``skip``  -> dont ONLY on an explicit grade D; could otherwise
     no digest -> could (a safe "look later")
     """
     high = grade in _HIGH_GRADES
@@ -78,10 +80,9 @@ def _base_verdict(read_decision: str, grade: str, *, goal_evidence: str) -> str:
     if read_decision == "skim":
         return "should_read" if high else "could_read"
     if read_decision == "skip":
-        # Asymmetric: a HIDE requires a REAL goal-miss (board evaluated, none
-        # fired). A match OR an unknown board keeps could_read — absence of
-        # evidence (e.g. a swallowed goal-summary error) is never evidence to hide.
-        return "dont_read" if goal_evidence == "miss" else "could_read"
+        # Asymmetric: a HIDE still needs the rubric's own verdict (grade D). The goal
+        # board adds no precision (measured), so it never licenses a hide on its own.
+        return "dont_read" if grade == "D" else "could_read"
     # No digest read_decision (e.g. the paper had no PDF, or the digest layer was
     # skipped): never propose a hide off no evidence — a neutral "look later".
     return "could_read"
@@ -90,79 +91,106 @@ def _base_verdict(read_decision: str, grade: str, *, goal_evidence: str) -> str:
 def _quality_flags(quality: dict[str, Any] | None) -> tuple[list[str], bool]:
     """``(flags, shaky)`` from the cached quality_eval signals.
 
-    ``shaky`` (band ``uncertain`` OR any overstatement) drives the confidence cut.
+    ``shaky`` (band ``uncertain``) drives the confidence cut. Overstatements are
+    display-only (low reliability, #189) and never flag or cut anything.
     The flags are short, human-readable reasons for the UI's "double-check" hint."""
     q = quality or {}
     flags: list[str] = []
     band = str(q.get("quality_band") or "")
-    overstatements = [o for o in (q.get("overstatements") or []) if str(o).strip()]
     red_flags = [r for r in (q.get("red_flags") or []) if str(r).strip()]
     if band == "uncertain":
         flags.append("quality_uncertain")
-    if overstatements:
-        flags.append("overstatements")
     if band == "flag":
         flags.append("quality_flag")
     if red_flags:
         flags.append("red_flags")
-    shaky = band == "uncertain" or bool(overstatements)
+    shaky = band == "uncertain"
     return flags, shaky
 
 
 def effective_read_decision(
     digest: dict[str, Any] | None,
     quality: dict[str, Any] | None,
-    *,
-    goal_summaries: Any = None,
 ) -> tuple[str, list[str]]:
-    """Reserve full reading for the intersection of idea, goal, evidence, and effort."""
+    """Reserve full reading for the intersection of idea, evidence, and effort.
+
+    The standing-goal board deliberately plays no part: it is displayed, not gating
+    (see the module docstring for the measurement behind that).
+    """
     d, q = digest or {}, quality or {}
     decision = str(d.get("read_decision") or "").strip().lower()
-    if decision == "skip" and _goal_evidence(goal_summaries) == "unknown":
-        return "", ["goals_not_assessed"]
-    if decision != "read":
-        return decision if decision in {"skim", "skip"} else "", []
     flags: list[str] = []
+    band = str(q.get("quality_band") or "")
+    if q.get("basis") != "non_paper" and (
+        band == "flag" or bool(q.get("missing_critical"))
+    ):
+        flags.append("weak_evidence")
+    if decision != "read":
+        return decision if decision in {"skim", "skip"} else "", flags
+    if d.get("basis") != "full_text":
+        flags.append("full_text_not_confirmed")
+    if not str(d.get("original_value") or "").strip():
+        flags.append("original_value_not_assessed")
     friction = str(d.get("writing_friction") or "")
     if friction == "high":
         flags.append("writing_friction")
     elif friction not in {"low", "moderate"}:
         flags.append("writing_not_assessed")
-    if _goal_evidence(goal_summaries) != "match":
-        flags.append("active_goal_not_confirmed")
     idea_score = max(int(d.get("novelty") or 0), int(d.get("significance") or 0))
     if idea_score < 4:
         flags.append("idea_value_not_high")
-    band = str(q.get("quality_band") or "")
-    if str(q.get("basis") or "") != "non_paper" and band != "highlight":
+    if q.get("basis") != "non_paper" and (q.get("basis") != "full_text" or band != "highlight"):
         flags.append("strong_evidence_not_confirmed")
-    if band == "flag" or any(str(value).strip() for value in (q.get("overstatements") or [])):
-        flags.append("weak_evidence")
+    if not any(str(part).strip() for part in (d.get("read_parts") or [])):
+        return "", [*flags, "reading_targets_not_assessed"]
     return ("skim", flags) if flags else ("read", [])
 
 
 def apply_reading_policy(
     digest: dict[str, Any],
     quality: dict[str, Any] | None,
-    goal_summaries: Any,
 ) -> tuple[dict[str, Any], str, list[str]]:
-    """Apply the glassbox reading cap while preserving the model's raw decision."""
+    """Project reading and scientific grade; the caller retains the raw model digest."""
+    grade = _grade(digest, quality)
     raw = str(digest.get("read_decision") or "")
-    effective, flags = effective_read_decision(
-        digest, quality, goal_summaries=goal_summaries,
-    )
-    if effective != raw:
-        reason = "Goals not assessed; reading decision withheld." if not effective else (
-            "Full reading threshold not met. " + str(digest.get("read_why") or "")
-        )
-        digest = {**digest,
-            "read_decision": effective,
-            "read_why": reason,
-        }
+    effective, flags = effective_read_decision(digest, quality)
+    warnings = []
+    if not effective and flags:
+        warnings.append("Reading decision withheld; assessment or exact targets unavailable.")
+    elif effective != raw:
+        warnings.append("Full reading threshold not met; skim targeted parts.")
+    if "weak_evidence" in flags:
+        warnings.append("This is an idea paper; its claims are not yet backed by evidence.")
+    if "writing_friction" in flags:
+        warnings.append("Idea preserved; writing friction is high.")
+    reason = str(digest.get("read_why") or "")
+    warnings = [warning for warning in warnings if warning not in reason]
+    if effective != raw or warnings or grade != str(digest.get("grade") or ""):
+        digest = {**digest, "grade": grade, "read_decision": effective,
+                  "read_why": " ".join([*warnings, reason]).strip()}
     return digest, raw, flags
 
 
-def _confidence(read_decision: str, grade: str, *, goal_evidence: str, shaky: bool) -> float:
+def project_review(entry: dict[str, Any]) -> dict[str, Any]:
+    """Derive presentation from retained model output without modifying either source.
+    ``previous_review`` is a stored backup, never part of the projected review."""
+    entry = {key: value for key, value in entry.items() if key != "previous_review"}
+    source = entry.get("model_digest") or entry.get("digest")
+    if not source:
+        return entry
+    quality = entry.get("quality")
+    if entry.get("model_digest"):
+        if quality is None:
+            quality = QualityEval(quality_band="uncertain", basis="not_assessed").model_dump()
+        elif "grade" not in quality:
+            quality = {**quality, "grade": ""}
+    digest, raw, flags = apply_reading_policy(source, quality)
+    retained_flags = [] if entry.get("model_digest") else entry.get("reading_policy_flags", [])
+    return {**entry, "digest": digest, "quality": quality, "model_read_decision": entry.get("model_read_decision", raw),
+            "reading_policy_flags": list(dict.fromkeys([*retained_flags, *flags]))}
+
+
+def _confidence(read_decision: str, grade: str, *, shaky: bool) -> float:
     """A bounded [0,1] confidence for the proposal.
 
     Higher when the signals AGREE and are strong (a graded read/skip), lower when
@@ -175,10 +203,10 @@ def _confidence(read_decision: str, grade: str, *, goal_evidence: str, shaky: bo
     elif read_decision == "skim":
         score = 0.7 if grade else 0.55
     else:  # skip
-        # A clean goal-MISS is the most confident skip call; a goal-matched keep is
-        # softer; an UNKNOWN-board keep is least sure (kept only because the goal
-        # signal was unavailable) — deliberately below the card's 0.6 Confirm floor.
-        score = {"miss": 0.75, "match": 0.6, "unknown": 0.5}[goal_evidence]
+        # A graded-D skip is the most confident call; any other skip is kept as
+        # could_read and stays below the card's 0.6 one-tap-Confirm floor so a human
+        # sees it as a proposal rather than a decision.
+        score = 0.75 if grade == "D" else 0.5
     if not grade and read_decision:
         score -= 0.1
     if shaky:
@@ -186,7 +214,8 @@ def _confidence(read_decision: str, grade: str, *, goal_evidence: str, shaky: bo
     return round(max(0.0, min(1.0, score)), 2)
 
 
-def _rationale(read_decision: str, grade: str, verdict: str, *, goal_evidence: str, shaky: bool) -> str:
+def _rationale(read_decision: str, grade: str, verdict: str, *, goal_evidence: str,
+               shaky: bool) -> str:
     """One short plain-language sentence explaining the proposal (for the UI)."""
     decision_txt = {
         "read": "read the original",
@@ -195,8 +224,12 @@ def _rationale(read_decision: str, grade: str, verdict: str, *, goal_evidence: s
         "": "reading decision unavailable",
     }[read_decision]
     grade_txt = f"grade {grade}" if grade else "ungraded"
-    goal_txt = {"match": "matched a goal", "miss": "no goal match", "unknown": "goals not assessed"}[goal_evidence]
-    base = f"{decision_txt}, {grade_txt}, {goal_txt} → {verdict.replace('_', ' ')}"
+    base = f"{decision_txt}, {grade_txt} → {verdict.replace('_', ' ')}"
+    # The goal board is a badge, not a cause: it is named after the verdict it did
+    # not influence, so a reader can tell information from reasoning.
+    goal_txt = {"match": "matched a goal", "miss": "no goal match",
+                "unknown": "goals not assessed"}[goal_evidence]
+    base += f" (goal board: {goal_txt})"
     if shaky:
         base += " (quality signal uncertain — worth a check)"
     return base
@@ -224,12 +257,10 @@ def propose_verdict(
     goal_evidence = _goal_evidence(goal_summaries)
 
     flags, shaky = _quality_flags(quality)
-    effective_decision, policy_flags = effective_read_decision(
-        digest, quality, goal_summaries=goal_summaries,
-    )
+    effective_decision, policy_flags = effective_read_decision(digest, quality)
     flags.extend(flag for flag in policy_flags if flag not in flags)
-    verdict = _base_verdict(effective_decision, grade, goal_evidence=goal_evidence)
-    confidence = _confidence(effective_decision, grade, goal_evidence=goal_evidence, shaky=shaky)
+    verdict = _base_verdict(effective_decision, grade)
+    confidence = _confidence(effective_decision, grade, shaky=shaky)
     rationale = _rationale(effective_decision, grade, verdict, goal_evidence=goal_evidence, shaky=shaky)
 
     return ProposedVerdict(
@@ -244,4 +275,4 @@ def propose_verdict(
     )
 
 
-__all__ = ["apply_reading_policy", "effective_read_decision", "propose_verdict"]
+__all__ = ["apply_reading_policy", "effective_read_decision", "project_review", "propose_verdict"]

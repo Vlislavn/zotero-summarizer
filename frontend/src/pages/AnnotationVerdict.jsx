@@ -215,6 +215,7 @@ export default function AnnotationVerdict() {
   const detailQuery = useQuery({
     queryKey: ['review-detail', selectedKey],
     queryFn: () => fetchReviewDetail(selectedKey),
+    networkMode: 'always',
     enabled: Boolean(selectedKey),
   });
 
@@ -295,8 +296,10 @@ export default function AnnotationVerdict() {
 
   // ---------- Mutations ----------
   const submitMutation = useMutation({
+    networkMode: 'always',
     mutationFn: submitVerdict,
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['review-detail', variables.item_key] });
       queryClient.invalidateQueries({ queryKey: ['provenance-list'] });
       // Refresh "Used as GT" badges immediately.
       queryClient.invalidateQueries({ queryKey: ['effective-labels'] });
@@ -304,6 +307,7 @@ export default function AnnotationVerdict() {
   });
 
   const deleteMutation = useMutation({
+    networkMode: 'always',
     mutationFn: (itemKey) => deleteVerdict(itemKey),
     onSuccess: () => {
       if (selectedKey) {
@@ -327,8 +331,7 @@ export default function AnnotationVerdict() {
   const runOptimisticSave = useOptimisticAction({
     mutate: submitMutation.mutate,
     optimisticUpdate: (_vars, ctx) => {
-      setFlashStatus(`Saved ${ctx.itemKey} → ${ctx.user_priority}`);
-      setTimeout(() => setFlashStatus(null), 1500);
+      setFlashStatus(`Saving ${ctx.itemKey} → ${ctx.user_priority}…`);
       advance('next');
     },
     onSuccess: (data, _vars, ctx) => {
@@ -336,6 +339,8 @@ export default function AnnotationVerdict() {
       // ground truth) and the comment as a note. Flag a soft failure on either
       // (e.g. Zotero open) without undoing the saved verdict.
       const soft = data?.label_error || data?.note_error;
+      setFlashStatus(`${data?.saved_offline ? 'Saved on this device' : 'Saved in the app'}: ${ctx.itemKey} → ${ctx.user_priority}`);
+      setTimeout(() => setFlashStatus(null), 4000);
       if (soft) {
         const what = data?.label_error ? 'label not written' : 'note not written';
         setFlashStatus(`Saved ${ctx.itemKey} → ${ctx.user_priority} (${what}: ${soft})`);
@@ -372,7 +377,8 @@ export default function AnnotationVerdict() {
   // guard so a fumbled key can't silently replace a deliberate verdict.
   const handlePriorityKey = useCallback(
     (priority) => {
-      const existing = detailQuery.data?.verdict ?? null;
+      if (!selectedKey || !detailQuery.isSuccess || detailQuery.data?.item_key !== selectedKey) return;
+      const existing = detailQuery.data.verdict ?? null;
       if (
         existing
         && existing.user_priority
@@ -385,7 +391,7 @@ export default function AnnotationVerdict() {
       }
       handleVerdictSubmit({ user_priority: priority, comment: existing?.comment ?? '' });
     },
-    [detailQuery.data, handleVerdictSubmit],
+    [selectedKey, detailQuery.isSuccess, detailQuery.data, handleVerdictSubmit],
   );
 
   useKeyboardNav({
@@ -536,10 +542,10 @@ export default function AnnotationVerdict() {
             Papers
           </h2>
           <span className="text-[11px] text-slate-500">
-            Showing {filteredItems.length} of {totalMatched}
+            Showing {filteredItems.length} of {totalMatched} · {activeFilterLabel === 'All' ? 'all papers' : activeFilterLabel}
           </span>
         </div>
-        <TriageProgress labeled={labeledCount} total={filteredItems.length} />
+        <TriageProgress labeled={labeledCount} total={filteredItems.length} scope={activeFilterLabel === 'All' ? '' : activeFilterLabel} />
 
         <div className="space-y-2 mb-2">
           <div className="flex flex-wrap gap-1.5">
@@ -572,7 +578,7 @@ export default function AnnotationVerdict() {
                 : 'bg-white text-violet-700 border-violet-300 hover:bg-violet-50'
             }`}
           >
-            🎯 {isBorderMode ? 'Active learning — borderline picks (click to exit)' : 'Active learning: review borderline picks'}
+            🎯 {isBorderMode ? 'Papers the model is unsure about (click to exit)' : 'Papers the model is unsure about'}
           </button>
           <details
             open={Boolean(flagFilter) || Boolean(selectedCollection) || Boolean(selectedTag)}
@@ -672,7 +678,7 @@ export default function AnnotationVerdict() {
             && borderStatus !== 'computing'
             && filteredItems.length === 0 && (
             <li className="text-xs text-slate-500 p-3">
-              No <span className="font-semibold">{activeFilterLabel}</span> papers
+              No <span className="font-semibold">{activeFilterLabel === 'All' ? 'matching' : activeFilterLabel}</span> papers
               {(search || selectedCollection || selectedTag || flagFilter) ? ' for this search/filter' : ''}.
               {' '}Try another filter above.
             </li>

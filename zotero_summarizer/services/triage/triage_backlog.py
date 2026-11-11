@@ -23,6 +23,8 @@ import threading
 from typing import Any
 
 from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services.llm import factory
+from zotero_summarizer.services.triage._plain_error import plain_error
 
 LOGGER = logging.getLogger(__name__)
 
@@ -136,7 +138,7 @@ def _rescore_after_drain() -> None:
     except Exception as exc:  # noqa: BLE001 — background-worker boundary; drain already done
         LOGGER.exception("post-drain slate rescore failed (non-fatal)")
         with _LOCK:
-            _STATE["rescore_error"] = f"{type(exc).__name__}: {exc}"
+            _STATE["rescore_error"] = plain_error(exc, f"{type(exc).__name__}: {exc}")
 
 
 def _rescore_library_if_many() -> None:
@@ -156,7 +158,7 @@ def _rescore_library_if_many() -> None:
     except Exception as exc:  # noqa: BLE001 — background-worker boundary; drain already done
         LOGGER.exception("post-drain library rescore failed (non-fatal)")
         with _LOCK:
-            _STATE["rescore_error"] = f"{type(exc).__name__}: {exc}"
+            _STATE["rescore_error"] = plain_error(exc, f"{type(exc).__name__}: {exc}")
 
 
 def _drain_worker() -> None:
@@ -190,7 +192,7 @@ def _drain_worker() -> None:
             detail = readiness.check_classifier_gate().detail
             _finish(error=f"classifier gate unavailable — {detail}", done=False)
             return
-        triage_llm = None if gate_only else state().resolve_stage_client("backlog")
+        triage_llm = None if gate_only else factory.resolve_stage_client(state(), "backlog")
         drained = False
         for _ in range(_MAX_TICKS):
             report = feeds.run_daemon_tick(
@@ -228,7 +230,7 @@ def _drain_worker() -> None:
         # log the failure is invisible (the original bug — every other boundary
         # in this module logs). The reason is also recorded in the job status.
         LOGGER.exception("backlog drain failed")
-        _finish(error=f"{type(exc).__name__}: {exc}", done=False)
+        _finish(error=plain_error(exc, f"{type(exc).__name__}: {exc}"), done=False)
 
 
 def start_drain() -> bool:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -33,6 +33,7 @@ __all__ = [
     "UniversityAccessConfig",
     "GoalsConfig",
     "USER_OWNED_KEYS",
+    "USER_KNOBS",
 ]
 
 
@@ -130,6 +131,13 @@ class QualityReviewConfig(BaseModel):
     # from the deep_review job (serial on a local provider, parallel on a remote one).
     # Env override: ZS_DEEP_REVIEW_PREWARM_K. See services/library/deep_review_prewarm.py.
     prewarm_on_startup_k: int = Field(default=5, ge=0, le=20)
+    # Remote deep-review parallelism, set separately: papers reviewed at once and LLM
+    # calls in flight inside one paper. 0 = the provider's max_sub_concurrency. Default 8×2
+    # measured 2.06× the papers/min of 4×4 (data/perf-20261107/speed/fleet/report.md).
+    # A local provider always stays serial. Env: ZS_QUALITY_REVIEW_FLEET_PAPERS /
+    # ZS_QUALITY_REVIEW_CALLS_PER_PAPER.
+    fleet_papers: int = Field(default=8, ge=0, le=16)
+    calls_per_paper: int = Field(default=2, ge=0, le=16)
     # Auto-review newly-materialized Today picks at the END of a daily-selection
     # tick (not just the launch-time prewarm). The full-text quality review only
     # fired on startup / manual trigger before; this closes the gap so papers
@@ -186,7 +194,13 @@ class QualityReviewConfig(BaseModel):
         default=50_000_000, ge=1_000_000
     )  # figure-heavy clinical PDFs run >20 MB
     fetch_timeout_secs: float = Field(default=30.0, ge=1.0, le=300.0)
-    # Hard cap on full-text chars fed to the reviewer (context safety).
+    # Whole-paper reading (#136): a REMOTE provider reads the whole cleaned body (references,
+    # acknowledgements/funding/licence boilerplate and running headers removed; appendices
+    # kept) up to `context_window_tokens` minus a prompt reserve and the provider's output
+    # tokens; only above that do digest/rubric select or map_reduce, visibly.
+    context_window_tokens: int = Field(default=256_000, ge=8_000)
+    # Cap on full-text chars for LOCAL (non-lean) providers — remote providers use the window
+    # above and this value as the floor (context safety).
     # validated-GOOD: faithbench run 20260612_193120 (commit 55bdd09) — 96.4% full-text
     # QA accuracy, 0% trap-hallucination, 93.9% claim support @ 60k on MLX-35B. NOT a
     # head-to-head budget sweep (60k vs 30k vs 12k) — Phase 5 (bench_deep_review).
@@ -351,6 +365,13 @@ class GoalsConfig(BaseModel):
     summary_structure: List[str] = Field(default_factory=list)
     output_language: str = Field(default="English")
     llm_enabled: bool = Field(default=True)
+    # Settings "Review depth": thorough = digest reasoning on + rubric `self_consistency_runs`;
+    # fast = digest reasoning off + 1 rubric run (measured trade-off in docs/features.md).
+    review_depth: Literal["thorough", "fast"] = "thorough"
+    # Settings "Checklist engine" (#147): which Jev-compatible engine answers checklist criteria and the Telegram
+    # disagreement check. Off by default; Local = URL of a server on this machine; Cloud = the hosted service.
+    checklist_engine: Literal["off", "local", "cloud"] = "off"
+    checklist_local_url: str = "http://127.0.0.1:8766/v1/systemone"
     llm: LLMConfig
     # Per-stage provider+model routing. Optional in goals.yaml: when absent it is
     # synthesized from the legacy ``llm:`` block below (see ``_synthesize_routing``)
@@ -441,8 +462,19 @@ USER_OWNED_KEYS: frozenset[str] = frozenset(
         "summary_structure",
         "output_language",
         "llm_enabled",
+        "review_depth",
+        "checklist_engine",
+        "checklist_local_url",
         "llm",
         "llm_routing",
         "university_access",
     }
 )
+
+# System-owned sections whose few operational knobs the Settings page edits (#219).
+# ``write_user_config`` persists just these fields, and only when they differ from
+# the default, so goals.yaml stays intent-only. ``ZS_*`` env still wins on load.
+USER_KNOBS: dict[str, tuple[str, ...]] = {
+    "quality_review": ("fleet_papers", "calls_per_paper"),
+    "feeds": ("backfill_days", "max_pages_per_feed"),
+}

@@ -232,6 +232,26 @@ def test_run_refuses_frozen_text_drift(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize('entry', ['parse', 'provider'])
+@pytest.mark.parametrize('field', ['answer', 'quote'])
+@pytest.mark.parametrize('suffix', ['\ud800', '\udfff'])
+def test_unencodable_output_is_not_success_or_a_json_repair(entry, field, suffix):
+    raw = json.dumps({'answer': 'ImageNet', 'quote': 'ImageNet', field: 'ImageNet' + suffix})
+    calls = []
+
+    class Client:
+        def prompt(self, prompt):
+            calls.append(prompt)
+            return raw
+
+    with pytest.raises(UnicodeError):
+        if entry == 'parse':
+            parse_answer(raw)
+        else:
+            answer_with_retry(Client(), 'owned question')
+    assert calls == ([] if entry == 'parse' else ['owned question'])
+
+
 def test_parse_answer_abstention_and_retry():
     assert parse_answer('{"answer": null, "quote": null}') == {
         "answer": None, "abstained": True, "quote": None,
@@ -263,15 +283,15 @@ def test_parse_answer_abstention_and_retry():
 
 class FakeDigestModel:
     def pydantic_prompt(self, *, prompt, pydantic_model):
-        assert pydantic_model is PaperDigest
-        return PaperDigest(
+        assert issubclass(pydantic_model, PaperDigest)
+        return PaperDigest(**{**PaperDigest().model_dump(exclude={'basis'}), **dict(
             tldr="GlassNet reaches 85.3 percent top-1 on ImageNet.",
             read_decision="read", read_why="strong result", grade="A",
             read_parts=["§4 Results"], skip_parts=[], estimated_read_minutes=15,
             original_value="The complete experimental evidence.",
             key_strength="large training set", key_weakness="no ablations",
             writing_friction="low", writing_reasons=[],
-        )
+        )})
 
 
 class FakeDecomposer:

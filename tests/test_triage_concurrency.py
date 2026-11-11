@@ -6,10 +6,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import zotero_summarizer.services._common as common
-from zotero_summarizer.models import SummarizeResponse
+from zotero_summarizer.models import SummarizeRequest, SummarizeResponse
 from zotero_summarizer.models.providers import ProviderConfig
 from zotero_summarizer.services.triage.feeds import _triage as feeds
 from zotero_summarizer.services.triage.prompts import DEFAULT_PRACTITIONER_TRIAGE_PROMPT
+from zotero_summarizer.services.triage.summarization import _fast_reject_response
 
 
 def _item(key: str) -> dict:
@@ -17,8 +18,18 @@ def _item(key: str) -> dict:
             "title": f"Title {key}", "abstract": "abs"}
 
 
-def _cand(tags=None):
-    return SimpleNamespace(summary=SimpleNamespace(tags=tags or []))
+def _cand(tags=None, *, machine_reject=False):
+    if machine_reject:
+        summary = _fast_reject_response(
+            SummarizeRequest(title="Synthetic"),
+            {"has_corpus": True, "affinity_score": -0.31}, "Synthetic abstract",
+        )
+    else:
+        summary = SummarizeResponse(
+            executive_summary="Synthetic summary", relevance_score=3,
+            triage_rationale="Synthetic rationale", tags=tags or [],
+        )
+    return SimpleNamespace(summary=summary)
 
 
 def _run(items, outcomes_by_key, *, concurrency=4, provider=None):
@@ -55,8 +66,8 @@ def _observed_workers(items, *, provider, concurrency):
 def test_partitions_triaged_fastreject_errors_and_fatal():
     items = [_item("K1"), _item("K2"), _item("K3"), _item("K4")]
     outcomes = {
-        "K1": (_cand(tags=[]), None, False),
-        "K2": (_cand(tags=["prefilter_low_corpus_affinity"]), None, False),
+        "K1": (_cand(tags=["prefilter_low_corpus_affinity"]), None, False),
+        "K2": (_cand(machine_reject=True), None, False),
         "K3": (None, "boom", False),
         "K4": (None, "401 unauthorized", True),
     }
@@ -107,7 +118,7 @@ def test_hackernoon_uses_practitioner_prompt_only():
 
     def run(_req, **kwargs):
         seen.append(kwargs["triage_prompt_override"])
-        return SummarizeResponse()
+        return _cand().summary
 
     with patch.object(feeds, "run_abstract_pipeline", side_effect=run), \
          patch.object(feeds, "_apply_prestige"), \

@@ -9,6 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from zotero_summarizer.settings import automatic_gate_updates_enabled
+
 from zotero_summarizer.services.triage.feeds._common import (
     LOGGER,
     TriagedCandidate,
@@ -56,9 +58,7 @@ def _synthesize_gate_only_candidate(item: dict[str, Any]) -> "TriagedCandidate":
         composite_relevance_score=float(pred.calibrated_score) * 5.0,
         reading_priority=priority,
         triage_rationale=(
-            f"Predicted by classifier gate "
-            f"(raw={pred.raw_score:.4f}, cal={pred.calibrated_score:.4f}). "
-            "Open the Feed Review tab to inspect SHAP contributions."
+            "Picked by the relevance model alone; no AI explanation was written."
         ),
         triage_confidence=float(pred.calibrated_score),
         corpus_affinity_score=0.0,
@@ -233,6 +233,8 @@ def schedule_gate_retrain_async(reason: str, *, allow_initial: bool = False) -> 
     blocking startup; the swap target requires ``classifier_gate_lock`` to
     be set by the caller.
     """
+    if not automatic_gate_updates_enabled():
+        return False
     app_state = get_state()
     if getattr(app_state, "classifier_gate_training", False):
         return False
@@ -375,9 +377,8 @@ def schedule_slate_rescore_async(reason: str) -> None:
 
 def _gate_retrain_worker(golden_csv: Path, classifier_name: str) -> None:
     """Background thread: retrain, then atomic swap + slate rescore via
-    ``install_gate``. Errors are logged then re-raised so the default thread
-    excepthook surfaces them; the daemon keeps using the old gate in the
-    meantime."""
+    ``install_gate``, then append the training ledger. Errors are logged and
+    re-raised; an already saved or installed model is not rolled back."""
     try:
         from zotero_summarizer.services.model import classifier_persistence
         app_state = get_state()
@@ -396,13 +397,15 @@ def _gate_retrain_worker(golden_csv: Path, classifier_name: str) -> None:
             triage_db_path=settings_.triage_db_path,
         )
         install_gate(new_gate, reason="daemon-retrain")
-    except Exception as exc:
+        from zotero_summarizer.services.model.training_record import append_daemon_training_record
+        append_daemon_training_record(settings_, new_gate, golden_csv)
+    except BaseException as exc:
         # Record WHY so readiness can report it (e.g. "No module named
         # 'lightgbm'") instead of leaving the gate a silent None. install_gate
         # clears this on the next success. Re-raised below so the thread
         # excepthook still surfaces it.
         get_state().classifier_gate_error = f"{type(exc).__name__}: {exc}"
-        LOGGER.exception("background gate retrain/install/rescore failed; completed steps are not rolled back")
+        LOGGER.exception("background gate retrain/install/rescore/ledger failed; completed steps are not rolled back")
         raise
     finally:
         # Always clear the in-progress flag so the next tick can retry.

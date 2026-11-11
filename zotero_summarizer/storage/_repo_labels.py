@@ -17,7 +17,7 @@ from zotero_summarizer.storage.feed_identity import is_legacy_feed_key
 
 
 def _row_to_label_verdict(row: sqlite3.Row) -> dict[str, Any]:
-    return {
+    verdict = {
         "id": int(row["id"]),
         "item_key": str(row["item_key"]),
         "original_derived_priority": str(row["original_derived_priority"]),
@@ -26,6 +26,11 @@ def _row_to_label_verdict(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": str(row["created_at"]),
         "source": str(row["source"]),
     }
+    if "reasons_json" in row.keys():
+        verdict["reasons_json"] = row["reasons_json"]
+    if "proposal_json" in row.keys():
+        verdict["proposal_json"] = row["proposal_json"]
+    return verdict
 
 
 def insert_or_update_label_verdict(
@@ -37,8 +42,14 @@ def insert_or_update_label_verdict(
     comment: str,
     source: str = VERDICT_SOURCE_USER,
     expected_revision: int | None = None,
+    reasons_json: str | None = None,
+    proposal_json: str | None = None,
 ) -> int | None:
-    """Commit a label verdict using the shared transactional writer."""
+    """Commit a label verdict using the shared transactional writer.
+
+    ``reasons_json`` is written on EVERY commit (NULL when not supplied): a fresh
+    verdict without reason chips deliberately clears any prior reasons — reasons
+    belong to the decision that was just made, not to a superseded one (#37)."""
     conn = _connect_to(db_path)
     try:
         with conn:
@@ -53,6 +64,7 @@ def insert_or_update_label_verdict(
             row_id, _ = upsert_label_verdict(
                 conn, item_key=item_key, original_derived_priority=original_derived_priority,
                 user_priority=user_priority, comment=comment, source=source,
+                reasons_json=reasons_json, proposal_json=proposal_json,
             )
         return row_id
     finally:
@@ -68,8 +80,16 @@ def upsert_label_verdict(
     comment: str,
     source: str = VERDICT_SOURCE_USER,
     training_sample: dict[str, str] | None = None,
+    reasons_json: str | None = None,
+    proposal_json: str | None = None,
 ) -> tuple[int, dict[str, Any] | None]:
-    """Write within the caller transaction; return id and the previous snapshot."""
+    """Write within the caller transaction; return id and the previous snapshot.
+
+    ``reasons_json`` is set on both INSERT and UPDATE so every new verdict
+    overwrites it (NULL clears stale reasons) — see
+    :func:`insert_or_update_label_verdict`. ``proposal_json`` (#224) follows the
+    same rule: it is the app's proposal at THIS decision, so a verdict without
+    one clears the superseded snapshot."""
     safe_item_key = str(item_key or "").strip()
     safe_original = str(original_derived_priority or "").strip()
     safe_user = str(user_priority or "").strip()
@@ -89,21 +109,30 @@ def upsert_label_verdict(
 
     now_iso = datetime.now(timezone.utc).isoformat()
     previous_row = conn.execute("SELECT * FROM label_verdicts WHERE item_key = ?", (safe_item_key,)).fetchone()
+    if (
+        safe_source == VERDICT_SOURCE_USER and previous_row is not None
+        and previous_row["source"] != VERDICT_SOURCE_USER and comment == previous_row["comment"]
+    ):
+        comment = ""  # the owner takes over: a machine-written note (e.g. 'auto quality gate: ...') is not theirs
     row = conn.execute(
         """
         INSERT INTO label_verdicts (
-            item_key, original_derived_priority, user_priority, comment, created_at, source
+            item_key, original_derived_priority, user_priority, comment, created_at,
+            source, reasons_json, proposal_json
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(item_key) DO UPDATE SET
             original_derived_priority = excluded.original_derived_priority,
             user_priority = excluded.user_priority,
             comment = excluded.comment,
             created_at = excluded.created_at,
-            source = excluded.source
+            source = excluded.source,
+            reasons_json = excluded.reasons_json,
+            proposal_json = excluded.proposal_json
         RETURNING id
         """,
-        (safe_item_key, safe_original, safe_user, comment, now_iso, safe_source),
+        (safe_item_key, safe_original, safe_user, comment, now_iso, safe_source, reasons_json,
+         proposal_json),
     ).fetchone()
     if training_sample is not None:
         conn.execute(
@@ -158,7 +187,7 @@ def get_label_verdict(db_path: Path, item_key: str) -> dict[str, Any] | None:
             row = conn.execute(
                 """
                 SELECT id, item_key, original_derived_priority, user_priority,
-                       comment, created_at, source
+                       comment, created_at, source, reasons_json, proposal_json
                 FROM label_verdicts
                 WHERE item_key = ?
                 """,
@@ -239,6 +268,22 @@ def list_label_verdict_priorities(db_path: Path) -> dict[str, str]:
     return {str(r["item_key"]): str(r["user_priority"]) for r in rows}
 
 
+def list_user_verdict_keys(db_path: Path) -> set[str]:
+    """Item keys carrying the owner's OWN verdict (``source='user'``) — uncapped.
+
+    Machine-made rows (``machine_add``, ``auto_quality``) are not decisions the
+    owner took, so the Library queue keeps those papers in the undecided flow."""
+    conn = _connect_to(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT item_key FROM label_verdicts WHERE source = ? AND item_key IS NOT NULL AND item_key != ''",
+            (VERDICT_SOURCE_USER,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {str(r["item_key"]) for r in rows}
+
+
 def delete_label_verdict(db_path: Path, item_key: str, *, expected_revision: int | None = None) -> bool:
     """Delete one verdict; return True iff a row was removed."""
     safe_item_key = str(item_key or "").strip()
@@ -309,6 +354,7 @@ __all__ = [
     "list_all_label_verdicts",
     "list_label_verdict_keys",
     "list_label_verdict_priorities",
+    "list_user_verdict_keys",
     "delete_label_verdict",
     "upsert_review_note",
     "get_review_note",

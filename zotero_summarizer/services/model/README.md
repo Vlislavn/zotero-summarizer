@@ -35,7 +35,7 @@ golden CSV ─featurize→ SPECTER2 embeds + library/prestige features
 | `label_weights.py` | per-row training weights by signal tier. Explicit `label:<priority>` verdicts (tier `user_label`) weigh at the top (1.0) — your deliberate, decay-immune ground truth, no longer the 0.7 medium fall-through. Tier dispatch keys on the FIRST pipe segment (a suffixed tier inherits its base, never the 0.7 fall-through); any `outcome_*` segment (resolved 7-day materialization observation, see `golden/hybrid_gt`) → `WEIGHT_REVIEW`. Band-frequency balancing was measured and deliberately NOT shipped (no must_read-recall gain, −9 pts dont_read recall = junk through the gate; see module comment). Recency-decay weighting (half-life sweep, `0.5**(days/halflife)`) was ALSO measured and rejected — it hurt forward ρ (the drift is a base-rate shift, not feature→relevance; and "recent" rows are mostly undated provisional adds) |
 | `golden_metrics.py` | accuracy / per-class / confusion for eval; shared finite-vector Spearman diagnostic for training and feed prediction |
 | `library_features.py` | features conditioned on your positive-engagement set |
-| `active_learning.py` | border-case picks that would most improve the model. Disagreement is judged against your EFFECTIVE label (`label:*`-aware via `hybrid_gt.load_hybrid_labels`) — "the gate disagrees with what *you* decided", not a noisy derived guess; `has_label` flags rows where the truth is your explicit verdict. Pure `_ground_truth` resolver keeps it unit-testable. Golden-CSV read reuses `services._common.load_golden_rows` (de-duped) |
+| `active_learning.py` | border-case picks that would most improve the model. Disagreement is judged against your EFFECTIVE label (`label:*`-aware via `hybrid_gt.load_hybrid_labels`) — "the gate disagrees with what *you* decided", not a noisy derived guess; `has_label` flags rows where the truth is your explicit verdict. Pure `_ground_truth` resolver keeps it unit-testable. Golden-CSV read reuses `services.golden.csv_store.load_golden_rows` (de-duped) |
 | `tune.py` | Optuna hyperparameter search: paper-group folds, aligned row weights, train-fold positive-library features |
 | `eval_baseline/` | 5×5 CV baseline + learning curve with bootstrap CIs |
 
@@ -129,6 +129,14 @@ Training saves the pre-training identity, never a later CSV hash. Concurrent
 input edits therefore remain detectable by the next reuse check; this is not a
 cross-store snapshot or a lock on human labeling. Encoder provenance and
 train/evaluation fit-recipe consistency have separate checks below.
+`_text.paper_text` removes HTML tags, comments and script/style bodies, decodes
+entities and normalizes whitespace at the SPECTER2 boundary. Both inference and
+training use the same conversion, including the content-cache identity. Raw
+source records remain intact; old HTML-derived vectors miss rather than being
+reused for different encoder input. Plain unchanged inputs keep their cache hits.
+The tokenizer's 512-token limit remains; preserving full exported abstracts does
+not claim unlimited encoder context.
+
 The SPECTER2 tokenizer/base and proximity adapter are pinned to immutable Hub
 commits in `classifier_const.py`, shared by loading, input identity and the
 single/batch vector-cache key. Pins match the pre-existing local snapshots:
@@ -243,3 +251,7 @@ the category-slot restriction. Its `--replay` also compares score keys directly,
 not the production role allocator; neither measures this new ordering policy.
 The new restriction has regression coverage, not a measured user-preference lift;
 bonus magnitudes and feature-flag defaults are unchanged.
+
+The existing daemon training-ledger producer is retained with its original synthetic-trainer regression suite. It appends retained artifact identities only after install/rescore; this packaging adds no fitting, inference or new identity authority.
+
+Existing Telegram source-review part: saved posts, collector/composer/rendering, model selection and migration11 are retained from the original working source. CLI worker/wiring and combined live-schema/native dependencies follow separately; no live collection, model loading or issue completion is inferred.

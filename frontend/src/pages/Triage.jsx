@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
 import {
   fetchJobs,
   fetchJob,
@@ -8,7 +7,6 @@ import {
   fetchLatestResultFeedback,
   submitResultFeedback,
 } from '../api/triageApi.js';
-import { triggerTriageBacklog } from '../api/dailyApi.js';
 import { humanizeError } from '../utils/humanizeError.js';
 import Async from '../components/ui/Async.jsx';
 import { ActionBadge } from '../components/ui/Badge.jsx';
@@ -97,8 +95,18 @@ function ResultCard({ result, current, submitting, onFeedback }) {
   );
 }
 
+const STALE_JOB_MS = 7 * 24 * 3600 * 1000;
+// A finished job from over a week ago (e.g. an old test run) is history, not current state.
+function isStaleJob(job) {
+  const started = Date.parse(job.started_at || '');
+  return Number.isFinite(started) && Date.now() - started > STALE_JOB_MS && !['running', 'cancelling'].includes(job.status);
+}
+
 export default function Triage() {
-  const [jobs, setJobs] = useState([]);
+  const [allJobs, setJobs] = useState([]);
+  const [showOldJobs, setShowOldJobs] = useState(false);
+  const jobs = useMemo(() => (showOldJobs ? allJobs : allJobs.filter((job) => !isStaleJob(job))), [allJobs, showOldJobs]);
+  const hiddenJobs = allJobs.length - jobs.length;
   const [activeJobId, setActiveJobId] = useState('');
   const [activeJob, setActiveJob] = useState(null);
   const [cancelingId, setCancelingId] = useState('');
@@ -115,11 +123,6 @@ export default function Triage() {
   // Last seen status of the active job, so we can auto-refresh calibration the
   // moment a job transitions out of `running` (EDGE 4).
   const prevStatusRef = useRef(null);
-  const runMutation = useMutation({
-    mutationFn: triggerTriageBacklog,
-    onSuccess: () => { setMessage('Triage started — check job list.'); setIsError(false); loadJobs(); },
-    onError: (err) => { setMessage(humanizeError(err)); setIsError(true); },
-  });
   const jobListRef = useRef(null);
 
   // Completed results, optionally narrowed to the ones still awaiting your
@@ -135,7 +138,7 @@ export default function Triage() {
       const data = await fetchJobs();
       const list = data?.items || [];
       setJobs(list);
-      setActiveJobId((prev) => prev || (list.length ? list[0].job_id : ''));
+      setActiveJobId((prev) => prev || list.find((job) => !isStaleJob(job))?.job_id || '');
     } catch (err) {
       setMessage(`Failed to load jobs: ${humanizeError(err)}`);
       setIsError(true);
@@ -313,19 +316,12 @@ export default function Triage() {
         <div>
           <h2 className="font-display text-xl font-light text-slate-900">Triage Monitor</h2>
           <p className="text-sm text-slate-600">
-            Watch active triage jobs and review feedback metrics. Start new jobs from the
-            Library tab.
+            Watch selected-item triage jobs and review feedback metrics. Start new jobs from the
+            Library tab. Feed backlog triage runs in{' '}
+            <a href="/today" className="text-teal-700 underline">Today</a>, separate from these jobs.
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => runMutation.mutate()}
-            disabled={runMutation.isPending}
-            className="px-3 py-1.5 rounded-lg border border-teal-600 bg-teal-600 text-white text-xs font-medium hover:bg-teal-700 disabled:opacity-50"
-          >
-            {runMutation.isPending ? 'Starting…' : 'Run triage now'}
-          </button>
           <button
             type="button"
             onClick={() => { loadJobs(); if (activeJobId) loadJob(activeJobId); }}
@@ -344,6 +340,11 @@ export default function Triage() {
             <div className="flex items-center gap-2">
               <span>Job <span className="mono">{activeJob.job_id}</span></span>
               <JobStatusPill status={activeJob.status} />
+              {activeJob.status === 'cancelling' && (
+                <span role="status" className="text-xs text-slate-500">
+                  Stopping after the current AI call finishes…
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <span>
@@ -492,13 +493,21 @@ export default function Triage() {
                   <JobStatusPill status={job.status} />
                 </div>
                 <div className="text-xs text-slate-600">
-                  {(job.completed || 0)}/{(job.total || 0)}
+                  {(job.completed || 0)}/{(job.total || 0)}{job.started_at && ` · ${job.started_at.slice(0, 10)}${isStaleJob(job) ? ' (old)' : ''}`}
                 </div>
+                {job.status === 'failed' && job.errors?.length > 0 && (
+                  <div className="text-xs text-rose-700">{job.errors.length} item error{job.errors.length === 1 ? '' : 's'} — open for the cause</div>
+                )}
               </button>
             );
           })}
           {jobs.length === 0 && (
-            <div className="text-xs text-slate-500">No triage jobs recorded yet.</div>
+            <div className="text-xs text-slate-500">{allJobs.length ? 'No recent triage jobs.' : 'No triage jobs recorded yet.'}</div>
+          )}
+          {allJobs.some(isStaleJob) && (
+            <button type="button" onClick={() => setShowOldJobs((v) => !v)} className="text-xs text-teal-700 underline">
+              {showOldJobs ? 'Hide jobs older than 7 days' : `Show ${hiddenJobs} older job${hiddenJobs === 1 ? '' : 's'} (over 7 days, finished)`}
+            </button>
           )}
         </div>
       </div>
@@ -527,10 +536,10 @@ export default function Triage() {
                   <div>Predictions available: {p.with_prediction_count ?? 0} / {p.total_feedback ?? 0}</div>
                   <div className="mt-1">Agreement: <span className="mono">{formatPercent(p.agreement_rate)}</span></div>
                   <div title="Among approved items with a saved prediction, the fraction predicted should_read or must_read.">
-                    Observed recall: <span className="mono">{formatPercent(p.recall)}</span>
+                    Approved papers it rated worth reading: <span className="mono">{formatPercent(p.recall)}</span>
                   </div>
                   <div title="Approved items whose saved triage prediction was could_read or dont_read.">
-                    False negatives: <span className="mono">{p.false_negative_count ?? 0}</span>
+                    Approved papers it rated low: <span className="mono">{p.false_negative_count ?? 0}</span>
                   </div>
                 </div>
               );
