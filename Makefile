@@ -36,8 +36,10 @@ iphone: $(DIST) ## Start the app for iPhone via Tailscale HTTPS (Ctrl+C stops)
 	@ZS="$(ZS)" PY="$(PY)" tools/serve-iphone.sh
 
 stop: ## Stop this app's server (run/iphone) and its caffeinate; nothing else
-	@pkill -INT -f "serve-iphone.sh" 2>/dev/null; pkill -INT -f "zotero-summarizer serve" 2>/dev/null; pkill -INT -f "make iphone" 2>/dev/null; pkill -INT -f "make run" 2>/dev/null; pkill -INT -f "caffeinate -dims" 2>/dev/null; \
-	sleep 3; if lsof -nP -t -iTCP:8000 -sTCP:LISTEN >/dev/null 2>&1; then echo "port 8000 still busy: $$(lsof -nP -t -iTCP:8000 -sTCP:LISTEN)"; exit 1; else echo "stopped: port 8000 free"; fi
+	@for pid in $$(pgrep -f "serve-iphone.sh|zotero-summarizer serve|make (iphone|run)$$" ); do kill -INT $$pid 2>/dev/null; done; \
+	pkill -INT -x caffeinate 2>/dev/null; \
+	sleep 3; \
+	if lsof -nP -t -iTCP:8000 -sTCP:LISTEN >/dev/null 2>&1; then echo "port 8000 still busy: $$(lsof -nP -t -iTCP:8000 -sTCP:LISTEN)"; exit 1; else echo "stopped: port 8000 free"; fi
 
 dev: ## Develop: backend :8000 + hot-reload UI :5173 (Ctrl+C stops both)
 	@echo "Starting backend (:8000) + frontend (:5173). Ctrl+C stops both."
