@@ -4,6 +4,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ## [Unreleased]
 
+- Today: a shortlist card the server can no longer match is released instead of showing «1 paper is still being added» forever; a dropped proxy connection no longer fails a paper's background PDF fetch after every restart, and such papers are not counted as «still being analyzed».
 - Ask without a Zotero PDF: Ask reads the PDF the Mac already holds (Zotero file, brief build, or the file its full-text review read); feed papers show «Not in your Zotero library yet» instead of failing tags with «Item not found»; a running sync no longer says «Tag changes need the Mac».
 - Paper card (#311): the method icons and legend follow the paper's own review (yes/no) where one exists, so they no longer contradict it; the facts scan keeps appendices after the reference list; the AI card is told only the flags the scan found and never an absence it could have missed.
 - Paper review at a glance (#308): one card (paper page, Library row) leads with what the paper does, the verdict line, grade with a check bar, the key metric as a number, a strength and a weakness; Assessment opens second as a data→method→baselines map; the TL;DR `Code` line gives way to «Not found».

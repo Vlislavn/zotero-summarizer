@@ -61,9 +61,10 @@ def status(db_path: Path) -> dict[str, Any]:
     # Display counts use the same usable-review seam as the slate/members, so an
     # outdated-but-valid review counts as ready (not '0 ready, N not analyzed').
     # The prewarm run below stays current-only (it decides what to re-analyze).
+    # Keys that failed this process are not "still being analyzed" (the run skips them too).
     keys, eligible_seen = plan(
         ranked_unhandled_candidates(db_path, lookback_hours=LOOKBACK_HOURS),
-        deep_review.usable_reviews(), set(),
+        deep_review.usable_reviews(), _failed,
     )
     return {"running": _latch.is_running(), "ready": eligible_seen, "left": len(keys)}
 
