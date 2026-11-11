@@ -74,7 +74,7 @@ function ReviewZone({ deep, runner, sectionOverlay, itemKey }) {
   ].some((value) => String(value || '').trim());
   // Card facts (#98) sit right under the verdict card; with no review yet they lead the zone.
   const showReview = reviewed && !running;
-  const facts = <PaperFactsCard cardKey={itemKey} variant="paper" />;
+  const facts = <PaperFactsCard cardKey={itemKey} variant="paper" rubric={deep?.quality?.rubric} />;
   return (
     <div className="space-y-3">
       {!showReview && facts}

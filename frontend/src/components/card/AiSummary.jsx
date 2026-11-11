@@ -14,10 +14,14 @@ import { aiReasonMessage } from './cardModel.js';
 const ROW = 'flex min-h-11 flex-wrap items-center justify-between gap-x-3 gap-y-1 sm:min-h-9';
 const BTN = 'min-h-11 sm:min-h-9';
 
-// Terse labelled bullets (New / Take / Caveat / Code), not prose (#127).
-const LABEL_TONE = { Caveat: 'text-amber-800' };
+// Terse labelled bullets (New / Take / Caveat / Not found), not prose (#127). The server's
+// `Code` bullet only repeated the code badge under the TL;DR, so it is dropped; where the
+// paper has a review, `notFound` (cardModel.notFoundLine) says what was NOT found instead.
+const LABEL_TONE = { Caveat: 'text-amber-800', 'Not found': 'text-slate-600' };
 
-function Summary({ bullets }) {
+function Summary({ bullets: stored, notFound }) {
+  const bullets = [...stored.filter(({ label }) => label !== 'Code'),
+    ...(notFound ? [{ label: 'Not found', text: notFound }] : [])];
   return (
     <div>
       <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.06em] text-forest-800">
@@ -27,7 +31,7 @@ function Summary({ bullets }) {
       <ul className="mt-1 space-y-0.5">
         {bullets.map(({ label, text }) => (
           <li key={label} className="flex gap-2 text-[13px] leading-snug text-slate-800">
-            <span className={`w-[3.25rem] shrink-0 text-[12px] font-medium ${LABEL_TONE[label] || 'text-forest-800'}`}>{label}</span>
+            <span className={`w-[4rem] shrink-0 text-[12px] font-medium ${LABEL_TONE[label] || 'text-forest-800'}`}>{label}</span>
             <span className="min-w-0">{text}</span>
           </li>
         ))}
@@ -36,14 +40,14 @@ function Summary({ bullets }) {
   );
 }
 
-export default function AiSummary({ cardKey, card }) {
+export default function AiSummary({ cardKey, card, notFound = '' }) {
   const queryClient = useQueryClient();
   const [asking, setAsking] = useState(false);
   const generate = useMutation({
     mutationFn: (token) => generateCard(cardKey, token),
     onSuccess: (data) => { setAsking(false); queryClient.setQueryData(['card', cardKey], data); },
   });
-  if (Array.isArray(card.ai?.bullets)) return <Summary bullets={card.ai.bullets} />;
+  if (Array.isArray(card.ai?.bullets)) return <Summary bullets={card.ai.bullets} notFound={notFound} />;
 
   const reason = card.ai_reason;
   const boundary = card.boundary || {};

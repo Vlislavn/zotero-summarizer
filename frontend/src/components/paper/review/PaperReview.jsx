@@ -7,6 +7,7 @@ import {
 import { formatShortDate, timeAgo } from '../../library/shared.jsx';
 import CodeLink from './CodeLink.jsx';
 import Recommendation from './Recommendation.jsx';
+import { StudyFlow, ImpactGrid } from './StudyMap.jsx';
 
 const STATE_LABEL = {
   hit: '● addressed', miss: '○ not addressed', not_retrieved: '⚠ not retrieved',
@@ -139,7 +140,6 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
   // The server projects scientific grade with the reading action. A separate
   // legacy quality-only review has no digest; raw model_digest never supplies a grade.
   const grade = isNonPaper ? '' : (digest ? digest.grade || '' : quality?.grade || '');
-  const tldr = digest?.tldr || '';
 
   // Located findings (the story page passes the section overlay; the compact card
   // does not → unchanged). Keyed by VALUE (goal/flag text, critical item) so the
@@ -161,14 +161,12 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
         </p>
       )}
       {compact && quality && !isNonPaper && <QualityHeadline quality={quality} band={band} />}
-      {tldr && (
-        <p className="text-[14px] leading-relaxed text-slate-800 max-w-[66ch]">{tldr}</p>
-      )}
       {quality && !isNonPaper && <QualityDetails quality={quality} band={band} />}
       {digest && (
         <div>
           <SectionLabel>Full digest</SectionLabel>
-          <div className="mt-1.5"><DigestRows digest={digest} lost={lost} onRegenerate={onRegenerate} /></div>
+          <div className="mt-1.5"><DigestRows digest={{ ...digest, parameters: digest.parameters && { ...digest.parameters, metrics: [] } }}
+            lost={lost} onRegenerate={onRegenerate} exclude={GLANCE_FIELDS} /></div>
         </div>
       )}
       {compact && deep.reviewed_at && (
@@ -179,10 +177,12 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
     </div>
   );
 
+  // A field that could not be grounded is said so in its place, never shown as verified.
+  const grounded = (field) => (lost.includes(field) ? <Ungrounded onRegenerate={onRegenerate} /> : digest?.[field] || null);
   const recommendation = (
     <Recommendation verdict={verdict} digest={digest} deep={deep} grade={grade} band={band} redFlags={redFlags}
       digestDecision={digestDecision} hasReadingDecision={hasReadingDecision} isNonPaper={isNonPaper}
-      compact={compact} flat={flat && !compact} />
+      flat={flat} strength={grounded('key_strength')} weakness={grounded('key_weakness')} />
   );
 
   // Reading-size type applies to the review itself; the `facts` slot between the
@@ -202,11 +202,10 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
           stays clean. Older cached reviews have no code_link → renders nothing. */}
       {!compact && !flat && deep.code_link && <CodeLink codeLink={deep.code_link} />}
 
-      {/* Verdict banner — the single loud element (Von Restorff). In the compact
-          Library card every signal is a chip on this ONE row (grade + band +
-          red-flag count), each hide-when-empty, so the glance is pre-attentive
-          (colour carries the verdict) and the gloss/coverage/flag-text all move
-          into Details. Full surfaces keep the labelled "Quality {grade}" chip. */}
+      {/* The glance card — verdict, what the paper does, quality, reported metrics,
+          strength vs weakness — leads every surface; the verdict chip stays the single
+          loud element (Von Restorff). The gloss, flag texts and checklist follow below
+          (in Details on the compact Library card). */}
       {!flat && recommendation}
 
       {/* (The Rigor·Relevance summary spine was removed — it restated the two
@@ -220,22 +219,29 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
       <div className={reading}>
       <div className={flat ? '' : 'mt-2 divide-y divide-slate-200/60'}>
         {flat ? <>
-          <Fold label="Contribution" defaultOpen>
-            {tldr ? <p>{tldr}</p> : <p>Contribution not recorded in this saved review.</p>}
-            {isNonPaper && <p>Not a research paper — reviewed for relevance only; scientific quality criteria don't apply.</p>}
-          </Fold>
           <Fold label="Findings and applicability" defaultOpen>
             {findings.length > 0 ? <Bullets items={findings} /> : <p>Key findings not recorded in this saved review.</p>}
           </Fold>
+          {digest && (
+            <Fold label="Assessment" defaultOpen>
+              <div className="space-y-5">
+                <StudyFlow parameters={digest.parameters} />
+                <ImpactGrid cells={[['Impact', grounded('impact')], ['Industry', grounded('industry_impact')],
+                  ['Academia', grounded('academy_impact')], ['Unknowns', grounded('unknown_unknowns')]]} />
+                <DigestRows digest={{ ...digest, parameters: null }} lost={lost} onRegenerate={onRegenerate}
+                  exclude={[...GLANCE_FIELDS, ...IMPACT_FIELDS, 'key_findings', 'read_why', 'methods', 'limitations', 'executive_summary']} />
+              </div>
+            </Fold>
+          )}
           <Fold label="Caveats and coverage" defaultOpen summary={caveatsSummary(quality, band, isNonPaper, redFlags)}>
             <div className="space-y-4">
               {partialBasis.length > 0 && <p className="!text-[14px] text-slate-600">Not based on the full text — {partialBasis.join('; ')}.</p>}
               {quality && !isNonPaper && <QualityHeadline quality={quality} band={band} flagLoc={flagLoc} missLoc={missLoc} critiqueViews />}
-              <dl><DigestRow field="key_weakness" label="Weakness" tone="neg" lost={lost} onRegenerate={onRegenerate}>{digest?.key_weakness}</DigestRow></dl>
               {quality && !isNonPaper && <MaterialClaims quality={quality} />}
               {!quality && <p>Assessment and source coverage not recorded in this saved review.</p>}
             </div>
           </Fold>
+          {evidence}
           {goals.length > 0 && (
             <Fold label={`Relevance — ${nHitGoals} of ${goals.length} goals addressed`}
               summary={goals.filter(isSupportedGoal).map(g => shortGoal(g.goal)).join(' · ') || 'No supported goal match recorded'}>
@@ -248,15 +254,14 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
               <DigestRow field="limitations" label="Limitations" lost={lost} onRegenerate={onRegenerate}>{digest?.limitations}</DigestRow></dl>
             {!digest?.methods && !digest?.limitations && !lost.some(f => f === 'methods' || f === 'limitations') && <p>Methods and limitations not recorded in this saved review.</p>}
           </Fold>
-          <Fold label="Assessment and reference" summary="Full digest, rubric and checklist">
+          <Fold label="Reference" summary="Summary, full checklist and how it was judged">
             <div className="space-y-4">
-              {digest && <DigestRows digest={digest} lost={lost} onRegenerate={onRegenerate} exclude={['key_findings', 'read_why', 'methods', 'limitations', 'key_weakness']} />}
+              <dl><DigestRow field="executive_summary" label="Summary" lost={lost} onRegenerate={onRegenerate}>{digest?.executive_summary}</DigestRow></dl>
               {quality && !isNonPaper && <ChecklistBasis quality={quality} />}
               {quality && !isNonPaper && <QualityDetails quality={quality} band={band} hideMaterial />}
               <p className="!text-[13px] text-slate-500">Saved source basis — quality: {quality?.basis || 'not recorded'}; digest: {digest?.basis || 'not recorded'}. Reviewed extent not recorded.</p>
             </div>
           </Fold>
-          {evidence}
         </> : <>
 
         {/* compact (Library row card): the per-goal board is the biggest block and
@@ -276,11 +281,11 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
           </Section>
         )}
 
-        {/* Decision-only by default (Cognitive Load / Miller): everything below the
-            call — the TLDR, how the grade was reached, the full rubric, the
-            structured digest — lives behind ONE disclosure. Quiet by default, deep
+        {/* Glance first (Cognitive Load / Miller): everything below it — how the
+            grade was reached, the full rubric, the structured digest — lives
+            behind ONE disclosure. Quiet by default, deep
             on demand. In compact, the full quality headline lives here too. */}
-        {(tldr || quality || digest) && (
+        {(quality || digest) && (
           <Section label={flat ? 'Details' : undefined}>
             {flat ? detailsInner : <Disclosure summary="Details">{detailsInner}</Disclosure>}
           </Section>
@@ -734,18 +739,24 @@ function RubricMark({ value }) {
 
 // A field whose text could not be grounded is stored empty (never shown as
 // verified); one quiet line + the existing Regenerate action stands in its place.
+function Ungrounded({ onRegenerate }) {
+  return <>
+    <span className="text-slate-500">Could not be grounded this time</span>
+    {onRegenerate && <>
+      {' · '}
+      <button type="button" onClick={onRegenerate} className="font-medium text-forest-800 underline underline-offset-2 hover:text-forest-700">Regenerate</button>
+    </>}
+  </>;
+}
+
 function DigestRow({ field, lost, onRegenerate, children, ...rest }) {
   if (!lost.includes(field)) return <KeyVal {...rest}>{children}</KeyVal>;
-  return (
-    <KeyVal {...rest} tone="default">
-      <span className="text-slate-500">Could not be grounded this time</span>
-      {onRegenerate && <>
-        {' · '}
-        <button type="button" onClick={onRegenerate} className="font-medium text-forest-800 underline underline-offset-2 hover:text-forest-700">Regenerate</button>
-      </>}
-    </KeyVal>
-  );
+  return <KeyVal {...rest} tone="default"><Ungrounded onRegenerate={onRegenerate} /></KeyVal>;
 }
+
+// Shown in the glance card / the impact grid, so the digest rows below leave them out.
+const GLANCE_FIELDS = ['key_strength', 'key_weakness'];
+const IMPACT_FIELDS = ['impact', 'industry_impact', 'academy_impact', 'unknown_unknowns'];
 
 const LOST_ONLY = { relevance: 'Relevance', skip_parts: 'Skip', writing_reasons: 'Writing', read_parts: 'Read parts', verdict: 'Verdict' };
 

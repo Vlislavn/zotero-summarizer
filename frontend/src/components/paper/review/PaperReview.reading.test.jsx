@@ -25,16 +25,20 @@ it('preserves a legacy assessment when an empty digest object is cached', () => 
 it('orders the full reading flow and keeps every material caveat in its section fold', () => {
   const { container } = render(<PaperReview deep={deep} flat />);
   const headings = [...container.querySelectorAll('h2')].map(el => el.textContent);
-  expect(headings).toEqual(['Contribution', 'Findings and applicability', 'Caveats and coverage', 'Methods and limitations', 'Assessment and reference']);
-  for (const text of ['Flag four.', 'Overstatement.', 'Synthetic weakness.', 'Synthetic method.', 'Synthetic limitation.', 'Validated on independent / held-out data']) {
+  expect(headings).toEqual(['Findings and applicability', 'Assessment', 'Caveats and coverage', 'Methods and limitations', 'Reference']);
+  for (const text of ['Flag four.', 'Overstatement.', 'Synthetic method.', 'Synthetic limitation.', 'Validated on independent / held-out data']) {
     const node = [...container.querySelectorAll('*')].find(el => el.textContent === text);
     expect(node, text).toBeTruthy();
     expect(foldOf(node), text).toBe(text.startsWith('Synthetic method') || text.startsWith('Synthetic limitation')
       ? 'Methods and limitations' : 'Caveats and coverage');
   }
-  for (const text of ['Synthetic rationale.', 'Synthetic finding.']) {
+  for (const text of ['Synthetic rationale.', 'Synthetic finding.', 'Synthetic weakness.', 'Synthetic contribution.']) {
     expect(container.textContent.split(text).length - 1).toBe(1);
   }
+  // The weakness and the contribution lead in the glance card, outside every fold.
+  const glance = container.querySelector('[aria-label="At a glance"]');
+  expect(glance.textContent).toContain('Synthetic weakness.');
+  expect(glance.closest('details')).toBeNull();
   expect(container.textContent).toContain('Unique secondary summary.');
 });
 it('retains the entire original goal label and source text on disclosure', () => {
@@ -97,7 +101,9 @@ it('keeps compact content folded and non-paper scientific criteria suppressed', 
   expect(container.textContent).not.toContain('Quality A');
   expect(container.textContent).toContain('Not peer-reviewed');
   const contribution = [...container.querySelectorAll('p')].find(el => el.textContent === deep.digest.tldr);
-  expect(contribution.closest('details')).toBeTruthy();
+  expect(contribution.closest('details')).toBeNull();  // the TL;DR leads the glance card
+  const summary = [...container.querySelectorAll('dd')].find(el => el.textContent === deep.digest.executive_summary);
+  expect(summary.closest('details')).toBeTruthy();
 });
 
 it('leads with the verdict summary card before the contribution in flat full view', () => {

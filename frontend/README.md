@@ -83,8 +83,10 @@ source tasks open with `?task=`; the old Settings hashes resolve through `LEGACY
 - Card on Today + paper page (#98, redesigned #124, English + terse TL;DR #127): `components/card/PaperFactsCard.jsx`
   (+ `AiSummary.jsx`, `FactStrip.jsx`, pure `cardModel.js`, `api/cardApi.js`) renders `GET /api/card/{key}` under the
   title. Order: **AI TL;DR** → **fact icon row** → one quiet who-is-behind line. The TL;DR is ≤4 labelled one-line
-  bullets (`New` / `Take` / `Caveat` / `Code`; `card.ai.bullets`, never prose — a card without `bullets` is treated as
-  not generated) in a label column + text; the `Caveat` label is ochre. Facts are 10 small icons + the code mark from the shared
+  bullets (`New` / `Take` / `Caveat`; `card.ai.bullets`, never prose — a card without `bullets` is treated as
+  not generated) in a label column + text; the `Caveat` label is ochre. The server's `Code` bullet is not shown (#308: it
+  repeated the code mark). On the paper page, where a review exists, a last `Not found` line (`cardModel.notFoundLine`)
+  names what is absent in the card facts AND answered "no" in the review checklist (`quality.rubric`); Today cards have no such line. Facts are 10 small icons + the code mark from the shared
   inline-SVG set `components/ui/Icon.jsx` (lucide-style, stroke 1.5): *Published* (prompts, protocol, judge-vs-human,
   contracts, data) | *Method* (baselines, ablation, uncertainty, external validation, reproducibility) | the GitHub mark
   with a ✓/✗ dot (a link when the repo exists). The row shows **only the facts that were found** (#231), in that
@@ -127,13 +129,19 @@ source tasks open with `?task=`; the old Settings hashes resolve through `LEGACY
   `usePaperReview` fetches `review-detail` once per open. Related-in-library sits below the
   abstract, collapsed.
 - Paper page layout (#125): the whole page is a centred `max-w-[76rem]` frame (TOC / reading column / rail),
-  with one ≤68ch reading column inside it. Order: title/authors/links → `PaperFactsCard` →
-  ONE summary card (`review/Recommendation.jsx`: verdict chip, minutes, grade, the why with its first
-  sentence leading, `ReadingPlan` «Read first / Skip / What the original adds», policy reasons, code row
-  `review/CodeLink.jsx`) → `Fold` sections (`review/primitives.jsx`: serif title + one-line summary while
-  closed). Only Contribution and Findings start open; Caveats and coverage (red flags = clay left rule +
-  quiet «verify» badge; summary names the flag count), Relevance, Methods, Assessment, Figures, Paper map,
-  Abstract and Related are closed folds with their content in the DOM. The closed **Evidence** fold (`review/EvidenceFold.jsx`, #40) reads `GET /api/library/review-audit/{key}` and lists, per verified claim (Contribution, Findings), the verbatim quotes from the paper (the best-matching sentence ±1 of the verified passage + «Show full passage»; «…» marks an excerpt); `not_established_fields` show as «could not be grounded this time»; legacy / stale / PDF-changed states are one plain sentence; older-rules audits carry a note. An outdated review is one line +
+  with one ≤68ch reading column inside it. Order: title/authors/links →
+  ONE at-a-glance card (#308, `review/Recommendation.jsx`, the same on the paper page, the Library expanded row and
+  Annotate: verdict chip, minutes → what the paper does (`digest.tldr`) + the one-line `digest.verdict` →
+  `review/Glance.jsx`: Quality tile (grade letter, «n of m checks», one segment per check, red-flag count), Metrics tile
+  («as reported»: the first `digest.parameters.metrics` string leads with its number large and the full string under it;
+  a bar/pair/range is drawn by `review/metricModel.js` only when that number is the only one in the string), one
+  strength and one weakness → the why → `ReadingPlan` «Read first / Skip / What the original adds» → policy reasons → code row
+  `review/CodeLink.jsx`) → `PaperFactsCard` → `Fold` sections (`review/primitives.jsx`: serif title + one-line summary while
+  closed). Order: Findings, **Assessment** (`review/StudyMap.jsx`: Data → Method → Compared with → External validation
+  rail, then Impact / Industry / Academia / Unknowns, then the remaining digest rows) and Caveats and coverage (red flags =
+  clay left rule + quiet «verify» badge) start open; Evidence, Relevance, Methods and limitations, **Reference** (summary,
+  checklist, source basis), Figures, Paper map, Abstract and Related are closed folds with their content in the DOM. The
+  Library row shows the same card and keeps everything else behind one «Details». The closed **Evidence** fold (`review/EvidenceFold.jsx`, #40) reads `GET /api/library/review-audit/{key}` and lists, per verified claim (Contribution, Findings), the verbatim quotes from the paper (the best-matching sentence ±1 of the verified passage + «Show full passage»; «…» marks an excerpt); `not_established_fields` show as «could not be grounded this time»; legacy / stale / PDF-changed states are one plain sentence; older-rules audits carry a note. An outdated review is one line +
   `Regenerate` (`onRegenerate` → `runner.run()`). The mobile verdict bar uses graded tints (must Forest
   solid, should Sage, could Mint, skip outline), no black fills.
 - Today exposure (card shown/dwell, review and link opens) is reported best-effort to

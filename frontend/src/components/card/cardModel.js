@@ -55,6 +55,22 @@ export function codeView(code = {}) {
   }
 }
 
+// The TL;DR's last line: what was looked for and not found — the complement of the icon
+// row, which shows only what WAS found. The card's own text scan misses things (it reports
+// "no baselines" for papers whose review lists three), so an absence is said only when the
+// paper's review checklist (`rubric`: key → yes/no/na) ALSO answers "no". Without a review,
+// or when no full text was read, there is no line.
+const NOT_FOUND = { baselines: ['baselines', 'baselines'], ablation: ['ablation', 'ablation'],
+  uncertainty: ['uncertainty', 'uncertainty'], external: ['external_validation', 'external validation'],
+  repro: ['repro_detail', 'reproducibility'], code: ['code_data_released', 'code'] };
+export function notFoundLine(method, code, rubric) {
+  if (!rubric || [...method, code].some((fact) => fact.state === 'unknown')) return '';
+  return [...method, { ...code, id: 'code' }]
+    .filter((fact) => fact.state === 'absent' && NOT_FOUND[fact.id])
+    .filter((fact) => String(rubric[NOT_FOUND[fact.id][0]] || '').toLowerCase() === 'no')
+    .map((fact) => NOT_FOUND[fact.id][1]).join(' · ');
+}
+
 // Who is behind it: affiliations + max h-index + a presentation-only confidence
 // (NOT the owner's “depends on” compute, which is out of scope). High when a
 // known-org affiliation is present or the h-index is solid.
