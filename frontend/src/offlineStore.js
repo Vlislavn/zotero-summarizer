@@ -5,6 +5,7 @@ const DB_NAME = 'zotero-summarizer-offline';
 const EVENT = 'zs-sync-status';
 let database;
 let connection = 'unchecked';
+let settled = 'unchecked'; // what the last finished sync established; a running sync does not erase it
 let syncError = '';
 
 function openDb() {
@@ -612,6 +613,7 @@ export function publishNoResponse(error) {
 export async function publishStatus(message = '', phase) {
   if (phase) {
     connection = phase;
+    if (phase !== 'syncing') settled = phase;
     if (phase !== 'syncing' && phase !== 'busy') {
       clearTimeout(busyRetry);
       busyRetry = null;
@@ -644,7 +646,8 @@ export async function publishStatus(message = '', phase) {
 }
 
 export function isServerAvailable({ allowSyncFailure = false } = {}) {
-  return navigator.onLine && (connection === 'connected' || (allowSyncFailure && ['blocked', 'busy'].includes(connection)));
+  const known = connection === 'syncing' ? settled : connection;
+  return navigator.onLine && (known === 'connected' || (allowSyncFailure && ['blocked', 'busy'].includes(known)));
 }
 
 export function transportUnavailable() {

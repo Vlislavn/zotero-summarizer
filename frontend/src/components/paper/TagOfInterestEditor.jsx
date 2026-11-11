@@ -28,8 +28,7 @@ export default function TagOfInterestEditor(props) {
 }
 
 function TagEditor({ itemKey, tags = [], onChanged }) {
-  // A busy or blocked sync still means the server answers; the write itself reports a real failure.
-  const serverAvailable = useServerAvailable({ allowSyncFailure: true });
+  const serverAvailable = useServerAvailable();
   const [tagText, setTagText] = useState('');
   const [error, setError] = useState(null);
   const [busyTag, setBusyTag] = useState(null);
