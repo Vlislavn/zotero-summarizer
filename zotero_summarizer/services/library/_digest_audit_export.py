@@ -190,7 +190,7 @@ def retained_audit_status(entry: dict, *, current_identity: dict | None = None,
         review = entry['review_identity']
         if not isinstance(review, dict) or not review.get('source_path'):
             return 'unavailable', 'source_identity_unavailable'
-        from zotero_summarizer.services.library.paper_render import _allowed_paper_path
+        from zotero_summarizer.services.library import _paper_pdf
         from zotero_summarizer.services.library._review_identity import build_review_identity
         from zotero_summarizer.services._common import state
 
@@ -200,7 +200,7 @@ def retained_audit_status(entry: dict, *, current_identity: dict | None = None,
             raise ValueError('Invalid review-source binding')
         now = current_identity
         if now is None:
-            path = _allowed_paper_path(review['source_path'])
+            path = _paper_pdf.allowed_path(review['source_path'])
             if not path.is_file():
                 return 'unavailable', 'source_unavailable'
             now = build_review_identity(config=state().app_state.config, pdf_path=str(path),

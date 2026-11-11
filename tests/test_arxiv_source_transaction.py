@@ -13,7 +13,7 @@ import pytest
 
 from zotero_summarizer.integrations import app_rss
 from zotero_summarizer.services.library import _paper_read_tex as tex
-from zotero_summarizer.services.library import paper_render
+from zotero_summarizer.services.library import _paper_pdf, paper_render
 
 
 def _archive(*, extra=None):
@@ -297,7 +297,8 @@ def paper(tmp_path, monkeypatch):
     monkeypatch.setattr(paper_render, "settings", lambda: SimpleNamespace(
         paper_render_dir=tmp_path / "state", pdf_root=tmp_path, pdf_cache_dir=tmp_path / "cache",
     ))
-    monkeypatch.setattr(paper_render, "_item_detail", lambda _: {"pdf_path": str(pdf), "title": "Paper"})
+    monkeypatch.setattr(_paper_pdf, "settings", paper_render.settings)
+    monkeypatch.setattr(_paper_pdf, "item_detail", lambda _: {"pdf_path": str(pdf), "title": "Paper"})
     monkeypatch.setattr(paper_render, "_JOBS", {})
     return pdf
 

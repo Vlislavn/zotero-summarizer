@@ -23,9 +23,8 @@ if TYPE_CHECKING:
 @dataclass(slots=True)
 class FullText:
     """Acquired full text + provenance. ``source`` is the resolver rung that won
-    (``arxiv``/``unpaywall``/``biorxiv``/``pmc``/``openalex``/``local_pdf``/
-    ``abstract``). ``source_sha`` is the sha256 of ``text`` — the cache's
-    content-change key."""
+    (``arxiv``/``unpaywall``/``biorxiv``/``pmc``/``openalex``/``abstract``).
+    ``source_sha`` is the sha256 of ``text`` — the cache's content-change key."""
 
     text: str = ""
     link_uris: list[str] = field(default_factory=list)
@@ -49,13 +48,9 @@ def _from_pdf(pdf: Path, source: str) -> FullText:
 
 
 def get_fulltext(ref: "PaperRef", *, abstract: str = "") -> FullText:
-    """Acquire and extract the paper's full text. Prefers an existing local PDF,
-    then the app's headless acquisition chain; on any failure returns the abstract
-    as a degraded source so downstream facts still compute."""
-    local = (ref.local_pdf or "").strip()
-    if local and Path(local).exists():
-        return _from_pdf(Path(local), "local_pdf")
-
+    """Acquire and extract the paper's full text. Uses the app's headless
+    acquisition chain; on any failure returns the abstract as a degraded
+    source so downstream facts still compute."""
     detail = {"url": ref.url, "doi": ref.doi, "has_pdf": False}
     try:
         result = _pdf_acquire.acquire_pdf_for(ref.key, detail, allow_browser=False)

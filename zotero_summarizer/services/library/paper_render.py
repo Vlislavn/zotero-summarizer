@@ -23,6 +23,7 @@ from zotero_summarizer.services.library import (
     _paper_read_meta,
     _paper_read_pdf,
     _paper_read_tex,
+    _paper_pdf,
     deep_review,
 )
 from zotero_summarizer.services.library._paper_read_meta import qa_body_text  # re-exported
@@ -103,84 +104,6 @@ def _write_state(item_key: str, payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _item_detail(item_key: str) -> dict[str, Any]:
-    # Key-aware: a stable_feed_key (un-materialized Today paper) resolves via the app
-    # library reader even when live Zotero is present; a Zotero key uses the live reader.
-    # _pdf_for_item_or_acquire then fetches the PDF into the local cache for a feed item.
-    from zotero_summarizer.services.zotero.zotero import resolve_reader_for_key
-
-    reader = resolve_reader_for_key(item_key)
-    detail = reader.get_item_detail(item_key)
-    if detail is None:
-        raise APIError(error="not_found", message=f"Item {item_key} not found", status_code=404)
-    return detail
-
-
-def _pdf_from_detail(item_key: str, detail: dict[str, Any]) -> Path:
-    pdf_path = Path(str(detail.get("pdf_path") or ""))
-    if not str(pdf_path) or not pdf_path.is_file():
-        raise APIError(error="needs_pdf", message=f"No local PDF for item {item_key}", status_code=404)
-    return _allowed_paper_path(pdf_path)
-
-
-def _pdf_for_item_or_acquire(item_key: str, *, allow_acquire_missing: bool) -> tuple[Path, dict[str, Any]]:
-    """Return a local PDF path, optionally acquiring one into the fetch cache.
-
-    The normal paper-render path uses Zotero's attached PDF. The Library brief
-    shortcut can opt into the same acquisition chain the deep-review path uses:
-    arXiv/OA first, then the university/Chrome browser session. Acquired PDFs are
-    rendered from the cache and are not written back into Zotero.
-    """
-    detail = _item_detail(item_key)
-    try:
-        return _pdf_from_detail(item_key, detail), detail
-    except APIError as exc:
-        if exc.error != "needs_pdf":
-            raise
-        saved = _read_state(item_key)
-        if saved and saved.get("acquired_pdf"):
-            cached = _allowed_paper_path(saved.get("pdf_path"))
-            if cached.is_file():
-                return cached, {**detail, "pdf_path": str(cached), "has_pdf": True, "acquired_pdf": True}
-        if not allow_acquire_missing:
-            raise
-
-    from zotero_summarizer.services.library import _pdf_acquire  # lazy: browser stack is optional
-
-    acquired = _pdf_acquire.acquire_pdf_for(item_key, detail, allow_headed_fallback=True)
-    if acquired.path is not None:
-        path = _allowed_paper_path(acquired.path)
-        if not path.is_file():
-            raise APIError(
-                error="needs_pdf",
-                message=f"PDF acquisition for item {item_key} returned a missing file",
-                status_code=404,
-            )
-        return path, {**detail, "pdf_path": str(path), "has_pdf": True, "acquired_pdf": True}
-    if acquired.needs_login:
-        raise APIError(
-            error="needs_library_login",
-            message=(
-                "The paper has no local Zotero PDF, and the browser/university "
-                "session could not fetch it. Open the publisher page in Chrome or "
-                "refresh University access, then retry."
-            ),
-            status_code=424,
-            details={"login_url": acquired.login_url},
-        )
-    if acquired.outcome == "browser_extra_unavailable":
-        raise APIError(
-            error="browser_extra_unavailable",
-            message="Browser support is not installed; open Settings → University access.",
-            status_code=424,
-        )
-    raise APIError(
-        error="needs_pdf",
-        message=f"No local PDF or fetchable full-text source for item {item_key}.",
-        status_code=404,
-    )
-
-
 def _use_docling() -> bool:
     app = state().app_state
     return app.config.quality_review.use_docling if app is not None else False
@@ -199,7 +122,7 @@ def _completed_outputs_missing(state: dict[str, Any]) -> bool:
         return False
     outputs = state.get("outputs") or {}
     return not Path(str(outputs.get("presentation") or "")).is_file() or any(
-        not _allowed_paper_path(_allowed_paper_path(outputs.get("figures_dir")) / f["name"]).is_file()
+        not _paper_pdf.allowed_path(_paper_pdf.allowed_path(outputs.get("figures_dir")) / f["name"]).is_file()
         for f in state.get("figures") or [] if f.get("name")
     )
 
@@ -211,6 +134,14 @@ def _get_item_lock(item_key: str) -> threading.Lock:
             lock = threading.Lock()
             _ITEM_LOCKS[item_key] = lock
         return lock
+
+
+def held_pdf(item_key: str) -> Path:
+    """The PDF this Mac already holds for a paper; never builds or acquires."""
+    _state_path(item_key)
+    return _paper_pdf.pdf_for_item(
+        item_key, read_state=lambda: _read_state(item_key), allow_acquire_missing=False
+    )[0]
 
 
 def render_paper(item_key: str) -> dict[str, Any]:
@@ -228,16 +159,16 @@ def render_paper(item_key: str) -> dict[str, Any]:
                     **state, "status": "missing", "stale": True,
                     "message": "Generated HTML brief is missing or a listed figure is missing; rebuild the artifact.",
                 }
-            pdf_path, _detail = _pdf_for_item_or_acquire(item_key, allow_acquire_missing=False)
+            pdf_path, _detail = _paper_pdf.pdf_for_item(item_key, read_state=lambda: state, allow_acquire_missing=False)
             if state.get("pdf_key") != _pdf_key(pdf_path):
                 return {**state, "stale": True}
         return state
     try:
-        pdf_path, detail = _pdf_for_item_or_acquire(item_key, allow_acquire_missing=False)
+        pdf_path, detail = _paper_pdf.pdf_for_item(item_key, read_state=lambda: None, allow_acquire_missing=False)
     except APIError as exc:
         if exc.error != "needs_pdf":
             raise
-        detail = _item_detail(item_key)
+        detail = _paper_pdf.item_detail(item_key)
         return {
             "status": "missing",
             "item_key": item_key,
@@ -323,8 +254,8 @@ def build_paper_read(
     non-atomic figure writes)."""
     _state_path(item_key)
     with _get_item_lock(item_key):
-        pdf_path, detail = _pdf_for_item_or_acquire(
-            item_key, allow_acquire_missing=allow_acquire_missing
+        pdf_path, detail = _paper_pdf.pdf_for_item(
+            item_key, read_state=lambda: _read_state(item_key), allow_acquire_missing=allow_acquire_missing
         )
         key = _pdf_key(pdf_path)
         existing = _read_state(item_key)
@@ -445,21 +376,11 @@ def build_paper_read_for_pdf(
         return content
 
 
-def _allowed_paper_path(path: str | Path | None) -> Path:
-    if not path:
-        raise APIError(error="not_found", message="Paper artifact path is missing", status_code=404)
-    resolved = Path(path).expanduser().resolve()
-    roots = (settings().pdf_root, settings().pdf_cache_dir)
-    if not any(resolved.is_relative_to(root.expanduser().resolve()) for root in roots):
-        raise APIError(error="path_not_allowed", message="Paper path is outside allowed roots", status_code=403)
-    return resolved
-
-
 def presentation_path(item_key: str) -> Path:
     state = render_paper(item_key)
     if state.get("status") != "completed" or state.get("stale"):
         raise APIError(error="not_ready", message="Paper-read artifact is not current; rebuild it", status_code=404)
-    path = _allowed_paper_path((state.get("outputs") or {}).get("presentation"))
+    path = _paper_pdf.allowed_path((state.get("outputs") or {}).get("presentation"))
     if not path.is_file():
         raise APIError(error="not_found", message="Generated presentation is missing", status_code=404)
     return path
@@ -475,7 +396,7 @@ def source_pdf_path(item_key: str) -> Path:
     state = _read_state(item_key)
     if state is None or state.get("status") != "completed":
         raise APIError(error="not_ready", message="Paper-read artifact has not been built", status_code=404)
-    path = _allowed_paper_path(state.get("pdf_path"))
+    path = _paper_pdf.allowed_path(state.get("pdf_path"))
     if not path.is_file():
         raise APIError(error="not_found", message="Source PDF for this brief is missing", status_code=404)
 
@@ -491,8 +412,8 @@ def figure_path(item_key: str, name: str) -> Path:
         raise APIError(error="not_ready", message="Paper-read artifact is not current; rebuild it", status_code=404)
     if name not in {f.get("name") for f in state.get("figures") or []}:
         raise APIError(error="not_found", message=f"figure {name} not in audited artifact", status_code=404)
-    figures_dir = _allowed_paper_path((state.get("outputs") or {}).get("figures_dir"))
-    resolved = _allowed_paper_path(figures_dir / name)
+    figures_dir = _paper_pdf.allowed_path((state.get("outputs") or {}).get("figures_dir"))
+    resolved = _paper_pdf.allowed_path(figures_dir / name)
     if not resolved.is_relative_to(figures_dir):
         raise APIError(error="validation_error", message="bad figure path", status_code=422)
     if not resolved.is_file():

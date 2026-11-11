@@ -77,7 +77,8 @@ collect_facts(PaperRef)                      cache: Settings.card_facts_dir/<sta
 - `resolve_ref(key, …) -> PaperRef` — build a ref, filling identity/fetch fields from
   the feed row through the existing `feed_key` alias resolver, and from a bare identity
   key (`arxiv:<id>` → arXiv abs URL, `doi:<id>` → DOI) so the acquisition chain has a
-  fetchable target even with no feed row. Explicit fields win.
+  fetchable target even with no feed row. Explicit fields win. A ref carries no
+  local PDF path: full text always comes from the acquisition chain (or the abstract).
 - `PaperRef.stable_key` — `arxiv:<id>` → `doi:<norm>` → `key:<key>`. Keying by
   arXiv/DOI identity is the alias handling: a feed-key and the Zotero-key for the
   same paper map to one cache entry.

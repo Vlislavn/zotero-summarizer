@@ -29,7 +29,7 @@ reading_queue next-K undecided ─fleet (single-flight, 3 passes)─┐
 | `prewarm.py` | launch-time `schedule_on_startup(config, app_state)`, modeled 1:1 on `deep_review_prewarm`. Spawns the fleet for the top-`quality_review.prewarm_on_startup_k` picks (env override `ZS_REVIEW_FLEET_PREWARM_K`, validated fail-loud; `0` disables). Skipped when deep review is disabled. It still schedules when `zotero_reader is None`; unavailable sources are handled by the fleet job. Daemon-thread + best-effort: a failure is logged and swallowed, never blocks boot. |
 | `__init__.py` | re-exports `start`, `status`, `schedule_on_startup`. |
 
-Acquired overrides carry `{path, source, source_url}` into the durable deep-review cache, so Today materialization can reuse the validated PDF without another fetch.
+Acquired overrides (`AcquireResult.as_override()`) carry `{path, source, source_url}` into the durable deep-review cache, so Today materialization can reuse the validated PDF without another fetch.
 
 The standing-goal board is a badge, never a gate: it changes no verdict, read decision
 or Today eligibility (owner decision 11-08; board AUC 0.50 vs owner verdicts, see

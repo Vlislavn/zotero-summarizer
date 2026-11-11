@@ -11,7 +11,7 @@ import fitz
 import pytest
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services.library import _pdf_acquire, app_library_reader, deep_review, paper_render, qa
+from zotero_summarizer.services.library import _paper_pdf, _pdf_acquire, app_library_reader, deep_review, paper_render, qa
 from zotero_summarizer.services.zotero import zotero
 
 _FEED = "feed:d:" + "a" * 64
@@ -51,6 +51,7 @@ def paper(tmp_path, monkeypatch):
     monkeypatch.setattr(zotero, "settings", lambda: config)
     monkeypatch.setattr(app_library_reader, "AppLibraryReader", lambda path: feed_reader)
     monkeypatch.setattr(paper_render, "settings", lambda: config)
+    monkeypatch.setattr(_paper_pdf, "settings", paper_render.settings)
     monkeypatch.setattr(paper_render, "_JOBS", {})
     monkeypatch.setattr(deep_review, "get_current_review", lambda key: None)
     return SimpleNamespace(config=config, pdf=pdf, detail=detail)

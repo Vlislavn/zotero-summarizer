@@ -53,7 +53,6 @@ class PaperRef:
     arxiv_id: str = ""
     doi: str = ""
     url: str = ""
-    local_pdf: str = ""
 
     @property
     def stable_key(self) -> str:
@@ -147,7 +146,7 @@ def _feed_row(key: str) -> dict[str, Any] | None:
 
 
 def resolve_ref(
-    key: str, *, title: str = "", url: str = "", doi: str = "", arxiv_id: str = "", local_pdf: str = "",
+    key: str, *, title: str = "", url: str = "", doi: str = "", arxiv_id: str = "",
 ) -> PaperRef:
     """Build a :class:`PaperRef`, filling missing identity/fetch fields from the feed
     row (alias-resolved) and from a bare identity key. Explicit arguments always win."""
@@ -167,7 +166,7 @@ def resolve_ref(
         doi = k[4:].strip()
     if arxiv_id and not url:
         url = f"https://arxiv.org/abs/{arxiv_id}"
-    return PaperRef(key=k, title=title, arxiv_id=arxiv_id, doi=doi, url=url, local_pdf=local_pdf)
+    return PaperRef(key=k, title=title, arxiv_id=arxiv_id, doi=doi, url=url)
 
 
 __all__ = [

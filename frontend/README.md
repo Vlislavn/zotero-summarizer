@@ -213,6 +213,9 @@ source tasks open with `?task=`; the old Settings hashes resolve through `LEGACY
 - `api/offlineTransport.js` bounds offline-capable requests with build-time
   `VITE_SYNC_TIMEOUT_MS` (default 15000, max 60000). Server-only features (PDF, AI,
   annotations, native Zotero) gate on `hooks/useServerAvailable.js`.
+  While a sync runs (`syncing`) the gate keeps the last settled status (the last phase other than `syncing`), so controls
+  do not flip to "need the Mac" at every sync start; `ServerUnavailableNote` says "need the Mac" only when
+  the Mac is unreachable, "The app is busy" when it answered, "Checking the connection…" before the first answer.
 - A sync deadline with no answer, or a 502/503/504 (incl. `database_busy`), is phase `busy`, not
   `unavailable`: the header says "Server is busy — retrying…", `publishStatus` re-requests a sync
   (5 s, then 15 s) and recovery re-checks the AI model. "Server unreachable" is only a refused

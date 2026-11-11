@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from zotero_summarizer.api.errors import APIError, install_error_handlers
 from zotero_summarizer.api.routes import library
-from zotero_summarizer.services.library import paper_figures, paper_render
+from zotero_summarizer.services.library import _paper_pdf, paper_figures, paper_render
 
 _NAMES = ("brief_presentation.html", "paper.pdf", "fig1_result.png")
 _ROUTES = ("presentation", "pdf", "figures/fig1_result.png", "attachments")
@@ -24,9 +24,10 @@ def outputs(tmp_path, monkeypatch):
     config.pdf_root.mkdir()
     config.pdf_cache_dir.mkdir()
     monkeypatch.setattr(paper_render, "settings", lambda: config)
+    monkeypatch.setattr(_paper_pdf, "settings", paper_render.settings)
     source = config.pdf_root / "source.pdf"
     source.write_bytes(b"OWNED_SOURCE_BYTES")
-    monkeypatch.setattr(paper_render, "_item_detail", lambda _: {"pdf_path": str(source)})
+    monkeypatch.setattr(_paper_pdf, "item_detail", lambda _: {"pdf_path": str(source)})
     monkeypatch.setattr(paper_render, "_JOBS", {})
     return config
 

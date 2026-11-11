@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from zotero_summarizer.api.errors import APIError, install_error_handlers
 from zotero_summarizer.api.routes import library
 from zotero_summarizer.services.library import _paper_read_html as html
-from zotero_summarizer.services.library import paper_figures, paper_render
+from zotero_summarizer.services.library import _paper_pdf, paper_figures, paper_render
 
 
 @pytest.fixture
@@ -29,7 +29,8 @@ def paper(tmp_path, monkeypatch):
     monkeypatch.setattr(paper_render, "settings", lambda: SimpleNamespace(
         paper_render_dir=tmp_path / "state", pdf_root=tmp_path, pdf_cache_dir=tmp_path / "cache",
     ))
-    monkeypatch.setattr(paper_render, "_item_detail", lambda _: {"pdf_path": str(pdf), "title": "Audited Paper"})
+    monkeypatch.setattr(_paper_pdf, "settings", paper_render.settings)
+    monkeypatch.setattr(_paper_pdf, "item_detail", lambda _: {"pdf_path": str(pdf), "title": "Audited Paper"})
     monkeypatch.setattr(paper_render, "_JOBS", {})
     return pdf
 
@@ -179,7 +180,7 @@ def test_stale_outputs_are_not_served_or_attached_but_saved_bytes_survive(paper,
     elif change == "attachment":
         other = paper.with_name("other.pdf")
         other.write_bytes(paper.read_bytes())
-        monkeypatch.setattr(paper_render, "_item_detail", lambda _: {"pdf_path": str(other)})
+        monkeypatch.setattr(_paper_pdf, "item_detail", lambda _: {"pdf_path": str(other)})
     elif change == "renderer":
         monkeypatch.setattr(paper_render, "_RENDERER_REV", "changed-renderer")
     elif change == "parser":
@@ -244,7 +245,7 @@ def test_figure_metadata_without_an_image_blocks_publication(paper, monkeypatch)
 
 
 def test_minor_audit_warning_allows_publication_and_reuse(paper, monkeypatch):
-    monkeypatch.setattr(paper_render, "_item_detail", lambda _: {
+    monkeypatch.setattr(_paper_pdf, "item_detail", lambda _: {
         "pdf_path": str(paper), "title": "Audited Paper", "authors": "Author 1",
     })
     built = paper_render.build_paper_read("KEY")

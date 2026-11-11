@@ -148,7 +148,7 @@ def _auto_render_slate(tick_id: str) -> None:
     brief folds the cached review in, after Today preparation published it, never racing it)
     and NOT already rendered. Reuses ``paper_render.start_build`` (its own pool + single-flight;
     the PDF is a cache hit from the review, and the digest is cached → NO extra LLM). Resolves
-    the feed key via the key-aware reader (``paper_render._item_detail`` → ``resolve_reader_for_key``).
+    the feed key via the key-aware reader (``resolve_reader_for_key``).
     Gated by ``quality_review.render_on_tick_k`` (0 disables). Daemon-tick boundary: a failure is
     logged, never crashes the tick."""
     config = _load_config()

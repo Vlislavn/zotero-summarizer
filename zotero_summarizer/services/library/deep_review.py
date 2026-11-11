@@ -358,10 +358,7 @@ def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str)
             if acquired.path is not None:
                 item.update({
                     "pdf_path": str(acquired.path), "web_article": acquired.web_article,
-                    "acquired_pdf": {
-                        "path": str(acquired.path), "source": acquired.source,
-                        "source_url": acquired.source_url,
-                    },
+                    "acquired_pdf": acquired.as_override(),
                 })
         feed_out = {}
         if context is not None:
