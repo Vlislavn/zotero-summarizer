@@ -1,4 +1,4 @@
-**Результаты приёмки v4 (2026-11-11):** [manual-checklist.md](manual-checklist.md) — итог агентского прогона
+**Результаты приёмки v4 (2026-11-11):** [manual-checklist.md](manual-checklist.md) — итог агентского прогона (с раундом R6)
 по 126 пунктам и раздел «Что остаётся владельцу»; evidence — `data/perf-20261107/acceptance/` (`R3/…`, `results-*.md`).
 
 # PR208 — аудит 50 агентов и добавленные функции
@@ -128,3 +128,4 @@ Source: **Laws of UX vault — Hick’s Law, Tesler’s Law, Occam’s Razor**. 
 затем уточнены источник, видимая причина и recovery в существующих owners.
 Дальнейшее дробление этих небольших границ не упрощает touched code. Это эвристики,
 не measured comprehension benefit. Автоматически merge/close issues нельзя.
+- [Финальный индекс апрува внешнего вида](look-approval.md) — короткий список скриншотов для телефона.
