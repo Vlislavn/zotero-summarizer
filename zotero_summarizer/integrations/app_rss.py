@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import re
 import socket
 import zlib
 from pathlib import Path
@@ -201,13 +202,17 @@ def _entry_authors(entry: Any) -> str:
     return "; ".join(names)
 
 
+# GitHub release notes embed expiring signed image URLs that change on every fetch.
+_SIGNED_IMAGE_QUERY = re.compile(r"(https://private-user-images\.githubusercontent\.com/[^\s\"'<>?]*)\?[^\s\"'<>]*")
+
+
 def _entry_to_item(
     entry: Any, *, feed: dict[str, Any], feed_title: str
 ) -> dict[str, Any]:
     link = str(entry.get("link") or "").strip()
     entry_id = str(entry.get("id") or "").strip()
     guid = str(entry.get("guid") or entry_id or "").strip()
-    summary = str(entry.get("summary") or entry.get("description") or "").strip()
+    summary = _SIGNED_IMAGE_QUERY.sub(r"\1", str(entry.get("summary") or entry.get("description") or "")).strip()
     item = {
         "feed_library_id": int(feed["id"]),
         "item_id": 0,
@@ -270,7 +275,7 @@ class AppRssReader:
             return None
 
     def _refresh_feed(self, conn, feed: dict[str, Any], *, timeout: float,
-                      backfill_days: int, max_pages: int) -> tuple[int, int, bool]:
+                      backfill_days: int, max_pages: int) -> tuple[int, int, int, bool]:
         """Store every entry of the source newer than the feed's watermark.
 
         No slicing before dedupe (REQ-S4). Paginated arXiv queries are read until
@@ -287,7 +292,7 @@ class AppRssReader:
                 url, (entries, self._total(parsed)),
                 cutoff=rss_paging.cutoff_iso(feed.get("fetch_watermark"), backfill_days), max_pages=max_pages,
             )
-        inserted = updated = 0
+        inserted = updated = unchanged = 0
         newest = ""
         for entry in entries:
             item = _entry_to_item(entry, feed=feed, feed_title=title)
@@ -296,12 +301,13 @@ class AppRssReader:
             _, state = rss_storage.upsert_rss_item(conn, rss_feed_id=int(feed["id"]), item=item)
             inserted += state == "inserted"
             updated += state == "updated"
+            unchanged += state == "unchanged"
             newest = max(newest, rss_paging.entry_time(entry))
         rss_storage.record_rss_fetch_result(conn, int(feed["id"]), error=warning,
                                            etag=headers.get("etag"), modified=headers.get("last-modified"),
                                            watermark=newest if complete else None, incomplete=not complete)
         conn.commit()
-        return inserted, updated, not complete
+        return inserted, updated, unchanged, not complete
 
     def refresh_feeds(
         self,
@@ -347,14 +353,14 @@ class AppRssReader:
             for feed in feeds:
                 fetched += 1
                 try:
-                    new, changed, cut_off = self._refresh_feed(
+                    new, changed, same, cut_off = self._refresh_feed(
                         conn, feed, timeout=float(per_feed_timeout),
                         backfill_days=int(backfill_days), max_pages=int(max_pages_per_feed),
                     )
                     inserted += new
                     updated += changed
                     incomplete += int(cut_off)
-                    unchanged += not (new or changed)
+                    unchanged += same
                 except Exception as exc:
                     conn.rollback()
                     rss_storage.record_rss_fetch_result(

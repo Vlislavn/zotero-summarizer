@@ -169,7 +169,9 @@ def upsert_rss_item(
     """Store one feed item; returns ``(id, "inserted" | "updated" | "unchanged")``.
 
     An existing row is rewritten only when the incoming content differs from what is stored
-    (a missing incoming value keeps the old one), so re-fetching an identical feed is a no-op."""
+    (a missing incoming value keeps the old one), so re-fetching an identical feed is a no-op.
+    An item keeps its FIRST feed (``rss_feed_id``, ``publication_title``): the same key arriving from
+    another feed neither moves it nor counts as a change."""
     stable = str(item.get("stable_feed_key") or stable_feed_key_from_item(item) or "").strip()
     if not stable:
         raise ValueError("rss item has no stable feed key")
@@ -188,7 +190,6 @@ def upsert_rss_item(
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(stable_feed_key) DO UPDATE SET
-            rss_feed_id = excluded.rss_feed_id,
             guid = COALESCE(excluded.guid, rss_items.guid),
             entry_id = COALESCE(excluded.entry_id, rss_items.entry_id),
             title = excluded.title,
@@ -198,14 +199,13 @@ def upsert_rss_item(
             doi = COALESCE(excluded.doi, rss_items.doi),
             arxiv_id = COALESCE(excluded.arxiv_id, rss_items.arxiv_id),
             publication_date = COALESCE(excluded.publication_date, rss_items.publication_date),
-            publication_title = COALESCE(excluded.publication_title, rss_items.publication_title),
+            publication_title = COALESCE(rss_items.publication_title, excluded.publication_title),
             authors = COALESCE(excluded.authors, rss_items.authors),
             item_type = excluded.item_type,
             raw_json = COALESCE(excluded.raw_json, rss_items.raw_json),
             fetched_at = datetime('now'),
             updated_at = datetime('now')
-        WHERE rss_items.rss_feed_id IS NOT excluded.rss_feed_id
-           OR rss_items.title IS NOT excluded.title
+        WHERE rss_items.title IS NOT excluded.title
            OR rss_items.item_type IS NOT excluded.item_type
            OR (excluded.guid IS NOT NULL AND rss_items.guid IS NOT excluded.guid)
            OR (excluded.entry_id IS NOT NULL AND rss_items.entry_id IS NOT excluded.entry_id)
@@ -215,7 +215,6 @@ def upsert_rss_item(
            OR (excluded.doi IS NOT NULL AND rss_items.doi IS NOT excluded.doi)
            OR (excluded.arxiv_id IS NOT NULL AND rss_items.arxiv_id IS NOT excluded.arxiv_id)
            OR (excluded.publication_date IS NOT NULL AND rss_items.publication_date IS NOT excluded.publication_date)
-           OR (excluded.publication_title IS NOT NULL AND rss_items.publication_title IS NOT excluded.publication_title)
            OR (excluded.authors IS NOT NULL AND rss_items.authors IS NOT excluded.authors)
            OR (excluded.raw_json IS NOT NULL AND rss_items.raw_json IS NOT excluded.raw_json)
         """,
