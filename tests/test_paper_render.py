@@ -10,6 +10,7 @@ import pytest
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services.library import (
+    _paper_pdf,
     _paper_read_html,
     _paper_read_meta,
     _paper_read_tex,
@@ -264,6 +265,7 @@ def test_render_paper_flags_stale_when_renderer_changed(tmp_path, monkeypatch):
         paper_render_dir=tmp_path / "render", pdf_root=tmp_path, pdf_cache_dir=tmp_path / "cache",
     )
     monkeypatch.setattr(paper_render, "settings", lambda: fake_settings)
+    monkeypatch.setattr(_paper_pdf, "settings", paper_render.settings)
     monkeypatch.setattr(
         "zotero_summarizer.services.zotero.zotero.get_library_reader", lambda: _Reader()
     )
@@ -355,6 +357,7 @@ def test_facade_status_presentation_and_figure_guards(tmp_path, monkeypatch):
         paper_render_dir=tmp_path / "render", pdf_root=tmp_path, pdf_cache_dir=tmp_path / "cache",
     )
     monkeypatch.setattr(paper_render, "settings", lambda: fake_settings)
+    monkeypatch.setattr(_paper_pdf, "settings", paper_render.settings)
     monkeypatch.setattr(
         "zotero_summarizer.services.zotero.zotero.get_library_reader",
         lambda: _Reader(),
@@ -385,6 +388,7 @@ def test_missing_presentation_output_is_rebuildable(tmp_path, monkeypatch):
         paper_render_dir=tmp_path / "render", pdf_root=tmp_path, pdf_cache_dir=tmp_path / "cache",
     )
     monkeypatch.setattr(paper_render, "settings", lambda: fake_settings)
+    monkeypatch.setattr(_paper_pdf, "settings", paper_render.settings)
     monkeypatch.setattr(
         "zotero_summarizer.services.zotero.zotero.get_library_reader",
         lambda: _Reader(),
@@ -433,6 +437,7 @@ def test_build_paper_read_acquires_missing_pdf_when_allowed(tmp_path, monkeypatc
         pdf_cache_dir=tmp_path / "data" / "pdfs",
     )
     monkeypatch.setattr(paper_render, "settings", lambda: fake_settings)
+    monkeypatch.setattr(_paper_pdf, "settings", paper_render.settings)
     monkeypatch.setattr(
         "zotero_summarizer.services.zotero.zotero.get_library_reader",
         lambda: _Reader(),
@@ -463,9 +468,9 @@ def test_acquire_missing_reports_browser_setup_instead_of_login(monkeypatch):
     from zotero_summarizer.services.library import _pdf_acquire
 
     detail = {"has_pdf": False, "pdf_path": "", "url": "https://publisher.example/x"}
-    monkeypatch.setattr(paper_render, "_item_detail", lambda _key: detail)
+    monkeypatch.setattr(_paper_pdf, "item_detail", lambda _key: detail)
     monkeypatch.setattr(
-        paper_render, "_pdf_from_detail",
+        _paper_pdf, "_pdf_from_detail",
         lambda *_a: (_ for _ in ()).throw(
             APIError(error="needs_pdf", message="missing", status_code=404),
         ),
@@ -478,5 +483,5 @@ def test_acquire_missing_reports_browser_setup_instead_of_login(monkeypatch):
     )
 
     with pytest.raises(APIError) as caught:
-        paper_render._pdf_for_item_or_acquire("OTHER", allow_acquire_missing=True)
+        _paper_pdf.pdf_for_item("OTHER", read_state=lambda: None, allow_acquire_missing=True)
     assert caught.value.error == "browser_extra_unavailable"

@@ -72,8 +72,7 @@ def needs_pdf_error(item_key: str, exc: APIError) -> APIError:
 def require_pdf(item_key: str) -> None:
     """Fail fast (before any save/mirror/model work) when the paper has no PDF."""
     try:  # availability only: never builds or acquires
-        paper_render._state_path(item_key)
-        paper_render._pdf_for_item_or_acquire(item_key, allow_acquire_missing=False)
+        paper_render.held_pdf(item_key)
     except APIError as exc:
         raise needs_pdf_error(item_key, exc) from exc
 

@@ -13,7 +13,7 @@ from zotero_summarizer.api.routes import library
 from zotero_summarizer.runtime import AppContext, set_context
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS, run_migrations
-from zotero_summarizer.services.library import paper_render
+from zotero_summarizer.services.library import _paper_pdf, paper_render
 from zotero_summarizer.services.library.review_fleet import fleet
 
 
@@ -94,8 +94,8 @@ def test_valid_keys_round_trip_without_changing_identity(storage, key):
 def test_http_rejects_unsafe_keys_before_work_or_job_mutation(storage, monkeypatch, surface, key):
     (storage / "LINK").symlink_to(storage.parent, target_is_directory=True)
     monkeypatch.setattr(paper_render._BUILD_POOL, "submit", unexpected)
-    monkeypatch.setattr(paper_render, "_pdf_for_item_or_acquire", unexpected)
-    monkeypatch.setattr(paper_render, "_item_detail", unexpected)
+    monkeypatch.setattr(_paper_pdf, "pdf_for_item", unexpected)
+    monkeypatch.setattr(_paper_pdf, "item_detail", unexpected)
     monkeypatch.setattr(fleet, "try_start", unexpected)
     app = FastAPI()
     app.include_router(library.router)
@@ -117,7 +117,7 @@ def test_http_rejects_unsafe_keys_before_work_or_job_mutation(storage, monkeypat
 
 
 def test_sync_build_rejects_key_before_acquisition(storage, monkeypatch):
-    monkeypatch.setattr(paper_render, "_pdf_for_item_or_acquire", unexpected)
+    monkeypatch.setattr(_paper_pdf, "pdf_for_item", unexpected)
     with pytest.raises(APIError) as caught:
         paper_render.build_paper_read("..", allow_acquire_missing=True)
     assert caught.value.status_code == 422

@@ -355,6 +355,8 @@ def test_needs_pdf_pick_is_acquired_then_re_reviewed_from_that_path(monkeypatch)
     """A pick with no Zotero PDF first reviews to ``needs_pdf``, then the fleet acquires
     a PDF (sequentially) and re-reviews FROM that path via ``pdf_overrides`` — the digest
     from the acquired path drives the proposal."""
+    from zotero_summarizer.services.library import _pdf_acquire
+
     _stub_queue(monkeypatch, ["A"])
     cache: dict = {}
 
@@ -373,7 +375,7 @@ def test_needs_pdf_pick_is_acquired_then_re_reviewed_from_that_path(monkeypatch)
     )
     monkeypatch.setattr(
         "zotero_summarizer.services.library._pdf_acquire.acquire_pdf_for",
-        lambda _k, _detail: types.SimpleNamespace(path=Path("/tmp/acquired.pdf"), needs_login=False),
+        lambda _k, _detail: _pdf_acquire.AcquireResult(path=Path("/tmp/acquired.pdf")),
     )
 
     fleet.start(top_k=1)

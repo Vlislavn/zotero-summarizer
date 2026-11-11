@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from zotero_summarizer.api.errors import APIError, install_error_handlers
 from zotero_summarizer.api.routes import library
-from zotero_summarizer.services.library import paper_render
+from zotero_summarizer.services.library import _paper_pdf, paper_render
 from zotero_summarizer.runtime import AppContext, set_context
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS, run_migrations
@@ -151,7 +151,7 @@ def test_lexically_valid_key_saves_before_renderer_symlink_rejection(tmp_path, m
     settings.paper_render_dir.mkdir(parents=True, exist_ok=True)
     (settings.paper_render_dir / "LINK").symlink_to(tmp_path, target_is_directory=True)
     monkeypatch.setattr(
-        paper_render, "_pdf_for_item_or_acquire",
+        _paper_pdf, "pdf_for_item",
         lambda *_args, **_kwargs: pytest.fail("symlink key reached paper acquisition"),
     )
     payload = _ask_payload(uuid4(), item_key="LINK")

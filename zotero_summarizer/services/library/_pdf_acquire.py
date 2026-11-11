@@ -26,6 +26,10 @@ class AcquireResult:
     source_url: str = ""
     outcome: str = "no_oa_source"
 
+    def as_override(self) -> dict[str, str]:
+        """The ``pdf_overrides`` / stored ``acquired_pdf`` record for this result."""
+        return {"path": str(self.path), "source": self.source, "source_url": self.source_url}
+
 
 def _proxied_url(ua: Any, url: str, doi: str) -> str:
     """The institutional URL to drive in the browser: the publisher ``url`` (or a

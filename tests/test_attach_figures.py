@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from zotero_summarizer.integrations._zotero_write_attachments import ZoteroAttachmentWriteMixin
-from zotero_summarizer.services.library import paper_figures, paper_render
+from zotero_summarizer.services.library import _paper_pdf, paper_figures, paper_render
 
 
 def test_safe_attachment_filename_forces_content_type_extension() -> None:
@@ -33,11 +33,12 @@ def test_attachable_figures_returns_only_audited_images(tmp_path, monkeypatch) -
             paper_render_dir=tmp_path / "render", pdf_root=tmp_path, pdf_cache_dir=tmp_path / "cache",
         ),
     )
+    monkeypatch.setattr(_paper_pdf, "settings", paper_render.settings)
     source = tmp_path / "source.pdf"
     source.write_bytes(b"OWNED_SOURCE_BYTES")
     presentation = tmp_path / "brief.html"
     presentation.write_text("<article>Owned synthetic artifact</article>")
-    monkeypatch.setattr(paper_render, "_item_detail", lambda _: {"pdf_path": str(source)})
+    monkeypatch.setattr(_paper_pdf, "item_detail", lambda _: {"pdf_path": str(source)})
     monkeypatch.setattr(paper_render, "_JOBS", {})
     paper_render._write_state("ANYKEY", {
         "status": "completed", "audit": {"status": "passed", "blocking": []},

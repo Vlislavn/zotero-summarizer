@@ -260,10 +260,7 @@ def _acquire_missing_pdfs(keys: list[str], outcomes: dict[str, str]) -> tuple[di
                 continue  # has a local PDF but no digest → extraction failure, not a missing source
             result = _pdf_acquire.acquire_pdf_for(item_key, detail)
             if result.path is not None:
-                overrides[item_key] = {
-                    "path": str(result.path), "source": getattr(result, "source", ""),
-                    "source_url": getattr(result, "source_url", ""),
-                }
+                overrides[item_key] = result.as_override()
             elif result.needs_login:
                 doi = str(detail.get("doi") or "")
                 login[item_key] = {

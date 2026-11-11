@@ -9,7 +9,7 @@ import pytest
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.runtime import get_context
-from zotero_summarizer.services.library import _paper_docling, _paper_read_pdf, paper_render, qa
+from zotero_summarizer.services.library import _paper_docling, _paper_pdf, _paper_read_pdf, paper_render, qa
 
 _DOCLING_TEXT = "The structured table reports OMEGA as the evaluation dataset."
 _FITZ_TEXT = "The text layer reports ALPHA as the evaluation dataset."
@@ -32,7 +32,8 @@ def paper(tmp_path, monkeypatch):
     monkeypatch.setattr(paper_render, "settings", lambda: SimpleNamespace(
         paper_render_dir=tmp_path / "state", pdf_root=tmp_path, pdf_cache_dir=tmp_path / "cache",
     ))
-    monkeypatch.setattr(paper_render, "_item_detail", lambda _: {"pdf_path": str(pdf), "title": "Parser study"})
+    monkeypatch.setattr(_paper_pdf, "settings", paper_render.settings)
+    monkeypatch.setattr(_paper_pdf, "item_detail", lambda _: {"pdf_path": str(pdf), "title": "Parser study"})
     monkeypatch.setattr(paper_render, "_JOBS", {})
     calls = []
 
