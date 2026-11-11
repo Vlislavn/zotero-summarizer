@@ -4,7 +4,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 
 const connection = vi.hoisted(() => ({ ready: true }));
 vi.mock('../../hooks/useServerAvailable.js', () => ({ default: () => connection.ready }));
-vi.mock('../../offlineStore.js', () => ({ isServerAvailable: () => connection.ready }));
+vi.mock('../../offlineStore.js', () => ({ isServerAvailable: () => connection.ready, transportUnavailable: () => !connection.ready, syncStatusEvent: 'zs-sync-status' }));
 
 vi.mock('../../api/libraryApi.js', () => ({
   fetchPaperRender: vi.fn(),

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { fetchPaperRender, buildPaperRender } from '../../api/libraryApi.js';
 import Spinner from '../ui/Spinner.jsx';
 import useServerAvailable from '../../hooks/useServerAvailable.js';
+import useUnavailableText from '../../hooks/useUnavailableText.js';
 import { isServerAvailable } from '../../offlineStore.js';
 
 // One-click access to the full review from a Read-next row. The paper-read render
@@ -38,6 +39,8 @@ function briefErrorMessage(error) {
 
 export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }) {
   const serverAvailable = useServerAvailable();
+  const { say } = useUnavailableText();
+  const cachedTitle = `Open cached review. ${say('PDF preparation needs the Mac.')}`;
   const [working, setWorking] = useState(false);
   const [error, setError] = useState(null);
   // Drop the in-flight result if the row unmounts mid-build (don't navigate a
@@ -123,7 +126,7 @@ export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }
           disabled={working}
           aria-busy={working}
           aria-describedby={error ? `${itemKey}-brief-error` : undefined}
-          title={!serverAvailable ? 'Open cached review; PDF preparation needs the Mac' : hasPdf ? 'Open the full review (builds it first if needed)' : NO_PDF_MESSAGE}
+          title={!serverAvailable ? cachedTitle : hasPdf ? 'Open the full review (builds it first if needed)' : NO_PDF_MESSAGE}
           className="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg bg-teal-700 text-white text-[13px] font-semibold hover:bg-teal-800 disabled:opacity-60"
         >
           {working && <Spinner size="sm" color="teal-on-fill" />}
@@ -155,7 +158,7 @@ export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }
           error
             ? `Couldn't open the review: ${error}`
             : !serverAvailable
-              ? 'Open cached review; PDF preparation needs the Mac'
+              ? cachedTitle
               : hasPdf
               ? 'Open the full review (builds the paper artifact first if needed)'
               : NO_PDF_MESSAGE

@@ -10,6 +10,7 @@ import {
 import Spinner from '../ui/Spinner.jsx';
 import { Disclosure } from '../paper/review/primitives.jsx';
 import useServerAvailable from '../../hooks/useServerAvailable.js';
+import useUnavailableText from '../../hooks/useUnavailableText.js';
 
 // Figures & full brief. A build job publishes audited figures and a single-file HTML
 // brief beside its source PDF. The decision content (verdict / quality / goals /
@@ -20,6 +21,7 @@ import useServerAvailable from '../../hooks/useServerAvailable.js';
 export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = true }) {
   const queryClient = useQueryClient();
   const serverAvailable = useServerAvailable();
+  const { say } = useUnavailableText();
   const [allowArxivSource, setAllowArxivSource] = useState(false);
   const staleRebuiltRef = useRef(new Set());
   const renderQuery = useQuery({
@@ -50,7 +52,7 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = 
     }
   }, [serverAvailable, render?.stale, running, staleIdentity]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!serverAvailable) return <p className="text-xs text-slate-500">Figures &amp; full brief unavailable — needs the Mac. Cached review text remains available.</p>;
+  if (!serverAvailable) return <p className="text-xs text-slate-500">{say('Figures & full brief unavailable — needs the Mac.')} Cached review text remains available.</p>;
 
   const summary = (
     <>
