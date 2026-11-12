@@ -4,6 +4,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ## [Unreleased]
 
+- Figures: a feed paper whose PDF the app already holds now offers Figures, built from that file with no download; the «Save figures to Zotero» button is hidden for feed papers (they have no Zotero item).
+- Library, paper page and brief button say «The app is busy — try again.» (not «needs the Mac») when the server only answered with an error, and «Checking the connection…» before the first answer; the text follows the connection without a reload.
 - Browser PDF fetch: a request the browser already dropped («Invalid InterceptionId») no longer fails the fetch, and a fetch that hangs is cut after 10× the fetch timeout (≤15 min, default 10) — it kills that session's browser, releases the lock and counts as an ordinary failure.
 - Today: a shortlist card the server can no longer match is released instead of showing «1 paper is still being added» forever; a dropped proxy connection no longer fails a paper's background PDF fetch after every restart, and such papers are not counted as «still being analyzed».
 - Ask without a Zotero PDF: Ask reads the PDF the Mac already holds (Zotero file, brief build, or the file its full-text review read); feed papers show «Not in your Zotero library yet» instead of failing tags with «Item not found»; a running sync no longer says «Tag changes need the Mac».

@@ -1,5 +1,6 @@
 import { itemPdfUrl } from '../../api/libraryApi.js';
 import useServerAvailable from '../../hooks/useServerAvailable.js';
+import useUnavailableText from '../../hooks/useUnavailableText.js';
 import { trackTodayLink } from '../../utils/todayEvents.js';
 
 // Links to the abstract / DOI / full PDF — the expected affordance for "open the
@@ -7,6 +8,7 @@ import { trackTodayLink } from '../../utils/todayEvents.js';
 // detail. `detail` is the /api/golden/review-detail payload.
 export default function LinksRow({ detail, itemKey }) {
   const serverAvailable = useServerAvailable();
+  const { say } = useUnavailableText();
   const url = detail.url;
   const doi = detail.doi;
   const hasPdf = detail.has_pdf;
@@ -23,7 +25,7 @@ export default function LinksRow({ detail, itemKey }) {
       {doi && (
         <a href={`https://doi.org/${doi}`} target="_blank" rel="noreferrer" className={linkCls} onClick={() => trackTodayLink('doi')} onAuxClick={() => trackTodayLink('doi')}>DOI ↗</a>
       )}
-      {hasPdf && !serverAvailable && <span aria-disabled="true" className="text-xs text-slate-500">PDF unavailable — needs the Mac</span>}
+      {hasPdf && !serverAvailable && <span aria-disabled="true" className="text-xs text-slate-500">{say('PDF unavailable — needs the Mac')}</span>}
       {hasPdf && serverAvailable && (
         <a href={itemPdfUrl(itemKey)} target="_blank" rel="noreferrer"
           onClick={() => trackTodayLink('pdf')} onAuxClick={() => trackTodayLink('pdf')}

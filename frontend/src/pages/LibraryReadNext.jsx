@@ -30,6 +30,7 @@ import { isMachineTag } from '../utils/tags.js';
 import { fulltextMessage } from './todayHelpers.js';
 import { readStorage, writeStorage } from '../utils/safeStorage.js';
 import useServerAvailable from '../hooks/useServerAvailable.js';
+import useUnavailableText from '../hooks/useUnavailableText.js';
 import { allPapers } from '../offlineStore.js';
 
 // Library page — a single "Read next" surface (Stage 2). The former Browse tab
@@ -68,6 +69,7 @@ export default function LibraryReadNext() {
   const navigate = useNavigate();
   const { status } = useSetupStatus();
   const serverAvailable = useServerAvailable();
+  const { say: sayUnavailable } = useUnavailableText();
   const zoteroConnected = status?.zotero?.db_found === true;
   const [searchParams, setSearchParams] = useSearchParams();
   // Client-side smart filters (Phase 1) — hydrated from the URL on mount so a
@@ -595,7 +597,7 @@ export default function LibraryReadNext() {
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyUp={(e) => { if (e.key === 'Enter') applySearch(); }}
               disabled={!serverAvailable}
-              placeholder={serverAvailable ? 'Search by meaning… (e.g. hallucination mitigation)' : 'Meaning search needs the Mac (offline)'}
+              placeholder={serverAvailable ? 'Search by meaning… (e.g. hallucination mitigation)' : sayUnavailable('Meaning search needs the Mac (offline)')}
               className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
             {/* Search is semantic by default (hybrid); Enter submits — no Meaning/
@@ -733,7 +735,7 @@ export default function LibraryReadNext() {
           />
           </fieldset>
           {!serverAvailable && <p role="status" className="mt-2 text-xs text-amber-800">{queueMeta.status === 'offline'
-            ? 'Cached working set — verdicts and notes save on this device. Review, meaning search and Zotero export need the Mac.'
+            ? `Cached working set — verdicts and notes save on this device. ${sayUnavailable('Review, meaning search and Zotero export need the Mac.')}`
             : 'App sync is not confirmed. Use Sync now before server-only actions; local review remains available.'}</p>}
           <div className="mt-3">
             <ReadNextView
