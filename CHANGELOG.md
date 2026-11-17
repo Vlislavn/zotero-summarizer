@@ -4,6 +4,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ## [Unreleased]
 
+- Quality letter (#33): an A is green only with no critical gap and no automatic warning; otherwise grey with «checklist only — reason» and a «?» legend. Model notes read «Notes to verify (N)», red only at band flag; critical gaps get plain labels. Display only: nothing recomputed or rewritten.
 - Feedback analysis: `result.json` omits null event keys (absent = null) and lists only repeated `content_multiplicity` groups, so a report on live-size data (68.3 MB) fits the 64 MiB cap again (57.6 MB); no field dropped, older runs read the same.
 - Labels (#24): a paper labelled under both its feed key and its Zotero key trains once, on its latest verdict (both rows stay stored); relabels across the two keys log `changed` (with `post_read` after a published review); Refresh labels never overrides an in-app verdict, creates no duplicate row, keeps the app's proposal snapshot, and lists differing Zotero tags (`user_labels_differing`); feedback analysis flags log entries for unknown items (`unknown_item`).
 - Reviews: a paper whose fetched text is a bot-check / «Access Denied» / paywall page (Cloudflare «Performing security verification» etc.) no longer gets a grade, writing friction or concerns — it says «Source text not readable» and can be retried; stored reviews are cleaned on display, no regeneration.

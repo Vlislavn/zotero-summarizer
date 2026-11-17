@@ -23,7 +23,25 @@ export const CHIP_TONE = {
 
 // A-D full-text quality grade.
 const GRADE_TONE = { A: 'emerald', B: 'sky', C: 'amber', D: 'rose' };
-export const gradeTone = (grade) => GRADE_TONE[grade] || 'slate';
+
+// Letter display rule D (data/requirements/specs/quality-display-D.md). The letter keeps its
+// meaning (share of this paper type's checks met with a quote); only its COLOUR changes:
+// an A is green only when the review also found no critical gap and no automatic warning
+// (band = highlight). B/C/D and a stored band are shown as before. A pure function of stored
+// fields — nothing is recomputed, no model call.
+export const letterMuted = (grade, band) => grade === 'A' && band !== 'highlight';
+export const gradeTone = (grade, band) => (letterMuted(grade, band) ? 'slate' : GRADE_TONE[grade] || 'slate');
+
+// Why a muted A is grey, one reason in this order: runs disagreed → missing critical check(s) →
+// automatic warning → one gap (neutral, gaps not at hand, e.g. a Library row) → no band.
+// `gaps` are plain-word labels of the missing critical items.
+export function mutedReason(band, gaps = []) {
+  if (band === 'uncertain') return 'the review runs disagreed';
+  if (gaps.length) return `missing: ${gaps.join('; ')}`;
+  if (band === 'flag') return 'automatic warning';
+  if (band === 'neutral') return 'one critical check is missing';
+  return 'not enough to judge';
+}
 
 // What the letter rests on: "3 of 5 checks". Stored numbers only; an old review
 // without them yields '' (letter alone).

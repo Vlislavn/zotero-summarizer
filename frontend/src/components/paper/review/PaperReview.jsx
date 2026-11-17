@@ -51,7 +51,7 @@ function clip(text, max) {
   return t.length > max ? `${t.slice(0, max).replace(/\s+\S*$/, '')}…` : t;
 }
 
-// The closed "Caveats and coverage" row: red flags first (clay), then coverage and gaps.
+// The closed "Caveats and coverage" row: the model's notes first (clay only when the band is flag), then coverage and gaps.
 function caveatsSummary(quality, band, isNonPaper, redFlags) {
   if (!quality || isNonPaper) return 'Source basis and coverage';
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -63,7 +63,9 @@ function caveatsSummary(quality, band, isNonPaper, redFlags) {
   ].filter(Boolean);
   if (!redFlags.length && !rest.length) return bandGloss(band, false).lead || 'Source basis and coverage';
   return <>
-    {redFlags.length > 0 && <span className="text-rose-700">{plural(redFlags.length, 'red flag')} to verify</span>}
+    {redFlags.length > 0 && (band === 'flag'
+      ? <span className="text-rose-700">{plural(redFlags.length, 'red flag')} to verify</span>
+      : <span>Notes to verify ({redFlags.length})</span>)}
     {redFlags.length > 0 && rest.length > 0 && ' · '}{rest.join(' · ')}
   </>;
 }
@@ -106,7 +108,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
   if (!digest && quality && quality.grade && quality.basis !== 'non_paper' && !goals.length) {
     return (
       <div className={`text-[13px] text-slate-600 ${flat ? 'review-reading' : ''}`}>
-        <Chip tone={gradeTone(quality.grade)}>{['Quality ' + quality.grade, qualityBasis(quality)].filter(Boolean).join(' · ')}</Chip>
+        <Chip tone={gradeTone(quality.grade, quality.quality_band)}>{['Quality ' + quality.grade, qualityBasis(quality)].filter(Boolean).join(' · ')}</Chip>
         {quality.verdict ? <span className="ml-2">{quality.verdict}</span> : null}
         <div className="mt-1 text-[11px] text-slate-400">Older review — re-run for the new digest.</div>
       </div>
@@ -482,6 +484,7 @@ function QualityHeadline({ quality, band, flagLoc, missLoc, critiqueViews = fals
   const applicable = Number(quality.coverage_applicable) || 0;
   const missing = (quality.missing_critical || []).map((x) => String(x || '').trim()).filter(Boolean);
   const tentative = critiqueIsTentative(quality);
+  const flagged = band === 'flag';  // rule D: rose only when the band says flag
 
   return (
     <div className="space-y-2.5">
@@ -520,10 +523,12 @@ function QualityHeadline({ quality, band, flagLoc, missLoc, critiqueViews = fals
         </div>
       )}
       {redFlags.length > 0 && (
-        <div className="border-l-2 border-rose-300 pl-4">
+        <div className={`border-l-2 pl-4 ${flagged ? 'border-rose-300' : 'border-slate-300'}`}>
           <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-rose-700">Red flags</span>
-            <span className="text-[11px] text-rose-700" title="Model-generated critique — verify against the paper">· AI-generated, verify</span>
+            <span className={`text-[11px] font-medium uppercase tracking-[0.08em] ${flagged ? 'text-rose-700' : 'text-slate-600'}`}>
+              {flagged ? 'Red flags' : `Notes to verify (${redFlags.length})`}
+            </span>
+            <span className={`text-[11px] ${flagged ? 'text-rose-700' : 'text-slate-600'}`} title="Model-generated critique — verify against the paper">· AI-generated, verify</span>
             {tentative && (
               <span className="text-[11px] text-amber-700" title="Self-consistency runs disagreed or confidence was low — treat as a prompt to check, not a finding">low confidence</span>
             )}

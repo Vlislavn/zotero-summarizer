@@ -167,7 +167,7 @@ it('factors only exact prefixes with complete readable suffixes and individual s
 it('never removes negation, internal context or different scopes by word matching', () => {
   const flags = ['No empirical validation is provided.', 'Empirical validation is provided.',
     'Training excludes trials with missing outcomes.', 'Evaluation includes trials with missing outcomes.'];
-  const { container } = render(<PaperReview flat deep={{ quality: { red_flags: flags,
+  const { container } = render(<PaperReview flat deep={{ quality: { quality_band: 'flag', red_flags: flags,
     rubric: { validation: 'no' } } }} />);
   const rows = [...container.querySelectorAll('.border-rose-300 > ul > li')];
   expect(rows.map(el => el.textContent)).toEqual(flags);
@@ -177,7 +177,7 @@ it('never removes negation, internal context or different scopes by word matchin
 it('does not group warnings by criterion or source and leaves compact presentation unchanged', () => {
   const flags = ['Artifact license is unknown.', 'Artifacts were not independently reproduced.'];
   const section = { id: 'same', title: 'Methods' };
-  const { container, rerender } = render(<PaperReview flat deep={{ quality: { red_flags: flags,
+  const { container, rerender } = render(<PaperReview flat deep={{ quality: { quality_band: 'flag', red_flags: flags,
     rubric: { artifacts: 'no' } } }} sectionOverlay={{ red_flags: flags.map(text => ({ text, section, match: 'exact' })) }} />);
   expect(container.querySelectorAll('.border-rose-300 > ul > li')).toHaveLength(2);
   rerender(<PaperReview compact deep={deep} />);
@@ -199,7 +199,7 @@ it.each(['validation', 'reliability', 'contamination'])('reconstructs literal %s
     `${intro} potential ${term} or overlap with pretraining corpora.`,
     `${intro} potential ${term} with LLM pretraining data.`];
   const section = { id: 'abstract', title: 'Abstract', page: 2 };
-  const { container } = render(<PaperReview flat deep={{ quality: { red_flags: flags,
+  const { container } = render(<PaperReview flat deep={{ quality: { quality_band: 'flag', red_flags: flags,
     rubric: { [term]: 'no' } } }}
     sectionOverlay={{ red_flags: flags.map(text => ({ text, section, match: 'exact' })) }} />);
   const panel = container.querySelector('.border-rose-300');
@@ -214,7 +214,7 @@ it.each(['validation', 'reliability', 'contamination'])('reconstructs literal %s
 
 it('does not factor a non-rubric term and never produces an empty prefix continuation', () => {
   const flags = ['No validation', 'No validation with independent data.', 'Validation is provided.'];
-  const { container } = render(<PaperReview flat deep={{ quality: { red_flags: flags } }} />);
+  const { container } = render(<PaperReview flat deep={{ quality: { quality_band: 'flag', red_flags: flags } }} />);
   expect([...container.querySelectorAll('.border-rose-300 > ul > li')].map(row => row.textContent)).toEqual(flags);
 });
 

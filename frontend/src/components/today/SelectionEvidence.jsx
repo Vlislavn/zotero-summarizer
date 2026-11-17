@@ -1,5 +1,5 @@
 import { Disclosure } from '../paper/review/primitives.jsx';
-import { CHIP_TONE, gradeTone, qualityBasis } from '../paper/review/tones.js';
+import { CHIP_TONE, gradeTone, letterMuted, mutedReason, qualityBasis } from '../paper/review/tones.js';
 
 const ANALYZED = 'analyzed-today-v1';
 const POLICY = {
@@ -59,17 +59,21 @@ function selectionLine(paper, selectionPolicy, blinded) {
 function reviewPresentation(paper) {
   const review = paper.selection_evidence?.review;
   const grade = ['A', 'B', 'C', 'D'].includes(paper.quality?.grade) ? paper.quality.grade : null;
+  const band = paper.quality?.quality_band || '';
   if (review?.join === 'matched') {
     if (review.needs_pdf === true) return {
       text: 'Review: full text unavailable', tone: 'amber',
       detail: 'The current entry needs readable full text. Access failure is not a scientific-quality judgment.',
     };
-    if (review.digest_usable === true) return {
-      text: grade && review.quality_origin === 'current_entry'
-        ? `Quality ${[grade, qualityBasis(paper.quality)].filter(Boolean).join(' · ')}` : null,
-      tone: review.quality_origin === 'current_entry' ? gradeTone(grade) : 'slate',
-      detail: 'A current usable review matched. Its AI assessment is not independent scientific validation.',
-    };
+    if (review.digest_usable === true) {
+      const current = review.quality_origin === 'current_entry';
+      const greyA = current && letterMuted(grade, band) ? `Grey A: checklist only — ${mutedReason(band)}.` : '';
+      return {
+        text: grade && current ? `Quality ${[grade, qualityBasis(paper.quality)].filter(Boolean).join(' · ')}` : null,
+        tone: current ? gradeTone(grade, band) : 'slate', title: greyA,
+        detail: ['A current usable review matched. Its AI assessment is not independent scientific validation.', greyA].filter(Boolean).join(' '),
+      };
+    }
     if (review.digest_usable === false) return {
       text: 'Review: not ready', tone: 'slate',
       detail: 'A current entry matched, but its digest is not usable. Failure and staleness are not recorded here.',
@@ -162,7 +166,7 @@ export function SelectionWhy({ note = null, ...props }) {
   const { blinded, review } = evidenceView(props);
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1">
-      {review.text && <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${CHIP_TONE[review.tone] || CHIP_TONE.slate}`}>{review.text}</span>}
+      {review.text && <span title={review.title || undefined} className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${CHIP_TONE[review.tone] || CHIP_TONE.slate}`}>{review.text}</span>}
       <p className="text-xs text-slate-700">
         {note && <span className={note.warn ? 'text-amber-800' : 'text-slate-500'}>{note.text} </span>}
         {selectionLine(paper, selectionPolicy, blinded)}

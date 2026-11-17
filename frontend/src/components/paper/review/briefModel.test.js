@@ -31,7 +31,10 @@ it.each([
 ])('uses actual checklist gaps for reviews, theory and case reports (%j)', (rubric) => {
   const result = decisiveRows(rubric, 'flag');
   expect(result.rows).toEqual(Object.entries(rubric).filter(([, value]) => value === 'no')
-    .map(([key]) => ({ ok: false, label: key.replace(/_/g, ' ') })));
+    .map(([key]) => ({ ok: false, label: {
+      search_strategy: 'Reports databases searched and the full search strategy',
+      proofs: 'Gives a proof or proof sketch for each claim',
+    }[key] || key.replace(/_/g, ' ') })));
 });
 
 it.each(['flag', 'highlight', 'uncertain', 'neutral'])('does not turn an absent rubric or N/A into failed empirical criteria (%s)', (band) => {

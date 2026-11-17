@@ -132,14 +132,14 @@ source tasks open with `?task=`; the old Settings hashes resolve through `LEGACY
   with one ≤68ch reading column inside it. Order: title/authors/links →
   ONE at-a-glance card (#308, `review/Recommendation.jsx`, the same on the paper page, the Library expanded row and
   Annotate: verdict chip, minutes → what the paper does (`digest.tldr`) + the one-line `digest.verdict` →
-  `review/Glance.jsx`: Quality tile (grade letter, «n of m checks», one segment per check, red-flag count), Metrics tile
+  `review/Glance.jsx`: Quality tile (grade letter, «n of m checks», one segment per check, the model's notes count; letter rule D below), Metrics tile
   («as reported»: the first `digest.parameters.metrics` string leads with its number large and the full string under it;
   a bar/pair/range is drawn by `review/metricModel.js` only when that number is the only one in the string), one
   strength and one weakness → the why → `ReadingPlan` «Read first / Skip / What the original adds» → policy reasons → code row
   `review/CodeLink.jsx`) → `PaperFactsCard` → `Fold` sections (`review/primitives.jsx`: serif title + one-line summary while
   closed). Order: Findings, **Assessment** (`review/StudyMap.jsx`: Data → Method → Compared with → External validation
-  rail, then Impact / Industry / Academia / Unknowns, then the remaining digest rows) and Caveats and coverage (red flags =
-  clay left rule + quiet «verify» badge) start open; Evidence, Relevance, Methods and limitations, **Reference** (summary,
+  rail, then Impact / Industry / Academia / Unknowns, then the remaining digest rows) and Caveats and coverage (notes =
+  slate left rule «Notes to verify (N)», clay «Red flags» only when the band is flag; quiet «verify» badge) start open; Evidence, Relevance, Methods and limitations, **Reference** (summary,
   checklist, source basis), Figures, Paper map, Abstract and Related are closed folds with their content in the DOM. The
   Library row shows the same card and keeps everything else behind one «Details». The closed **Evidence** fold (`review/EvidenceFold.jsx`, #40) reads `GET /api/library/review-audit/{key}` and lists, per verified claim (Contribution, Findings), the verbatim quotes from the paper (the best-matching sentence ±1 of the verified passage + «Show full passage»; «…» marks an excerpt); `not_established_fields` show as «could not be grounded this time»; legacy / stale / PDF-changed states are one plain sentence; older-rules audits carry a note. An outdated review is one line +
   `Regenerate` (`onRegenerate` → `runner.run()`). The mobile verdict bar uses graded tints (must Forest
@@ -159,6 +159,7 @@ source tasks open with `?task=`; the old Settings hashes resolve through `LEGACY
   grade are rendered from the server projection (`digest.grade`, projected decision).
   Every printed letter carries what it rests on (`tones.js` `qualityBasis`/`gradeBasis`): `A · 3 of 5 checks`
   from stored `coverage_met`/`coverage_applicable` (old reviews → letter only).
+  Letter rule D (`tones.js` `letterMuted`/`gradeTone(grade, band)`/`mutedReason`, a pure function of stored fields; the letter's meaning is unchanged): an **A** is green only when `quality_band` is `highlight` («no critical gap found»), otherwise slate grey with «checklist only — <one reason>» (runs disagreed → critical gap(s) by plain label → automatic warning → not enough to judge when no band is stored); B/C/D keep their colour. The Quality tile has a real `?` button (`aria-expanded`, 44 px hit area) that opens the one-line legend; the Library row chip and the Today chip only carry the reason in `title`. Model notes read «Notes to verify (N)» (neutral) and turn into the red «N red flags to verify» only at band flag. `briefModel.js` `rubricLabel` has plain labels for all 28 critical checklist items (the brief keeps the raw key).
   The one client mirror, the effective relevance band with prestige demotion
   (`utils/relevanceBands.js`), is shared by Library filters and the cool-review loop.
 

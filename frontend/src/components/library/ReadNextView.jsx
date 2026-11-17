@@ -7,7 +7,7 @@ import ScoreHistogram from './ScoreHistogram.jsx';
 import { StatusBanner, formatShortDate, truncateAuthors } from './shared.jsx';
 import { pretty } from '../../utils/priorityLabels.js';
 import { COUNTS_EXPLAINER, isDecided, queueCounts, scoreStatus } from './readNextCopy.js';
-import { CHIP_TONE, bandTone, gradeTone, gradeBasis, BAND_LABEL } from '../paper/review/tones.js';
+import { CHIP_TONE, bandTone, gradeTone, gradeBasis, letterMuted, mutedReason, BAND_LABEL } from '../paper/review/tones.js';
 import { Disclosure } from '../paper/review/primitives.jsx';
 import { humanizeError } from '../../utils/humanizeError.js';
 import { cleanAbstract } from '../../utils/feedText.js';
@@ -512,8 +512,8 @@ export default function ReadNextView({
                         if (grade) {
                           return (
                             <span
-                              className={`inline-flex items-center px-1.5 py-0 rounded-full border font-semibold ${CHIP_TONE[gradeTone(grade)]}`}
-                              title="Full-text deep-review quality grade (A–D) — floats high-quality papers up within their relevance band."
+                              className={`inline-flex items-center px-1.5 py-0 rounded-full border font-semibold ${CHIP_TONE[gradeTone(grade, band)]}`}
+                              title={`Full-text deep-review quality grade (A–D) — floats high-quality papers up within their relevance band.${letterMuted(grade, band) ? ` Grey A: checklist only — ${mutedReason(band)}.` : ''}`}
                             >
                               {[grade, gradeBasis(it.quality_met, it.quality_applicable)].filter(Boolean).join(' · ')}
                             </span>
