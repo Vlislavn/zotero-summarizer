@@ -12,7 +12,7 @@ import AbstractBlock from '../components/paper/PaperDetailView/AbstractBlock.jsx
 import PaperReview from '../components/paper/review/PaperReview.jsx';
 import EvidenceFold from '../components/paper/review/EvidenceFold.jsx';
 import MethodCard from '../components/paper/review/MethodCard.jsx';
-import ReviewFeedback from '../components/paper/review/ReviewFeedback.jsx';
+import FeedbackMode from '../components/paper/review/FeedbackMode.jsx';
 import ReviewFailure from '../components/paper/ReviewFailure.jsx';
 import ReviewModelStatus from '../components/paper/ReviewModelStatus.jsx';
 import RelatedPapers from '../components/paper/RelatedPapers.jsx';
@@ -65,7 +65,7 @@ function useSettlingAfterRun(running, deep) {
 // the access banners + a prominent Generate button + a live skeleton while it
 // runs. The runner auto-fires on open for a paper with a PDF (the user opted into
 // auto-generate-on-open), so the common case renders instantly.
-function ReviewZone({ deep, runner, sectionOverlay, itemKey }) {
+function ReviewZone({ deep, runner, sectionOverlay, itemKey, onFeedbackActive }) {
   const { status, error, llmAvailable, online, running } = runner;
   const settling = useSettlingAfterRun(running, deep);
   const reviewed = deep && !deep.needs_pdf && (deep.digest || deep.quality || (deep.goal_summaries || []).length);
@@ -77,17 +77,19 @@ function ReviewZone({ deep, runner, sectionOverlay, itemKey }) {
   // Card facts (#98) sit right under the verdict card; with no review yet they lead the zone.
   const showReview = reviewed && !running;
   const facts = <PaperFactsCard cardKey={itemKey} variant="paper" rubric={deep?.quality?.rubric} />;
+  const review = showReview && <PaperReview deep={settling ? { ...deep, review_freshness: null } : deep} flat sectionOverlay={sectionOverlay} facts={facts}
+    methodCard={<MethodCard itemKey={itemKey} codeLink={deep.code_link} />}
+    evidence={<EvidenceFold itemKey={itemKey} lost={deep.not_established_fields || []} />}
+    onRegenerate={runner.checkingStatus ? null : () => runner.run()} />;
   return (
     <div className="space-y-3">
       {!showReview && facts}
       {!running && !usable && <ReviewModelStatus runner={runner} />}
       <FullTextAccessNotice deep={deep} />
 
-      {showReview && <PaperReview deep={settling ? { ...deep, review_freshness: null } : deep} flat sectionOverlay={sectionOverlay} facts={facts}
-        methodCard={<MethodCard itemKey={itemKey} codeLink={deep.code_link} />}
-        evidence={<EvidenceFold itemKey={itemKey} lost={deep.not_established_fields || []} />}
-        onRegenerate={runner.checkingStatus ? null : () => runner.run()} />}
-      {showReview && deep.reviewed_at && <ReviewFeedback key={`${itemKey}|${deep.reviewed_at}`} itemKey={itemKey} reviewedAt={deep.reviewed_at} />}
+      {showReview && (deep.reviewed_at
+        ? <FeedbackMode key={`${itemKey}|${deep.reviewed_at}`} itemKey={itemKey} reviewedAt={deep.reviewed_at} onActiveChange={onFeedbackActive}>{review}</FeedbackMode>
+        : review)}
       {running ? (
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-5 text-[13px] text-slate-600" role="status" aria-live="polite">
           <div className="flex items-center gap-2 font-medium text-slate-700">
@@ -192,6 +194,7 @@ export default function PaperReviewPage() {
   const prevKey = navIdx > 0 ? reviewOrder[navIdx - 1] : null;
   const nextKey = navIdx >= 0 && navIdx < reviewOrder.length - 1 ? reviewOrder[navIdx + 1] : null;
   const [notesDirty, setNotesDirty] = useState(false);
+  const [feedbackActive, setFeedbackActive] = useState(false); // «Give feedback» mode or panel is up
   useUnsavedNotesGuard(notesDirty);
   const [relatedRevision, setRelatedRevision] = useState(0);
   const fenceRelatedContext = useCallback(() => {
@@ -352,7 +355,7 @@ export default function PaperReviewPage() {
 
         <main className="min-w-0 max-w-[68ch]">
           <section id="review" className="scroll-mt-20 pb-2">
-            <ReviewZone deep={deep} runner={runner} sectionOverlay={ov} itemKey={itemKey} />
+            <ReviewZone deep={deep} runner={runner} sectionOverlay={ov} itemKey={itemKey} onFeedbackActive={setFeedbackActive} />
           </section>
 
           {/* Next step after reading the review, so it sits right under it (not the last, forgotten fold). */}
@@ -407,7 +410,7 @@ export default function PaperReviewPage() {
 
       {/* The decision stays on the first iPhone screen: the full editor (notes,
           tags, collection, Ask) is still in the rail far below. */}
-      <MobileVerdictBar itemKey={itemKey} verdict={verdict} />
+      <div hidden={feedbackActive}><MobileVerdictBar itemKey={itemKey} verdict={verdict} /></div>
     </div>
   );
 }

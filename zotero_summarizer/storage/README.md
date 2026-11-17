@@ -20,7 +20,7 @@ cached/live use; the gated digest pipeline reads it directly. Posts carry
 (no SQL migration), feeding forward-dedup and comment gating. Migration 16 adds the
 nullable `reasons_json` (owner's 'не подошло' chips) via `set_reasons`/`read_reasons`; upserts keep it.
 
-Migration 19 adds `review_feedback` (`review_feedback.py`): per-review owner feedback, one row per `(item_key, reviewed_at)` (`reviewed_at` is the review version; reviews are overwritten in place, so the row also snapshots `generation_sha256` and `model`). `upsert` keeps `created_at` on replace, `delete` clears, `list_for_paper`/`all_rows` read; item-key aliases are not resolved. The corpus DB gets only the named v19 alignment marker.
+Migration 19 adds `review_feedback` (`review_feedback.py`): per-review owner feedback, one row per `(item_key, reviewed_at)` (`reviewed_at` is the review version; reviews are overwritten in place, so the row also snapshots `generation_sha256` and `model`). Migration 20 adds `fields_json` (`{part: {chips, note, shown, at}}`, or a `{withdrawn, at}` tombstone; `NULL`/`[]` read as `{}`); the chips/note columns are the whole-review part. `update(conn, item_key, version, mutate)` is the one writer: it runs under `BEGIN IMMEDIATE`, keeps `created_at`, and deletes the row only when chips, note and `fields` are all empty; `list_for_paper`/`all_rows` read; item-key aliases are not resolved. The corpus DB gets only the named v19/v20 alignment markers.
 
 `configuration_lock.py` provides a nonwaiting (unless a sync worker-thread caller opts into a bounded `wait`), no-follow cross-process file lock
 under the selected `Settings.data_dir`. It is reentrant only within the same

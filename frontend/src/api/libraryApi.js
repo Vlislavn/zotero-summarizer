@@ -437,9 +437,23 @@ export async function fetchReviewFeedback(itemKey) {
   return request(`/api/library/review-feedback?${new URLSearchParams({ item_key: itemKey })}`);
 }
 
-/** POST /api/library/review-feedback → { cleared: true } (no chips, no note) or { cleared: false, feedback }. */
-export async function saveReviewFeedback(itemKey, chips, note) {
-  return request('/api/library/review-feedback', {
-    method: 'POST', body: JSON.stringify({ item_key: itemKey, chips, note }), idempotent: true, // an upsert
+const feedbackPart = (itemKey, field) => `/api/library/review-feedback/${encodeURIComponent(itemKey)}/parts/${field}`;
+
+/** PUT …/parts/{field} → { cleared: false, feedback: row, package }; 409 review_version_changed when the review was regenerated. */
+export async function saveReviewFeedbackPart(itemKey, field, reviewedAt, chips, note) {
+  return request(feedbackPart(itemKey, field), {
+    method: 'PUT', body: JSON.stringify({ reviewed_at: reviewedAt, chips, note }), idempotent: true, // an upsert
   });
+}
+
+/** DELETE …/parts/{field} → { cleared: true, feedback: row | null }; withdrawing twice is fine. */
+export async function withdrawReviewFeedbackPart(itemKey, field, reviewedAt) {
+  return request(`${feedbackPart(itemKey, field)}?${new URLSearchParams({ reviewed_at: reviewedAt })}`, {
+    method: 'DELETE', idempotent: true,
+  });
+}
+
+/** GET …/check/{item_key} → { checks: { part: { status, note, checked_at } } } — what was concluded about each part. */
+export async function fetchReviewFeedbackChecks(itemKey) {
+  return request(`/api/library/review-feedback/check/${encodeURIComponent(itemKey)}`);
 }

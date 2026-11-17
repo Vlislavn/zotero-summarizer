@@ -69,7 +69,7 @@ export function Disclosure({ summary, children, defaultOpen = false, count = nul
 // summary while closed, chevron on the right. Native <details>, so keyboard and
 // no-JS work and every closed section keeps its content in the DOM. Sections the
 // reader needs by default pass `defaultOpen`; everything else stays one quiet line.
-export function Fold({ id, label, summary, defaultOpen = false, children }) {
+export function Fold({ id, label, summary, defaultOpen = false, feedbackField, children }) {
   return (
     <details id={id} open={defaultOpen || undefined} className="group scroll-mt-20 border-t border-slate-200/70 first:border-t-0">
       <summary className="grid min-h-11 cursor-pointer select-none list-none grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded py-3 [&::-webkit-details-marker]:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest-400 focus-visible:ring-offset-1">
@@ -81,7 +81,7 @@ export function Fold({ id, label, summary, defaultOpen = false, children }) {
           <path d="M4 2l4 4-4 4" />
         </svg>
       </summary>
-      <div className="pb-5 pt-1">{children}</div>
+      <div className="pb-5 pt-1" data-feedback-field={feedbackField}>{children}</div>
     </details>
   );
 }

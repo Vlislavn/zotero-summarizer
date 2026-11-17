@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Query
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from zotero_summarizer.api.errors import APIError
@@ -25,7 +24,6 @@ from zotero_summarizer.services.library import (
     qa,
     reading_queue,
     related,
-    review_feedback,
     review_questions,
     score_tags,
     section_summaries_job,
@@ -80,12 +78,6 @@ class DiscoveryRequest(BaseModel):
     context_fingerprint: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
     consent_token: str | None = Field(default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
     retry: bool = False
-
-
-class ReviewFeedbackRequest(BaseModel):
-    item_key: str = Field(..., min_length=1)
-    chips: list[str] = Field(default_factory=list, max_length=len(review_feedback.CHIPS))
-    note: str = Field(default="", max_length=review_feedback.NOTE_MAX)
 
 
 class RejectTagRequest(BaseModel):
@@ -309,23 +301,6 @@ async def get_paper_questions(item_key: str = Query(..., min_length=1)) -> dict[
     return {"item_key": item_key, "questions": rows}
 
 
-async def save_review_feedback(req: ReviewFeedbackRequest) -> dict[str, Any]:
-    """Save chips + note on the paper's current review; empty chips and note clear it."""
-    return await asyncio.to_thread(review_feedback.save, req.item_key, req.chips, req.note)
-
-
-async def get_review_feedback(item_key: str = Query(..., min_length=1)) -> dict[str, Any]:
-    """Feedback saved for this paper, one entry per review version."""
-    return {"item_key": item_key, "feedback": await asyncio.to_thread(review_feedback.list_feedback, item_key)}
-
-
-async def export_review_feedback() -> Response:
-    """Every review-feedback row as a JSON download (user-study data)."""
-    rows = await asyncio.to_thread(review_feedback.export)
-    return Response(json.dumps(rows, ensure_ascii=False, indent=1), media_type="application/json",
-                    headers={"Content-Disposition": 'attachment; filename="review-feedback.json"'})
-
-
 async def run_deep_review(req: DeepReviewRunRequest) -> dict[str, Any]:
     """Start an on-demand full-text deep review (quality + relevance). With
     ``item_key`` set, reviews that single paper (per-paper button) and returns THAT
@@ -471,9 +446,6 @@ router.add_api_route("/api/library/render/{item_key}/figures/{name}", get_paper_
 router.add_api_route("/api/library/ask", ask_paper, methods=["POST"])
 router.add_api_route("/api/library/questions", save_paper_question, methods=["POST"])
 router.add_api_route("/api/library/questions", get_paper_questions, methods=["GET"])
-router.add_api_route("/api/library/review-feedback", save_review_feedback, methods=["POST"])
-router.add_api_route("/api/library/review-feedback", get_review_feedback, methods=["GET"])
-router.add_api_route("/api/library/review-feedback/export", export_review_feedback, methods=["GET"])
 router.add_api_route("/api/library/review-audit/{item_key}", export_review_audit, methods=["GET"])
 router.add_api_route("/api/library/deep-review/run", run_deep_review, methods=["POST"])
 router.add_api_route("/api/library/deep-review/status", get_deep_review_status, methods=["GET"])

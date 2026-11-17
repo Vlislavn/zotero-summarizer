@@ -145,13 +145,16 @@ source tasks open with `?task=`; the old Settings hashes resolve through `LEGACY
   Library row shows the same card and keeps everything else behind one «Details». The closed **Evidence** fold (`review/EvidenceFold.jsx`, #40) reads `GET /api/library/review-audit/{key}` and lists, per verified claim (Contribution, Findings), the verbatim quotes from the paper (the best-matching sentence ±1 of the verified passage + «Show full passage»; «…» marks an excerpt); `not_established_fields` show as «could not be grounded this time»; legacy / stale / PDF-changed states are one plain sentence; older-rules audits carry a note. An outdated review is one line +
   `Regenerate` (`onRegenerate` → `runner.run()`). The mobile verdict bar uses graded tints (must Forest
   solid, should Sage, could Mint, skip outline), no black fills.
-  Under the review, ONE closed **Feedback on this review** fold (`review/ReviewFeedback.jsx`, mounted in `PaperReviewPage`
-  `ReviewZone` with `key={itemKey|reviewed_at}`, so every review version starts fresh and older rows stay stored): the closed
-  line says «Optional — tap what was off…» or «**Saved** · Good as is + note»; open, 8 chips on the shared `chipClass` style
-  (Good as is first, then 7 problems — it and the problems exclude each other; ids = backend `CHIPS`) and an optional note
-  (≤1000). Chips save on tap, the note on blur (`POST /api/library/review-feedback`, `GET` by `item_key`; both in
-  `libraryApi.js`); an empty selection + empty note clears the row («Cleared»); a failed save rolls the chip back and shows the
-  error. Nothing here opens by itself, and it never touches the verdict bar.
+  **Give feedback** (`review/FeedbackMode.jsx`, mounted in `PaperReviewPage` `ReviewZone` with `key={itemKey|reviewed_at}`): one
+  button above the review turns on a mode in which every part of the review carrying `data-feedback-field="<id>"` (ids and
+  labels: `review/reviewFeedbackFields.js`; `Fold` takes `feedbackField`) gets an outlined overlay button laid over it (not
+  wrapped around it, so no control nests in another). The review is `inert` while the mode is on, closed folds are opened,
+  the phone verdict bar is hidden (`hidden` wrapper, not unmounted) and a sticky bar offers **Done** and **Whole review**.
+  A tap opens `FeedbackPanel.jsx` (non-modal `dialog`: bottom sheet on phones, a card beside the part from `lg`): the 8
+  shared `chipClass` reasons (Good as is excludes the problems), a note ≤1000 and **Save** / **Withdraw** (`PUT`/`DELETE
+  …/parts/{field}` in `libraryApi.js`; the server records the shown text). Esc closes the panel, then the mode; focus returns
+  to the part. `ReviewFeedback.jsx` lists what was said below the review («Your feedback on this review (N)», Edit /
+  Withdraw, and «Checked: …» from `check.json`); with nothing saved nothing renders.
 - Today exposure (card shown/dwell, review and link opens) is reported best-effort to
   `/api/daily/events` by `hooks/useCardExposure.js` and `utils/todayEvents.js`, keyed by
   the retained visit id (= the logged `slate_id`); a failed send is dropped. Cards with

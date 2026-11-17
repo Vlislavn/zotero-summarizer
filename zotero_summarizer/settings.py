@@ -155,6 +155,11 @@ class Settings:
         return self.data_dir / "card"
 
     @property
+    def review_feedback_dir(self) -> Path:
+        """Per-review feedback evidence packages (``<paper>/<version>/``); never read by the app's logic."""
+        return self.data_dir / "review_feedback"
+
+    @property
     def feedback_schedule_dir(self) -> Path:
         return self.feedback_analysis_dir / "schedule"
 

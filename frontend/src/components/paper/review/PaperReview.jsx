@@ -222,11 +222,11 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
       <div className={flat ? '' : 'mt-2 divide-y divide-slate-200/60'}>
         {flat ? <>
           {methodCard}
-          <Fold label="Findings and applicability" defaultOpen>
+          <Fold label="Findings and applicability" defaultOpen feedbackField="findings">
             {findings.length > 0 ? <Bullets items={findings} /> : <p>Key findings not recorded in this saved review.</p>}
           </Fold>
           {digest && (
-            <Fold label="Assessment" defaultOpen>
+            <Fold label="Assessment" defaultOpen feedbackField="assessment">
               <div className="space-y-5">
                 <StudyFlow parameters={digest.parameters} />
                 <ImpactGrid cells={[['Impact', grounded('impact')], ['Industry', grounded('industry_impact')],
@@ -236,7 +236,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
               </div>
             </Fold>
           )}
-          <Fold label="Caveats and coverage" defaultOpen summary={caveatsSummary(quality, band, isNonPaper, redFlags)}>
+          <Fold label="Caveats and coverage" defaultOpen feedbackField="quality" summary={caveatsSummary(quality, band, isNonPaper, redFlags)}>
             <div className="space-y-4">
               {partialBasis.length > 0 && <p className="!text-[14px] text-slate-600">Not based on the full text — {partialBasis.join('; ')}.</p>}
               {quality && !isNonPaper && <QualityHeadline quality={quality} band={band} flagLoc={flagLoc} missLoc={missLoc} critiqueViews />}
@@ -247,11 +247,11 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
           {evidence}
           {goals.length > 0 && (
             <Fold label={`Relevance — ${nHitGoals} of ${goals.length} goals addressed`}
-              summary={goals.filter(isSupportedGoal).map(g => shortGoal(g.goal)).join(' · ') || 'No supported goal match recorded'}>
+              summary={goals.filter(isSupportedGoal).map(g => shortGoal(g.goal)).join(' · ') || 'No supported goal match recorded'} feedbackField="relevance">
               <GoalBoard goals={goals} goalLoc={goalLoc} foldReasons />
             </Fold>
           )}
-          <Fold label="Methods and limitations" summary={clip(digest?.methods || digest?.limitations, 110)}>
+          <Fold label="Methods and limitations" summary={clip(digest?.methods || digest?.limitations, 110)} feedbackField="methods_limits">
             <dl className="space-y-3">
               <DigestRow field="methods" label="Methods" lost={lost} onRegenerate={onRegenerate}>{digest?.methods}</DigestRow>
               <DigestRow field="limitations" label="Limitations" lost={lost} onRegenerate={onRegenerate}>{digest?.limitations}</DigestRow></dl>

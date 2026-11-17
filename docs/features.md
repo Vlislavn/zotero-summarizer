@@ -162,14 +162,16 @@ and leaving never saves it silently. A note saved in the app is not yet confirme
 
 ### Review feedback
 
-For a user study, the app can record what is wrong with a paper's review: pick any of eight
-reasons (such as "methods not useful", "unsupported fact", "too long", "good as is") and add
-a note up to 1000 characters. Feedback is stored per paper and review version, so a later
-regenerated review starts clean; saving again replaces it, and saving with nothing selected
-clears it. All feedback can be downloaded as one JSON file. This is the backend only; the
-review page does not show it yet. [Code](../zotero_summarizer/services/library/review_feedback.py).
-
-## Save results
+On a paper page, **Give feedback** outlines each part of the review (verdict, top sentence, quality, red flags,
+metrics, strength/weakness, reading plan, findings, assessment, relevance, methods, code link; **Whole review** in the
+bar). Tap a part, pick any of eight reasons (such as "unsupported fact", "too long", "good as is") and/or write a note up
+to 1000 characters, then **Save**; Esc or **Done** leaves the mode. Feedback is stored per part, paper and review
+version, so a regenerated review starts clean; **Your feedback on this review** lists it with Edit and Withdraw. Each
+save writes an evidence package under `data/review_feedback/` (your words, the text each part showed, the review as stored,
+the paper text re-extracted from its PDF and a PDF copy up to 25 MB, with hash checks against what the review read).
+`zotero-summarizer review-feedback list|check` shows the packages and searches the part text in the paper; a recorded
+verdict appears as «Checked: …». All feedback downloads as one JSON file. No tokens or network are used.
+[Code](../zotero_summarizer/services/library/review_feedback.py) · [Tests](../tests/test_review_feedback_parts.py).
 
 ### Zotero changes
 

@@ -1,76 +1,35 @@
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchReviewFeedback, saveReviewFeedback } from '../../../api/libraryApi.js';
-import { chipClass } from '../../decisionVocab.js';
 import { Fold } from './primitives.jsx';
+import { PART_LABELS, REVIEW_FEEDBACK_CHIPS, WHOLE } from './reviewFeedbackFields.js';
 
-// «Feedback on this review»: one closed fold under the review (user-study instrument). Chips save on tap, the
-// note on blur; neither is required. The backend keeps one row per paper and review version, so the page mounts
-// this with key={reviewed_at}: a regenerated review starts empty and the old row stays stored.
-// Ids are the backend's (services/library/review_feedback.py CHIPS); good_as_is leads, the rest are problems.
-const REVIEW_FEEDBACK_CHIPS = [
-  ['good_as_is', 'Good as is'], ['methods_not_useful', 'Methods not useful'],
-  ['wrong_or_unsupported_fact', 'Wrong or unsupported fact'], ['flags_noise', 'Flags are noise'],
-  ['too_long', 'Too long'], ['missing_code_or_data', 'Missing code or data'],
-  ['wrong_read_depth', 'Wrong read advice'], ['grade_unclear', 'Grade unclear'],
-];
+const CHIP_LABELS = Object.fromEntries(REVIEW_FEEDBACK_CHIPS);
+const CHECK_TEXT = { confirmed: 'confirmed', rejected: 'not confirmed', unclear: 'unclear' };
 
-const queryKey = (itemKey) => ['review-feedback', itemKey];
-
-function summaryOf(row) {
-  if (!row) return 'Optional — tap what was off, or “Good as is”';
-  const labels = Object.fromEntries(REVIEW_FEEDBACK_CHIPS);
-  const parts = row.chips.length === 1 ? [labels[row.chips[0]]] : row.chips.length ? [`${row.chips.length} issues`] : [];
-  if (row.note) parts.push('note');
-  return <><span className="font-medium text-forest-800">Saved</span> · {parts.join(' + ')}</>;
-}
-
-function FeedbackForm({ itemKey, reviewedAt, row }) {
-  const cache = useQueryClient();
-  const [chips, setChips] = useState(row?.chips || []);
-  const [note, setNote] = useState(row?.note || '');
-  const save = useMutation({
-    mutationFn: ({ next, text }) => saveReviewFeedback(itemKey, next, text),
-    onSuccess: (data) => cache.setQueryData(queryKey(itemKey), (old) => {
-      const rows = (old?.feedback || []).filter((entry) => entry.reviewed_at !== reviewedAt);
-      return { ...old, item_key: itemKey, feedback: data.cleared ? rows : [...rows, data.feedback] };
-    }),
-  });
-  const post = (next, text, onError) => save.mutate({ next, text }, { onError });
-  const toggle = (id) => {
-    const previous = chips;
-    // «Good as is» and a problem exclude each other.
-    const without = chips.filter((chip) => chip !== id && (id === 'good_as_is') === (chip === 'good_as_is'));
-    const next = chips.includes(id) ? without : [...without, id];
-    setChips(next);
-    post(next, note, () => setChips(previous));
-  };
-  const commit = () => { if (note.trim() !== (row?.note || '').trim()) post(chips, note); };
-  return <div className="space-y-3">
-    <div className="flex flex-wrap gap-1.5">
-      {REVIEW_FEEDBACK_CHIPS.map(([id, label]) => <button key={id} type="button" onClick={() => toggle(id)}
-        aria-pressed={chips.includes(id)} className={chipClass(chips.includes(id))}>{label}</button>)}
-    </div>
-    <label className="block text-xs text-slate-600">Note (optional)
-      <textarea value={note} maxLength={1000} rows={2} onChange={(event) => setNote(event.target.value)} onBlur={commit}
-        className="mt-0.5 block w-full rounded-lg border border-slate-300 bg-white p-2 text-sm text-slate-800" />
-    </label>
-    <div className="min-h-4 text-xs text-slate-600" aria-live="polite">
-      {save.isPending ? 'Saving…' : save.isError
-        ? <span role="alert" className="text-rose-700">Could not save: {save.error?.message}</span>
-        : note.trim() !== (row?.note || '').trim() ? 'The note saves when you leave the field'
-          : row ? 'Saved' : save.isSuccess && 'Cleared'}
-    </div>
-  </div>;
-}
-
-export default function ReviewFeedback({ itemKey, reviewedAt }) {
-  const query = useQuery({ queryKey: queryKey(itemKey), queryFn: () => fetchReviewFeedback(itemKey), staleTime: 60_000 });
-  const row = (query.data?.feedback || []).find((entry) => entry.reviewed_at === reviewedAt) || null;
-  const summary = query.isError ? 'Could not load saved feedback' : query.isPending ? 'Loading…' : summaryOf(row);
-  return <Fold id="review-feedback" label="Feedback on this review" summary={summary}>
-    {query.isError
-      ? <p role="alert" className="text-xs text-rose-700">Could not load saved feedback: {query.error?.message}</p>
-      : query.isSuccess && <FeedbackForm itemKey={itemKey} reviewedAt={reviewedAt} row={row} />}
+// «Your feedback on this review (N)»: what the owner already said, one row per part, below the review. Edit reopens
+// the part's panel; Withdraw removes it (the saved package keeps a «withdrawn» record). `checks` is what was concluded
+// after looking at the paper (check.json), shown as «Checked: …». Nothing to list → nothing rendered.
+export default function ReviewFeedback({ entries, checks, onEdit, onWithdraw, withdrawing }) {
+  const fields = Object.keys(entries).sort((a, b) => (a === WHOLE) - (b === WHOLE));
+  if (!fields.length) return null;
+  const summary = fields.map((field) => PART_LABELS[field]).join(' · ');
+  return <Fold id="review-feedback" label={`Your feedback on this review (${fields.length})`} summary={summary}>
+    <ul className="space-y-3">
+      {fields.map((field) => {
+        const { chips, note } = entries[field];
+        const check = checks?.[field];
+        return <li key={field} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 text-[14px] leading-snug text-slate-800">
+          <div className="min-w-0">
+            <div className="font-medium">{PART_LABELS[field]}</div>
+            {chips.length > 0 && <div className="text-slate-600">{chips.map((id) => CHIP_LABELS[id]).filter(Boolean).join(' · ')}</div>}
+            {note && <div className="break-words text-slate-600">“{note}”</div>}
+            {check && <div className="text-forest-800">Checked: {CHECK_TEXT[check.status]}{check.note ? ` — ${check.note}` : ''}</div>}
+          </div>
+          <div className="flex">
+            <button type="button" onClick={() => onEdit(field)} className="min-h-11 px-2 text-[13px] text-forest-800 underline underline-offset-2">Edit</button>
+            <button type="button" onClick={() => onWithdraw(field)} disabled={withdrawing}
+              className="min-h-11 px-2 text-[13px] text-rose-700 underline underline-offset-2 disabled:opacity-50">Withdraw</button>
+          </div>
+        </li>;
+      })}
+    </ul>
   </Fold>;
 }

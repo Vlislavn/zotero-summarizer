@@ -197,6 +197,13 @@ def _migration_review_feedback(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_review_feedback_parts(conn: sqlite3.Connection) -> None:
+    """Per-part feedback (#110): ``fields_json`` = ``{part: {chips, note, shown, at}}`` (or a
+    ``{withdrawn, at}`` tombstone); the older chips/note columns stay the whole-review part."""
+    if "fields_json" not in repositories.table_columns(conn, "review_feedback"):
+        conn.execute("ALTER TABLE review_feedback ADD COLUMN fields_json TEXT NOT NULL DEFAULT '{}'")
+
+
 # Append-only, version-ordered. To change the schema, add a new Migration with
 # the next version number — never edit a shipped one or add inline ALTERs.
 TRIAGE_MIGRATIONS: list[Migration] = [
@@ -219,6 +226,7 @@ TRIAGE_MIGRATIONS: list[Migration] = [
     Migration(17, "rss_fetch_watermark", _migration_rss_fetch_watermark),
     Migration(18, "verdict_proposal_snapshot", _migration_verdict_proposal),
     Migration(19, "review_feedback", _migration_review_feedback),
+    Migration(20, "review_feedback_parts", _migration_review_feedback_parts),
 ]
 CORPUS_MIGRATIONS: list[Migration] = [
     Migration(1, "baseline_embedding_cache", _migration_baseline_corpus),
@@ -240,6 +248,7 @@ CORPUS_MIGRATIONS: list[Migration] = [
     Migration(17, "rss_fetch_watermark_alignment", _migration_baseline_corpus),
     Migration(18, "verdict_proposal_snapshot_alignment", _migration_baseline_corpus),
     Migration(19, "review_feedback_alignment", _migration_baseline_corpus),
+    Migration(20, "review_feedback_parts_alignment", _migration_baseline_corpus),
 ]
 
 # Both namespaces advance in lockstep so one reported target stays meaningful;

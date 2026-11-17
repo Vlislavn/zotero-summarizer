@@ -54,7 +54,7 @@ function QualityTile({ grade, band, quality, redFlags }) {
         Quality
         {grade && <LegendButton open={legend} onToggle={() => setLegend((v) => !v)} />}
       </div>
-      <div className="mt-1 flex items-center gap-3">
+      <div className="mt-1 flex items-center gap-3" data-feedback-field="quality">
         {grade && <span title="Saved quality grade" className={`font-display text-[40px] font-light leading-none ${muted ? MUTED_INK : GRADE_INK[grade] || 'text-slate-700'}`}>{grade}</span>}
         <div className="min-w-0 flex-1 space-y-1.5 text-[13px] leading-snug text-slate-700">
           {(basis || facts) && <div>{[basis, facts].filter(Boolean).join(' · ')}</div>}
@@ -64,7 +64,7 @@ function QualityTile({ grade, band, quality, redFlags }) {
       </div>
       {legend && <p id={LEGEND_ID} className="mt-2 max-w-[66ch] text-[12px] leading-snug text-slate-600">{LETTER_LEGEND}</p>}
       {redFlags.length > 0 && (
-        <div className={`mt-2 text-[13px] leading-snug ${flagged ? 'text-rose-700' : 'text-slate-600'}`} title={redFlags.slice(0, 3).join('; ')}>
+        <div data-feedback-field="red_flags" className={`mt-2 text-[13px] leading-snug ${flagged ? 'text-rose-700' : 'text-slate-600'}`} title={redFlags.slice(0, 3).join('; ')}>
           {flagged ? `⚠ ${redFlags.length} red flag${plural} to verify` : `Notes to verify (${redFlags.length})`}
         </div>
       )}
@@ -99,7 +99,7 @@ function MetricVisual({ visual }) {
 function MetricsTile({ metrics }) {
   const [hero, ...rest] = metrics.map((text) => ({ text, ...metricView(text) }));
   return (
-    <div className="min-w-0">
+    <div className="min-w-0" data-feedback-field="metrics">
       <div className={EYEBROW}>{metrics.length > 1 ? 'Metrics' : 'Key metric'} · as reported</div>
       <div className="mt-1">
         {hero.lead && <div className="font-display text-[30px] font-light leading-tight tabular-nums text-forest-800">{hero.lead}</div>}
@@ -128,7 +128,7 @@ function ProsCons({ strength, weakness }) {
     </div>
   );
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5" data-feedback-field="strength_weakness">
       {row('+', 'Strength', strength, 'text-forest-700')}
       {row('−', 'Weakness', weakness, 'text-rose-700')}
     </div>
