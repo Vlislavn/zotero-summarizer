@@ -173,6 +173,8 @@ the paper text re-extracted from its PDF and a PDF copy up to 25 MB, with hash c
 verdict appears as «Checked: …». All feedback downloads as one JSON file. No tokens or network are used.
 [Code](../zotero_summarizer/services/library/review_feedback.py) · [Tests](../tests/test_review_feedback_parts.py).
 
+## Save results
+
 ### Zotero changes
 
 Every write to Zotero (an explicit **Add**, a metadata edit, an approved **Pending**
