@@ -97,6 +97,7 @@ source tasks open with `?task=`; the old Settings hashes resolve through `LEGACY
   posts the GET's `boundary.token`), later taps generate at once (`POST /api/card/{key}/generate`). The fetch is
   additive and fail-soft; unavailability reasons (`cardModel.js` `AI_REASON_MESSAGE`) use the backend's keys
   (`call_cap`, `daily_token_cap`, `circuit_open`, …).
+- Today header line «N papers waiting for Zotero sync» (`components/today/ZoteroSyncLine.jsx`): reads `stats.unsynced_items` of `GET /api/zotero/status`; shown only when N>0, silent on error or a missing key, re-read after an Add finishes. Not the app's own pending Zotero exports.
 - Today "Not reviewed yet (N)" shelf: `components/today/NotReviewedShelf.jsx` under the cards, fed by the
   `unreviewed` field of `/api/daily` kept in the retained visit (`todayVisit.js`). One tap row per paper
   (title, source, ≤2 why chips, cached TL;DR bullets) → `/paper/<key>`; no verdict/Add controls.

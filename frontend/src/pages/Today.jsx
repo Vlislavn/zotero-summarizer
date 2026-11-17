@@ -9,6 +9,7 @@ import PaperCard from '../components/today/PaperCard.jsx';
 import NotReviewedShelf from '../components/today/NotReviewedShelf.jsx';
 import CollectionPicker from '../components/CollectionPicker.jsx';
 import NotConfiguredCard from '../components/setup/NotConfiguredCard.jsx';
+import ZoteroSyncLine from '../components/today/ZoteroSyncLine.jsx';
 import Spinner from '../components/ui/Spinner.jsx';
 import Icon from '../components/ui/Icon.jsx';
 import Skeleton from '../components/ui/Skeleton.jsx';
@@ -110,6 +111,7 @@ export default function Today() {
           ? `Showing ${members.length} of 15 · kept until the next shortlist`
           : 'New papers from your feeds — decide what enters your library.'}
       </p>
+      <ZoteroSyncLine enabled={enabled} busy={view.busy} />
       <div className="mt-3 flex items-center gap-2">
         <button type="button" onClick={startRenewal} disabled={!view.canRenew} aria-busy={view.renewing}
           className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-forest-800 px-4 text-sm font-medium text-white hover:bg-forest-700 disabled:bg-slate-300 disabled:text-slate-100 sm:flex-none">

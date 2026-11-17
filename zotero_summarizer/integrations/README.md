@@ -16,7 +16,7 @@ Product behavior: [docs/features.md](../../docs/features.md); placement: [docs/a
 
 | file | responsibility |
 |---|---|
-| `zotero_read.py` | `ZoteroReader`: read-only WAL-aware connections, bounded lock retries (persistent lock raises), collection/stat helpers scoped to the user library, trashed items/attachments excluded; `collection_name_for_key` validates picker keys; Inbox and read-next sort first |
+| `zotero_read.py` | `ZoteroReader`: read-only WAL-aware connections, bounded lock retries (persistent lock raises), collection/stat helpers scoped to the user library, trashed items/attachments excluded; `count_unsynced_items()` = ordinary user-library items with `synced=0` (not yet uploaded to Zotero's cloud; no attachments/notes/annotations/trash/feeds; never the app's own pending exports); `collection_name_for_key` validates picker keys; Inbox and read-next sort first |
 | `_zotero_read_items.py` · `_zotero_read_lookup.py` · `_zotero_read_feeds.py` | reader mixins: items/detail/notes/annotations (`item_type`, `venue`; `get_items` paged 500, `get_all_items` one unpaged query) · find/membership/tags (DOI match over all `normalize_doi` variants; `get_pdf_paths(keys)` = each key's `get_item_detail` `pdf_path` over one connection, without fields/notes/annotations) · feeds (`get_unread_feed_guid_map`; `get_feed_items(limit=None)` returns all rows) |
 | `_zotero_read_common.py` | `ZoteroReadError`, arXiv/sanitize helpers, `_NON_BIBLIOGRAPHIC_TYPES_SQL`, `_USER_LIBRARY_ID_SELECT` (leaf) |
 | `zotero_write.py` | `ZoteroWriter`: WAL-consistent backup, `apply_changes` dispatcher, `_prune_backups` |

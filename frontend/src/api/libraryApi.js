@@ -67,6 +67,11 @@ export async function fetchCollections() {
   return request('/api/zotero/collections');
 }
 
+/** GET /api/zotero/status — `stats.unsynced_items` is absent when Zotero is unreadable. */
+export async function fetchZoteroStatus() {
+  return request('/api/zotero/status');
+}
+
 /** GET /api/zotero/tags?limit=300 — top tags by item_count. */
 export async function fetchTags({ limit = 300 } = {}) {
   return request(`/api/zotero/tags?limit=${encodeURIComponent(limit)}`);

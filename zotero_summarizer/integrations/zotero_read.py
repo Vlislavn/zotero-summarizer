@@ -91,6 +91,26 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
 
         return self._execute_read(_read)
 
+    def count_unsynced_items(self) -> int:
+        """Ordinary user-library items Zotero has not uploaded to its cloud yet.
+
+        ``items.synced = 0`` for regular papers only (no attachment/note/annotation,
+        no trash, no feed libraries). NOT the app's own «awaiting write to Zotero»
+        rows (``services/triage/daily_actions.py``), which are exports this app
+        could not make.
+        """
+        query = f"""
+            SELECT COUNT(*) AS value
+            FROM items i
+            JOIN itemTypes it ON it.itemTypeID = i.itemTypeID
+            LEFT JOIN deletedItems di ON di.itemID = i.itemID
+            WHERE di.itemID IS NULL
+              AND i.synced = 0
+              AND i.libraryID = ({_USER_LIBRARY_ID_SELECT})
+              AND it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
+        """
+        return self._execute_read(lambda conn: int(conn.execute(query).fetchone()["value"]))
+
     def get_collections(self) -> list[dict[str, Any]]:
         """Return the collection tree with per-collection item counts."""
 

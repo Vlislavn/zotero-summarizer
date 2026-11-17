@@ -53,6 +53,7 @@ it.each([
     else if (url.pathname === '/api/daily/triage-status') data = { running: false };
     else if (url.pathname === '/api/zotero/collections') data = { items: [{ key: 'C1', name: 'Reading' }] };
     else if (url.pathname === '/api/zotero/tags') data = { items: [] };
+    else if (url.pathname === '/api/zotero/status') data = { available: true, stats: {} };
     else if (url.pathname === '/api/library/review-fleet/status') data = { status: 'idle' };
     else if (url.pathname === '/api/library/reading-queue') data = {
       items: url.searchParams.get('search') || url.searchParams.get('include_read') === 'true'

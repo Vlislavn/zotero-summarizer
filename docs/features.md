@@ -115,7 +115,7 @@ Today also records, locally only (`data/today-exposure/<day>.jsonl`; `ZS_TODAY_E
 turns it off), which papers it showed, how long each stayed on screen and which links
 you opened, and adds up to two clearly marked "Random check" papers per day from just
 below its bar (`ZS_TODAY_EXPLORATION_SLOTS`) so the ranking can later be checked against
-unbiased data. A review that is outdated but still of the same PDF stays on Today with an *Outdated review · Regenerate* line (a different or unresolved PDF is left out). Below the cards, **Not reviewed yet (N)** lists the best-ranked papers that have no usable review (same ranking, no verdict buttons); opening one starts its full review on the paper page. [Code](../zotero_summarizer/services/triage/) · [Tests](../tests/test_review_eligibility.py) · [Source-mode boundary](../tests/test_abstract_reading_boundary.py).
+unbiased data. When Zotero has not yet uploaded papers in your library to its cloud (they are missing on the iPad until it does), a line under the Today title says «N papers waiting for Zotero sync»; it is hidden at 0 and when Zotero cannot be read, and the app only reads Zotero's database to count them. A review that is outdated but still of the same PDF stays on Today with an *Outdated review · Regenerate* line (a different or unresolved PDF is left out). Below the cards, **Not reviewed yet (N)** lists the best-ranked papers that have no usable review (same ranking, no verdict buttons); opening one starts its full review on the paper page. [Code](../zotero_summarizer/services/triage/) · [Tests](../tests/test_review_eligibility.py) · [Source-mode boundary](../tests/test_abstract_reading_boundary.py).
 
 ### Today cards
 
