@@ -369,7 +369,9 @@ def build_reading_queue(
     filters only select which cached scores appear.
 
     Returns ``{status, items, total_unread, read_hidden, decided_count, model_ready,
-    error, computed_at, scores_stale}``."""
+    error, computed_at, scores_stale}`` — plus ``rank_coverage``/``rank_fill``/
+    ``balanced_weights`` (and ``rank_group``/``rank_parts`` on the rows) for a ranked,
+    search-free queue; see ``_ranking.rank_explain``."""
     # "Meaning" search ranks the WHOLE (collection/tag-scoped) library by hybrid
     # relevance, so the substring filter is bypassed; "Exact" keeps it.
     semantic_requested = bool(semantic and str(search or "").strip())
@@ -435,6 +437,7 @@ def build_reading_queue(
         "reranked": bool(search_flags.get("reranked")),
         "reranker_loading": bool(search_flags.get("reranker_loading")),
         "semantic_unavailable": bool(semantic_requested and not search_flags.get("semantic")),
+        **search_flags.get("rank", {}),  # rank_coverage / rank_fill / balanced_weights (Read-next presets)
         # Distribution over the full unread queue (not just the shown slice), so
         # the histogram reflects everything the current filter selects. The
         # prestige floor (median of the library's KNOWN prestige) gates the

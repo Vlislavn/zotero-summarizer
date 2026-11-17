@@ -29,6 +29,9 @@ import {
 import { isMachineTag } from '../utils/tags.js';
 import { fulltextMessage } from './todayHelpers.js';
 import { readStorage, writeStorage } from '../utils/safeStorage.js';
+import {
+  ORDER_STORAGE_KEY, BALANCED_ORDER, orderAvailable, readStoredOrder, sortByPreset,
+} from '../utils/readNextOrder.js';
 import useServerAvailable from '../hooks/useServerAvailable.js';
 import useUnavailableText from '../hooks/useUnavailableText.js';
 import { allPapers } from '../offlineStore.js';
@@ -78,11 +81,13 @@ export default function LibraryReadNext() {
   // Explicit Zotero-column sort (Title/Creator/Publication/Year/Date Added);
   // 'best' = the server's blended order untouched. URL-persisted like filters.
   const [sort, setSort] = useState(() => hydrateSort(searchParams));
+  // Read-next order preset (Best match only), kept on this device; Balanced = server order.
+  const [order, setOrder] = useState(readStoredOrder);
   const [queue, setQueue] = useState([]);
   const [queueMeta, setQueueMeta] = useState({
     read_hidden: 0, total_unread: 0, decided_count: 0, status: 'ready', model_ready: true,
     error: null, computed_at: null, scores_stale: false, distribution: null,
-    semantic: false, reranker_loading: false, semantic_unavailable: false,
+    semantic: false, reranker_loading: false, semantic_unavailable: false, order_meta: null,
   });
   const pollRef = useRef(null);
   const queueRequest = useRef(null);
@@ -176,10 +181,21 @@ export default function LibraryReadNext() {
   // What the list actually shows: client filters apply only when the model is
   // ready (the bar is hidden otherwise), the explicit sort applies always —
   // sorting by Title/Year needs no model.
+  // Order presets re-rank only a ranked, search-free list whose response has the parts.
+  const orderMeta = orderAvailable({
+    sortField: sort.field, search, modelReady: queueMeta.model_ready, meta: queueMeta.order_meta,
+  }) ? queueMeta.order_meta : null;
   const displayedQueue = useMemo(
-    () => sortQueue(queueMeta.model_ready ? filteredQueue : queue, sort),
-    [queueMeta.model_ready, filteredQueue, queue, sort],
+    () => sortByPreset(
+      sortQueue(queueMeta.model_ready ? filteredQueue : queue, sort),
+      orderMeta ? order : BALANCED_ORDER, orderMeta,
+    ),
+    [queueMeta.model_ready, filteredQueue, queue, sort, order, orderMeta],
   );
+  function changeOrder(next) {
+    setOrder(next);
+    writeStorage(ORDER_STORAGE_KEY, JSON.stringify(next));
+  }
   const visibleSelected = useMemo(
     () => new Set((queueLoading || queueErr ? [] : displayedQueue)
       .filter((row) => selected.has(row.item_key)).map((row) => row.item_key)),
@@ -262,6 +278,9 @@ export default function LibraryReadNext() {
       semantic: Boolean(data?.semantic),
       reranker_loading: Boolean(data?.reranker_loading),
       semantic_unavailable: Boolean(data?.semantic_unavailable),
+      order_meta: data?.rank_coverage
+        ? { coverage: data.rank_coverage, fill: data.rank_fill || {}, balancedWeights: data.balanced_weights }
+        : null,
     });
   }, []);
 
@@ -751,6 +770,9 @@ export default function LibraryReadNext() {
           offline={queueMeta.status === 'offline'}
           sort={sort}
           onSortChange={setSort}
+          order={order}
+          onOrderChange={changeOrder}
+          orderMeta={orderMeta}
           loading={queueLoading}
           err={queueErr}
           includeRead={includeRead}

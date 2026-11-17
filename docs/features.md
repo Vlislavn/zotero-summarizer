@@ -129,6 +129,10 @@ separate `card` model (operational, never affecting a review) and are generated 
 time for Today's top papers, so opening one is instant; generation respects a per-paper
 call cap, a daily token cap and a circuit breaker. [Code](../zotero_summarizer/services/card/).
 
+### Read next order
+
+Library → Read next with Sort = Best match has an **Order** list: Balanced (the server order), Relevance, My goals, Quality first and Custom (four sliders). A change re-sorts the list at once on this device, remembered per device; your own Must read stay first, nothing is hidden, a line under the toolbar shows the shares and how many papers each signal is known for, and **Why here** on a row shows its group, each signal's weight × value and the key. Order is hidden during a search and when the model is not ready. It changes only this list: Zotero rank numbers, «Review top N» and Today keep their own order. [Code](../frontend/src/utils/readNextOrder.js) · [Tests](../frontend/src/utils/readNextOrder.test.js).
+
 ### Reading reviews
 
 Open a paper in **Library** to get a digest, a reading plan beside the action, and

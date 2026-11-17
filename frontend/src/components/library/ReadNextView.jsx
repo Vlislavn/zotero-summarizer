@@ -6,7 +6,10 @@ import BulkVerdictBar from './BulkVerdictBar.jsx';
 import ScoreHistogram from './ScoreHistogram.jsx';
 import { StatusBanner, formatShortDate, truncateAuthors } from './shared.jsx';
 import { pretty } from '../../utils/priorityLabels.js';
-import { COUNTS_EXPLAINER, isDecided, mustGroupSize, queueCounts, scoreStatus } from './readNextCopy.js';
+import { COUNTS_EXPLAINER, isDecided, mustGroupSize, qualityHint, queueCounts, scoreStatus } from './readNextCopy.js';
+import { CustomPanel, OrderCaption, OrderSelect } from './OrderControls.jsx';
+import { WhyHereButton, WhyHerePanel } from './WhyHere.jsx';
+import { BALANCED_ORDER } from '../../utils/readNextOrder.js';
 import { CHIP_TONE, bandTone, gradeTone, gradeBasis, letterMuted, mutedReason, BAND_LABEL } from '../paper/review/tones.js';
 import { Disclosure } from '../paper/review/primitives.jsx';
 import { humanizeError } from '../../utils/humanizeError.js';
@@ -125,6 +128,10 @@ export default function ReadNextView({
   // Explicit Zotero-column sort (Library owns the state; `items` arrive already
   // sorted). 'best' = the blended server order.
   sort = DEFAULT_SORT, onSortChange,
+  // Read-next order presets: `orderMeta` ({coverage, fill, balancedWeights}) is set only
+  // where the Order control exists (Best match, no search, parts in the response);
+  // Library owns `order` and has already sorted `items` by it.
+  order = BALANCED_ORDER, onOrderChange, orderMeta = null,
 }) {
   const computing = status === 'computing';
   // A failed read must leave Rescore available even with retained last-good rows.
@@ -134,6 +141,9 @@ export default function ReadNextView({
     || items.some((it) => typeof it.relevance_score !== 'number');
   const [expandedKey, setExpandedKey] = useState(null);
   const [notesDirty, setNotesDirty] = useState(false);
+  const [whyKey, setWhyKey] = useState(null);  // the row whose «Why here» is open
+  const orderOn = Boolean(orderMeta && onOrderChange);
+  const activeOrder = orderOn ? order : BALANCED_ORDER;
   const expandedPanelRef = useRef(null);
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   // Target for the bulk "Add to collection" action. Defaults to the last-used
@@ -239,11 +249,12 @@ export default function ReadNextView({
               )}
             </span>
           )}
+          {orderOn && <OrderSelect order={order} meta={orderMeta} onChange={onOrderChange} />}
           {sort.field === 'best' && (
             offline ? <span>· cached working set order</span> : semantic
               ? <span>· ranked by similarity to “{searchQuery}”</span>
               : (modelReady
-                ? (
+                ? orderOn ? <OrderCaption order={order} meta={orderMeta} /> : (
                   <span title="Best first: your own Must read papers, then model relevance + goal match + author/venue and quality evidence. Review suggestions do not affect this order.">
                     · relevance + goals + evidence
                   </span>
@@ -338,6 +349,9 @@ export default function ReadNextView({
           </label>
         </div>
       </div>
+      {orderOn && order.preset === 'custom' && (
+        <CustomPanel order={order} meta={orderMeta} onChange={onOrderChange} />
+      )}
       <div className="-mt-1 mb-3">
         <Disclosure summary="About these counts">
           <p className="text-[11px] text-slate-500" data-testid="counts-explainer">{COUNTS_EXPLAINER}</p>
@@ -492,8 +506,8 @@ export default function ReadNextView({
                       {/* Why it surfaced — the top signal behind its rank (topic
                           match / library affinity / prestige). Answers "why did I
                           get this paper?" at a glance without opening the row. */}
-                      {it.why_reason && (
-                        <span className="min-w-0 max-w-full truncate text-slate-600" title={`Why it ranks here — the strongest signal behind its score: ${it.why_reason}`}>
+                      {it.why_reason && !(orderOn && it.rank_parts) && (
+                        <span className="min-w-0 max-w-full truncate text-slate-600" title={`Main model reason — the strongest signal behind its score: ${it.why_reason}`}>
                           · {it.why_reason}
                         </span>
                       )}
@@ -514,7 +528,7 @@ export default function ReadNextView({
                           return (
                             <span
                               className={`inline-flex items-center px-1.5 py-0 rounded-full border font-semibold ${CHIP_TONE[bandTone(band)]}`}
-                              title="Deep-review quality verdict — floats high-quality papers up (and sinks weak ones) WITHIN their relevance band, never across it."
+                              title={qualityHint(activeOrder.preset === 'balanced', 'Deep-review quality verdict')}
                             >
                               {BAND_LABEL[band]}
                             </span>
@@ -524,7 +538,7 @@ export default function ReadNextView({
                           return (
                             <span
                               className={`inline-flex items-center px-1.5 py-0 rounded-full border font-semibold ${CHIP_TONE[gradeTone(grade, band)]}`}
-                              title={`Full-text deep-review quality grade (A–D) — floats high-quality papers up within their relevance band.${letterMuted(grade, band) ? ` Grey A: checklist only — ${mutedReason(band)}.` : ''}`}
+                              title={`${qualityHint(activeOrder.preset === 'balanced', 'Full-text deep-review quality grade (A–D)')}${letterMuted(grade, band) ? ` Grey A: checklist only — ${mutedReason(band)}.` : ''}`}
                             >
                               {[grade, gradeBasis(it.quality_met, it.quality_applicable)].filter(Boolean).join(' · ')}
                             </span>
@@ -546,8 +560,27 @@ export default function ReadNextView({
               {/* Direct shortcut to the standalone HTML brief — a sibling of the
                   expand button (not nested inside it). Builds on demand if the
                   brief hasn't been generated yet, then opens it in a new tab. */}
-              <OpenBriefButton itemKey={it.item_key} hasPdf={Boolean(it.has_pdf)} />
+              <span className="shrink-0 flex flex-col items-end gap-1">
+                <OpenBriefButton itemKey={it.item_key} hasPdf={Boolean(it.has_pdf)} />
+                {/* «Why here»: a sibling button too — tap / keyboard, never hover. */}
+                {orderOn && it.rank_parts && (
+                  <WhyHereButton
+                    open={whyKey === it.item_key}
+                    onToggle={() => setWhyKey(whyKey === it.item_key ? null : it.item_key)}
+                    panelId={`why-here-${it.item_key}`}
+                  />
+                )}
+              </span>
             </div>
+            {orderOn && it.rank_parts && whyKey === it.item_key && (
+              <WhyHerePanel
+                item={it}
+                order={order}
+                meta={orderMeta}
+                mustCount={queueItems.filter((r) => r.rank_group === 0).length}
+                panelId={`why-here-${it.item_key}`}
+              />
+            )}
             {/* One-tap Confirm/Override for the fleet's proposal — the card
                 PredictionsBar's state line promises ("Confirm or Override on the
                 rows below"). Hidden while the row is expanded (Override opens the

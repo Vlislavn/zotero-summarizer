@@ -43,7 +43,7 @@ src/
                       useReviewCoolLoop, useServerAvailable, useKeyboardNav, useOptimisticAction, …
   api/                one thin wrapper per backend area on api/client.js `request` (quietly retries a 503 `database_busy` ≤2× for GETs and `idempotent: true` writes)
   utils/              pure helpers: configForm, settingsNavigation, todayVisit, relevanceBands,
-                      setupDoctorState, safeStorage, humanizeError, searchSort
+                      setupDoctorState, safeStorage, humanizeError, searchSort, readNextOrder
   offlineStore.js     IndexedDB papers / mutations (outbox) / meta
   syncClient.js       typed sync protocol over /api/sync/push|pull
   searchPolling.js, questionSubmission.js
@@ -194,6 +194,7 @@ source tasks open with `?task=`; the old Settings hashes resolve through `LEGACY
 - Decision (Select & label default): the filter stays **Must read** (the owner's labelling queue), but the chips now start with **All**, the active chip carries a ✓ and a ring (`aria-pressed`), and the header/progress name the filter ("Must read: 143 of 160"). Revisit only if opening on All proves wanted.
 - Paper figures: "+ Attach to Zotero" (`PaperReviewPage`) is hidden unless the render is completed and current — never while figures are outdated or rebuilding.
 - Library Read next: in the default order the server puts the owner's own unread Must read (`decided` + `user_priority=must_read`) first and the other `decided` papers after the undecided ones; `ReadNextView` shows a «Your Must read (N)» header over the group (none in text search, Meaning mode, other sorts or the offline set), states one set of counts (`components/library/readNextCopy.js` — N Your Must read · to decide · decided (last) · read hidden; sum = queue), the score age/staleness next to Rescore, and a divider before the other decided papers. "Cool papers" is called "top picks".
+- Library Read next **Order** (Sort = Best match, no search, response has `rank_coverage`): `utils/readNextOrder.js` holds the presets, the stored choice (`localStorage` `zs:readNextOrder`; unknown/broken value → Balanced), the key (Σ weight × part over the signals with data; an unknown part takes `rank_fill`) and `sortByPreset` (group ↑ → scored first → key ↓ → date added ↓; rows without `rank_group` stay last); Balanced returns the server order untouched. `OrderControls.jsx` (Order select, state line, Custom sliders) and `WhyHere.jsx` (a sibling button of the row button + panel: group, weight × part per signal, key, the model's main reason) render it; `LibraryReadNext` applies it before `zs.reviewOrder` is written, so Prev/Next follows the shown order.
 
 **Configuration writes**
 - `components/settings/ConfigTask.jsx` captures the saved snapshot and its `_revision`, PUTs
