@@ -329,8 +329,8 @@ def _verdict_priorities() -> dict[str, str]:
     """``{item_key: user_priority}`` for the user's manual verdicts (``label_verdicts``).
 
     Only ``dont_read`` is "handled" (drops out of Read next, like the Today
-    slate); a POSITIVE verdict is a reading intent, so the paper stays but sorts
-    after the undecided ones (``_ranking.sort_unread``) — findable, not hidden.
+    slate); a POSITIVE verdict is a reading intent, so the paper stays: the owner's own
+    Must read lead, other decided ones sort after the undecided (``_ranking.sort_unread``).
     UNCAPPED reader: a paged fetch un-hides handled papers once the table outgrows
     it (the 500-cap training-bug failure class).
     """
@@ -424,7 +424,7 @@ def build_reading_queue(
         "items": items,
         "total_unread": len(unread),
         "read_hidden": len(read),
-        # Of ``total_unread``: papers with the owner's own verdict, sorted last.
+        # Of ``total_unread``: papers with the owner's own verdict (Must read first, the rest last).
         "decided_count": sum(1 for r in unread if r["decided"]),
         "model_ready": model_ready,
         "error": err if status == "error" else None,

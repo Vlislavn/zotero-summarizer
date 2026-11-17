@@ -137,14 +137,23 @@ def _blended_sort(unread: list[dict[str, Any]]) -> None:
     unread[:] = [base[i][0] for i in order] + unscored
 
 
-def sort_unread(unread: list[dict[str, Any]], *, model_ready: bool) -> None:
+def _group_rank(rec: dict[str, Any], lift_must: bool) -> int:
+    """0 = the owner's own Must read (``decided`` + ``user_priority``: a machine
+    label is not a decision), 1 = still to decide, 2 = otherwise decided."""
+    if not rec.get("decided"):
+        return 1
+    return 0 if lift_must and rec.get("user_priority") == "must_read" else 2
+
+
+def sort_unread(unread: list[dict[str, Any]], *, model_ready: bool, lift_must: bool = True) -> None:
     """Order the unread queue IN PLACE (the queue's normal, non-search order).
 
     Gate ready → relevance × goal × prestige blend (attaches ``goal_sim`` per row;
     each optional term folds into relevance when its signal is absent, so with no
     goals AND no known prestige this is gate-score-then-recency). Gate not ready →
     priority-tier then recency. Only ORDER changes; banding stays from the gate
-    score. See ``_blended_sort`` / ``rank_blend.GOAL_BLEND_WEIGHT``."""
+    score. See ``_blended_sort`` / ``rank_blend.GOAL_BLEND_WEIGHT``. ``lift_must``
+    puts the owner's own Must read first (off for a text search)."""
     if model_ready:
         # goal_sim is precomputed at rescore time and carried on each rec from the
         # score cache (_build_recs). Only items still missing it — legacy cache
@@ -170,11 +179,11 @@ def sort_unread(unread: list[dict[str, Any]], *, model_ready: bool) -> None:
             key=lambda c: (_PRIORITY_RANK.get(c["reading_priority"], 0), c["date_added"]),
             reverse=True,
         )
-    # Papers the owner already decided (own verdict) go LAST: Read next leads with
-    # what still needs a decision. Stable, so the blended order is kept within each
-    # group; they stay findable (verdict shown on the row), never hidden.
+    # One stable pass (blended order kept within each group, nothing hidden):
+    # the owner's own unread Must read lead as a group, then what still needs a
+    # decision, then the rest of the papers the owner already decided (own verdict).
     if any(r.get("decided") for r in unread):
-        unread.sort(key=lambda c: -1 if c.get("decided") else 0, reverse=True)
+        unread.sort(key=lambda c: _group_rank(c, lift_must))
 
 
 def _build_recs(
@@ -191,7 +200,7 @@ def _build_recs(
     "Handled" = engaged (emoji) OR explicitly rejected (``dont_read``); those drop
     out of the unread queue. A POSITIVE verdict is a reading intent — the paper
     stays in ``unread`` but is flagged ``decided`` (own verdict, ``own_verdicts``)
-    and sorts after the undecided papers (``sort_unread``). The
+    and is grouped by ``sort_unread`` (own Must read first, other decided last). The
     ``proposed_verdict`` and quality fields are display-only sidecars (never fed to
     the hide/pin logic)."""
     from zotero_summarizer.services.library.review_fleet.verdict_store import proposal_matches_review
@@ -292,7 +301,7 @@ def _order_and_dedup(
         from zotero_summarizer.services.library import _search
         unread, search_flags = _search.order_unread_semantic(search, unread)
     if not search_flags.get("semantic"):
-        sort_unread(unread, model_ready=model_ready)
+        sort_unread(unread, model_ready=model_ready, lift_must=not (search or "").strip())
     unread = _dedup_by_content(unread)
     _unread_keys = {k for r in unread if (k := _content_key(r))}
     read = [r for r in _dedup_by_content(read) if _content_key(r) not in _unread_keys]

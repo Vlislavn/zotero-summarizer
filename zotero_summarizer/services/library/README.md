@@ -45,7 +45,7 @@ code_link, verification_audit, review_identity, review_contract_version, …}`.
 
 | file | responsibility |
 |---|---|
-| `reading_queue.py` | Read-next queue, global score cache (`gate_sha` = live `model_sha256`), Rescore job, `distribution`, handled filter, `decided` flag + `decided_count` (owner's own verdict → sorted last) |
+| `reading_queue.py` | Read-next queue, global score cache (`gate_sha` = live `model_sha256`), Rescore job, `distribution`, handled filter, `decided` flag + `decided_count` (owner's own verdict → own Must read first, the other decided last) |
 | `_ranking.py` / `_score_distribution.py` / `_row_why.py` | library records (260-char `abstract_preview`, `decided`) → unread/handled queue records, content de-dup, adapter to `services/model/rank_blend`, histogram and prestige floor; `_row_why` turns the top informative SHAP feature into a plain `why_reason` sentence (None when only bookkeeping features contributed); `_row_nearest` (hooked at the end of `_build_recs`) swaps the generic "topic close to papers you saved" for `close to: <title of the nearest kept paper>` using the cached corpus embeddings (no model load; the generic sentence stays when no neighbour is known) and owns the shared `corpus_cache()` opener |
 | `_search.py` | library hybrid search (BM25 + dense via RRF + reranker); `order_unread_semantic` is the queue seam |
 | `score_tags.py` | `sync_rel_tags` / `sync_score_ranks`: backup-first Zotero writes of relevance tags and Call-Number ranks |
@@ -159,7 +159,7 @@ code_link, verification_audit, review_identity, review_contract_version, …}`.
 
 ### Reading queue
 - Rescore builds a fresh whole-library snapshot, pins its gate/config once at start, and publishes atomically only after every batch succeeds; failure keeps the old file. Corrupt cache JSON raises.
-- A `dont_read` verdict hides; positive verdicts stay but the owner's OWN (`source='user'`, `list_user_verdict_keys`) sort after the undecided papers (`decided=true`); machine verdicts (`machine_add`, `auto_quality`) do not count as decisions. `proposed_verdict` is display-only and never enters `_verdict_priorities`. Handled filtering uses the uncapped `list_label_verdict_priorities`.
+- A `dont_read` verdict hides; positive verdicts stay; the owner's OWN (`source='user'`, `list_user_verdict_keys`; `decided=true`) with `user_priority='must_read'` lead the default order as a group (`_ranking._group_rank`, same blended order inside; off for a text search), the other decided sort after the undecided papers; machine verdicts (`machine_add`, `auto_quality`) do not count as decisions. `proposed_verdict` is display-only and never enters `_verdict_priorities`. Handled filtering uses the uncapped `list_label_verdict_priorities`.
 - Quality lift and hybrid search only reorder; gate relevance and banding stay from the score. `ZS_QUALITY_PROMOTE` (default off) is the one path that raises a band (one step, to `must_read`; user verdicts win). Blend math lives in `services/model/rank_blend`.
 - `sync_rel_tags` and `sync_score_ranks` refuse stale scores ("Rescore first"); `sync_score_ranks` skips items whose Call Number already equals the computed rank and user-owned Call Numbers.
 

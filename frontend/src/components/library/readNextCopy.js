@@ -6,19 +6,33 @@ import { formatShortDate, timeAgo } from './shared.jsx';
 // offline working set carry no `decided` flag; a bare user_priority then stands in.
 export const isDecided = (row) => row.decided ?? Boolean(row.user_priority);
 
+// Your own Must read: the owner's verdict (`decided`, not a machine label) says so.
+const isOwnMustRead = (row) => row.decided === true && row.user_priority === 'must_read';
+
+// Size of the leading «Your Must read» group of an ordered list (the server puts
+// those rows first in the default order); 0 when the list has none up front.
+export function mustGroupSize(items) {
+  const end = items.findIndex((row) => !isOwnMustRead(row));
+  return end < 0 ? items.length : end;
+}
+
 // One consistent set of counts: queue = unread library papers; the rest are
-// subsets or hidden. `shown` differs from the queue size only under client filters.
-export function queueCounts({ totalUnread, decidedCount, readHidden, includeRead, shown, filtered }) {
+// subsets or hidden. `mustCount` is the Your-Must-read group (a part of the
+// decided ones, listed first); only the other decided ones come last.
+// `shown` differs from the queue size only under client filters.
+export function queueCounts({ totalUnread, decidedCount, mustCount = 0, readHidden, includeRead, shown, filtered }) {
   const undecided = Math.max(0, totalUnread - (decidedCount || 0));
+  const lastDecided = Math.max(0, (decidedCount || 0) - mustCount);
   const parts = [`${undecided} to decide`];
-  if (decidedCount > 0) parts.push(`${decidedCount} already decided by you (last)`);
+  if (mustCount > 0) parts.unshift(`${mustCount} Your Must read`);
+  if (lastDecided > 0) parts.push(`${lastDecided} already decided by you (last)`);
   if (readHidden > 0 && !includeRead) parts.push(`${readHidden} read hidden`);
   if (filtered) parts.push(`${shown} match your filters`);
   return parts;
 }
 
-export const COUNTS_EXPLAINER = 'Queue = unread library papers (ones you judged come last; read ones are '
-  + 'hidden). Select & label = papers you have read. The header’s “cached” = the offline copy.';
+export const COUNTS_EXPLAINER = 'Queue = unread library papers (your own Must read lead, the other ones you '
+  + 'judged come last; read ones are hidden). Select & label = papers you have read. The header’s “cached” = the offline copy.';
 
 // Where the ranking comes from, stated next to Rescore: when, and whether the
 // model has changed since (stale) — plus how many rows have no score at all.

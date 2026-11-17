@@ -137,12 +137,12 @@ def test_positive_verdict_stays_visible_and_sorts_after_undecided(monkeypatch):
     """A positive verdict (must/should/could_read) is a reading INTENT, not 'done':
     the paper stays in Read next, flagged ``decided`` and sorted AFTER the papers
     still awaiting a decision (even with the highest relevance). Only ``dont_read``
-    hides."""
+    hides. (``should_read`` here; the owner's own Must read leads — next test.)"""
     from zotero_summarizer.storage import repositories
 
     _patch_state(monkeypatch, _FakeReader([_item("A"), _item("B"), _item("L")]), _FakeGate("sha1"))
     _seed("sha1", A=3.0, B=4.5, L=5.0)
-    monkeypatch.setattr(repositories, "list_label_verdict_priorities", lambda db_path: {"L": "must_read"})
+    monkeypatch.setattr(repositories, "list_label_verdict_priorities", lambda db_path: {"L": "should_read"})
     monkeypatch.setattr(repositories, "list_user_verdict_keys", lambda db_path: {"L"})
     res = reading_queue.build_reading_queue()
     keys = [i["item_key"] for i in res["items"]]
@@ -150,11 +150,12 @@ def test_positive_verdict_stays_visible_and_sorts_after_undecided(monkeypatch):
     assert set(keys) == {"A", "B", "L"}         # nothing hidden
     assert res["read_hidden"] == 0 and res["decided_count"] == 1
     decided = next(i for i in res["items"] if i["item_key"] == "L")
-    assert decided["user_priority"] == "must_read" and decided["decided"] is True
+    assert decided["user_priority"] == "should_read" and decided["decided"] is True
 
 
 def test_decided_papers_follow_undecided_keeping_relevance_order(monkeypatch):
-    """Decided papers trail the undecided ones; relevance order holds within each."""
+    """Decided papers trail the undecided ones; relevance order holds within each.
+    The owner's own Must read ("must") leads as a group instead."""
     from zotero_summarizer.storage import repositories
 
     _patch_state(
@@ -168,7 +169,7 @@ def test_decided_papers_follow_undecided_keeping_relevance_order(monkeypatch):
     monkeypatch.setattr(repositories, "list_user_verdict_keys", lambda db_path: set(labels))
     res = reading_queue.build_reading_queue()
     keys = [i["item_key"] for i in res["items"]]
-    assert keys == ["plain", "could", "should", "must"]
+    assert keys == ["must", "plain", "could", "should"]
 
 
 def test_read_items_hidden_live_and_shown_with_toggle(monkeypatch):

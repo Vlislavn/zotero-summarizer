@@ -6,7 +6,7 @@ import BulkVerdictBar from './BulkVerdictBar.jsx';
 import ScoreHistogram from './ScoreHistogram.jsx';
 import { StatusBanner, formatShortDate, truncateAuthors } from './shared.jsx';
 import { pretty } from '../../utils/priorityLabels.js';
-import { COUNTS_EXPLAINER, isDecided, queueCounts, scoreStatus } from './readNextCopy.js';
+import { COUNTS_EXPLAINER, isDecided, mustGroupSize, queueCounts, scoreStatus } from './readNextCopy.js';
 import { CHIP_TONE, bandTone, gradeTone, gradeBasis, letterMuted, mutedReason, BAND_LABEL } from '../paper/review/tones.js';
 import { Disclosure } from '../paper/review/primitives.jsx';
 import { humanizeError } from '../../utils/humanizeError.js';
@@ -22,10 +22,19 @@ import { readStorage } from '../../utils/safeStorage.js';
 const REVEAL_STEP = 60;  // rows revealed initially and per "Show more" click
 const DESKTOP_QUERY = '(min-width: 1024px)';
 
-// Your own verdict. A decided paper sorts AFTER the undecided ones (the backend
-// sort) and carries this chip, so it stays findable instead of vanishing
-// (dont_read is handled-filtered, so it never reaches the queue).
+// Your own verdict. A decided paper carries this chip, so it stays findable instead
+// of vanishing (dont_read is handled-filtered, so it never reaches the queue). In
+// the default order the backend leads with your Must read and sorts the other
+// decided ones AFTER the undecided ones.
 const USER_PRIORITY_LABEL = { must_read: 'must read', should_read: 'should read', could_read: 'could read' };
+
+function GroupLabel({ children }) {
+  return (
+    <div className="mb-2 mt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500" role="separator">
+      {children}
+    </div>
+  );
+}
 
 function useMediaQuery(query) {
   const getMatches = () => (
@@ -99,7 +108,7 @@ const previewText = (text) => cleanAbstract(text).replace(/<\/?[a-z][^>]*$/i, ''
 
 export default function ReadNextView({
   items, loading, err, includeRead, onToggleIncludeRead,
-  readHidden, totalUnread, decidedCount = 0, onSaved, status, modelReady, error, computedAt, scoresStale, distribution, onRescore, onReload,
+  readHidden, totalUnread, decidedCount = 0, queueItems = items, onSaved, status, modelReady, error, computedAt, scoresStale, distribution, onRescore, onReload,
   selectMode, onToggleSelectMode, selected, onToggleItem, onRunTriage, onBulkDone, starting,
   // Bulk "Add to collection" (the Meaning-search → Zotero collection shortcut):
   // flat collection list + handler from Library; last target remembered so the
@@ -143,9 +152,12 @@ export default function ReadNextView({
   // reset the reveal here instead.
   useEffect(() => { setVisibleCount(REVEAL_STEP); }, [filterSig]);
   const shown = items.slice(0, visibleCount);
-  // Default order groups decided papers last — label where that group starts.
+  // Default order: your own Must read lead as a group, the other decided papers
+  // come last — label where each group starts (a text search has no Must read group).
   const groupDecided = sort.field === 'best' && !semantic && !offline;
-  const firstDecided = groupDecided ? shown.findIndex(isDecided) : -1;
+  const groupMust = groupDecided && !searchQuery.trim();
+  const mustCount = groupMust ? mustGroupSize(items) : 0;  // shown rows (client filters applied)
+  const firstDecided = groupDecided ? shown.findIndex((it, i) => i >= mustCount && isDecided(it)) : -1;
   // Desktop keeps the review beside the list. Mobile renders it directly under
   // the tapped row; otherwise the panel lands after the whole revealed list.
   const expandedItem = expandedKey ? items.find((it) => it.item_key === expandedKey) : null;
@@ -187,6 +199,7 @@ export default function ReadNextView({
           <span title={COUNTS_EXPLAINER}>
             {queueCounts({
               totalUnread, decidedCount, readHidden, includeRead,
+              mustCount: groupMust ? mustGroupSize(queueItems) : 0,
               shown: items.length, filtered: hasActiveFilters,
             }).map((part, i) => (
               <span key={part} className={i === 0 ? '' : 'text-slate-500'}>
@@ -206,7 +219,7 @@ export default function ReadNextView({
                   onSortChange(field === 'best' ? DEFAULT_SORT : { field, dir: SORT_DEFAULT_DIR[field] });
                 }}
                 className="px-1.5 py-0.5 rounded-md border border-slate-300 text-[11px] text-slate-700 bg-white"
-                title="Sort the list — same columns as Zotero. Best match uses relevance, goals, and evidence; review suggestions do not affect order."
+                title="Sort the list — same columns as Zotero. Best match puts your own Must read first, then uses relevance, goals, and evidence; review suggestions do not affect order."
                 aria-label="Sort by"
               >
                 {SORT_FIELDS.map((f) => (
@@ -231,7 +244,7 @@ export default function ReadNextView({
               ? <span>· ranked by similarity to “{searchQuery}”</span>
               : (modelReady
                 ? (
-                  <span title="Best first: model relevance + goal match + author/venue and quality evidence. Review suggestions do not affect this order.">
+                  <span title="Best first: your own Must read papers, then model relevance + goal match + author/venue and quality evidence. Review suggestions do not affect this order.">
                     · relevance + goals + evidence
                   </span>
                 )
@@ -410,13 +423,11 @@ export default function ReadNextView({
       <ol className={`space-y-2 ${expandedItem && isDesktop ? 'lg:flex-1 lg:min-w-0' : ''}`}>
         {shown.map((it, idx) => (
           <li key={it.item_key}>
-            {/* Undecided papers lead; the owner's own verdicts follow under one
-                labelled divider (only in the default order, where they are grouped). */}
-            {groupDecided && idx === firstDecided && (
-              <div className="mb-2 mt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500" role="separator">
-                Already decided by you
-              </div>
-            )}
+            {/* Your own Must read lead under one labelled header, then the papers
+                still to decide; your other verdicts follow under a divider (only in
+                the default order, where they are grouped). */}
+            {idx === 0 && mustCount > 0 && <GroupLabel>Your Must read ({mustCount})</GroupLabel>}
+            {groupDecided && idx === firstDecided && <GroupLabel>Already decided by you</GroupLabel>}
             <div
               className={`w-full flex items-start gap-2 p-2.5 rounded-xl border bg-white hover:border-teal-300 hover:bg-teal-50/30 ${
                 expandedKey === it.item_key ? 'border-teal-400 ring-1 ring-teal-200' : 'border-slate-200'
@@ -448,12 +459,12 @@ export default function ReadNextView({
                   {(it.user_priority || it.proposed_verdict?.proposed || typeof it.relevance_score === 'number') && (
                     <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-5">
                       {/* Your own verdict leads the row (Von Restorff): a decided
-                          paper is listed after the undecided ones and flagged
-                          here, so deciding makes it findable, never hidden. */}
+                          paper is flagged here, so deciding makes it findable,
+                          never hidden. */}
                       {isDecided(it) && USER_PRIORITY_LABEL[it.user_priority] && (
                         <span
                           className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-amber-100 text-amber-900 border border-amber-300 font-semibold"
-                          title="Your own verdict — you already decided this paper, so it is listed after the undecided ones."
+                          title="Your own verdict — you already decided this paper. Your Must read lead the list; the other decided ones come after the undecided."
                         >
                           You: {USER_PRIORITY_LABEL[it.user_priority]}
                         </span>

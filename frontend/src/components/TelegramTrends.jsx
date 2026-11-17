@@ -29,7 +29,7 @@ function Behind({ topic, cards, onOpenCard }) {
   const linked = new Set(cards.map((post) => post.permalink));
   const others = (topic.examples || []).filter((example) => !linked.has(example.permalink)).slice(0, 3);
   return <div className="space-y-1.5">
-    {ids && <p>{cards.length > 0 ? `${cards.length} of ${postsText(ids.length)} ${cards.length === 1 ? 'has' : 'have'} a discussion card:` : 'No comments collected for these posts yet.'}</p>}
+    {ids && <p>{cards.length > 0 ? `${cards.length} of ${postsText(ids.length)} ${cards.length === 1 ? 'has' : 'have'} a discussion card:` : 'No discussion card for this trend yet. At each check, comments are collected only for posts with the most replies and the closest to your goals. Open the posts in Telegram to see if there is a discussion.'}</p>}
     {cards.length > 0 && <ul className="space-y-0.5">{cards.map((post) => <li key={post.source_id} className="break-words">
       <a href={`#${cardId(post.source_id)}`} onClick={(event) => { event.preventDefault(); onOpenCard(post.source_id); }}
         className="inline-flex min-h-11 items-center text-forest-800 underline underline-offset-2 sm:min-h-8">{headlineOf(post.text, post.channel) || 'No text'} · @{post.channel}</a></li>)}</ul>}

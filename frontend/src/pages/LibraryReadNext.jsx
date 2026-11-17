@@ -758,6 +758,7 @@ export default function LibraryReadNext() {
           readHidden={queueMeta.read_hidden}
           totalUnread={queueMeta.total_unread}
           decidedCount={queueMeta.decided_count}
+          queueItems={queue}
           status={queueMeta.status}
           modelReady={queueMeta.model_ready}
           error={queueMeta.error}
