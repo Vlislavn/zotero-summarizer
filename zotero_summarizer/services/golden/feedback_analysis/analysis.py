@@ -182,7 +182,7 @@ def _interaction(event, data):
         explicit = explicit or data.get("source") in {"offline_sync", "sync_conflict_resolution"}
         event.update(kind="label_transition" if explicit else "nonpreference", value=data["new_user_priority"],
                      previous=data["previous_user_priority"] if data["history_known"] else None,
-                     prediction=_priority(data.get("model_priority")))
+                     prediction=_priority(data.get("model_priority")), post_read=data.get("post_read") is True)
         if event["value"] is not None and _priority(event["value"]) is None:
             event["kind"] = "nonpreference"
     else:
@@ -309,9 +309,23 @@ def _item_exclusions(events, family, state, cutoff):
             gap(state, reason, event["locator"])
 
 
+def _known_item_keys(records, family):
+    """Keys the retained snapshots know; a logged decision on any other key (test
+    fixtures, papers gone from every snapshot) has no paper to attach to and is
+    flagged ``unknown_item`` (counted in ``coverage.unknown_item_events``; its
+    eligibility is unchanged). ``None`` when no feed-item snapshot is retained."""
+    if not family.mapping:
+        return None  # no feed-item snapshot retained: nothing to tell a real key from a fixture
+    keys = set(family.mapping) | family.ambiguous
+    keys.update(str(r["data"]["item_key"]).strip() for r in records
+                if r["channel"] in {"golden_csv", "label_verdicts", "review_notes"})
+    return keys
+
+
 def _events(state, family, cutoff, guard):
     events, journals, prior = [], [], {}
     ignored = {"feed_key_aliases", "feed_key_alias_ambiguities"}
+    known = _known_item_keys(state["records"], family)
     for record in state["records"]:
         guard.check()
         if record["channel"] in ignored:
@@ -319,6 +333,8 @@ def _events(state, family, cutoff, guard):
         event = _base(record, family, cutoff)
         if record["channel"] == "interaction_log":
             _interaction(event, record["data"])
+            if known is not None and event["item_key"] not in known:
+                event["unknown_item"] = True
         elif record["channel"] == "sync_changes":
             journals.append((event, record["data"]))
         else:
@@ -328,6 +344,8 @@ def _events(state, family, cutoff, guard):
         elif event["time_basis"] == "naive_origin_unproven":
             gap(state, "unproven_timestamp_origin", event["locator"])
         events.append(event)
+    if any(e.get("unknown_item") for e in events):
+        gap(state, "unknown_item")  # per-event count: coverage.unknown_item_events
     _item_exclusions(events, family, state, cutoff)
     for event, data in journals:
         _journal(event, data, prior, state)
@@ -401,10 +419,13 @@ def analyze_inputs(destination: Path, *, budgets=None) -> dict:
                                                                               configured.max_decoded_bytes)},
               "rules": RULES.copy(), "coverage": {"sources": state["sources"], "tables": state["tables"],
                   "unique_current_paper_groups": len(papers), "raw_observations": len(events),
-                  "content_multiplicity": dict(Counter(e["content_group"] for e in events)),
+                  "content_multiplicity": {group: n for group, n in Counter(
+                      e["content_group"] for e in events).items() if n > 1},
+                  "unknown_item_events": sum(bool(e.get("unknown_item")) for e in events),
                   "exclusions": dict(Counter(e["eligibility"] for e in events if e["eligibility"] != "eligible")),
                   "date_coverage": _date_coverage(events), "snapshot_profiles": _snapshot_profiles(events)},
-              "papers": papers, "events": events, "periods": periods(events, cutoff, state["tables"], state["sources"], guard),
+              "papers": papers, "events": [_serialized(e) for e in events],
+              "periods": periods(events, cutoff, state["tables"], state["sources"], guard),
               "chronological": chronological(events, papers, cutoff, split_at),
               "ranking": {"status": "unscorable", "precision_at_10": None, "ndcg_at_10": None,
                           "reasons": ["immutable_exposed_ordered_slates_unavailable", "fully_timed_slate_judgments_unavailable"]},
@@ -415,6 +436,11 @@ def analyze_inputs(destination: Path, *, budgets=None) -> dict:
         raise ValueError("retained bundle changed during analysis")
     guard.check()
     return result
+
+
+def _serialized(event):
+    """Result-contract form of an event: null-valued keys are omitted (absent == null)."""
+    return {key: value for key, value in event.items() if value is not None}
 
 
 def _date_coverage(events):

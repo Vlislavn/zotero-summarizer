@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { telegramFeedApi } from '../api/researchFeedApi.js';
+import TelegramLink, { isSafeHref } from './TelegramLink.jsx';
 
 // A thread of comments in message order, full text, fetched when this opens (the digest ships only the summary points).
 // A reply shows who it answers (the parent's first words); `ids` limits the list to cited comments (a summary point),
@@ -20,6 +21,9 @@ export default function TelegramThread({ sourceId, ids }) {
       return <li key={row.id} className="break-words border-l-2 border-sage-300 pl-3 text-slate-800">
         {parent && <span className="mb-0.5 block text-xs text-slate-600">↳ {parent.text.slice(0, PARENT_CHARS)}{parent.text.length > PARENT_CHARS ? '…' : ''}</span>}
         <span className="whitespace-pre-wrap">{row.text}</span>
+        {/* The stored comment permalink (public discussion groups only); private groups and old snapshots have none. */}
+        {isSafeHref(row.permalink) && <span className="mt-0.5 block text-xs">
+          <TelegramLink href={row.permalink} aria-label="Open this comment in Telegram" className="relative text-slate-600 underline underline-offset-2 before:absolute before:-inset-x-2 before:-inset-y-3.5 before:content-[''] hover:text-forest-800 sm:before:-inset-y-1">Telegram ↗</TelegramLink></span>}
       </li>;
     })}
   </ol>;

@@ -11,6 +11,7 @@ import LinksRow from '../components/paper/LinksRow.jsx';
 import AbstractBlock from '../components/paper/PaperDetailView/AbstractBlock.jsx';
 import PaperReview from '../components/paper/review/PaperReview.jsx';
 import EvidenceFold from '../components/paper/review/EvidenceFold.jsx';
+import ReviewFeedback from '../components/paper/review/ReviewFeedback.jsx';
 import ReviewFailure from '../components/paper/ReviewFailure.jsx';
 import ReviewModelStatus from '../components/paper/ReviewModelStatus.jsx';
 import RelatedPapers from '../components/paper/RelatedPapers.jsx';
@@ -84,6 +85,7 @@ function ReviewZone({ deep, runner, sectionOverlay, itemKey }) {
       {showReview && <PaperReview deep={settling ? { ...deep, review_freshness: null } : deep} flat sectionOverlay={sectionOverlay} facts={facts}
         evidence={<EvidenceFold itemKey={itemKey} lost={deep.not_established_fields || []} />}
         onRegenerate={runner.checkingStatus ? null : () => runner.run()} />}
+      {showReview && deep.reviewed_at && <ReviewFeedback key={`${itemKey}|${deep.reviewed_at}`} itemKey={itemKey} reviewedAt={deep.reviewed_at} />}
       {running ? (
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-5 text-[13px] text-slate-600" role="status" aria-live="polite">
           <div className="flex items-center gap-2 font-medium text-slate-700">

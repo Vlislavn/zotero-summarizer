@@ -136,7 +136,7 @@ def test_v11_upgrade_preserves_original_evaluation_and_legacy_cursor(tmp_path):
     with closing(repositories._connect_to(corpus)) as conn:
         assert [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")] == [
             "schema_migrations"]
-    assert migrations.SCHEMA_VERSION == 18
+    assert migrations.SCHEMA_VERSION == 19
 
 
 def test_saved_upsert_stays_uninitialized_unbound_and_nonpaper(store):

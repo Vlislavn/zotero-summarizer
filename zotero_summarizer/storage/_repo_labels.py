@@ -143,6 +143,42 @@ def upsert_label_verdict(
     return int(row[0]), previous
 
 
+def label_alias_resolver(db_path: Path):
+    """``key -> alias family`` resolver (:func:`review_notes.alias_resolver`) loaded once.
+
+    A legacy store without the feed/alias tables has no aliases: every key is its own family."""
+    conn = _connect_to(db_path)
+    try:
+        return review_notes.alias_resolver(conn)
+    except sqlite3.OperationalError as exc:
+        if "no such table:" not in str(exc).lower():
+            raise
+        return lambda item_key: [item_key]
+    finally:
+        conn.close()
+
+
+def list_label_verdict_family(db_path: Path, item_key: str, resolver=None) -> list[dict[str, Any]]:
+    """Every verdict row stored under any alias of ``item_key``'s paper, newest first.
+
+    One paper can carry a ``feed:g:`` row and a Zotero-key row (both stay stored);
+    callers needing the paper's current verdict take the newest ``source='user'`` row.
+    Bulk callers pass one ``resolver`` from :func:`label_alias_resolver`.
+    """
+    keys = (resolver or label_alias_resolver(db_path))(str(item_key or "").strip())
+    conn = _connect_to(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT id, item_key, original_derived_priority, user_priority, comment, created_at, "
+            "source, reasons_json, proposal_json FROM label_verdicts "
+            f"WHERE item_key IN ({','.join('?' * len(keys))}) "
+            "ORDER BY datetime(created_at) DESC, id DESC", keys,
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_row_to_label_verdict(row) for row in rows]
+
+
 def get_label_verdict(db_path: Path, item_key: str) -> dict[str, Any] | None:
     """Return one verdict for ``item_key`` or None if not present.
 
@@ -351,6 +387,8 @@ __all__ = [
     "insert_or_update_label_verdict",
     "upsert_label_verdict",
     "get_label_verdict",
+    "label_alias_resolver",
+    "list_label_verdict_family",
     "list_all_label_verdicts",
     "list_label_verdict_keys",
     "list_label_verdict_priorities",

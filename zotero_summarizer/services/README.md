@@ -142,7 +142,7 @@ reason instead of degrading silently; new subsystem = one checker + one row),
 `run_log` (run IDs combine a readable timestamp with a stdlib UUID, so same-second
 and concurrent commands cannot share report paths; latest-per-classifier reads
 append order, not lexical ID order),
-`interaction_log` (append-only **agentic interaction log** → `data/interaction-events.jsonl`:
+`interaction_log` (append-only **agentic interaction log** → `data/interaction-events.jsonl`; label events carry `post_read` when the change was made after the paper had a usable published review:
 one immutable JSON line per human reading decision — including explicit `label_transition`
 assignment/change/retraction events with separate prior-user/current-user/model values — plus
 the daemon's 7-day behavioural outcome; reuses `run_log`'s NDJSON appender,

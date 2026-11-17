@@ -27,6 +27,7 @@ GAP_TEXT = {
     "unproven_timestamp_origin": "Records whose time cannot be trusted are left out of the weekly numbers",
     "item_time_unproven": "Items with an unproven time are left out",
     "ambiguous_identity": "Papers that could not be matched to one identity are left out",
+    "unknown_item": "Some log entries are for items in none of the retained snapshots (often test leftovers); they are flagged, not removed",
     "missing_classifier_runs_log": "No classifier training log was found",
     "interaction_schema1_has_no_durable_event_identity": "Older log entries cannot be told apart from repeats",
     "current_alias_mapping_not_historical_identity_availability": "Paper identities reflect today's mapping, not the past",

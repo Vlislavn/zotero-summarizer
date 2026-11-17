@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { telegramFeedApi } from '../api/researchFeedApi.js';
 import Icon from './ui/Icon.jsx';
-import TelegramPost from './TelegramPost.jsx';
+import TelegramPost, { cardId } from './TelegramPost.jsx';
 import TelegramTrends from './TelegramTrends.jsx';
 
 const UNDO_MS = 10000;
@@ -13,15 +13,23 @@ export default function TelegramFeed({ data }) {
   const cache = useQueryClient();
   const [showRead, setShowRead] = useState(false);
   const [undo, setUndo] = useState(null);
+  const [target, setTarget] = useState(null);
   const posts = data?.posts || [];
   const unread = posts.filter((post) => !post.done);
   const read = posts.filter((post) => post.done);
+  // A trend's link: a Done card sits behind «n read», so open that first; then scroll to the card and focus it.
+  const openCard = (sourceId) => { if (posts.find((post) => post.source_id === sourceId)?.done) setShowRead(true); setTarget(sourceId); };
+  useEffect(() => {
+    const card = target && document.getElementById(cardId(target));
+    if (card) { card.scrollIntoView({ block: 'center' }); card.focus({ preventScroll: true }); }
+    if (target) setTarget(null);
+  }, [target, showRead]);
   useEffect(() => { if (!undo) return undefined; const timer = setTimeout(() => setUndo(null), UNDO_MS); return () => clearTimeout(timer); }, [undo]);
   const mark = useMutation({ mutationFn: ({ ids, done }) => telegramFeedApi.done(ids, done),
     onSuccess: (_result, { ids, done }) => { setUndo(done ? ids : null); cache.invalidateQueries({ predicate: ({ queryKey }) => String(queryKey[0]).startsWith('telegram-') }); } });
   const link = 'inline-flex min-h-11 items-center text-sm text-forest-800 underline underline-offset-4 disabled:opacity-50 sm:min-h-8';
   return <>
-    <TelegramTrends trends={data?.trends} />
+    <TelegramTrends trends={data?.trends} posts={posts} onOpenCard={openCard} />
     <section aria-label="Discussions" className="space-y-1">
       <div className="flex items-center justify-between gap-3">
         <h2 className="flex min-h-11 items-center font-display text-xl font-light text-forest-800">Discussions</h2>

@@ -20,6 +20,8 @@ cached/live use; the gated digest pipeline reads it directly. Posts carry
 (no SQL migration), feeding forward-dedup and comment gating. Migration 16 adds the
 nullable `reasons_json` (owner's 'не подошло' chips) via `set_reasons`/`read_reasons`; upserts keep it.
 
+Migration 19 adds `review_feedback` (`review_feedback.py`): per-review owner feedback, one row per `(item_key, reviewed_at)` (`reviewed_at` is the review version; reviews are overwritten in place, so the row also snapshots `generation_sha256` and `model`). `upsert` keeps `created_at` on replace, `delete` clears, `list_for_paper`/`all_rows` read; item-key aliases are not resolved. The corpus DB gets only the named v19 alignment marker.
+
 `configuration_lock.py` provides a nonwaiting (unless a sync worker-thread caller opts into a bounded `wait`), no-follow cross-process file lock
 under the selected `Settings.data_dir`. It is reentrant only within the same
 synchronous thread owner; that ownership is not inherited by another worker.
@@ -294,6 +296,8 @@ no new queue, migration or approval capability is introduced.
 uncapped, shared by HTTP, training and the one-time Zotero transfer. The duplicate
 `list_label_verdicts` API and its implicit 500/5000-row caps were removed. Key-only
 and priority-only readers retain their narrower projections.
+
+`label_alias_resolver(db_path)` (one `alias_resolver` load) and `list_label_verdict_family(db_path, key, resolver=None)` return every verdict row (incl. `proposal_json`/`reasons_json`) stored under any alias of a paper, newest first: a paper may hold a `feed:g:` row and a Zotero-key row; both stay stored, callers pick the newest `source='user'` one. `get_label_verdict` stays exact-key (+legacy `feed:<id>`). The offline-sync `_write_value` inserts a new verdict row with the `proposal_json`/`reasons_json` of the paper's other-key row when one exists (an update leaves them untouched).
 
 `review_notes.py` resolves a note family through stored/unambiguous legacy aliases
 and materialized library keys: `alias_resolver(conn)` loads the identity graph once

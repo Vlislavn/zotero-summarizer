@@ -152,6 +152,15 @@ answering, and a failed save keeps your draft with a **Retry** button instead of
 automatically. Leaving a paper with an unsaved note asks first: cancelling keeps the draft,
 and leaving never saves it silently. A note saved in the app is not yet confirmed in Zotero. [Code](../zotero_summarizer/services/library/review_questions.py) · [Tests](../tests/test_review_questions.py) · [UI](../frontend/src/pages/PaperReviewPage.jsx) · [Navigation tests](../frontend/src/pages/PaperReviewPage.test.jsx).
 
+### Review feedback
+
+For a user study, the app can record what is wrong with a paper's review: pick any of eight
+reasons (such as "methods not useful", "unsupported fact", "too long", "good as is") and add
+a note up to 1000 characters. Feedback is stored per paper and review version, so a later
+regenerated review starts clean; saving again replaces it, and saving with nothing selected
+clears it. All feedback can be downloaded as one JSON file. This is the backend only; the
+review page does not show it yet. [Code](../zotero_summarizer/services/library/review_feedback.py).
+
 ## Save results
 
 ### Zotero changes
@@ -206,7 +215,7 @@ unavailable, never repaired or regenerated. [Code](../zotero_summarizer/services
 
 In **Weekly → Telegram sources**, choose public channels, groups or forum topics, a local
 model and work limits and allow reading them once (a remembered, revocable checkbox). **Weekly** (linked from Today) shows
-**Сегодня в каналах** with the digest age and one **Проверить каналы** button: it runs in the background with staged progress and Russian errors, and new posts appear when it finishes. **Тренды недели** come first: the top 5 of up to 15 topics (**Show all N trends**) the channels discuss now, each with a short label, a one-line gist, notable ideas/tools, a new/growing marker against the previous week and the channels (links to posts). Below, compact cards: channel, age, headline, a few discussion lines (one per picked comment, plus a «Спор:» line for the main disagreement) where each line expands to the exact comment(s) it cites; lines are checked by a local NLI model (`data/models/nli-mdeberta`), **Важное (n)** quotes, **All comments (n)**, **Подробнее**, a «Continues …» line for series posts and «Also in: topic». Authorize
+**Channels** with the digest age and one **Check channels** button: it runs in the background with staged progress and English errors, and new posts appear when it finishes. **Trends** come first: the top 5 of up to 15 topics (**Show all N trends**) the channels discuss now, each with a short label, a one-line gist, a new/growing/hot marker against the previous week and — always visible — where it comes from («12 posts in 6 channels this week (11 the week before) · @a, @b and 3 more»). Opening a trend shows its notable ideas/tools and the posts behind it: those with a discussion card link to the card on the same page (a card marked Done opens under «n read»), the rest open in Telegram, and it says plainly when none has comments yet («2 of 4 posts have a discussion card»; comments are collected only for the most discussed posts of each check). Below, compact **Discussions** cards: channel, age, an **Open in Telegram** link to the original post (the stored permalink; none shown when a digest has none), headline, a few discussion lines (one per picked comment, plus a «Disagreement» line when two picked comments clash) where each line expands to the exact comment(s) it cites, each with a «Telegram ↗» link to the original comment when its discussion group is public (none for private groups or comments stored before permalinks); lines are checked by a local NLI model (`data/models/nli-mdeberta`), **Highlights (n)**, **All comments (n)**, **Details**, a «Continues …» line for series posts and «Also in: topic». Authorize
 your Telegram account once in a terminal with `zotero-summarizer research-feed telegram-auth` (shown as one
 copyable command on the page; optional `telegram` extra); the app never joins
 chats, sends messages or reads your personal inbox, and saving or viewing never collects or

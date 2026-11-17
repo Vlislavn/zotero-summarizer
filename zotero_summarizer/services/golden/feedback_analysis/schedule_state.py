@@ -286,7 +286,7 @@ def scheduled_receipt(settings, intent, attempt, record, guard, *, committed, re
         previous = aware_time(previous_cutoff)
         result = read_result(Path(record["run_path"]) / "result.json", guard)
         late["at_or_before_previous_cutoff"] = sum(
-            aware_time(event["time"]) <= previous for event in result["events"] if aware_time(event["time"]) is not None)
+            aware_time(event["time"]) <= previous for event in result["events"] if aware_time(event.get("time")) is not None)
     path = attempt / ("schedule-recovery.json" if recovery else "schedule-receipt.json")
     result = {"schema_version": 1, "intent_id": intent["intent_id"], "window_start": intent["window_start"],
               "cutoff": intent["cutoff"], "status": receipt["status"], "publication_action": "committed" if committed else "reused",

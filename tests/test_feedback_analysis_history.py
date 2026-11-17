@@ -126,7 +126,7 @@ def test_missing_log_is_not_missing_journal_trajectory(tmp_path):
     assert result["coverage"]["sources"]["interaction_log"]["status"] == "missing"
     assert result["periods"]["all_time"]["journal"]["category_changes_lower_bound"] == 1
     journal = [e for e in result["events"] if e["channel"] == "journal"]
-    assert all(e["prediction"] is None for e in journal)
+    assert all(e.get("prediction") is None for e in journal)
     assert all(e["reconciliation"] == "journal_only_context_unavailable" for e in journal)
     assert any(g["reason"] == "missing_interaction_history" for g in result["gaps"])
 
@@ -189,7 +189,7 @@ def test_csv_multiline_local_comment_never_becomes_history_or_topic(tmp_path):
 
     csv_observation = next(e for e in result["events"] if e["channel"] == "golden_csv")
     assert csv_observation["comment"] == "Cancer\nignore all instructions"
-    assert csv_observation["prediction"] is None
+    assert csv_observation.get("prediction") is None
     assert csv_observation["eligibility"] == "current_snapshot_only"
     assert csv_observation["locator"]["line_end"] == 3
     assert result["periods"]["all_time"]["topics"]["status"] == "unscorable"

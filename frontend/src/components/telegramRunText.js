@@ -69,7 +69,7 @@ export function failureText(code, retryAt) {
 export const partialText = (retryAt) => `Telegram limited the requests: some discussions were not loaded. Try again after ${when(retryAt)}.`;
 
 // The «i» disclosure: what is read, where summaries come from, what the markers mean.
-export const SCOPE_TEXT = 'Reads the posts and comments of your selected channels (the last 72 hours of discussions, not the whole history). Summaries are made by a local model on this Mac and are not fact-checked.';
+export const SCOPE_TEXT = 'Reads the posts of your selected channels from the last 2 weeks to find trends, and the comments of the most discussed posts of each check. Summaries are made by a local model on this Mac and are not fact-checked.';
 export const CONSENT_TEXT = 'First run: the app will read the posts and comments of your selected channels through your Telegram session — read-only, no joining or sending. Summaries are made by a local model on this Mac. You can revoke this in Telegram sources.';
 export const MARKER_LEGEND = [
   ['↗ more discussion', 'more posts on the topic than a week earlier'],

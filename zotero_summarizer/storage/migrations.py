@@ -180,6 +180,23 @@ def _migration_rss_fetch_watermark(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE rss_feeds ADD COLUMN fetch_incomplete INTEGER NOT NULL DEFAULT 0")
 
 
+def _migration_review_feedback(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS review_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_key TEXT NOT NULL,
+            reviewed_at TEXT NOT NULL,
+            generation_sha256 TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            chips_json TEXT NOT NULL DEFAULT '[]',
+            note TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(item_key, reviewed_at)
+        )"""
+    )
+
+
 # Append-only, version-ordered. To change the schema, add a new Migration with
 # the next version number — never edit a shipped one or add inline ALTERs.
 TRIAGE_MIGRATIONS: list[Migration] = [
@@ -201,6 +218,7 @@ TRIAGE_MIGRATIONS: list[Migration] = [
     Migration(16, "telegram_post_reasons", _migration_telegram_post_reasons),
     Migration(17, "rss_fetch_watermark", _migration_rss_fetch_watermark),
     Migration(18, "verdict_proposal_snapshot", _migration_verdict_proposal),
+    Migration(19, "review_feedback", _migration_review_feedback),
 ]
 CORPUS_MIGRATIONS: list[Migration] = [
     Migration(1, "baseline_embedding_cache", _migration_baseline_corpus),
@@ -221,6 +239,7 @@ CORPUS_MIGRATIONS: list[Migration] = [
     Migration(16, "telegram_post_reasons_alignment", _migration_baseline_corpus),
     Migration(17, "rss_fetch_watermark_alignment", _migration_baseline_corpus),
     Migration(18, "verdict_proposal_snapshot_alignment", _migration_baseline_corpus),
+    Migration(19, "review_feedback_alignment", _migration_baseline_corpus),
 ]
 
 # Both namespaces advance in lockstep so one reported target stays meaningful;

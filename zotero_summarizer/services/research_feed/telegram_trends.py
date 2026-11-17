@@ -82,7 +82,7 @@ def load_docs(conn, now: datetime, gists: dict[str, str]) -> list[dict]:
     docs = []
     for post in kept:
         note = _REF.sub("", " ".join((gists.get(post.source_id) or "").split())) or notes.get(post.source_id, "")
-        docs.append({"id": post.source_id, "hot": rank.get(post.source_id), "channel": post.username or "канал", "at": _iso(post.published_at),
+        docs.append({"id": post.source_id, "hot": rank.get(post.source_id), "channel": post.username or "channel", "at": _iso(post.published_at),
                      "headline": _headline(post.text), "permalink": post.permalink, "note": note[:NOTE_CHARS * 2],
                      "text": " ".join(post.text.split())[:DOC_CHARS]})
     return sorted(docs, key=lambda d: (d["at"], d["id"]))

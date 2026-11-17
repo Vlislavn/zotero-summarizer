@@ -255,3 +255,5 @@ description above; the explicit unconfigured-Zotero boundary remains local-first
 `GET /api/pending?item_key=...` passes the item filter through to the indexed
 storage query. `GET /api/triage/jobs?active_only=true` returns persisted running
 and cancelling jobs without limiting the lookup to newest terminal jobs.
+
+`POST /api/library/review-feedback` saves the owner's chips + note on a paper's CURRENT review (empty chips and note clear it); `GET /api/library/review-feedback?item_key=…` lists the saved feedback per review version; `GET /api/library/review-feedback/export` downloads every row as JSON (`routes/library.py`, `services/library/review_feedback.py`, table `review_feedback`).

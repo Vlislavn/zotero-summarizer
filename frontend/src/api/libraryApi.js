@@ -416,3 +416,15 @@ export async function saveReviewQuestion(submission) {
     method: 'POST', body: JSON.stringify(submission), idempotent: true,
   });
 }
+
+/** GET /api/library/review-feedback → { item_key, feedback: [one row per review version] }. */
+export async function fetchReviewFeedback(itemKey) {
+  return request(`/api/library/review-feedback?${new URLSearchParams({ item_key: itemKey })}`);
+}
+
+/** POST /api/library/review-feedback → { cleared: true } (no chips, no note) or { cleared: false, feedback }. */
+export async function saveReviewFeedback(itemKey, chips, note) {
+  return request('/api/library/review-feedback', {
+    method: 'POST', body: JSON.stringify({ item_key: itemKey, chips, note }), idempotent: true, // an upsert
+  });
+}
