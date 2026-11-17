@@ -1,8 +1,9 @@
 # cli — the `zotero-summarizer` command-line interface
 
-The `_telegram-child` has two purposes: `auth` (interactive terminal only) and `digest`
+The `_telegram-child` has three purposes: `auth` (interactive terminal only), `digest`
 (the Settings 'Collect' action: `collect_pages` + digest, persisted in-child as
-`telegram-today.json`). It retains the dedicated session/fuse/lease and a receipt
+`telegram-today.json`) and `comments` (Weekly «Load discussions»: reads the comments of the
+post ids in `--source-ids`, saved as conversation snapshots; no model). It retains the dedicated session/fuse/lease and a receipt
 verified before the parent proceeds (`integrations.telegram_child.run_child` spawns it; `cli/_telegram.py` holds the child body); failures expose bounded status codes, never raw
 SDK messages/account paths. The `conversations` purpose and its v2 bundle export were
 removed (retired; historical bundles stay readable in Weekly).

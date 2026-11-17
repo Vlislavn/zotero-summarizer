@@ -165,4 +165,13 @@ def read_today(settings) -> dict:
     return value
 
 
-__all__ = ["build_today", "persist_today", "collect_and_persist", "read_today", "thread"]
+def read_page(settings) -> dict:
+    """``read_today`` plus each trend's «Load discussions» state (read-time only: never saved or archived)."""
+    from zotero_summarizer.services.research_feed import telegram_discussions
+
+    value = read_today(settings)
+    telegram_discussions.overlay(settings, value.get("trends") or {})
+    return value
+
+
+__all__ = ["build_today", "persist_today", "collect_and_persist", "read_today", "read_page", "thread"]

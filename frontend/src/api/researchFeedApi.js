@@ -16,6 +16,7 @@ export const telegramFeedApi = {
   processing: (token, allow) => request(`${telegram}/processing`, { method: 'POST', body: JSON.stringify({ token, allow }) }),
   collectConsent: (allow) => request(`${telegram}/collect-consent`, { method: 'POST', body: JSON.stringify({ allow }) }),
   run: () => request(`${telegram}/runs`, { method: 'POST' }),
+  discussions: (topicId) => request(`${telegram}/discussions`, { method: 'POST', body: JSON.stringify({ topic_id: topicId }) }),
 };
 
 const base = '/api/research-feed/runs';

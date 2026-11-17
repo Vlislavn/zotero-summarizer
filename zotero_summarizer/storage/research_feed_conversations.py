@@ -40,3 +40,14 @@ def latest_messages(conn, source_id: str) -> list[dict]:
     for (value,) in rows:
         merged.update({m["message_id"]: m for m in json.loads(value or "[]")})
     return list(merged.values())
+
+
+def comment_counts(conn) -> dict[str, int]:
+    """``telegram:<channel>:<message>`` -> number of distinct stored comments (same merge as ``latest_messages``)."""
+    rows = conn.execute("""SELECT json_extract(payload_json, '$.origin.channel_id'),
+               json_extract(payload_json, '$.origin.message_id'), json_extract(payload_json, '$.messages')
+        FROM research_feed_conversations WHERE json_extract(payload_json, '$.origin.message_id') IS NOT NULL""").fetchall()
+    seen: dict[str, set[int]] = {}
+    for channel, message, value in rows:
+        seen.setdefault(f"telegram:{channel}:{message}", set()).update(m["message_id"] for m in json.loads(value or "[]"))
+    return {source_id: len(ids) for source_id, ids in seen.items()}

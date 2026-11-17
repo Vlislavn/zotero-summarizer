@@ -151,14 +151,15 @@ async def collect_pages(
                 result["counts"][name] += count
         if reply_client is not None and scorer is not None and goals:
             from zotero_summarizer.services.llm import jev_engine
-            from zotero_summarizer.services.research_feed import telegram_digest
+            from zotero_summarizer.services.research_feed import telegram_digest, telegram_history
             from zotero_summarizer.services.research_feed.telegram_relevance import DEFAULT_TAU
 
             await telegram_digest.run(conn, result, telegram_digest.DigestRequest(
                 reply_client=reply_client, scorer=scorer, goals=goals, model=model, now=now,
                 summary_top=summary_top,
                 tau=DEFAULT_TAU if tau is None else tau, limits=settings_limits(settings),
-                probe=probe, nli_dir=settings.nli_model_dir, noul=jev_engine.noul_for(settings)))
+                probe=probe, nli_dir=settings.nli_model_dir, noul=jev_engine.noul_for(settings),
+                exclude_ids=telegram_history.shown_ids(settings)))
     return result
 
 

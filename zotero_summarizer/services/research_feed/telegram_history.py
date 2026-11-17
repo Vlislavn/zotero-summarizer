@@ -9,6 +9,7 @@ shows up in two digests is done in both.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 
@@ -17,6 +18,7 @@ from zotero_summarizer.services._common import now_iso_z, write_json_atomic
 from zotero_summarizer.services.research_feed import telegram_reasons
 from zotero_summarizer.services.research_feed.telegram_selection import output_dir
 
+LOG = logging.getLogger(__name__)
 _RUN_ID = re.compile(r"^\d{8}T\d{6}Z(?:-\d{1,2})?$")
 _DONE = "done.json"
 _LOCK = threading.Lock()  # mark_done is read-modify-write of one file
@@ -56,6 +58,26 @@ def _done(settings) -> dict[str, str]:
     except (OSError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def shown_ids(settings, runs: int = 3) -> frozenset[str]:
+    """source_ids on the cards of the last ``runs`` archived digests plus the posts marked done.
+
+    Any unreadable archive file gives the empty set and one warning: the digest is then built as before.
+    """
+    try:
+        paths = sorted((p for p in _dir(settings).glob("*.json") if _RUN_ID.match(p.stem) and not p.is_symlink()),
+                       key=lambda p: p.stem)[-runs:]
+        ids = set(_done(settings))
+        for path in paths:
+            value = _read(path)
+            if value is None:
+                raise ValueError("unreadable digest archive")
+            ids.update(post["source_id"] for post in value["posts"])
+        return frozenset(ids)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        LOG.warning("telegram history unreadable, repeats are not excluded: %s", type(error).__name__)
+        return frozenset()
 
 
 def overlay(settings, posts: list[dict]) -> None:

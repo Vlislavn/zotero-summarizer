@@ -1,4 +1,4 @@
-"""One-shot Telegram child (auth or digest); the receipt is verified before the parent proceeds."""
+"""One-shot Telegram child (auth, digest or comments); the receipt is verified before the parent proceeds."""
 from __future__ import annotations
 
 import json
@@ -63,6 +63,7 @@ def child(args) -> int:
         result = telegram_runtime.collect_once_cli(
             settings, session_factory=lambda path: session_type(str(path)),
             client_factory=client_factory, purpose=args.purpose,
+            source_ids=[value for value in args.source_ids.split(",") if value],
         )
         receipt = _receipt(settings, args.purpose, result)
         if result["status"] != "collected" or result["cleanup"] != "completed":

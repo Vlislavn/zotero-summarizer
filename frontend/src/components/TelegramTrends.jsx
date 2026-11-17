@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Icon from './ui/Icon.jsx';
 import TelegramLink from './TelegramLink.jsx';
+import LoadDiscussions from './TelegramLoadDiscussions.jsx';
 import { cardId, headlineOf } from './TelegramPost.jsx';
 import { channelsText, postsText } from './telegramRunText.js';
 
@@ -24,7 +25,7 @@ function Provenance({ topic }) {
 }
 
 // The posts behind the trend: the ones with a discussion card link to it on this page, the rest open in Telegram.
-function Behind({ topic, cards, onOpenCard }) {
+function Behind({ topic, cards, onOpenCard, run }) {
   const ids = topic.source_ids;
   const linked = new Set(cards.map((post) => post.permalink));
   const others = (topic.examples || []).filter((example) => !linked.has(example.permalink)).slice(0, 3);
@@ -38,10 +39,11 @@ function Behind({ topic, cards, onOpenCard }) {
       <ul className="space-y-0.5">{others.map((example) => <li key={example.permalink} className="break-words">
         <TelegramLink href={example.permalink} className="inline-flex min-h-11 items-center text-slate-700 underline decoration-slate-300 underline-offset-2 hover:text-forest-800 sm:min-h-8">{example.headline} · @{example.channel}</TelegramLink></li>)}</ul>
     </>}
+    <LoadDiscussions topic={topic} cards={cards} run={run} />
   </div>;
 }
 
-function Row({ topic, posts, onOpenCard }) {
+function Row({ topic, posts, onOpenCard, run }) {
   const marker = MARKERS[topic.trend];
   const members = new Set(topic.source_ids || []);
   const cards = posts.filter((post) => members.has(post.source_id));
@@ -62,13 +64,13 @@ function Row({ topic, posts, onOpenCard }) {
     </summary>
     <div className="space-y-1.5 pb-3 text-sm text-slate-600">
       {(topic.ideas || []).length > 0 && <p>{topic.ideas.slice(0, 2).join(' · ')}</p>}
-      <Behind topic={topic} cards={cards} onOpenCard={onOpenCard} />
+      <Behind topic={topic} cards={cards} onOpenCard={onOpenCard} run={run} />
     </div>
   </details></li>;
 }
 
 // What the channels discuss now: a calm list (topic · one-line gist · marker · where it comes from), collapsible, no outer box.
-export default function TelegramTrends({ trends, posts = [], onOpenCard }) {
+export default function TelegramTrends({ trends, posts = [], onOpenCard, run = null }) {
   const [open, setOpen] = useState(true);
   const [all, setAll] = useState(false);
   const topics = trends?.topics || [];
@@ -81,7 +83,7 @@ export default function TelegramTrends({ trends, posts = [], onOpenCard }) {
       <Icon name="chevron" size={16} className={`text-slate-500 transition-transform ${open ? 'rotate-90' : ''}`} />
     </button>
     {open && <ol className="divide-y divide-slate-200 border-y border-slate-200">
-      {(all ? topics : topics.slice(0, SHOWN)).map((topic) => <Row key={topic.id} topic={topic} posts={posts} onOpenCard={onOpenCard} />)}
+      {(all ? topics : topics.slice(0, SHOWN)).map((topic) => <Row key={topic.id} topic={topic} posts={posts} onOpenCard={onOpenCard} run={run} />)}
     </ol>}
     {open && topics.length > SHOWN && <button type="button" aria-expanded={all} onClick={() => setAll(!all)}
       className="inline-flex min-h-11 items-center gap-1 text-sm text-slate-600 hover:text-forest-800 sm:min-h-8">

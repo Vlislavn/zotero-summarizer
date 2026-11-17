@@ -9,7 +9,7 @@ const UNDO_MS = 10000;
 
 // Trends + discussion cards of one digest (the latest run or a saved one): unread first, read ones behind «n read».
 // Done marks are stored per discussion, so they hold across digests and reloads.
-export default function TelegramFeed({ data }) {
+export default function TelegramFeed({ data, run = null }) {
   const cache = useQueryClient();
   const [showRead, setShowRead] = useState(false);
   const [undo, setUndo] = useState(null);
@@ -29,7 +29,7 @@ export default function TelegramFeed({ data }) {
     onSuccess: (_result, { ids, done }) => { setUndo(done ? ids : null); cache.invalidateQueries({ predicate: ({ queryKey }) => String(queryKey[0]).startsWith('telegram-') }); } });
   const link = 'inline-flex min-h-11 items-center text-sm text-forest-800 underline underline-offset-4 disabled:opacity-50 sm:min-h-8';
   return <>
-    <TelegramTrends trends={data?.trends} posts={posts} onOpenCard={openCard} />
+    <TelegramTrends trends={data?.trends} posts={posts} onOpenCard={openCard} run={run} />
     <section aria-label="Discussions" className="space-y-1">
       <div className="flex items-center justify-between gap-3">
         <h2 className="flex min-h-11 items-center font-display text-xl font-light text-forest-800">Discussions</h2>

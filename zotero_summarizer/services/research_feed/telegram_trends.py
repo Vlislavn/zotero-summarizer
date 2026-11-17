@@ -75,7 +75,7 @@ def load_docs(conn, now: datetime, gists: dict[str, str]) -> list[dict]:
     since = now - 2 * WEEK
     posts = [row["post"] for row in store.list_posts(conn, limit=1000)
              if not row["post"].skip_reason and len(row["post"].text.strip()) >= MIN_CHARS
-             and since < _iso(row["post"].published_at) <= now]
+             and not relevance.is_ad_post(row["post"].text) and since < _iso(row["post"].published_at) <= now]
     kept, _ = relevance.dedup(posts)
     notes = _notes(conn, since)
     rank = {source_id: number for number, source_id in enumerate(gists)}  # digest order: most discussed first

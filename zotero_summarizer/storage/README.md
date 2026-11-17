@@ -6,7 +6,7 @@ when the retained Today member is older. Both use the caller's connection and
 perform no writes. Native intent/rejection checks remain in `feeds_history`.
 
 Migration 14 adds `research_feed_conversations.py`: content-addressed append-only
-Telegram conversation snapshots, with update/delete refusal triggers. `research_feed_conversations.latest_messages` returns a post's comments merged over all its snapshots by message id (newest wins; a later snapshot may be empty or cursor-limited) (served lazily by `GET /telegram/thread/{source_id}`). Peer/message
+Telegram conversation snapshots, with update/delete refusal triggers. `research_feed_conversations.latest_messages` returns a post's comments merged over all its snapshots by message id (newest wins; a later snapshot may be empty or cursor-limited) (served lazily by `GET /telegram/thread/{source_id}`); `comment_counts` gives the distinct stored comments per post (one query, same merge) for Weekly's «Load discussions» block. Peer/message
 and thread/root context plus coverage participate in content identity; refreshed
 edits retain the previous snapshot rather than overwriting it. Duplicate unchanged
 content keeps its first stored observation; each published report retains its own

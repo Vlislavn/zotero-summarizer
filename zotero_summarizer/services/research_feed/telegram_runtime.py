@@ -19,21 +19,22 @@ def _page_client(sdk):
 
 
 def collect_once_cli(settings: Settings, *, session_factory=None, client_factory=None,
-                     now=None, purpose="collect") -> dict:
+                     now=None, purpose="collect", source_ids=()) -> dict:
     """Explicit factories run only in the dedicated public CLI child or owned tests.
 
     Factories run inside the integration's owned loop, after metadata/retry admission.
     The native fuse and lease remain live AFTER return. Exit this process; never run
     later ML/LLM work or embed this function in a server.
     """
-    if purpose not in {"collect", "auth", "digest"}:
+    if purpose not in {"collect", "auth", "digest", "comments"}:
         raise ValueError("invalid Telegram process purpose")
-    profile = None if purpose == "auth" else load_profile(settings.data_dir, persist_default=False)
-    if purpose == "digest":
+    profile = None if purpose in {"auth", "comments"} else load_profile(settings.data_dir, persist_default=False)
+    if purpose in {"digest", "comments"}:
         from zotero_summarizer.services.research_feed import telegram_progress
-        from zotero_summarizer.services.research_feed.telegram_selection import targets
 
         telegram_progress.init(settings)
+    if purpose == "digest":
+        from zotero_summarizer.services.research_feed.telegram_selection import targets
 
         usernames = [target.username for target in targets(profile)]
     else:
@@ -57,6 +58,10 @@ def collect_once_cli(settings: Settings, *, session_factory=None, client_factory
             from zotero_summarizer.integrations.telegram_auth import authenticate
 
             return await authenticate(sdk)
+        if purpose == "comments":
+            from zotero_summarizer.services.research_feed import telegram_discussions
+
+            return await telegram_discussions.collect(settings, sdk, source_ids, admit=admit, now=clock)
         if purpose == "digest":
             from zotero_summarizer.services._common import read_config
             from zotero_summarizer.services.research_feed import telegram_live, telegram_today
@@ -82,7 +87,7 @@ def collect_once_cli(settings: Settings, *, session_factory=None, client_factory
         admit=admit, on_error=on_error, purpose="auth" if purpose == "auth" else "collect",
     )
     result["account"] = (result["collection"]["account"]
-                         if result["collection"] is not None and purpose in {"collect", "digest"} else account)
+                         if result["collection"] is not None and purpose in {"collect", "digest", "comments"} else account)
     return result
 
 
