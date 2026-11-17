@@ -147,6 +147,10 @@ silently rewritten. If a job's status is unknown, use the read-only retry; it ne
 a duplicate review. Web articles are reviewed from extracted text, not a visual copy of the
 page. [Code](../zotero_summarizer/services/library/) · [Tests](../tests/test_review_source_boundary.py).
 
+### Method card
+
+On a paper's review page, **How it works** (above Findings) explains the method: core idea, what it was compared against, what the authors claim is new, and up to three steps to repeat it. **Build card** reads the whole paper once with the review model; a row appears only if its quote is found in the paper, and each row's § opens that quote. It starts collapsed to a short paragraph (**Expand** shows all four blocks); a failed build can be retried after 5 minutes, and a card never changes the review. "Novelty N/5" is no longer shown. Closest-prior-work checking is not built yet. [Code](../zotero_summarizer/services/library/method_card/README.md) · [Tests](../tests/test_method_card.py) · [UI](../frontend/src/components/paper/review/MethodCard.jsx).
+
 ### Paper questions and notes
 
 Ask a question about a paper, even before it has a PDF or review, to get an answer quoted

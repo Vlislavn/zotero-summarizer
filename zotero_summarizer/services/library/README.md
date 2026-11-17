@@ -72,6 +72,7 @@ code_link, verification_audit, review_identity, review_contract_version, …}`.
 | `paper_type.py` / `_paper_type_checklists.py` | paper-type detection, per-type checklists with cited standards, `coverage_grade` |
 | `_paper_goal_summaries.py` | per-goal retrieval, relevance gate, facet summaries; `retrieve_original_passages` for Search |
 | `_paper_section_summaries.py` / `section_summaries_job.py` / `_review_section_overlay.py` | verified section one-liners / their on-open job (`POST /api/library/section-summaries/{key}`, idempotent, sidecar, full tier only) / findings located onto the paper's own sections (`exact`/`fuzzy`/`approx`) |
+| `method_card/` | the "How it works" card (core idea · compared against · what the authors claim is new · reuse), built on request over the whole body, every row grounded in a paper quote; sidecar `_method_card/`, never touches the review ([README](method_card/README.md)) |
 | `_code_link.py` | the paper's own repo from full text + link annotations, validated through `integrations.github` |
 | `paper_render.py` / `paper_figures.py` | paper-brief build facade, state, guarded serving / attachable figure list |
 | `_paper_read_pdf.py` / `_paper_read_tex.py` / `_paper_read_html.py` / `_paper_read_brief.py` / `_paper_read_meta.py` / `_paper_docling.py` | PDF extraction + figures / TeX parse + arXiv source / audit + HTML writer / decision-aid panels / metadata + Q&A body / optional Docling parser |

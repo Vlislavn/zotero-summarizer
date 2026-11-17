@@ -11,6 +11,7 @@ import LinksRow from '../components/paper/LinksRow.jsx';
 import AbstractBlock from '../components/paper/PaperDetailView/AbstractBlock.jsx';
 import PaperReview from '../components/paper/review/PaperReview.jsx';
 import EvidenceFold from '../components/paper/review/EvidenceFold.jsx';
+import MethodCard from '../components/paper/review/MethodCard.jsx';
 import ReviewFeedback from '../components/paper/review/ReviewFeedback.jsx';
 import ReviewFailure from '../components/paper/ReviewFailure.jsx';
 import ReviewModelStatus from '../components/paper/ReviewModelStatus.jsx';
@@ -83,6 +84,7 @@ function ReviewZone({ deep, runner, sectionOverlay, itemKey }) {
       <FullTextAccessNotice deep={deep} />
 
       {showReview && <PaperReview deep={settling ? { ...deep, review_freshness: null } : deep} flat sectionOverlay={sectionOverlay} facts={facts}
+        methodCard={<MethodCard itemKey={itemKey} codeLink={deep.code_link} />}
         evidence={<EvidenceFold itemKey={itemKey} lost={deep.not_established_fields || []} />}
         onRegenerate={runner.checkingStatus ? null : () => runner.run()} />}
       {showReview && deep.reviewed_at && <ReviewFeedback key={`${itemKey}|${deep.reviewed_at}`} itemKey={itemKey} reviewedAt={deep.reviewed_at} />}

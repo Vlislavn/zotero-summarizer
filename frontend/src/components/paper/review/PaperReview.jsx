@@ -96,7 +96,7 @@ function critiqueIsTentative(q = {}) {
 // language, reading-grade type, flat hierarchy (Common Region / Uniform
 // Connectedness: hairline dividers + whitespace, not nested boxes). Reads the
 // SAME as the standalone presentation.html (briefModel mirrors the server).
-export default function PaperReview({ deep, compact = false, flat: requestedFlat = false, sectionOverlay = null, onRegenerate = null, evidence = null, facts = null }) {
+export default function PaperReview({ deep, compact = false, flat: requestedFlat = false, sectionOverlay = null, onRegenerate = null, evidence = null, facts = null, methodCard = null }) {
   if (!deep) return null;
   const flat = requestedFlat && !compact;
   const digest = deep.digest && Object.keys(deep.digest).length ? deep.digest : null;
@@ -221,6 +221,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
       <div className={reading}>
       <div className={flat ? '' : 'mt-2 divide-y divide-slate-200/60'}>
         {flat ? <>
+          {methodCard}
           <Fold label="Findings and applicability" defaultOpen>
             {findings.length > 0 ? <Bullets items={findings} /> : <p>Key findings not recorded in this saved review.</p>}
           </Fold>

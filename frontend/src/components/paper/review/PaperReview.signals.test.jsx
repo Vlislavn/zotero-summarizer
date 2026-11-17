@@ -65,6 +65,8 @@ describe('orthogonal reviewed signals', () => {
       expect(html).toContain(text);
     }
     expect(html.split(digest.writing_reasons[0])).toHaveLength(2);
+    expect(html).toContain('Significance 4/5');
+    expect(html).not.toContain('Novelty');
     expect(html).toContain('Argument quality (Wachsmuth)');
     expect(html).toContain('2/4 applicable items met');
     expect(html).not.toContain('Quality A');
@@ -74,6 +76,13 @@ describe('orthogonal reviewed signals', () => {
     expect(html).not.toContain('Validated on independent');
     expect(html).not.toContain('≥6 grounded');
     expect(JSON.stringify(deep)).toBe(original);
+  });
+
+  it('labels the idea by significance alone; the unchecked novelty score is not shown', () => {
+    const deep = { digest: { ...digest, novelty: 5, significance: 2 }, quality, model_digest: { ...digest, read_decision: 'read' } };
+    const html = renderToStaticMarkup(<PaperReview deep={deep} flat />);
+    expect(html).toContain('Idea: low');
+    expect(html).not.toContain('Novelty');
   });
 
   it.each(['flag', 'uncertain', 'highlight', 'neutral'])('uses only supplied applicable checks for %s', band => {

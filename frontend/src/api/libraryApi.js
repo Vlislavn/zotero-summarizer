@@ -350,6 +350,16 @@ export async function fetchSectionSummaries(itemKey) {
   return request(`/api/library/section-summaries/${encodeURIComponent(itemKey)}`, { method: 'POST' });
 }
 
+/** GET /api/library/method-card/{itemKey} — { state: 'building' | 'ready' | 'failed' | 'unavailable', reason, can_build, retry_in_seconds, card }. */
+export async function fetchMethodCard(itemKey) {
+  return request(`/api/library/method-card/${encodeURIComponent(itemKey)}`);
+}
+
+/** POST /api/library/method-card/{itemKey} — start the ONE background build per paper (idempotent); poll the GET. */
+export async function buildMethodCard(itemKey) {
+  return request(`/api/library/method-card/${encodeURIComponent(itemKey)}`, { method: 'POST' });
+}
+
 /** POST /api/library/render/{itemKey}/build { force, allow_arxiv_source, allow_acquire_missing }. */
 export async function buildPaperRender(
   itemKey,
