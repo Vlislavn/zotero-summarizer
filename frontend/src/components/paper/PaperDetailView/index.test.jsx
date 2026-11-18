@@ -9,12 +9,12 @@ vi.mock('../../../api/libraryApi.js', () => ({ saveReviewQuestion: mocks.saveRev
 vi.mock('../../../offlineStore.js', () => ({ queueQuestionSubmission: mocks.queueQuestionSubmission,
   isServerAvailable: mocks.isServerAvailable, syncStatusEvent: 'zs-sync-status' }));
 vi.mock('../LinksRow.jsx', () => ({ default: () => null }));
-vi.mock('../DeepReviewSection.jsx', () => ({ default: () => null }));
+vi.mock('../DeepReviewSection.jsx', () => ({ default: () => <div data-testid="digest" /> }));
 vi.mock('../TagOfInterestEditor.jsx', () => ({ default: () => null }));
 vi.mock('../CollectionEditor.jsx', () => ({ default: () => null }));
 vi.mock('../../library/PaperReaderPane.jsx', () => ({ default: () => null }));
 vi.mock('../../library/OpenBriefButton.jsx', () => ({ default: () => null }));
-vi.mock('../../VerdictPanel.jsx', () => ({ default: () => null }));
+vi.mock('../../VerdictPanel.jsx', () => ({ default: () => <div data-testid="verdict" /> }));
 import PaperDetailView from './index.jsx';
 
 beforeEach(() => {
@@ -124,3 +124,11 @@ it.each(['editable', 'readonly'])('keeps the %s question draft owner across actu
   expect(mocks.saveReviewQuestion).not.toHaveBeenCalled();
   expect(mocks.askPaper).not.toHaveBeenCalled();
 });
+
+it.each([[true, Node.DOCUMENT_POSITION_FOLLOWING], [false, Node.DOCUMENT_POSITION_PRECEDING]])(
+  'compact=%s: the verdict block sits relative to the digest as designed', (compact, position) => {
+    render(<PaperDetailView mode="editable" compact={compact} itemKey="P1" detail={{ has_pdf: true }} />);
+    const verdict = screen.getAllByTestId('verdict');
+    expect(verdict).toHaveLength(1);
+    expect(verdict[0].compareDocumentPosition(screen.getByTestId('digest')) & position).toBeTruthy();
+  });

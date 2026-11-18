@@ -88,6 +88,23 @@ export default function PaperDetailView({
     questions={detail.questions || []} questionMirror={questionMirror}
     onMirrorStart={beginNoteDelivery} onSaved={onDeepReviewDone} onDirtyChange={onNotesDirtyChange} />;
 
+  // compact (Library row card): the verdict leads the panel, above the digest —
+  // the decision is the reason the row was opened (Serial Position).
+  const verdictPanel = showVerdict && (
+    <VerdictPanel
+      itemKey={itemKey}
+      existingVerdict={verdict.existing}
+      onSubmit={verdict.onSubmit}
+      onDelete={verdict.onDelete}
+      submitting={verdict.submitting}
+      submitError={verdict.submitError}
+      submitWarning={verdict.submitWarning}
+      submitNotice={verdict.submitNotice}
+      deleting={verdict.deleting}
+      deleteError={verdict.deleteError}
+    />
+  );
+
   // ONE flat, hairline-divided column for both modes (Law of Common Region:
   // a divider, not a box). Editable splits into Decide / Act chunks (Miller's
   // Law); read-only drops the verdict/collection (Annotate owns the verdict in
@@ -100,6 +117,7 @@ export default function PaperDetailView({
             opens on the verdict banner, the decision (Serial Position), never on
             links. */}
         <div className="divide-y divide-slate-200/60">
+          {compact && verdictPanel && <Section>{verdictPanel}</Section>}
           {/* compact drops the "Decide"/"Act" eyebrows — the chip banner + the
               verdict picker are self-evidently those zones (Occam). */}
           <Section label={compact ? undefined : 'Decide'}>
@@ -128,20 +146,7 @@ export default function PaperDetailView({
               its saved comment and Cancel/Update boundary. */}
           <Section label={compact ? undefined : 'Act'}>
             <div className="space-y-4">
-              {showVerdict && (
-                <VerdictPanel
-                  itemKey={itemKey}
-                  existingVerdict={verdict.existing}
-                  onSubmit={verdict.onSubmit}
-                  onDelete={verdict.onDelete}
-                  submitting={verdict.submitting}
-                  submitError={verdict.submitError}
-                  submitWarning={verdict.submitWarning}
-                  submitNotice={verdict.submitNotice}
-                  deleting={verdict.deleting}
-                  deleteError={verdict.deleteError}
-                />
-              )}
+              {!compact && verdictPanel}
               {notes}
               {/* Collection lifted OUT of the disclosure — filing into Read Next
                   is a daily primary action, not the long tail (Pareto / Serial
