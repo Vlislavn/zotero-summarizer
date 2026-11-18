@@ -15,13 +15,19 @@ from zotero_summarizer.integrations._zotero_read_common import (  # noqa: F401  
     _NON_BIBLIOGRAPHIC_TYPES_SQL,
     _USER_LIBRARY_ID_SELECT,
 )
+from zotero_summarizer.integrations._zotero_read_copy import DEFAULT_REFRESH_INTERVAL_SECONDS, ReadCopy
 from zotero_summarizer.integrations._zotero_read_feeds import ZoteroFeedsMixin
 from zotero_summarizer.integrations._zotero_read_items import ZoteroItemsMixin
 from zotero_summarizer.integrations._zotero_read_lookup import ZoteroLookupMixin
+from zotero_summarizer.runtime import get_context
 
 
 class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
-    """Read-only adapter over Zotero's local SQLite database.
+    """Read-only adapter over a refreshed COPY of Zotero's local SQLite database.
+
+    The live ``zotero.sqlite`` is opened only as the ``mode=ro`` source of SQLite's backup
+    API (see ``_zotero_read_copy``); queries run on the copy (``Settings.zotero_read_copy_path``).
+    ``stale_since`` is set while the source changed but could not be re-copied.
 
     Query methods live in mixins (items / lookup / feeds); this class owns the
     connection/execute infrastructure + collection helpers they call via ``self``.
@@ -31,7 +37,13 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
     # Allow brief WAL checkpoint contention; persistent locks remain errors.
     _SQLITE_TIMEOUT_SECONDS = 2.0
 
-    def __init__(self, zotero_data_dir: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        zotero_data_dir: str | Path | None = None,
+        copy_path: str | Path | None = None,
+        *,
+        refresh_interval_seconds: float = DEFAULT_REFRESH_INTERVAL_SECONDS,
+    ) -> None:
         data_dir = Path(zotero_data_dir or (Path.home() / "Zotero")).expanduser().resolve()
         db_path = data_dir / "zotero.sqlite"
         storage_dir = data_dir / "storage"
@@ -44,6 +56,16 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
         self.data_dir = data_dir
         self.db_path = db_path
         self.storage_dir = storage_dir
+        self._copy = ReadCopy(
+            db_path,
+            Path(copy_path) if copy_path is not None else get_context().settings.zotero_read_copy_path,
+            refresh_interval_seconds=refresh_interval_seconds,
+        )
+
+    @property
+    def stale_since(self) -> str | None:
+        """UTC ISO time since which the copy lags a changed source (``None`` = current)."""
+        return self._copy.stale_since
 
     def get_library_stats(self) -> dict[str, Any]:
         """Return high-level counts for the local Zotero library."""
@@ -193,7 +215,9 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
         return self._execute_read(_read)
 
     def _connect(self) -> sqlite3.Connection:
-        uri = f"{self.db_path.as_uri()}?mode=ro"
+        self._copy.refresh()
+        # immutable: the copy is replaced atomically (never modified), so no -wal/-shm sidecars.
+        uri = f"{self._copy.copy_path.as_uri()}?mode=ro&immutable=1"
         conn = sqlite3.connect(uri, uri=True, timeout=self._SQLITE_TIMEOUT_SECONDS)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA query_only = ON")

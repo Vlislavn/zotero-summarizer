@@ -139,6 +139,11 @@ class Settings:
             raise ValueError("feedback schedule safety wall must be positive and <=600")
 
     @property
+    def zotero_read_copy_path(self) -> Path:
+        """Refreshed read-only copy of Zotero's ``zotero.sqlite`` the reader queries."""
+        return self.data_dir / "zotero_read" / "zotero.sqlite"
+
+    @property
     def today_exposure_log_dir(self) -> Path:
         """Append-only Today exposure JSONL, one ``YYYY-MM-DD.jsonl`` per local day."""
         return self.data_dir / "today-exposure"

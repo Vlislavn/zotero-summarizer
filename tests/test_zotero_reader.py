@@ -7,6 +7,7 @@ import pytest
 from fastapi.responses import JSONResponse
 
 from zotero_summarizer.api import errors
+from zotero_summarizer.integrations._zotero_read_copy import ReadCopy
 from zotero_summarizer.integrations.zotero_read import ZoteroReadError, ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriteError
 
@@ -95,3 +96,118 @@ def test_sort_collection_nodes_pins_recursively_and_matches_readnext_variants():
     ZoteroReader._sort_collection_nodes(nodes)
     assert [n["name"] for n in nodes] == ["Inbox", "Topics"]
     assert [c["name"] for c in nodes[1]["children"]] == ["ReadNext", "AAA", "later stuff"]
+
+
+# --- S0: the reader queries a refreshed COPY of zotero.sqlite -------------------------------
+
+
+def _source(tmp_path, name="Zotero", rows=(1,)):
+    zotero_dir = tmp_path / name
+    zotero_dir.mkdir()
+    conn = sqlite3.connect(zotero_dir / "zotero.sqlite")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("CREATE TABLE t(a)")
+    conn.executemany("INSERT INTO t VALUES (?)", [(r,) for r in rows])
+    conn.commit()
+    return zotero_dir, conn
+
+
+def _count(reader):
+    return reader._execute_read(lambda c: c.execute("SELECT COUNT(*) FROM t").fetchone()[0])
+
+
+def _backups(monkeypatch):
+    calls = []
+    real = ReadCopy._backup
+    monkeypatch.setattr(ReadCopy, "_backup", lambda self: (calls.append(1), real(self))[1])
+    return calls
+
+
+def test_read_copy_refreshes_only_when_the_source_changed(monkeypatch, tmp_path):
+    zotero_dir, live = _source(tmp_path)
+    calls = _backups(monkeypatch)
+    reader = ZoteroReader(zotero_dir, tmp_path / "copy" / "zotero.sqlite", refresh_interval_seconds=0)
+
+    assert _count(reader) == 1 and _count(reader) == 1
+    assert len(calls) == 1  # unchanged source -> no second copy
+    live.execute("INSERT INTO t VALUES (2)")
+    live.commit()
+    assert _count(reader) == 2  # changed source (WAL) -> new copy
+    assert len(calls) == 2 and reader.stale_since is None
+
+
+def test_read_copy_refresh_is_throttled_but_a_missing_copy_always_copies(monkeypatch, tmp_path):
+    zotero_dir, live = _source(tmp_path)
+    calls = _backups(monkeypatch)
+    reader = ZoteroReader(zotero_dir, tmp_path / "copy" / "zotero.sqlite", refresh_interval_seconds=3600)
+
+    assert _count(reader) == 1
+    live.execute("INSERT INTO t VALUES (2)")
+    live.commit()
+    assert _count(reader) == 1 and len(calls) == 1  # changed, but inside the interval
+    (tmp_path / "copy" / "zotero.sqlite").unlink()
+    assert _count(reader) == 2 and len(calls) == 2  # no copy -> refresh regardless of throttle
+
+
+def test_read_copy_never_opens_the_live_file_except_as_backup_source(monkeypatch, tmp_path):
+    zotero_dir, live = _source(tmp_path)
+    live_path = str(zotero_dir / "zotero.sqlite")
+    opened = []
+    real_connect = sqlite3.connect
+
+    def spy(target, *args, **kwargs):
+        opened.append(str(target))
+        return real_connect(target, *args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", spy)
+    reader = ZoteroReader(zotero_dir, tmp_path / "copy" / "zotero.sqlite", refresh_interval_seconds=0)
+    assert _count(reader) == 1
+    live.execute("INSERT INTO t VALUES (2)")
+    live.commit()
+    assert _count(reader) == 2
+
+    live_opens = [target for target in opened if live_path in target]
+    assert len(live_opens) == 2 and all(t.endswith("?mode=ro") for t in live_opens)  # one backup source per refresh
+    assert opened.count(str(tmp_path / "copy" / "zotero.sqlite")) == 0  # queries use the mode=ro URI of the copy
+
+
+def test_read_copy_serves_the_old_copy_flagged_stale_when_the_source_is_locked(monkeypatch, tmp_path):
+    zotero_dir, live = _source(tmp_path)
+    reader = ZoteroReader(zotero_dir, tmp_path / "copy" / "zotero.sqlite", refresh_interval_seconds=0)
+    assert _count(reader) == 1 and reader.stale_since is None
+
+    live.execute("INSERT INTO t VALUES (2)")
+    live.commit()
+    real = ReadCopy._backup
+
+    def locked(self):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(ReadCopy, "_backup", locked)
+    assert _count(reader) == 1  # old copy, not silent: flagged
+    first = reader.stale_since
+    assert first is not None
+    assert _count(reader) == 1 and reader.stale_since == first  # first failure time is kept
+
+    monkeypatch.setattr(ReadCopy, "_backup", real)
+    assert _count(reader) == 2 and reader.stale_since is None  # recovered
+
+
+def test_read_copy_missing_and_source_unreadable_raises_a_clear_error(tmp_path):
+    zotero_dir = tmp_path / "Zotero"
+    zotero_dir.mkdir()
+    (zotero_dir / "zotero.sqlite").write_bytes(b"this is not a sqlite database" * 200)
+    reader = ZoteroReader(zotero_dir, tmp_path / "copy" / "zotero.sqlite", refresh_interval_seconds=0)
+
+    with pytest.raises(ZoteroReadError, match="No readable Zotero copy"):
+        _count(reader)
+    assert not (tmp_path / "copy" / "zotero.sqlite").exists()
+
+
+def test_read_copy_is_not_reused_for_a_different_source(tmp_path):
+    first_dir, _first = _source(tmp_path, "ZoteroA", rows=(1,))
+    second_dir, _second = _source(tmp_path, "ZoteroB", rows=(1, 2, 3))
+    shared_copy = tmp_path / "copy" / "zotero.sqlite"
+
+    assert _count(ZoteroReader(first_dir, shared_copy, refresh_interval_seconds=3600)) == 1
+    assert _count(ZoteroReader(second_dir, shared_copy, refresh_interval_seconds=3600)) == 3
