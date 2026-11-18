@@ -12,13 +12,13 @@ from typing import Any
 import httpx
 
 from zotero_summarizer.integrations.crossref import CrossrefListError, list_crossref_works
-from zotero_summarizer.services.conferences.catalogue import Recipe
+from zotero_summarizer.services.conferences.catalogue import Recipe, abstract_number
 from zotero_summarizer.services.conferences.config import Edition
 
 HOST = "api.crossref.org"
 PAGE_SIZE = 1000
 PAGE_CAP = 40  # ceiling on requests per download, whatever the window
-_SELECT = ("DOI", "title", "author", "abstract", "published")
+_SELECT = ("DOI", "title", "author", "abstract", "published", "page", "volume")
 _FAILURES = {
     "rate_limited": "Crossref asked to wait",
     "http_error": "Crossref answered with an error",
@@ -30,7 +30,7 @@ _FAILURES = {
 @dataclass
 class Download:
     records: list[dict[str, Any]] = field(default_factory=list)
-    skipped: int = 0  # rows in the window that are not meeting abstracts (no matching DOI)
+    skipped: int = 0  # rows in the window that are not meeting abstracts (other articles, withdrawn abstracts)
     pages: int = 0
     total: int = 0  # rows Crossref reports for the window
     failure: str = ""  # "" = complete
@@ -55,12 +55,12 @@ def download(recipe: Recipe, edition: Edition, *, mailto: str | None = None,
             break
         out.pages, out.total = out.pages + 1, page.total
         for hit in page.hits:
-            match = recipe.doi_keep.search(hit.doi)
-            if match is None:
+            number = abstract_number(recipe, hit)
+            if number is None or (edition.volume and hit.volume != edition.volume):
                 out.skipped += 1
             else:
                 found[hit.doi.lower()] = {"title": hit.title, "authors": hit.authors, "abstract": hit.abstract,
-                                          "doi": hit.doi, "number": match.group(1)}
+                                          "doi": hit.doi, "number": number}
         cursor = page.next_cursor
         if not page.seen or not cursor or out.pages * PAGE_SIZE >= page.total:
             break

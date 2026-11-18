@@ -47,6 +47,8 @@ class CrossrefHit:
     authors: list[str] = field(default_factory=list)
     year: int | None = None
     venue: str = ""
+    page: str = ""  # first page; conference-supplement abstracts carry ``S209``-style pages
+    volume: str = ""
 
 
 def _abstract_text(raw: str) -> str:
@@ -91,6 +93,8 @@ def _hit_from_item(item: dict) -> CrossrefHit | None:
         authors=_authors_from_item(item),
         year=_year_from_item(item),
         venue=(containers[0] if containers else "").strip(),
+        page=str(item.get("page") or "").strip(),
+        volume=str(item.get("volume") or "").strip(),
     )
 
 

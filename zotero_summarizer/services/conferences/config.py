@@ -24,6 +24,7 @@ class Edition:
     year: int
     start: date
     end: date
+    volume: str = ""  # optional: keep only rows of this journal volume (ESMO AI: one volume per year)
 
 
 @dataclass(frozen=True)
@@ -63,7 +64,10 @@ def _edition(year_key: Any, params: Any) -> Edition:
         raise ValueError(f"edition {year_key}: 'from'/'until' must be dates like 2026-05-20") from None
     if end < start:
         raise ValueError(f"edition {year_key}: 'until' is before 'from'")
-    return Edition(int(year_key), start, end)
+    volume = str(params.get("volume", "")).strip()
+    if volume and not volume.isdigit():
+        raise ValueError(f"edition {year_key}: 'volume' must be a number like 14")
+    return Edition(int(year_key), start, end, volume)
 
 
 def _conference(block: Any) -> Conference:

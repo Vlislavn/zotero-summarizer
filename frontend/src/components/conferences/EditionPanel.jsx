@@ -3,6 +3,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { conferencesApi } from '../../api/conferencesApi.js';
 import Async from '../ui/Async.jsx';
 import Button from '../ui/Button.jsx';
+import ImportBar from './ImportBar.jsx';
 import { RowList } from './ConferenceRows.jsx';
 
 const fmt = (n) => n.toLocaleString('en-GB');
@@ -35,7 +36,7 @@ function Pager({ page, pages, onPage }) {
   </div>;
 }
 
-function Lists({ id, year }) {
+function Lists({ id, year, titleOnly }) {
   const [page, setPage] = useState(1);
   const [draft, setDraft] = useState('');
   const [q, setQ] = useState('');
@@ -47,7 +48,7 @@ function Lists({ id, year }) {
   return <div className="space-y-4">
     <div className="text-sm text-slate-700">
       <p>{fmt(counts.total)} abstracts · {fmt(counts.late_breaking)} late-breaking · {fmt(counts.unknown)} level unknown{d.skipped > 0 && ` · ${fmt(d.skipped)} other entries skipped`}</p>
-      <p className="text-xs text-slate-600">Only late-breaking (abstract number starting LBA) can be told from free metadata.</p>
+      <p className="text-xs text-slate-600">Only late-breaking can be told from free metadata.</p>
     </div>
     <form className="flex flex-wrap gap-2" role="search" onSubmit={(event) => { event.preventDefault(); setPage(1); setQ(draft.trim()); }}>
       <label className="sr-only" htmlFor="conference-title-search">Search titles</label>
@@ -57,11 +58,11 @@ function Lists({ id, year }) {
     </form>
     <section aria-labelledby="conference-late">
       <h2 id="conference-late" className="font-display text-xl font-light text-forest-800">Late-breaking ({fmt(d.late_breaking.length)}{q ? ` of ${fmt(counts.late_breaking)}` : ''})</h2>
-      {d.late_breaking.length ? <RowList rows={d.late_breaking} id={id} year={year} /> : <p className="py-2 text-sm text-slate-600">No late-breaking abstract{q ? ' matches' : ' in this list'}.</p>}
+      {d.late_breaking.length ? <RowList rows={d.late_breaking} id={id} year={year} titleOnly={titleOnly} /> : <p className="py-2 text-sm text-slate-600">No late-breaking abstract{q ? ' matches' : ' in this list'}.</p>}
     </section>
     <section aria-labelledby="conference-all">
       <h2 id="conference-all" className="font-display text-xl font-light text-forest-800">All abstracts ({fmt(d.matching)}{q ? ` of ${fmt(counts.total)}` : ''})</h2>
-      <RowList rows={d.items} id={id} year={year} />
+      <RowList rows={d.items} id={id} year={year} titleOnly={titleOnly} />
       <Pager page={d.page} pages={d.pages} onPage={setPage} />
     </section>
   </div>;
@@ -73,9 +74,11 @@ export default function EditionPanel({ conference, edition }) {
     <p className="text-sm text-slate-700">
       {edition.downloaded_at ? `Downloaded ${when(edition.downloaded_at)} · ${fmt(edition.count)} abstracts` : 'Not downloaded yet'}
       {' · '}window {edition.from} to {edition.until}
+      {!edition.abstract_available && <span className="ml-2 whitespace-nowrap rounded-full border border-amber-700 px-2 text-xs text-amber-800">title only</span>}
     </p>
     {edition.partial && <p className="text-sm text-amber-800">An interrupted download ({fmt(edition.partial.count)} records, {when(edition.partial.saved_at)}) is saved apart and is not shown as a list.</p>}
     <UpdateBar id={id} year={edition.year} />
-    <Lists key={`${id}/${edition.year}`} id={id} year={edition.year} />
+    <ImportBar id={id} year={edition.year} />
+    <Lists key={`${id}/${edition.year}`} id={id} year={edition.year} titleOnly={!edition.abstract_available} />
   </div>;
 }

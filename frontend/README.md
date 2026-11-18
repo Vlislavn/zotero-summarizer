@@ -37,7 +37,7 @@ src/
   pages/              route orchestration: Library(+ReadNext/AnnotationVerdict batch mode), Search,
                       Today, Weekly, Conferences, Settings, Ops (Feed review / Triage jobs / Pending changes / System tabs),
                       PaperReviewPage (/paper/:itemKey), SetupFlow (/setup); *Helpers.js beside pages
-  components/         shared UI and workflows by domain: paper/ (review, RelatedPapers), conferences/ (EditionPanel: Update + preflight, Late-breaking, paged All abstracts, lazy abstract), library/,
+  components/         shared UI and workflows by domain: paper/ (review, RelatedPapers), conferences/ (EditionPanel: Update + preflight, ImportBar file import, «title only» badge, Late-breaking, paged All abstracts, lazy abstract), library/,
                       today/, search/, settings/ (task pages), setup/, form/Fields, ui/ primitives
   hooks/              usePaperReview, useDeepReviewRunner, useConnectionTask, useTodayVisit,
                       useReviewCoolLoop, useServerAvailable, useKeyboardNav, useOptimisticAction, …
