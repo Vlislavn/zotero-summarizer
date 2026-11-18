@@ -115,9 +115,9 @@ into any list, offline. No scoring, topics or model. [Code](../zotero_summarizer
 
 ### Daily triage
 
-**Today** ranks RSS papers against your research goals and lets you **Add** or **Trash**
+**Today** ranks RSS papers against your research goals and lets you **Add** or mark **Not interested**
 them; start and watch backlog triage there, while **Ops** monitors or cancels review jobs
-started from Library. Add requires a current full-text review; Trash does not. The optional
+started from Library. Add requires a current full-text review; Not interested does not. The optional
 background daemon runs the same pipeline but never adds a paper to Zotero. Abstract-only
 triage never recommends a full read; that decision comes from the full-text review.
 Today also records, locally only (`data/today-exposure/<day>.jsonl`; `ZS_TODAY_EXPOSURE_LOG=0`
@@ -140,7 +140,7 @@ call cap, a daily token cap and a circuit breaker. [Code](../zotero_summarizer/s
 
 ### Read next order
 
-Library → Read next with Sort = Best match has an **Order** list: Balanced (the server order), Relevance, My goals, Rigor first and Custom (four sliders). A change re-sorts the list at once on this device, remembered per device; your own Must read stay first, nothing is hidden, a line under the toolbar shows the shares and how many papers each signal is known for, and **Why here** on a row shows its group, each signal's weight × value and the key. Order is hidden during a search and when the model is not ready. It changes only this list: Zotero rank numbers, «Review top N» and Today keep their own order. [Code](../frontend/src/utils/readNextOrder.js) · [Tests](../frontend/src/utils/readNextOrder.test.js).
+Library → Read next with Sort = Best match has an **Order** list: Balanced (the server order), Relevance, My goals, Rigor first and Custom (four sliders). A change re-sorts the list at once on this device, remembered per device; your own Must read stay first, nothing is hidden, a line under the toolbar shows the shares and how many papers each signal is known for, and **Why it's here** in an opened paper shows its group, each signal's weight × value and the key. Order is hidden during a search and when the model is not ready. It changes only this list: Zotero rank numbers, «Review top N» and Today keep their own order. [Code](../frontend/src/utils/readNextOrder.js) · [Tests](../frontend/src/utils/readNextOrder.test.js).
 
 ### Reading reviews
 

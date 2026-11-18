@@ -4,11 +4,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ## [Unreleased]
 
+- Library → Read next: grouped «Your must read · N» (3 rows + Show all) / «To decide · N» / collapsed «Decided by you», also offline; new row (signal line, AI summary, one state label); the per-row ℹ, «Why here» and Confirm/Override card are gone (the suggestion is a quiet chip).
+- Library: «Model guess» chips with counts replace the score histogram; the Why filter, duplicate Clear buttons and Find / Review queue captions are gone; «Select & label» is now «My verdicts».
+- Phone navigation is a single row; Settings and Ops moved behind ⋯; every page has exactly one heading.
+- The expanded paper panel opens on «Your verdict»; «Open full review» opens the paper page in the same tab without building the artifact and Back returns to the exact Library URL.
+- The «Remove»/«skip»/«Trash» verdict is now named «Not interested» everywhere; verdict pills stay on one row on phones.
+- Fixed: Library meaning search with the corpus off no longer shows the whole queue under «exact text matches»; «Show already-read» respects the query; the 50-row cap is visible («Top 50 by meaning»).
+- Fixed: Library reflects an already-running review-fleet run when the page opens. The My verdicts hint no longer claims a verdict retrains the model.
+- API: POST /api/golden/verdict accepts optional `surface`; reading-queue rows carry TL;DR, read decision, minutes and code-link flags (display only).
 - Items the app adds to Zotero: a feed's whole author list in one string now becomes one creator per author (and no creator name exceeds 255 chars), so Zotero sync no longer rejects them («creator name … too long to sync»). Items already stored are repaired separately.
 - Conferences tab (ASCO 2026): you list conferences in `data/conferences/config.yaml`; **Update** (after «≈N requests» is shown) downloads the Crossref list; Late-breaking, then all abstracts with title search; abstracts stay local, outside the paper pool; no scoring, no model.
 - Conferences: AACR (with abstract text), ESMO and ESMO AI (titles only, badge «title only») join ASCO; **Import abstracts…** merges your own CSV/XLSX (number, title, authors, abstract, doi, session) offline and survives an Update.
 - Paper page: «How it works» card (core idea, compared against, what's new, reuse) built on request; every row is tied to a quote found in the paper; «Novelty N/5» is no longer shown.
-- Library → Read next («Best match»): an **Order** list (Balanced, Relevance, My goals, Rigor first, Custom sliders) re-sorts the list on this device, plus a «Why here» button per row. Balanced is the server order; Zotero ranks, «Review top N» and Today are unchanged. Response grows ≈5 %.
+- Library → Read next («Best match»): an **Order** list (Balanced, Relevance, My goals, Rigor first, Custom sliders) re-sorts the list on this device, plus a «Why it's here» note inside the opened paper. Balanced is the server order; Zotero ranks, «Review top N» and Today are unchanged. Response grows ≈5 %.
 - The A–D letter is shown as «Rigor» (was «Quality»: it is the share of checks met): tile, Library filter, Read next «Rigor first», Today chip, feedback part. An A is green only with no critical gap or automatic warning, else grey «checklist only — reason». Display only.
 - Feedback analysis: `result.json` omits null event keys (absent = null) and lists only repeated `content_multiplicity` groups, so a report on live-size data (68.3 MB) fits the 64 MiB cap again (57.6 MB); no field dropped, older runs read the same.
 - Labels (#24): a paper labelled under both its feed key and its Zotero key trains once, on its latest verdict (both rows stay stored); relabels across the two keys log `changed` (with `post_read` after a published review); Refresh labels never overrides an in-app verdict, creates no duplicate row, keeps the app's proposal snapshot, and lists differing Zotero tags (`user_labels_differing`); feedback analysis flags log entries for unknown items (`unknown_item`).
