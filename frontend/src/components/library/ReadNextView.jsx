@@ -6,15 +6,14 @@ import UndoToast from './UndoToast.jsx';
 import useLibraryVerdict, { nextUndecided } from '../../hooks/useLibraryVerdict.js';
 import useKeyboardNav from '../../hooks/useKeyboardNav.js';
 import { DECISIONS } from '../decisionVocab.js';
-import { StatusBanner, formatShortDate } from './shared.jsx';
-import { groupRows, scoreStatus } from './readNextCopy.js';
+import { formatShortDate } from './shared.jsx';
+import { groupRows } from './readNextCopy.js';
 import { CustomPanel, OrderCaption, OrderSelect } from './OrderControls.jsx';
 import { WhyHerePanel } from './WhyHere.jsx';
 import { BALANCED_ORDER } from '../../utils/readNextOrder.js';
 import { Disclosure } from '../paper/review/primitives.jsx';
-import { humanizeError } from '../../utils/humanizeError.js';
 import { SORT_FIELDS, SORT_DEFAULT_DIR, DEFAULT_SORT, goalHighKeys } from '../../utils/relevanceBands.js';
-import Spinner from '../ui/Spinner.jsx';
+import Skeleton from '../ui/Skeleton.jsx';
 import { readStorage } from '../../utils/safeStorage.js';
 
 // Stage-2 "Read next": the single Library surface. Ranked queue over the WHOLE
@@ -85,7 +84,7 @@ const FLASH_MS = 2000;  // the row you came back from stays highlighted this lon
 
 export default function ReadNextView({
   items, loading, err, includeRead, onToggleIncludeRead,
-  queueItems = items, onSaved, status, modelReady, error, computedAt, scoresStale, onRescore, onReload,
+  queueItems = items, onSaved, status, modelReady, computedAt, scoresStale, onRescore,
   selectMode, onToggleSelectMode, selected, onToggleItem, onRunTriage, onBulkDone, starting,
   // Bulk "Add to collection" (the Meaning-search → Zotero collection shortcut):
   // flat collection list + handler from Library; last target remembered so the
@@ -372,12 +371,16 @@ export default function ReadNextView({
             offline ? <span>· cached working set order</span> : semantic
               ? (
                 // The backend caps meaning search at 50 rows; say so, and that filters cut within them.
+                // While the reranker downloads the order is the first-pass fusion: said here, next to the results.
                 <span data-testid="search-caption">
                   {rawCount >= SEARCH_TOP_N
                     ? `· Top ${SEARCH_TOP_N} by meaning for “${searchQuery}”${hasActiveFilters ? ` · ${items.length} of ${SEARCH_TOP_N} match filters` : ''}`
                     : `· ranked by similarity to “${searchQuery}”`}
+                  {rerankerLoading && ' · quick mode while the ranking model downloads (first search only)'}
                 </span>
               )
+              : searchQuery.trim() && semanticUnavailable
+                ? <span data-testid="search-caption">· exact text matches for “{searchQuery}” — meaning search is off</span>
               : (modelReady
                 ? orderOn ? <OrderCaption order={order} meta={orderMeta} /> : (
                   <span title="Best first: your own Must read papers, then model relevance + goal match + author/venue and quality evidence. Review suggestions do not affect this order.">
@@ -388,18 +391,6 @@ export default function ReadNextView({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {modelReady && !offline && (
-            // Plainly: how old the ranking is and whether the model changed since.
-            <span
-              className={`text-[11px] ${scoresStale ? 'text-amber-800' : 'text-slate-500'}`}
-              data-testid="score-status"
-            >
-              {scoreStatus({
-                computedAt, scoresStale,
-                unscored: items.filter((it) => typeof it.relevance_score !== 'number').length,
-              })}
-            </span>
-          )}
           {modelReady && rescoreActionable && (
             // One control, only when actionable; the stale state IS the button
             // (amber), the single accent (Von Restorff). Current + fully scored →
@@ -477,61 +468,8 @@ export default function ReadNextView({
       {orderOn && order.preset === 'custom' && (
         <CustomPanel order={order} meta={orderMeta} onChange={onOrderChange} />
       )}
-      {rerankerLoading && (
-        <div className="mb-2 flex items-center gap-2 text-xs text-slate-600">
-          <Spinner size="sm" color="teal" />
-          Downloading the reranker model (first semantic search only) — showing BM25 + embedding results meanwhile; search again shortly for the reranked order.
-        </div>
-      )}
-      {semanticUnavailable && (
-        <div className="mb-2 text-xs text-amber-700">
-          Semantic search needs the corpus enabled — showing exact text matches instead.
-        </div>
-      )}
-      {computing && (
-        <div className="mb-2 flex items-center gap-2 text-xs text-slate-600">
-          <Spinner size="sm" color="teal" />
-          Scoring your whole library… the complete result appears when scoring finishes. The previous cache is preserved if scoring fails.
-        </div>
-      )}
-      {errored && error && (
-        <StatusBanner message={`Scoring failed: ${error}. Click Rescore to retry.`} isError />
-      )}
-      {err && (
-        <div className="mb-2">
-          <StatusBanner
-            message={
-              err.status === 422
-                ? 'This view needs the updated backend — restart the app (the server has no auto-reload), then reload the page.'
-                : err.status === 503
-                  ? 'Zotero database was busy. Close Zotero if it’s open, then retry.'
-                  : `Failed to load queue: ${humanizeError(err)}`
-            }
-            tone={err.status === 503 ? 'warn' : 'error'}
-          />
-          {onReload && (
-            <button
-              type="button"
-              onClick={onReload}
-              className="mt-1 px-3 py-1 rounded-md border border-slate-300 text-xs text-slate-700 hover:bg-slate-50"
-            >
-              Retry
-            </button>
-          )}
-        </div>
-      )}
-      {loading && items.length === 0 && <div className="p-4 text-center text-xs text-slate-500">Loading reading queue…</div>}
-      {!loading && items.length === 0 && !computing && !errored && !err && (
-        hasActiveFilters && rawCount > 0 ? (
-          <div className="p-6 text-center text-xs text-slate-500">
-            No papers match your filters — Clear all, above, shows the whole list again.
-          </div>
-        ) : (
-          <div className="p-6 text-center text-xs text-slate-500">
-            Nothing to read — add papers from Today, adjust filters, or turn on “Show already-read”.
-            {modelReady && !computedAt && <div className="mt-1">Click <strong>Rescore</strong> to rank by relevance.</div>}
-          </div>
-        )
+      {loading && items.length === 0 && (
+        <div role="status" aria-busy="true"><span className="sr-only">Loading your reading list…</span><Skeleton count={3} height="h-16" /></div>
       )}
       {!toastInSheet && toast && <div className="sticky top-2 z-20 mb-2">{toast}</div>}
       <div ref={listRef} className={openKey && isDesktop ? 'lg:flex lg:gap-3 lg:items-start' : ''}>

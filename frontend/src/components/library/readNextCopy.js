@@ -1,6 +1,6 @@
-// Plain-language copy for the Read-next list — pure, so the grouping and the
-// stale-score sentence stay in one place.
-import { formatShortDate, timeAgo, truncateAuthors } from './shared.jsx';
+// Plain-language copy for the Read-next list — pure, so the grouping and the row wording stay in one place
+// (the status line and the empty lists are in libraryStatus.js).
+import { truncateAuthors } from './shared.jsx';
 import { pretty } from '../../utils/priorityLabels.js';
 
 // Rows the owner already judged (own verdict). Rows from an older cache / the
@@ -18,17 +18,6 @@ export function groupRows(items) {
     else (row.user_priority === 'must_read' ? groups.must : groups.decided).push(row);
   }
   return groups;
-}
-
-// Where the ranking comes from, stated next to Rescore: when, and whether the
-// model has changed since (stale) — plus how many rows have no score at all.
-export function scoreStatus({ computedAt, scoresStale, unscored }) {
-  if (!computedAt) return 'Papers are not scored yet.';
-  const when = `Scores from ${formatShortDate(computedAt)} (${timeAgo(computedAt)})`;
-  const extra = unscored > 0 ? `; ${unscored} not scored` : '';
-  return scoresStale
-    ? `${when} — computed by an older model, so the order may be out of date${extra}.`
-    : `${when}${extra}.`;
 }
 
 // ---- Order presets (Best match only) --------------------------------------

@@ -16,8 +16,12 @@ import ReadNextView from '../components/library/ReadNextView.jsx';
 import LibraryFilterBar from '../components/library/LibraryFilterBar.jsx';
 import ExpandableList from '../components/library/ExpandableList.jsx';
 import PredictionsBar from '../components/library/PredictionsBar.jsx';
+import LibraryStatusLine, { LibraryEmptyState } from '../components/library/LibraryStatusLine.jsx';
+import { emptyState } from '../components/library/libraryStatus.js';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import { useReviewCoolLoop } from '../hooks/useReviewCoolLoop.js';
+import usePendingCount from '../hooks/usePendingCount.js';
+import { syncNow } from '../syncClient.js';
 import ZoteroActionsMenu from '../components/library/ZoteroActionsMenu.jsx';
 import { StatusBanner, formatShortDate } from '../components/library/shared.jsx';
 import { Section } from '../components/paper/review/primitives.jsx';
@@ -77,7 +81,7 @@ export default function LibraryReadNext() {
   const navigate = useNavigate();
   const { status } = useSetupStatus();
   const serverAvailable = useServerAvailable();
-  const { say: sayUnavailable } = useUnavailableText();
+  const { say: sayUnavailable, kind: connectionKind } = useUnavailableText();
   const zoteroConnected = status?.zotero?.db_found === true;
   const [searchParams, setSearchParams] = useSearchParams();
   // Client-side smart filters (Phase 1) — hydrated from the URL on mount so a
@@ -96,7 +100,7 @@ export default function LibraryReadNext() {
   });
   const pollRef = useRef(null);
   const queueRequest = useRef(null);
-  const [queueLoading, setQueueLoading] = useState(false);
+  const [queueLoading, setQueueLoading] = useState(true);  // the first read starts on mount: no frame says «not scored» before it
   const [queueErr, setQueueErr] = useState(null);
   const [includeRead, setIncludeRead] = useState(false);
   const [collections, setCollections] = useState([]);
@@ -410,14 +414,22 @@ export default function LibraryReadNext() {
     setSearch(searchInput.trim());
   }
 
+  function clearSearch() {
+    setSearchInput('');
+    setSearch('');
+  }
+
+  function clearScope() {
+    setSelectedCollection('');
+    setSelectedTag('');
+    setSearchParams((prev) => { const next = new URLSearchParams(prev); next.delete('c'); next.delete('t'); return next; }, { replace: true });
+  }
+
   // The page's single "Clear all": scope (collection, tag, search) and smart filters.
   function clearAll() {
     setClientFilters(EMPTY_FILTERS);
-    setSelectedCollection('');
-    setSelectedTag('');
-    setSearchInput('');
-    setSearch('');
-    setSearchParams((prev) => { const next = new URLSearchParams(prev); next.delete('c'); next.delete('t'); return next; }, { replace: true });
+    clearScope();
+    clearSearch();
   }
 
   function toggleItem(key) {
@@ -629,6 +641,31 @@ export default function LibraryReadNext() {
     }
   }
 
+  // ------ The status line and the empty list (libraryStatus.js picks the one message) ------
+  const pending = usePendingCount(serverAvailable);
+  const offline = queueMeta.status === 'offline';
+  const scoringError = queueMeta.status === 'error' && queueMeta.error ? queueMeta.error : null;
+  const unscored = useMemo(() => queue.filter((row) => typeof row.relevance_score !== 'number').length, [queue]);
+  const scopeName = flatCollections.find((c) => c.key === selectedCollection)?.name
+    || (selectedCollection ? 'this collection' : selectedTag);
+  const base = {
+    loading: queueLoading, err: queueErr, offline, scoringError, computing: queueMeta.status === 'computing',
+    modelReady: queueMeta.model_ready, computedAt: queueMeta.computed_at,
+  };
+  const statusCtx = {
+    ...base, rows: queue.length, connection: serverAvailable ? 'ok' : connectionKind,
+    scoresStale: queueMeta.scores_stale, unscored, pending,
+  };
+  const empty = emptyState({
+    ...base, rows: displayedQueue.length, rawCount: queue.length, hasActiveFilters: queueMeta.model_ready && filtersActive,
+    search, scopeName, includeRead, readHidden: queueMeta.read_hidden,
+  });
+  const statusHandlers = {
+    sync: () => syncNow(), retry: () => loadQueue(false), reload: () => window.location.reload(),
+    rescore: () => loadQueue(true), clearFilters: () => setClientFilters(EMPTY_FILTERS), clearSearch, clearScope,
+    showRead: () => setIncludeRead(true),
+  };
+
   // Active scope shown in the collapsed drawer summary so folding it never hides
   // what's applied (Working Memory). Collection name (not key), tag, filters-on.
   const browseScope = [
@@ -639,6 +676,7 @@ export default function LibraryReadNext() {
 
   return (
     <div>
+      <LibraryStatusLine ctx={statusCtx} handlers={statusHandlers} />
       {/* ----- Single full-width Read-next surface (Stage 2). Collections, tags,
           and smart filters fold into ONE "Browse & filter" drawer so the ranked
           queue + decision card own the whole width. Three labelled regions keep
@@ -791,9 +829,6 @@ export default function LibraryReadNext() {
             queueAtLimit={queue.length >= QUEUE_LIMIT}
           />
           </fieldset>
-          {!serverAvailable && <p role="status" className="mt-2 text-xs text-amber-800">{queueMeta.status === 'offline'
-            ? `Cached working set — verdicts and notes save on this device. ${sayUnavailable('Review, meaning search and Zotero export need the Mac.')}`
-            : 'App sync is not confirmed. Use Sync now before server-only actions; local review remains available.'}</p>}
           <div className="mt-3">
             <ReadNextView
           // Remount on a deliberate SERVER filter change so the incremental-reveal
@@ -805,7 +840,7 @@ export default function LibraryReadNext() {
           // The explicit Zotero-column sort applies in both cases (displayedQueue).
           items={displayedQueue}
           serverAvailable={serverAvailable}
-          offline={queueMeta.status === 'offline'}
+          offline={offline}
           sort={sort}
           onSortChange={setSort}
           order={order}
@@ -815,17 +850,14 @@ export default function LibraryReadNext() {
           err={queueErr}
           includeRead={includeRead}
           onToggleIncludeRead={() => setIncludeRead((v) => !v)}
-          readHidden={queueMeta.read_hidden}
           totalUnread={queueMeta.total_unread}
           decidedCount={queueMeta.decided_count}
           queueItems={queue}
           status={queueMeta.status}
           modelReady={queueMeta.model_ready}
-          error={queueMeta.error}
           computedAt={queueMeta.computed_at}
           scoresStale={queueMeta.scores_stale}
           onRescore={() => loadQueue(true)}
-          onReload={() => loadQueue(false)}
           onSaved={() => loadQueue()}
           openState={openPaper}
           onFocusSearch={() => searchRef.current?.focus()}
@@ -851,6 +883,7 @@ export default function LibraryReadNext() {
           prestigeFloor={filterCtx.prestigeFloor}
           cohortFull={!selectedCollection && !selectedTag}
         />
+            <LibraryEmptyState state={empty} handlers={statusHandlers} />
           </div>
         </Section>
 

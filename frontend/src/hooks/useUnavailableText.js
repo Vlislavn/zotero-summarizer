@@ -5,6 +5,7 @@ import { isServerAvailable, syncStatusEvent, transportUnavailable } from '../off
 // app answered but errored/was slow; the "needs the Mac" text only when it truly cannot be reached;
 // "Checking the connection…" before the first answer. The state is kept here (not read at render)
 // so a mounted label follows the connection when it goes from unknown to unreachable.
+// `kind` is that state itself: 'busy' | 'mac' (cannot be reached) | 'checking'.
 const connectionKind = () => (isServerAvailable({ allowSyncFailure: true }) ? 'busy'
   : (!navigator.onLine || transportUnavailable()) ? 'mac' : 'checking');
 
@@ -18,5 +19,5 @@ export default function useUnavailableText() {
   }, []);
   const say = (macText) => (kind === 'busy' ? 'The app is busy — try again.'
     : kind === 'mac' ? macText : 'Checking the connection…');
-  return { busy: kind === 'busy', say };
+  return { busy: kind === 'busy', kind, say };
 }

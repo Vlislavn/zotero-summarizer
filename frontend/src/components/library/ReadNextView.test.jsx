@@ -85,7 +85,6 @@ describe('ReadNextView detail', () => {
     const err = Object.assign(new Error('Reading cache is corrupt'), { status: 500 });
     renderView({ computedAt: '2026-09-06T12:00:00Z', err, onRescore });
 
-    expect(screen.getByText(/Failed to load queue:/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Rescore' }));
 
     expect(onRescore).toHaveBeenCalledTimes(1);
@@ -196,14 +195,13 @@ describe('ReadNextView detail', () => {
     expect(screen.queryByRole('button', { name: /brief|Open cached review/i })).toBeNull();
   });
 
-  it('shows no empty state when the queue failed to load and there are no rows', () => {
-    const err = Object.assign(new Error('boom'), { status: 500 });
-    renderView({ items: [], rawCount: 0, totalUnread: 0, err });
-
-    expect(screen.getByText(/Failed to load queue:/)).toBeTruthy();
-    expect(screen.queryByText(/Nothing to read/)).toBeNull();
+  it('says in the search caption when meaning search is off or still downloading its ranker', () => {
+    renderView({ searchQuery: 'agents', semanticUnavailable: true });
+    expect(screen.getByTestId('search-caption').textContent).toMatch(/exact text matches for “agents” — meaning search is off/);
+    cleanup();
+    renderView({ searchQuery: 'agents', semantic: true, rerankerLoading: true });
+    expect(screen.getByTestId('search-caption').textContent).toMatch(/quick mode while the ranking model downloads/);
   });
-
 });
 
 describe('ReadNextView Goals strong', () => {
