@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
 import NavBar from './NavBar.jsx';
 import { resolveConflict } from '../offlineStore.js';
@@ -77,7 +77,7 @@ it('makes deployment limits and installation prerequisites visible without expos
 it('wraps long stable keys in both rejected drafts and conflicts on mobile', () => {
   const key = `feed:g:${'b'.repeat(64)}`;
   render(<MemoryRouter><NavBar /></MemoryRouter>);
-  expect(screen.getByRole('navigation').className).toContain('flex-wrap');
+  expect(screen.getByRole('navigation').className).toContain('sm:flex-wrap');
   expect(screen.getByRole('navigation').className).toContain('max-w-full');
   act(() => window.dispatchEvent(new CustomEvent('zs-sync-status', { detail: {
     online: true, pending: 0, conflicts: [], message: '', rejected: [
@@ -109,4 +109,46 @@ it('exposes every rejected draft for recovery without pretending refresh repairs
   expect(screen.getAllByRole('link', { name: 'Open paper', hidden: true }).map((link) => link.getAttribute('href')))
     .toEqual(['/paper/P1', '/paper/P2']);
   expect(screen.queryByText(/refresh the app before retrying/)).toBeNull();
+});
+
+const Where = () => <output data-testid="where">{useLocation().pathname}</output>;
+const renderNav = () => render(<MemoryRouter initialEntries={['/library']}><NavBar /><h1>Library</h1><Where /></MemoryRouter>);
+
+it('keeps one phone row: five destinations then a ⋯ button, each a 44 px target', () => {
+  renderNav();
+  const row = within(screen.getByRole('navigation')).getAllByRole('link').slice(0, 5);
+  expect(row.map((a) => a.textContent)).toEqual(['Today', 'Library', 'Search', 'Weekly', 'Conferences']);
+  const more = screen.getByRole('button', { name: /More/ });
+  expect(screen.getByRole('navigation').firstElementChild.textContent).toBe('Today');
+  [...row, more].forEach((el) => expect(el.className).toMatch(/\bmin-h-11\b/));
+  expect(more.className).toContain('sm:hidden');
+  expect(more.getAttribute('aria-expanded')).toBe('false');
+  expect(document.getElementById('nav-more').className).toMatch(/\bhidden\b/);
+});
+
+it('reaches Settings and Ops in two taps from the ⋯ button', () => {
+  renderNav();
+  fireEvent.click(screen.getByRole('button', { name: /More/ }));
+  expect(screen.getByRole('button', { name: /More/ }).getAttribute('aria-expanded')).toBe('true');
+  expect(document.getElementById('nav-more').className).not.toMatch(/\bhidden\b/);
+  expect(screen.getByRole('link', { name: 'Ops' }).getAttribute('href')).toBe('/ops');
+  fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+  expect(screen.getByTestId('where').textContent).toBe('/settings');
+  expect(screen.getByRole('button', { name: /More/ }).getAttribute('aria-expanded')).toBe('false');
+});
+
+it('closes ⋯ on Escape and returns focus to the button', () => {
+  renderNav();
+  const more = screen.getByRole('button', { name: /More/ });
+  fireEvent.click(more);
+  screen.getByRole('link', { name: 'Ops' }).focus();
+  fireEvent.keyDown(document.activeElement, { key: 'Escape' });
+  expect(more.getAttribute('aria-expanded')).toBe('false');
+  expect(document.activeElement).toBe(more);
+});
+
+it('leaves the page a single h1 — the app name is not a heading', () => {
+  renderNav();
+  expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual(['Library']);
+  expect(screen.getByText('Zotero Summarizer').tagName).not.toMatch(/^H\d$/);
 });
