@@ -38,8 +38,6 @@ function renderView(props = {}, entry = '/library') {
       items={items}
       loading={false}
       err={null}
-      includeRead={false}
-      onToggleIncludeRead={vi.fn()}
       readHidden={0}
       totalUnread={items.length}
       onSaved={vi.fn()}

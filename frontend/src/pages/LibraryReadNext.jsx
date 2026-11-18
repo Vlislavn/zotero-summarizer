@@ -26,7 +26,7 @@ import usePendingCount from '../hooks/usePendingCount.js';
 import useLibraryFilters from '../hooks/useLibraryFilters.js';
 import { syncNow } from '../syncClient.js';
 import { Section } from '../components/paper/review/primitives.jsx';
-import { buildPredicate, goalHighKeys, sortQueue } from '../utils/relevanceBands.js';
+import { DEFAULT_SORT, buildPredicate, goalHighKeys, sortQueue } from '../utils/relevanceBands.js';
 import { isMachineTag } from '../utils/tags.js';
 import { fulltextMessage } from './todayHelpers.js';
 import { readStorage, writeStorage } from '../utils/safeStorage.js';
@@ -154,14 +154,15 @@ export default function LibraryReadNext() {
   // What the list actually shows: client filters apply only when the model is
   // ready (the bar is hidden otherwise), the explicit sort applies always —
   // sorting by Title/Year needs no model.
-  // Order presets re-rank only a ranked, search-free list whose response has the parts.
+  // Order presets act only on a search-free list whose response has the parts; they re-rank it
+  // only while no Zotero field is chosen (the field IS the order then).
   const orderMeta = orderAvailable({
-    sortField: sort.field, search, modelReady: queueMeta.model_ready, meta: queueMeta.order_meta,
+    sortField: DEFAULT_SORT.field, search, modelReady: queueMeta.model_ready, meta: queueMeta.order_meta,
   }) ? queueMeta.order_meta : null;
   const displayedQueue = useMemo(
     () => sortByPreset(
       sortQueue(queueMeta.model_ready ? filteredQueue : queue, sort),
-      orderMeta ? order : BALANCED_ORDER, orderMeta,
+      sort.field === DEFAULT_SORT.field ? order : BALANCED_ORDER, orderMeta,
     ),
     [queueMeta.model_ready, filteredQueue, queue, sort, order, orderMeta],
   );
@@ -681,8 +682,6 @@ export default function LibraryReadNext() {
           orderMeta={orderMeta}
           loading={queueLoading}
           err={queueErr}
-          includeRead={includeRead}
-          onToggleIncludeRead={() => setIncludeRead((v) => !v)}
           totalUnread={queueMeta.total_unread}
           decidedCount={queueMeta.decided_count}
           queueItems={queue}

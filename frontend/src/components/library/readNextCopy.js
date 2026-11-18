@@ -22,7 +22,16 @@ export function groupRows(items) {
 
 // ---- Order presets (Best match only) --------------------------------------
 export const ORDER_INFO = 'Changes only this list. Zotero rank numbers, “Review top N” and Today keep their own '
-  + 'order (relevance + goals + prestige, without your verdict groups).';
+  + 'order (relevance + goals + prestige, without your verdict groups). A field sorts by that column instead. '
+  + 'In Balanced, rigor lifts a paper only within its ★ band.';
+
+// Why the presets cannot act right now ('' = they can): one reason, shown next to the control.
+export function presetsOffReason({ offline, searching, modelReady, hasMeta }) {
+  if (offline) return 'Presets need the live list — you are offline';
+  if (searching) return 'Presets are off during a search';
+  if (!modelReady) return 'Presets wait for the model';
+  return hasMeta ? '' : 'Presets need a freshly ranked list';
+}
 
 const pct = (share) => `${Math.round(share * 100)}%`;
 const SIGNAL_NAME = { relevance: 'relevance', goals: 'goals', quality: 'rigor', prestige: 'prestige' };
@@ -35,12 +44,11 @@ export function coverageNote(meta, signal) {
 }
 
 // The always-visible state line: which shares are in force and how many papers know each.
-export function orderCaption(label, shares, meta, balanced) {
+export function orderCaption(label, shares, meta) {
   const parts = Object.keys(SIGNAL_NAME).filter((s) => shares[s] > 0).map((s) => {
     const note = coverageNote(meta, s);
     return `${SIGNAL_NAME[s]} ${pct(shares[s])}${note ? ` (${note})` : ''}`;
   });
-  if (balanced) parts.push('rigor lifts within its ★ band');
   return [label, ...parts].join(' · ');
 }
 

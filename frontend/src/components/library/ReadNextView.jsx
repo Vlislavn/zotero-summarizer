@@ -6,12 +6,12 @@ import UndoToast from './UndoToast.jsx';
 import useLibraryVerdict, { nextUndecided } from '../../hooks/useLibraryVerdict.js';
 import useKeyboardNav from '../../hooks/useKeyboardNav.js';
 import { DECISIONS } from '../decisionVocab.js';
-import { groupRows } from './readNextCopy.js';
-import { CustomPanel, OrderCaption, OrderSelect } from './OrderControls.jsx';
+import { groupRows, presetsOffReason } from './readNextCopy.js';
+import { CustomPanel, OrderCaption, OrderControl } from './OrderControls.jsx';
 import { WhyHerePanel } from './WhyHere.jsx';
 import { BALANCED_ORDER } from '../../utils/readNextOrder.js';
 import { Disclosure } from '../paper/review/primitives.jsx';
-import { SORT_FIELDS, SORT_DEFAULT_DIR, DEFAULT_SORT, goalHighKeys } from '../../utils/relevanceBands.js';
+import { DEFAULT_SORT, goalHighKeys } from '../../utils/relevanceBands.js';
 import Skeleton from '../ui/Skeleton.jsx';
 import { readStorage } from '../../utils/safeStorage.js';
 
@@ -82,7 +82,7 @@ const NO_OPEN = { key: null, open() {}, close() {}, position: null, total: 0, pr
 const FLASH_MS = 2000;  // the row you came back from stays highlighted this long
 
 export default function ReadNextView({
-  items, loading, err, includeRead, onToggleIncludeRead,
+  items, loading, err,
   queueItems = items, onSaved, modelReady,
   selectMode, onToggleSelectMode, selected, onToggleItem, onRunTriage, onBulkDone, starting,
   // Bulk "Add to collection" (the Meaning-search → Zotero collection shortcut):
@@ -101,8 +101,8 @@ export default function ReadNextView({
   // sorted). 'best' = the blended server order.
   sort = DEFAULT_SORT, onSortChange,
   // Read-next order presets: `orderMeta` ({coverage, fill, balancedWeights}) is set only
-  // where the Order control exists (Best match, no search, parts in the response);
-  // Library owns `order` and has already sorted `items` by it.
+  // where the presets can act (no search, parts in the response); Library owns `order` and,
+  // while no Zotero field is chosen, has already sorted `items` by it.
   order = BALANCED_ORDER, onOrderChange, orderMeta = null,
   // True while the list is the whole library (no collection / tag scope): only then is
   // «Goals strong» (top third of goal_sim in the loaded list) the same word for a paper everywhere.
@@ -121,7 +121,7 @@ export default function ReadNextView({
   const [flashKey, setFlashKey] = useState(null);
   const [mustAll, setMustAll] = useState(false);  // «Show all N» of your own Must read (this visit)
   const [decidedOpen, setDecidedOpen] = useState(false);  // the «Decided by you» block
-  const orderOn = Boolean(orderMeta && onOrderChange);
+  const orderOn = Boolean(orderMeta && onOrderChange && sort.field === 'best');  // a Zotero field replaces the preset
   const listRef = useRef(null);
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   // Target for the bulk "Add to collection" action. Defaults to the last-used
@@ -327,39 +327,17 @@ export default function ReadNextView({
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <div className="text-xs text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-1">
-          {/* Zotero-column sort (Jakob's Law: same field names as Zotero's item
-              table). One select + one direction toggle; 'Best match' restores the
-              blended server order and hides the toggle. */}
-          {onSortChange && (
-            <span className="inline-flex items-center gap-1">
-              <select
-                value={sort.field}
-                onChange={(e) => {
-                  const field = e.target.value;
-                  onSortChange(field === 'best' ? DEFAULT_SORT : { field, dir: SORT_DEFAULT_DIR[field] });
-                }}
-                className="px-1.5 py-0.5 rounded-md border border-slate-300 text-[11px] text-slate-700 bg-white"
-                title="Sort the list — same columns as Zotero. Best match puts your own Must read first, then uses relevance, goals, and evidence; review suggestions do not affect order."
-                aria-label="Sort by"
-              >
-                {SORT_FIELDS.map((f) => (
-                  <option key={f.key} value={f.key}>{f.label}</option>
-                ))}
-              </select>
-              {sort.field !== 'best' && (
-                <button
-                  type="button"
-                  onClick={() => onSortChange({ ...sort, dir: sort.dir === 'asc' ? 'desc' : 'asc' })}
-                  className="px-1.5 py-0.5 rounded-md border border-slate-300 text-[11px] text-slate-700 bg-white hover:bg-slate-50"
-                  title={sort.dir === 'asc' ? 'Ascending — click for descending' : 'Descending — click for ascending'}
-                  aria-label="Toggle sort direction"
-                >
-                  {sort.dir === 'asc' ? '↑' : '↓'}
-                </button>
-              )}
-            </span>
+          {/* ONE Order list: presets + Zotero columns (Jakob's Law: Zotero's own field names). */}
+          {onSortChange && onOrderChange && (
+            <OrderControl
+              order={order}
+              meta={orderMeta}
+              sort={sort}
+              reason={presetsOffReason({ offline, searching: Boolean(searchQuery.trim()), modelReady, hasMeta: Boolean(orderMeta) })}
+              onOrderChange={onOrderChange}
+              onSortChange={onSortChange}
+            />
           )}
-          {orderOn && <OrderSelect order={order} meta={orderMeta} onChange={onOrderChange} />}
           {sort.field === 'best' && (
             offline ? <span>· cached working set order</span> : semantic
               ? (
@@ -433,11 +411,6 @@ export default function ReadNextView({
               </button>
             </span>
           )}
-          <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
-            <input type="checkbox" disabled={!serverAvailable} checked={includeRead} onChange={onToggleIncludeRead}
-              className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500" />
-            Show already-read
-          </label>
         </div>
       </div>
       {orderOn && order.preset === 'custom' && (

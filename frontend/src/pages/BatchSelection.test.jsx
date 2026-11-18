@@ -94,7 +94,11 @@ it.each([
       const input = screen.getByPlaceholderText(/^Search by meaning/);
       fireEvent.change(input, { target: { value: 'Alpha' } });
       fireEvent.keyUp(input, { key: 'Enter' });
-    } else fireEvent.click(screen.getByRole('checkbox', { name: 'Show already-read' }));
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+      fireEvent.click(screen.getByRole('checkbox', { name: /^Show read papers/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Show papers' }));
+    }
     await waitFor(() => expect(screen.queryByText('Beta 2')).toBeNull());
     if (action === 'collection') {
       fireEvent.change(screen.getByTitle('Target Zotero collection for the selected papers'), { target: { value: 'C1' } });
