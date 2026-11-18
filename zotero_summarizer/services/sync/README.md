@@ -45,6 +45,8 @@ The status `conflicts` count includes only conflict receipts without a successfu
 resolution mutation; resolved historical receipts remain auditable without being
 reported as active work.
 
+Each queue-row snapshot also carries the display-only `read_decision`, `estimated_read_minutes` and `has_code` row fields (null without a current review; the snapshot's own `review_digest` is unchanged; `protocol` stays 1).
+
 Snapshot review payloads are filtered through the same PDF/model/config identity
 check as Library policy consumers; stale deep-review output is never synced as current.
 

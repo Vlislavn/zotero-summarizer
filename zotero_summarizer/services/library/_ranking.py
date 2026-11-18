@@ -37,6 +37,8 @@ from zotero_summarizer.services.model.rank_blend import (
 _READ_TAGS: frozenset[str] = READ_EMOJIS | HARD_VETO_EMOJIS
 _TRIAGE_APPROVED_TOKEN = "triage-approved"
 _PREVIEW_CHARS = 260
+_TLDR_CHARS = 300
+_READ_DECISIONS = frozenset({"read", "skim", "skip"})
 _EMAIL_ONLY = re.compile(r"\S+@\S+\.\S+")
 
 
@@ -233,6 +235,26 @@ def sort_unread(unread: list[dict[str, Any]], *, model_ready: bool, lift_must: b
         unread.sort(key=lambda c: _group_rank(c, lift_must))
 
 
+def _review_row_fields(review: dict[str, Any] | None) -> dict[str, Any]:
+    """Display-only row fields from the current projected review (``None`` → all null).
+
+    ``has_code``: true = a repo was found and is not known dead; false = ``code_link``
+    present but nothing found / dead repo; null = no review or no ``code_link`` key."""
+    digest = (review or {}).get("digest")
+    if not digest:
+        return {"review_digest": None, "read_decision": None, "estimated_read_minutes": None, "has_code": None}
+    decision = str(digest.get("read_decision") or "")
+    minutes = digest.get("estimated_read_minutes")
+    link = review.get("code_link")
+    has_code = None if not isinstance(link, dict) else bool(link.get("found")) and link.get("exists") is not False
+    return {
+        "review_digest": {"tldr": str(digest.get("tldr") or "")[:_TLDR_CHARS]},
+        "read_decision": decision if decision in _READ_DECISIONS else None,
+        "estimated_read_minutes": minutes if isinstance(minutes, int) and not isinstance(minutes, bool) else None,
+        "has_code": has_code,
+    }
+
+
 def _build_recs(
     rows: list[dict[str, Any]],
     *,
@@ -321,6 +343,7 @@ def _build_recs(
             "quality_band": quality_band,
             "quality_met": qual.get("coverage_met"),
             "quality_applicable": qual.get("coverage_applicable"),
+            **_review_row_fields(reviews.get(it["item_key"])),
         }
         (read if (is_read or user_priority == "dont_read") else unread).append(rec)
     attach_nearest_kept(unread)
