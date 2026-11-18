@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useBeforeUnload, useBlocker, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useBeforeUnload, useBlocker, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchCollections, fetchPaperRender, fetchSectionSummaries, attachFiguresToZotero } from '../api/libraryApi.js';
 import { flattenCollections } from './pendingHelpers.js';
@@ -166,6 +166,7 @@ export default function PaperReviewPage() {
   const visitId = params.get('visit');
   const autoRun = params.get('autoRun') !== 'false';
   const navigate = useNavigate();
+  const cameFrom = useLocation().state?.from;  // set by in-app links (e.g. Library "Open full review")
   const queryClient = useQueryClient();
   useEffect(() => { // link opens on this page belong to the Today slate it was opened from
     setTodayReviewContext(fromToday && visitId ? { slateId: visitId, itemKey } : null);
@@ -309,7 +310,10 @@ export default function PaperReviewPage() {
   return (
     <div className="paper-reading-page mx-auto w-full min-w-0 max-w-[76rem] pb-44 lg:pb-6">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-0 text-[13px] text-slate-500">
-        <Link to={fromToday ? '/today' : '/library'} className="inline-flex min-h-11 items-center hover:text-forest-800">{fromToday ? '← Back to Today' : '← Back'}</Link>
+        <Link
+          to={fromToday ? '/today' : '/library'}
+          onClick={!fromToday && cameFrom ? (e) => { e.preventDefault(); navigate(-1); } : undefined}
+          className="inline-flex min-h-11 items-center hover:text-forest-800">{fromToday ? '← Back to Today' : '← Back'}</Link>
         {navIdx >= 0 && (
           <>
             <span className="text-slate-300" aria-hidden="true">·</span>

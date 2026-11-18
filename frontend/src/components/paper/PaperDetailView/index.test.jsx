@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
+import '../../../testSetup.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react';
+import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router-dom';
 
 const mocks = vi.hoisted(() => ({ saveReviewNote: vi.fn(), queueQuestionSubmission: vi.fn(),
-  saveReviewQuestion: vi.fn(), askPaper: vi.fn(), isServerAvailable: vi.fn() }));
+  saveReviewQuestion: vi.fn(), fetchPaperRender: vi.fn(), buildPaperRender: vi.fn(), askPaper: vi.fn(), isServerAvailable: vi.fn() }));
 vi.mock('../../../api/goldenApi.js', () => ({ saveReviewNote: mocks.saveReviewNote }));
-vi.mock('../../../api/libraryApi.js', () => ({ saveReviewQuestion: mocks.saveReviewQuestion, askPaper: mocks.askPaper }));
+vi.mock('../../../api/libraryApi.js', () => ({ saveReviewQuestion: mocks.saveReviewQuestion, askPaper: mocks.askPaper,
+  fetchPaperRender: mocks.fetchPaperRender, buildPaperRender: mocks.buildPaperRender }));
 vi.mock('../../../offlineStore.js', () => ({ queueQuestionSubmission: mocks.queueQuestionSubmission,
   isServerAvailable: mocks.isServerAvailable, syncStatusEvent: 'zs-sync-status' }));
 vi.mock('../LinksRow.jsx', () => ({ default: () => null }));
@@ -13,9 +16,10 @@ vi.mock('../DeepReviewSection.jsx', () => ({ default: () => <div data-testid="di
 vi.mock('../TagOfInterestEditor.jsx', () => ({ default: () => null }));
 vi.mock('../CollectionEditor.jsx', () => ({ default: () => null }));
 vi.mock('../../library/PaperReaderPane.jsx', () => ({ default: () => null }));
-vi.mock('../../library/OpenBriefButton.jsx', () => ({ default: () => null }));
 vi.mock('../../VerdictPanel.jsx', () => ({ default: () => <div data-testid="verdict" /> }));
 import PaperDetailView from './index.jsx';
+
+const render = (ui, options) => rtlRender(ui, { wrapper: MemoryRouter, ...options });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -132,3 +136,20 @@ it.each([[true, Node.DOCUMENT_POSITION_FOLLOWING], [false, Node.DOCUMENT_POSITIO
     expect(verdict).toHaveLength(1);
     expect(verdict[0].compareDocumentPosition(screen.getByTestId('digest')) & position).toBeTruthy();
   });
+
+it('compact: Open full review is a same-tab link that carries where you came from and builds nothing', () => {
+  const Detail = () => <PaperDetailView mode="editable" compact itemKey="K 1" detail={{ has_pdf: true }} />;
+  const router = createMemoryRouter([
+    { path: '/library', element: <Detail /> }, { path: '/paper/:itemKey', element: <p>paper page</p> },
+  ], { initialEntries: ['/library?open=K%201&c=C1'] });
+  rtlRender(<RouterProvider router={router} />);
+  const link = screen.getByRole('link', { name: 'Open full review ↗' });
+  expect(link.getAttribute('href')).toBe('/paper/K%201?autoRun=false');
+  expect(link.getAttribute('target')).toBeNull();
+  fireEvent.click(link);
+  expect(router.state.location.pathname).toBe('/paper/K%201');
+  expect(router.state.location.search).toBe('?autoRun=false');
+  expect(router.state.location.state).toEqual({ from: '/library?open=K%201&c=C1' });
+  expect(mocks.fetchPaperRender).not.toHaveBeenCalled();
+  expect(mocks.buildPaperRender).not.toHaveBeenCalled();
+});

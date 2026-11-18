@@ -1,3 +1,4 @@
+import { Link, useLocation } from 'react-router-dom';
 import LinksRow from '../LinksRow.jsx';
 import DeepReviewSection from '../DeepReviewSection.jsx';
 import TagOfInterestEditor from '../TagOfInterestEditor.jsx';
@@ -5,7 +6,6 @@ import CollectionEditor from '../CollectionEditor.jsx';
 import PaperReaderPane from '../../library/PaperReaderPane.jsx';
 import AskPaperBox from '../../library/AskPaperBox.jsx';
 import ReviewNotes from '../review/ReviewNotes.jsx';
-import OpenBriefButton from '../../library/OpenBriefButton.jsx';
 import VerdictPanel from '../../VerdictPanel.jsx';
 import useServerAvailable from '../../../hooks/useServerAvailable.js';
 import AbstractBlock from './AbstractBlock.jsx';
@@ -57,7 +57,7 @@ export default function PaperDetailView({
   show = {},
   // compact (Library row card): drop the per-goal board and lead the Decide
   // zone with "Open full review" — the full
-  // digest/figures/abstract live in the new-tab brief, not duplicated inline.
+  // digest/figures/abstract live on the full review page, not duplicated inline.
   compact = false,
   readerOpen = false,
   onReaderOpenChange,
@@ -70,6 +70,7 @@ export default function PaperDetailView({
   extras = null,
 }) {
   const serverAvailable = useServerAvailable();
+  const location = useLocation();
   const { questionMirror, beginNoteDelivery } = useNoteDelivery(itemKey, detail?.user_note || '', detail?.questions || []);
   if (!detail) return null;
   const editable = mode === 'editable';
@@ -123,7 +124,15 @@ export default function PaperDetailView({
           <Section label={compact ? undefined : 'Decide'}>
             <div className="space-y-4">
               {compact && (
-                <OpenBriefButton itemKey={itemKey} hasPdf={hasPdf} label="Open full review ↗" />
+                // Same-tab link, no artifact build and no POST: the page reads what exists.
+                // `state.from` lets the page's Back return to this exact URL (history -1).
+                <Link
+                  to={`/paper/${encodeURIComponent(itemKey)}?autoRun=false`}
+                  state={{ from: `${location.pathname}${location.search}` }}
+                  className="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg bg-teal-700 text-white text-[13px] font-semibold hover:bg-teal-800"
+                >
+                  Open full review ↗
+                </Link>
               )}
               <DeepReviewSection
                 itemKey={itemKey}

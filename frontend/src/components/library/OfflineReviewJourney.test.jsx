@@ -53,18 +53,11 @@ async function seed(key, hasPdf = false) {
 }
 const outbox = async key => (await pendingMutations()).filter(row => row.item_key === key);
 
-it.each([
-  ['row shortcut', true],
-  ['expanded compact CTA', false],
-])('opens cached context from the actual Library %s without preparing an artifact', async (entry, hasPdf) => {
-  const key = `OFFLINE:${entry}`;
-  const paper = await seed(key, hasPdf);
+it('opens cached context from the Library row shortcut without preparing an artifact', async () => {
+  const key = 'OFFLINE:row shortcut';
+  const paper = await seed(key, true);
   const library = queue(paper);
-  if (entry === 'expanded compact CTA') fireEvent.click(screen.getByText(paper.title));
-  const button = await screen.findByRole('button', { name: entry === 'row shortcut'
-    ? 'Open cached review' : 'Open full review ↗' });
-
-  fireEvent.click(button);
+  fireEvent.click(await screen.findByRole('button', { name: 'Open cached review' }));
 
   const path = `/paper/${encodeURIComponent(key)}`;
   expect(window.open).toHaveBeenCalledOnce();
@@ -78,6 +71,33 @@ it.each([
   expect(await screen.findByRole('heading', { name: paper.title })).toBeTruthy();
   expect(screen.getByRole('textbox', { name: 'Manual notes' }).value).toBe('Preserved manual note');
   expect((await cachedResponse(`review:${key}`)).abstract).toBe('Cached abstract');
+});
+
+it('opens cached context in the same tab from the expanded compact "Open full review" link', async () => {
+  const key = 'OFFLINE:compact CTA';
+  const paper = await seed(key);
+  const router = createMemoryRouter([
+    { path: '/library', element: <ReadNextView items={[paper]} totalUnread={1} rawCount={1} readHidden={0}
+      loading={false} status="ready" modelReady computedAt="2026-10-01T00:00:00Z" collections={[]}
+      selected={new Set()} onSaved={vi.fn()} /> },
+    { path: '/paper/:itemKey', element: <PaperReviewPage /> },
+  ], { initialEntries: ['/library?c=COLL'] });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  clients.push(client);
+  render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
+  fireEvent.click(screen.getByText(paper.title));
+  fireEvent.click(await screen.findByRole('link', { name: 'Open full review ↗' }));
+
+  expect(await screen.findByRole('heading', { name: paper.title })).toBeTruthy();
+  expect(`${router.state.location.pathname}${router.state.location.search}`)
+    .toBe(`/paper/${encodeURIComponent(key)}?autoRun=false`);
+  expect(window.open).not.toHaveBeenCalled();
+  expect(fetch.mock.calls.some(([url]) => url.startsWith('/api/library/render/'))).toBe(false);
+  expect(await outbox(key)).toEqual([]);
+  expect(screen.getByRole('textbox', { name: 'Manual notes' }).value).toBe('Preserved manual note');
+  fireEvent.click(screen.getByRole('link', { name: '← Back' }));
+  expect(await screen.findByText(paper.title)).toBeTruthy();
+  expect(`${router.state.location.pathname}${router.state.location.search}`).toBe('/library?c=COLL');
 });
 
 it('uses cached-page navigation for a known Mac outage even while the browser is online', async () => {
