@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   fetchCollections,
   fetchTags,
@@ -13,6 +13,7 @@ import {
   syncScoreRanks,
 } from '../api/libraryApi.js';
 import ReadNextView from '../components/library/ReadNextView.jsx';
+import AppliedFilters from '../components/library/AppliedFilters.jsx';
 import LibraryFilterBar from '../components/library/LibraryFilterBar.jsx';
 import ExpandableList from '../components/library/ExpandableList.jsx';
 import LibraryJobsPanel from '../components/library/LibraryJobsPanel.jsx';
@@ -23,12 +24,11 @@ import useConfirmSheet from '../hooks/useConfirmSheet.jsx';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import { useReviewCoolLoop } from '../hooks/useReviewCoolLoop.js';
 import usePendingCount from '../hooks/usePendingCount.js';
+import useLibraryFilters from '../hooks/useLibraryFilters.js';
 import { syncNow } from '../syncClient.js';
 import { Section } from '../components/paper/review/primitives.jsx';
 import {
-  EMPTY_FILTERS, buildPredicate, goalHighKeys, isFilterActive,
-  serializeFilters, hydrateFilters, prestigeBucketCounts, bandCounts,
-  sortQueue, serializeSort, hydrateSort,
+  buildPredicate, goalHighKeys, prestigeBucketCounts, bandCounts, sortQueue,
 } from '../utils/relevanceBands.js';
 import { isMachineTag } from '../utils/tags.js';
 import { fulltextMessage } from './todayHelpers.js';
@@ -83,13 +83,16 @@ export default function LibraryReadNext() {
   const serverAvailable = useServerAvailable();
   const { say: sayUnavailable, kind: connectionKind } = useUnavailableText();
   const zoteroConnected = status?.zotero?.db_found === true;
-  const [searchParams, setSearchParams] = useSearchParams();
-  // Client-side smart filters (Phase 1) — hydrated from the URL on mount so a
-  // filtered view is shareable / survives reload, then mirrored back on change.
-  const [clientFilters, setClientFilters] = useState(() => hydrateFilters(searchParams));
-  // Explicit Zotero-column sort (Title/Creator/Publication/Year/Date Added);
-  // 'best' = the server's blended order untouched. URL-persisted like filters.
-  const [sort, setSort] = useState(() => hydrateSort(searchParams));
+  const [selected, setSelected] = useState(() => new Set());
+  // Scope, search, Show read, smart filters and the sort: one hook owns the state and its URL
+  // (a filtered view is a link that survives reload).
+  const dropSelection = useCallback(() => setSelected(new Set()), []);
+  const filters = useLibraryFilters({ onScopeChange: dropSelection });
+  const {
+    clientFilters, setClientFilters, filtersActive, filterSig, sort, setSort,
+    selectedCollection, selectedTag, selectCollection, selectTag, clearScope,
+    search, searchInput, setSearchInput, applySearch, clearSearch, includeRead, setIncludeRead,
+  } = filters;
   // Read-next order preset (Best match only), kept on this device; Balanced = server order.
   const [order, setOrder] = useState(readStoredOrder);
   const [queue, setQueue] = useState([]);
@@ -102,11 +105,8 @@ export default function LibraryReadNext() {
   const queueRequest = useRef(null);
   const [queueLoading, setQueueLoading] = useState(true);  // the first read starts on mount: no frame says «not scored» before it
   const [queueErr, setQueueErr] = useState(null);
-  const [includeRead, setIncludeRead] = useState(false);
   const [collections, setCollections] = useState([]);
   const [tags, setTags] = useState([]);
-  const [selectedCollection, setSelectedCollection] = useState(() => searchParams.get('c') || '');
-  const [selectedTag, setSelectedTag] = useState(() => searchParams.get('t') || '');
   // "Browse & filter" drawer (collections + tags + smart filters). Default
   // COLLAPSED everywhere so the ranked queue — the task — owns the fold (Serial
   // Position); the collapsed summary still shows the active scope, so nothing is
@@ -119,11 +119,8 @@ export default function LibraryReadNext() {
     setBrowseOpen(open);
     writeStorage('zs:libraryBrowseOpen', open ? '1' : '0');
   }
-  const [searchInput, setSearchInput] = useState('');
   const searchRef = useRef(null);  // `/` focuses it (ReadNextView keys)
-  const [search, setSearch] = useState('');
   const [selectMode, setSelectMode] = useState(false);
-  const [selected, setSelected] = useState(() => new Set());
   const [starting, setStarting] = useState(false);
   const [addingToCollection, setAddingToCollection] = useState(false);
   const [syncingAll, setSyncingAll] = useState(false);
@@ -161,28 +158,6 @@ export default function LibraryReadNext() {
   }, [flatCollections, selectedCollection]);
 
   // ------ Client-side smart filters (over the already-loaded queue) ------
-  // Mirror the active filters into the URL (compact keys, defaults omitted) so a
-  // filtered view is a shareable link; `replace` keeps filter clicks out of history.
-  // Guard the write: only navigate when our filter params actually changed (a bare
-  // setSearchParams every render can loop, since its identity changes with the
-  // location it just updated). Non-filter params are preserved.
-  useEffect(() => {
-    // 'w' (the retired Why filter) stays listed only so an old link loses it on open.
-    const FILTER_KEYS = ['b', 'pr', 'g', 'w', 'q', 'vn', 's', 'sd'];
-    const target = { ...serializeFilters(clientFilters), ...serializeSort(sort) };
-    const current = new URLSearchParams();
-    for (const [k, v] of searchParams.entries()) {
-      if (FILTER_KEYS.includes(k)) current.append(k, v);
-    }
-    if (current.toString() !== new URLSearchParams(target).toString()) {
-      const merged = new URLSearchParams(searchParams);
-      FILTER_KEYS.forEach((k) => merged.delete(k));
-      Object.entries(target).forEach(([k, v]) => merged.set(k, v));
-      setSearchParams(merged, { replace: true });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientFilters, sort]);
-
   const filterCtx = useMemo(() => ({
     goalHigh: goalHighKeys(queue),
     prestigeFloor: queueMeta.distribution?.prestige_floor ?? null,
@@ -264,12 +239,6 @@ export default function LibraryReadNext() {
   // Proposals already on the rows (e.g. from the startup prewarm) — lets the
   // predictions bar say "N ready below" instead of implying nothing happened.
   const proposedCount = useMemo(() => queue.filter((i) => i.proposed_verdict).length, [queue]);
-  const filtersActive = isFilterActive(clientFilters);
-  const filterSig = useMemo(
-    () => JSON.stringify({ ...serializeFilters(clientFilters), ...serializeSort(sort) }),
-    [clientFilters, sort],
-  );
-
 
   // ------ Initial sidebar load ------
   useEffect(() => {
@@ -399,40 +368,6 @@ export default function LibraryReadNext() {
     if (!displayedQueue.length) return;
     writeStorage('zs.reviewOrder', JSON.stringify(displayedQueue.map((i) => i.item_key)));
   }, [displayedQueue]);
-
-  function selectCollection(key) {
-    setSelectedCollection(key);
-    setSelected(new Set());
-    setSearchParams((prev) => { const next = new URLSearchParams(prev); key ? next.set('c', key) : next.delete('c'); return next; }, { replace: true });
-  }
-
-  function selectTag(tag) {
-    setSelectedTag(tag);
-    setSelected(new Set());
-    setSearchParams((prev) => { const next = new URLSearchParams(prev); tag ? next.set('t', tag) : next.delete('t'); return next; }, { replace: true });
-  }
-
-  function applySearch() {
-    setSearch(searchInput.trim());
-  }
-
-  function clearSearch() {
-    setSearchInput('');
-    setSearch('');
-  }
-
-  function clearScope() {
-    setSelectedCollection('');
-    setSelectedTag('');
-    setSearchParams((prev) => { const next = new URLSearchParams(prev); next.delete('c'); next.delete('t'); return next; }, { replace: true });
-  }
-
-  // The page's single "Clear all": scope (collection, tag, search) and smart filters.
-  function clearAll() {
-    setClientFilters(EMPTY_FILTERS);
-    clearScope();
-    clearSearch();
-  }
 
   function toggleItem(key) {
     setSelected((prev) => {
@@ -685,7 +620,7 @@ export default function LibraryReadNext() {
   });
   const statusHandlers = {
     sync: () => syncNow(), retry: () => loadQueue(false), reload: () => window.location.reload(),
-    rescore: () => loadQueue(true), clearFilters: () => setClientFilters(EMPTY_FILTERS), clearSearch, clearScope,
+    rescore: () => loadQueue(true), clearFilters: filters.clearFilters, clearSearch, clearScope,
     showRead: () => setIncludeRead(true), dismiss: () => { setMessage(''); setIsError(false); setWarned(''); },
   };
 
@@ -725,7 +660,9 @@ export default function LibraryReadNext() {
           <div className="flex flex-wrap gap-2 items-center">
             <input
               ref={searchRef}
-              type="text"
+              type="search"
+              enterKeyHint="search"
+              aria-label="Search by meaning"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyUp={(e) => { if (e.key === 'Enter') applySearch(); }}
@@ -733,18 +670,20 @@ export default function LibraryReadNext() {
               placeholder={serverAvailable ? 'Search by meaning… (e.g. hallucination mitigation)' : sayUnavailable('Meaning search needs the Mac (offline)')}
               className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
-            {/* Search is semantic by default (hybrid); Enter submits — no Meaning/
-                Exact toggle, no separate Search button (the input IS the control). */}
-            {(selectedCollection || selectedTag || search || (queueMeta.model_ready && filtersActive)) && (
-              <button
-                type="button"
-                onClick={clearAll}
-                className="px-3 py-2 rounded-lg bg-slate-200 text-slate-700 text-sm hover:bg-slate-300"
-              >
-                Clear all
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={applySearch}
+              disabled={!serverAvailable}
+              className="px-4 py-2 rounded-lg bg-teal-600 text-white text-sm hover:bg-teal-700 disabled:opacity-50"
+            >
+              Go
+            </button>
           </div>
+          <AppliedFilters
+            f={filters}
+            collectionName={flatCollections.find((c) => c.key === selectedCollection)?.name}
+            modelReady={queueMeta.model_ready}
+          />
 
           {/* Collections + tags + smart filters in ONE collapsible drawer. The
               summary carries the active scope (Working Memory), so a collapsed

@@ -80,3 +80,19 @@ it('Model guess chips carry their counts and filter the list', async () => {
   expect(screen.getByText('Bravo')).toBeTruthy();
   expect(screen.getByTestId('query').textContent).toBe('?b=could_read');
 });
+
+it('a reload with text, rd, q and c restores the search box, Show read, Rigor and the collection; Clear all removes them in one press', async () => {
+  open('/library?text=agents&rd=1&q=high&c=K');
+  await screen.findByRole('button', { name: 'Remove Rigor A/B' });
+
+  expect(screen.getByRole('searchbox', { name: 'Search by meaning' }).value).toBe('agents');
+  expect(api.fetchReadingQueue).toHaveBeenCalledWith(expect.objectContaining({ search: 'agents', includeRead: true, collection: 'K' }));
+  const chips = screen.getAllByRole('button', { name: /^Remove / }).map((b) => b.getAttribute('aria-label'));
+  expect(chips).toEqual(['Remove Search “agents”', 'Remove Collection this collection', 'Remove Show read', 'Remove Rigor A/B']);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Clear all' }));
+  await waitFor(() => expect(screen.getByTestId('query').textContent).toBe(''));
+  expect(screen.getByRole('searchbox', { name: 'Search by meaning' }).value).toBe('');
+  expect(screen.queryByRole('button', { name: /^Remove / })).toBeNull();
+  expect(api.fetchReadingQueue).toHaveBeenLastCalledWith(expect.objectContaining({ search: '', includeRead: false, collection: '' }));
+});

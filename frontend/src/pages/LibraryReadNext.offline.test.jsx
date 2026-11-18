@@ -50,9 +50,9 @@ it('does not restart an earlier queue scope after its in-flight status poll sett
     expect(screen.getByText('Scope A', { exact: true })).toBeTruthy();
     await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
     expect(api.fetchReadingQueueStatus).toHaveBeenCalledOnce();
-    const input = screen.getByPlaceholderText('Search by meaning… (e.g. hallucination mitigation)', { exact: true });
+    const input = screen.getByRole('searchbox', { name: 'Search by meaning' });
     fireEvent.change(input, { target: { value: 'B' } });
-    await act(async () => { fireEvent.keyUp(input, { key: 'Enter' }); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Go' })); });
     expect(screen.getByText('Scope B', { exact: true })).toBeTruthy();
   } finally {
     await act(async () => { finish({ running: false }); });
