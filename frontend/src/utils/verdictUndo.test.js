@@ -99,3 +99,12 @@ it('warns when the tag request fails and does not repeat the verdict', async () 
   expect(onWarning).toHaveBeenCalledWith('Verdict saved, but reject tag was not queued: queue down');
   expect(api.submitVerdict).toHaveBeenCalledTimes(1);
 });
+
+it('keeps the earlier windows of a batch open so one Undo can still take them all back', async () => {
+  const first = decide('A', 'dont_read');
+  decide('B', 'dont_read', { keepOpen: true });
+  await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS - 1);
+  await first.undo();
+  await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS * 2);
+  expect(api.queueRejectTag.mock.calls).toEqual([['B']]);  // A was undone inside its window; only B's ❌ went out
+});

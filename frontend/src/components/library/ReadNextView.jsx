@@ -164,6 +164,10 @@ export default function ReadNextView({
   const toast = flow.toast && (
     <UndoToast toast={flow.toast} onUndo={flow.undo} onReason={flow.toggleReason} onDismiss={flow.dismiss} />
   );
+  const priorOf = (key) => {
+    const row = queueItems.find((it) => it.item_key === key);
+    return row?.user_priority ? { user_priority: row.user_priority, comment: '' } : null;
+  };
   const toastInSheet = Boolean(openKey && !isDesktop);
 
   // Rows are memoised: they get one stable callback that reads the latest state. A tap opens
@@ -370,7 +374,7 @@ export default function ReadNextView({
             </button>
           )}
           {selectMode && onBulkDone && (
-            <BulkVerdictBar keys={[...(selected || [])]} disabled={!serverAvailable} onDone={onBulkDone} />
+            <BulkVerdictBar keys={[...(selected || [])]} disabled={!serverAvailable} onDone={onBulkDone} onVerdicts={flow.batchVerdict} priorOf={priorOf} />
           )}
           {selectMode && collections.length > 0 && onAddToCollection && (
             <span className="inline-flex items-center gap-1">

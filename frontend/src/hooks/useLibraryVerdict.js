@@ -66,6 +66,20 @@ export default function useLibraryVerdict(env) {
     });
   }
 
+  // A bulk verdict that landed on `batch` = [{key, handle}…]: patch the rows, ONE toast, one Undo.
+  function batchVerdict({ priority, batch }) {
+    const { queueItems, onRowsChange, onWrite } = live.current;
+    const rows = batch.map(({ key }) => queueItems.find((it) => it.item_key === key)).filter(Boolean);
+    const keys = batch.map(({ key }) => key);
+    if (!keys.length) return;
+    onRowsChange(rows.map((row) => [row.item_key, asDecided(priority)]));
+    batch.forEach(({ key, handle }) => { onWrite(handle.done); handle.done.then(() => refreshDetail(key)); });
+    show({
+      kind: 'saved', message: `${pretty(priority)}: ${keys.length} paper${keys.length === 1 ? '' : 's'}`,
+      handles: batch.map(({ handle }) => handle), keys, restore: rows.map((row) => [row.item_key, asBefore(row)]),
+    });
+  }
+
   function undo() {
     const current = shown.current;
     if (current?.kind !== 'saved') return;
@@ -87,5 +101,5 @@ export default function useLibraryVerdict(env) {
     setToast({ ...current, reasons });
   }
 
-  return { toast, caughtUp, verdict, undo, toggleReason, dismiss: () => show(null) };
+  return { toast, caughtUp, verdict, batchVerdict, undo, toggleReason, dismiss: () => show(null) };
 }

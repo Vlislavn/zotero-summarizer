@@ -466,15 +466,15 @@ export default function LibraryReadNext() {
     }
   }
 
-  // Bulk verdict / mark-read finished (BulkVerdictBar): show the outcome and, once
-  // anything landed, drop the selection and refetch the queue.
-  function handleBulkDone(msg, failed, partial = !failed) {
+  // Bulk verdict / mark-read finished (BulkVerdictBar): show the outcome and, once anything landed,
+  // drop the selection and refetch the queue (a verdict batch already patched its rows: reload = false).
+  function handleBulkDone(msg, failed, partial = !failed, reload = true) {
     setMessage(msg);
     setIsError(failed);
     if (!partial) return;
     setSelected(new Set());
     if (!failed) setSelectMode(false);
-    loadQueue();
+    if (reload) loadQueue();
   }
 
   async function handleRunTriage() {

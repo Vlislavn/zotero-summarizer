@@ -7,7 +7,8 @@ import { queueRejectTag } from '../api/libraryApi.js';
 // saved at once; the ❌ reject-tag request waits out the Undo window (an applied ❌ would hide the
 // paper and teach the model a strong negative) and is dropped by Undo. Reason chips collect in
 // the window and go out as ONE extra POST when it closes. The window closes early on the next
-// verdict and on pagehide.
+// verdict and on pagehide — except for the 2nd… paper of a batch (`keepOpen`), so one Undo can
+// still take back the whole batch.
 export const UNDO_WINDOW_MS = 8000;
 
 const tails = new Map();    // item key -> last queued write
@@ -26,8 +27,8 @@ function closeAll() {
   [...windows.values()].forEach((win) => win.close());
 }
 
-export function decide(key, priority, { prior = null, surface, comment = '', onWarning } = {}) {
-  closeAll();  // the previous toast is replaced: its ❌ request / reasons go out now
+export function decide(key, priority, { prior = null, surface, comment = '', onWarning, keepOpen = false } = {}) {
+  if (!keepOpen) closeAll();  // the previous toast is replaced: its ❌ request / reasons go out now
   if (typeof window !== 'undefined' && !hooked) {
     hooked = true;
     window.addEventListener('pagehide', closeAll);

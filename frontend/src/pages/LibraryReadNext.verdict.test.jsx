@@ -106,3 +106,22 @@ it('hides the verdict bar while a text field in the detail has focus', async () 
   act(() => note.focus());
   expect(screen.getByTestId('verdict-bar').className).toMatch(/\bhidden\b/);
 });
+
+it('a batch of 3 in Select mode gives one toast and one Undo for all three', async () => {
+  await mount(5);
+  fireEvent.click(within(dialog()).getAllByRole('button', { name: 'Close' })[0]);
+  fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+  ['Paper 1', 'Paper 2', 'Paper 3'].forEach((title) => fireEvent.click(screen.getByRole('checkbox', { name: `Select ${title}` })));
+  fireEvent.click(screen.getByRole('button', { name: 'Set Could read for 3 selected' }));
+  await flush();
+  expect(golden.submitVerdict.mock.calls.map(([body]) => body.surface)).toEqual(Array(3).fill('library_bulk'));
+  expect(screen.getAllByTestId('undo-toast')).toHaveLength(1);
+  expect(screen.getByText('Could read: 3 papers')).toBeTruthy();
+  expect(todo(2)).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+  await flush();
+  expect(golden.deleteVerdict.mock.calls.map(([key]) => key)).toEqual(['K1', 'K2', 'K3']);
+  expect(todo(5)).toBeTruthy();
+  expect(api.fetchReadingQueue).toHaveBeenCalledTimes(1);
+});
