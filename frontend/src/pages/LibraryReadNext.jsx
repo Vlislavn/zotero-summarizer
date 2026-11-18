@@ -23,7 +23,7 @@ import { StatusBanner, formatShortDate } from '../components/library/shared.jsx'
 import { Section } from '../components/paper/review/primitives.jsx';
 import {
   EMPTY_FILTERS, buildPredicate, goalHighKeys, isFilterActive,
-  serializeFilters, hydrateFilters, prestigeBucketCounts,
+  serializeFilters, hydrateFilters, prestigeBucketCounts, bandCounts,
   sortQueue, serializeSort, hydrateSort,
 } from '../utils/relevanceBands.js';
 import { isMachineTag } from '../utils/tags.js';
@@ -155,6 +155,7 @@ export default function LibraryReadNext() {
   // setSearchParams every render can loop, since its identity changes with the
   // location it just updated). Non-filter params are preserved.
   useEffect(() => {
+    // 'w' (the retired Why filter) stays listed only so an old link loses it on open.
     const FILTER_KEYS = ['b', 'pr', 'g', 'w', 'q', 'vn', 's', 'sd'];
     const target = { ...serializeFilters(clientFilters), ...serializeSort(sort) };
     const current = new URLSearchParams();
@@ -201,16 +202,16 @@ export default function LibraryReadNext() {
       .filter((row) => selected.has(row.item_key)).map((row) => row.item_key)),
     [displayedQueue, selected, queueLoading, queueErr],
   );
-  const whyOptions = useMemo(
-    () => [...new Set(queue.map((i) => i.why_reason).filter(Boolean))].sort(),
-    [queue],
-  );
   const venueOptions = useMemo(
     () => [...new Set(queue.map((i) => i.venue).filter(Boolean))].sort(),
     [queue],
   );
   const prestigeCounts = useMemo(
     () => prestigeBucketCounts(queue, filterCtx.prestigeFloor),
+    [queue, filterCtx.prestigeFloor],
+  );
+  const bandCountsByBand = useMemo(
+    () => bandCounts(queue, filterCtx.prestigeFloor),
     [queue, filterCtx.prestigeFloor],
   );
   const goalEnabled = useMemo(() => queue.some((i) => typeof i.goal_sim === 'number'), [queue]);
@@ -224,11 +225,6 @@ export default function LibraryReadNext() {
     [clientFilters, sort],
   );
 
-  const clearClientFilters = useCallback(() => setClientFilters(EMPTY_FILTERS), []);
-  const toggleBand = useCallback((band) => setClientFilters((f) => ({
-    ...f,
-    bands: f.bands.includes(band) ? f.bands.filter((b) => b !== band) : [...f.bands, band],
-  })), []);
 
   // ------ Initial sidebar load ------
   useEffect(() => {
@@ -374,7 +370,9 @@ export default function LibraryReadNext() {
     setSearch(searchInput.trim());
   }
 
-  function clearFilters() {
+  // The page's single "Clear all": scope (collection, tag, search) and smart filters.
+  function clearAll() {
+    setClientFilters(EMPTY_FILTERS);
     setSelectedCollection('');
     setSelectedTag('');
     setSearchInput('');
@@ -604,11 +602,11 @@ export default function LibraryReadNext() {
       {/* ----- Single full-width Read-next surface (Stage 2). Collections, tags,
           and smart filters fold into ONE "Browse & filter" drawer so the ranked
           queue + decision card own the whole width. Three labelled regions keep
-          read-only FIND, suggestion-making REVIEW QUEUE, and whole-library WRITE
-          EXPORT distinct; one outer border, hairline rhythm between. ----- */}
+          the read-only find region, the suggestion-making review queue, and the
+          whole-library WRITE EXPORT distinct; one outer border, hairline rhythm between. ----- */}
       <div className="glass rounded-2xl border border-slate-200 p-3 divide-y divide-slate-200/60">
-        {/* Region A — FIND: read-only, instant scoping (search + browse drawer). */}
-        <Section label="Find">
+        {/* Region A — find: read-only, instant scoping (search + browse drawer). */}
+        <Section>
           <div className="flex flex-wrap gap-2 items-center">
             <input
               type="text"
@@ -621,13 +619,13 @@ export default function LibraryReadNext() {
             />
             {/* Search is semantic by default (hybrid); Enter submits — no Meaning/
                 Exact toggle, no separate Search button (the input IS the control). */}
-            {(selectedCollection || selectedTag || search) && (
+            {(selectedCollection || selectedTag || search || (queueMeta.model_ready && filtersActive)) && (
               <button
                 type="button"
-                onClick={clearFilters}
+                onClick={clearAll}
                 className="px-3 py-2 rounded-lg bg-slate-200 text-slate-700 text-sm hover:bg-slate-300"
               >
-                Clear
+                Clear all
               </button>
             )}
           </div>
@@ -726,21 +724,20 @@ export default function LibraryReadNext() {
                 <LibraryFilterBar
                   filters={clientFilters}
                   onChange={setClientFilters}
-                  whyOptions={whyOptions}
                   venueOptions={venueOptions}
                   prestigeCounts={prestigeCounts}
+                  bandCounts={bandCountsByBand}
                   goalEnabled={goalEnabled}
                   qualityEnabled={qualityEnabled}
-                  onClear={clearClientFilters}
                 />
               </div>
             )}
           </details>
         </Section>
 
-        {/* Region B — REVIEW QUEUE: the work surface. Predict lives HERE, atop the
+        {/* Region B — review queue: the work surface. Predict lives HERE, atop the
             rows whose Confirm/Override cards it produces, with its own feedback. */}
-        <Section label="Review queue">
+        <Section>
           <fieldset disabled={!serverAvailable}>
           <PredictionsBar
             fleetStatus={fleetStatus}
@@ -786,7 +783,6 @@ export default function LibraryReadNext() {
           error={queueMeta.error}
           computedAt={queueMeta.computed_at}
           scoresStale={queueMeta.scores_stale}
-          distribution={queueMeta.distribution}
           onRescore={() => loadQueue(true)}
           onReload={() => loadQueue(false)}
           onSaved={() => loadQueue()}
@@ -802,9 +798,6 @@ export default function LibraryReadNext() {
           addingToCollection={addingToCollection}
           rawCount={queue.length}
           hasActiveFilters={queueMeta.model_ready && filtersActive}
-          onClearClientFilters={clearClientFilters}
-          activeBands={clientFilters.bands}
-          onBandClick={toggleBand}
           filterSig={filterSig}
           semantic={queueMeta.semantic}
           searchQuery={search}

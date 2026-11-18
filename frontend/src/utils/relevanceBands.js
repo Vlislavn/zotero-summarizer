@@ -19,8 +19,8 @@ export const BAND_LABEL = {
   dont_read: 'Not interested',
 };
 
-// One palette, shared in spirit with ScoreHistogram.BAND_BAR and the Annotate
-// priority chips, so a band looks the same everywhere.
+// One palette, shared in spirit with the Annotate priority chips, so a band
+// looks the same everywhere.
 export const BAND_ACTIVE_CLS = {
   must_read: 'bg-emerald-600 text-white border-emerald-600',
   should_read: 'bg-sky-600 text-white border-sky-600',
@@ -67,7 +67,6 @@ export const EMPTY_FILTERS = {
   bands: [],        // multi-select subset of BANDS; [] = all bands
   prestige: 'any',  // any | high | low | new
   goal: 'any',      // any | high | low
-  why: [],          // multi-select of why_reason strings; [] = all
   quality: 'any',   // any | high (deep-review grade A/B) | low (C/D); the "quality papers" filter
   venue: '',        // exact journal/venue name; '' = any
 };
@@ -78,7 +77,6 @@ export function isFilterActive(f) {
     (f.bands && f.bands.length > 0)
     || f.prestige !== 'any'
     || f.goal !== 'any'
-    || (f.why && f.why.length > 0)
     || f.quality !== 'any'
     || (f.venue && f.venue.length > 0)
   );
@@ -112,6 +110,18 @@ export function prestigeBucketCounts(items, floor = null) {
   return c;
 }
 
+// Rows per model-guess band (the Model-guess chips show "must (12)"). Same banding
+// as the predicate (prestige floor included), so a chip's count is what clicking it
+// keeps. Unscored rows have no band and are not counted.
+export function bandCounts(items, floor = null) {
+  const c = { must_read: 0, should_read: 0, could_read: 0, dont_read: 0 };
+  for (const it of items || []) {
+    const band = effectiveBand(it, floor);
+    if (band) c[band] += 1;
+  }
+  return c;
+}
+
 // Keys of the top (1 - pct) fraction by goal_sim, among rows that HAVE a numeric
 // goal_sim. Returns an empty Set when no row carries goal_sim (corpus disabled,
 // or only read rows present) — callers then hide the goal control entirely.
@@ -127,7 +137,6 @@ export function goalHighKeys(items, pct = 0.66) {
 export function buildPredicate(filters, ctx) {
   const f = filters || EMPTY_FILTERS;
   const bandSet = new Set(f.bands || []);
-  const whySet = new Set(f.why || []);
   const floor = ctx?.prestigeFloor ?? null;
   const goalHigh = ctx?.goalHigh ?? new Set();
 
@@ -152,8 +161,6 @@ export function buildPredicate(filters, ctx) {
     if (f.goal === 'high' && !(typeof it.goal_sim === 'number' && goalHigh.has(it.item_key))) return false;
     if (f.goal === 'low' && !(typeof it.goal_sim === 'number' && !goalHigh.has(it.item_key))) return false;
 
-    if (whySet.size && !whySet.has(it.why_reason)) return false;
-
     // Deep-review quality grade (only set on reviewed rows). When the filter is on,
     // un-reviewed (ungraded) rows match neither high nor low — i.e. "quality papers"
     // shows only the deep-reviewed, well-graded ones.
@@ -174,7 +181,6 @@ export function serializeFilters(f) {
   if (f.bands && f.bands.length) out.b = f.bands.join(',');
   if (f.prestige && f.prestige !== 'any') out.pr = f.prestige;
   if (f.goal && f.goal !== 'any') out.g = f.goal;
-  if (f.why && f.why.length) out.w = f.why.join('~');   // '~' never appears in a why label
   if (f.quality && f.quality !== 'any') out.q = f.quality;
   if (f.venue) out.vn = f.venue;
   return out;
@@ -185,10 +191,9 @@ export function hydrateFilters(searchParams) {
   const bands = (get('b') || '').split(',').filter((x) => BANDS.includes(x));
   const prestige = ['high', 'low', 'new'].includes(get('pr')) ? get('pr') : 'any';
   const goal = ['high', 'low'].includes(get('g')) ? get('g') : 'any';
-  const why = (get('w') || '').split('~').filter(Boolean);
   const quality = ['high', 'low'].includes(get('q')) ? get('q') : 'any';
   const venue = get('vn') || '';
-  return { bands, prestige, goal, why, quality, venue };
+  return { bands, prestige, goal, quality, venue };
 }
 
 // ---------- Zotero-column sort (explicit user sort over the loaded queue) ------

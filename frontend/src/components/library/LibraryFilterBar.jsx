@@ -1,14 +1,13 @@
 import { FilterChip } from '../../pages/AnnotationVerdict_helpers.jsx';
-import { isFilterActive } from '../../utils/relevanceBands.js';
+import { BANDS, BAND_LABEL } from '../../utils/relevanceBands.js';
 
 // Smart client-side filters for the Library reading queue.
 // Compact + progressive disclosure (Hick's Law): the headline facets that vary
-// day-to-day (goal-match, quality) sit on the quick row; the lower-frequency
-// Prestige + Why facets live behind an "Advanced" <details>. Band filtering is
-// owned by the ScoreHistogram bars (one band control, not a duplicate chip row),
-// and the raw Score≥ / scored-state knobs were removed (the histogram + Rescore
-// already cover them). A controlled component: owns no state, calls
-// onChange(nextFilters) / onClear().
+// day-to-day (model guess, goal-match, quality) sit on the quick row; the
+// lower-frequency Prestige + Journal facets live behind an "Advanced" <details>.
+// The model-guess chips carry their counts (one band control). Clearing is owned
+// by the page's single "Clear all". A controlled component: owns no state, calls
+// onChange(nextFilters).
 
 const PRESTIGE_OPTS = [
   { value: 'high', label: 'high' },
@@ -26,9 +25,10 @@ const QUALITY_OPTS = [
   { value: 'low', label: 'C/D' },
 ];
 
-function Cluster({ label, children }) {
+// `stacked`: the label sits above its chips (a long chip row then fits one line on a phone).
+function Cluster({ label, stacked = false, children }) {
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className={stacked ? 'inline-flex flex-col gap-1' : 'inline-flex items-center gap-1.5'}>
       <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{label}</span>
       <span className="flex flex-wrap gap-1">{children}</span>
     </span>
@@ -36,8 +36,8 @@ function Cluster({ label, children }) {
 }
 
 export default function LibraryFilterBar({
-  filters, onChange, whyOptions = [], venueOptions = [], prestigeCounts = null,
-  goalEnabled = false, qualityEnabled = false, onClear,
+  filters, onChange, venueOptions = [], prestigeCounts = null, bandCounts = null,
+  goalEnabled = false, qualityEnabled = false,
 }) {
   const set = (patch) => onChange({ ...filters, ...patch });
   // Single-select cluster: clicking the active value clears it back to 'any'.
@@ -54,13 +54,27 @@ export default function LibraryFilterBar({
       ? `${o.label} (${prestigeCounts[o.value]})` : o.label
   );
 
-  const active = isFilterActive(filters);
-  const advancedActive = filters.prestige !== 'any' || filters.why.length > 0 || !!filters.venue;
+  const modelBands = BANDS.filter((b) => bandCounts?.[b] > 0 || filters.bands.includes(b));
+  const advancedActive = filters.prestige !== 'any' || !!filters.venue;
 
   return (
-    <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        {/* Band filtering lives on the ScoreHistogram bars (one band control). */}
+    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        {/* Model guess — multi-select bands with their counts. A band with no rows is
+            no chip (a dead control), unless it is applied — then it stays, to be undone. */}
+        {modelBands.length > 0 && (
+          <Cluster label="Model guess" stacked>
+            {modelBands.map((band) => (
+              <FilterChip
+                key={band}
+                active={filters.bands.includes(band)}
+                onClick={() => toggle('bands', band)}
+              >
+                {`${BAND_LABEL[band]} ${bandCounts?.[band] ?? 0}`}
+              </FilterChip>
+            ))}
+          </Cluster>
+        )}
 
         {/* Goal-match — only when a goal signal exists (corpus on, scored rows). */}
         {goalEnabled && (
@@ -90,18 +104,6 @@ export default function LibraryFilterBar({
               </FilterChip>
             ))}
           </Cluster>
-        )}
-
-        {/* Close-the-loop (Zeigarnik): a way out. The shown/total count lives with
-            the list it describes (ReadNextView), not duplicated here. */}
-        {active && (
-          <button
-            type="button"
-            onClick={onClear}
-            className="ml-auto px-2 py-0.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 text-[11px] font-medium"
-          >
-            Clear filters
-          </button>
         )}
       </div>
 
@@ -139,17 +141,6 @@ export default function LibraryFilterBar({
                   <option key={v} value={v}>{v}</option>
                 ))}
               </select>
-            </Cluster>
-          )}
-
-          {/* Why (top reason) — multi-select, built from the live data. */}
-          {whyOptions.length > 0 && (
-            <Cluster label="Why">
-              {whyOptions.map((w) => (
-                <FilterChip key={w} active={filters.why.includes(w)} onClick={() => toggle('why', w)}>
-                  {w}
-                </FilterChip>
-              ))}
             </Cluster>
           )}
         </div>

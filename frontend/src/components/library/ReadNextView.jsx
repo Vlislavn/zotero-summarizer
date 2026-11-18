@@ -3,7 +3,6 @@ import InlineAnnotate from './InlineAnnotate.jsx';
 import OpenBriefButton from './OpenBriefButton.jsx';
 import ProposedVerdictCard from './ProposedVerdictCard.jsx';
 import BulkVerdictBar from './BulkVerdictBar.jsx';
-import ScoreHistogram from './ScoreHistogram.jsx';
 import { StatusBanner, formatShortDate, truncateAuthors } from './shared.jsx';
 import { pretty } from '../../utils/priorityLabels.js';
 import { COUNTS_EXPLAINER, isDecided, mustGroupSize, qualityHint, queueCounts, scoreStatus } from './readNextCopy.js';
@@ -111,7 +110,7 @@ const previewText = (text) => cleanAbstract(text).replace(/<\/?[a-z][^>]*$/i, ''
 
 export default function ReadNextView({
   items, loading, err, includeRead, onToggleIncludeRead,
-  readHidden, totalUnread, decidedCount = 0, queueItems = items, onSaved, status, modelReady, error, computedAt, scoresStale, distribution, onRescore, onReload,
+  readHidden, totalUnread, decidedCount = 0, queueItems = items, onSaved, status, modelReady, error, computedAt, scoresStale, onRescore, onReload,
   selectMode, onToggleSelectMode, selected, onToggleItem, onRunTriage, onBulkDone, starting,
   // Bulk "Add to collection" (the Meaning-search → Zotero collection shortcut):
   // flat collection list + handler from Library; last target remembered so the
@@ -120,7 +119,7 @@ export default function ReadNextView({
   // Client-side smart filters (Library owns the state; `items` arrives already
   // filtered). rawCount = pre-filter size, so we can tell "nothing fetched" apart
   // from "filtered to zero". filterSig = serialized filters, to reset the reveal.
-  rawCount = 0, hasActiveFilters = false, onClearClientFilters, activeBands = [], onBandClick, filterSig = '',
+  rawCount = 0, hasActiveFilters = false, filterSig = '',
   // Hybrid "Meaning" search: `semantic` = the list is ranked by similarity to
   // `searchQuery`; `rerankerLoading` = the cross-encoder is still downloading (we
   // show fusion order meanwhile); `semanticUnavailable` = corpus off (text match).
@@ -357,19 +356,6 @@ export default function ReadNextView({
           <p className="text-[11px] text-slate-500" data-testid="counts-explainer">{COUNTS_EXPLAINER}</p>
         </Disclosure>
       </div>
-      {/* Score distribution is reference, not the task — fold it behind the shared
-          Disclosure (closed by default) so the ranked queue owns the top of the
-          surface (Serial Position). Active band-filters surface in the summary. */}
-      {modelReady && distribution && (
-        <div className="mb-3">
-          <Disclosure
-            summary="Filter by score band"
-            count={activeBands?.length ? `${activeBands.length} band filter${activeBands.length === 1 ? '' : 's'}` : null}
-          >
-            <ScoreHistogram distribution={distribution} activeBands={activeBands} onBandClick={onBandClick} />
-          </Disclosure>
-        </div>
-      )}
       {rerankerLoading && (
         <div className="mb-2 flex items-center gap-2 text-xs text-slate-600">
           <Spinner size="sm" color="teal" />
@@ -417,14 +403,7 @@ export default function ReadNextView({
       {!loading && items.length === 0 && !computing && !errored && (
         hasActiveFilters && rawCount > 0 ? (
           <div className="p-6 text-center text-xs text-slate-500">
-            No papers match your filters.
-            <button
-              type="button"
-              onClick={onClearClientFilters}
-              className="ml-2 px-2 py-0.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 font-medium"
-            >
-              Clear filters
-            </button>
+            No papers match your filters — Clear all, above, shows the whole list again.
           </div>
         ) : (
           <div className="p-6 text-center text-xs text-slate-500">

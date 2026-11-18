@@ -80,7 +80,8 @@ export default function PredictionsBar({ fleetStatus, onRun, onStop, autoActive 
     // "Rescore — model updated", not this). A thin indigo rule keeps the tie to
     // the Confirm/Override cards it spawns.
     <div className="border-l-2 border-indigo-200 pl-3 py-1">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      {/* Nothing to run (N = 0, idle): no button — the state line below says why. */}
+      {(stopping || autoActive || coolCount > 0) && <div className="flex items-center justify-between gap-3 flex-wrap">
         {stopping ? (
           <button
             type="button"
@@ -107,10 +108,10 @@ export default function PredictionsBar({ fleetStatus, onRun, onStop, autoActive 
             className="px-3 py-1 rounded-lg border border-indigo-300 bg-white text-indigo-700 text-[13px] font-semibold hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed"
             title="Top picks = papers the model rates must/should read that you have not decided yet. Deep-review each and propose a verdict. Suggestions only — nothing is written until you Confirm. Results stream in; click Stop to end early."
           >
-            {coolCount > 0 ? `Deep-review top picks (${coolCount})` : 'All reviewed'}
+            {`Deep-review top picks (${coolCount})`}
           </button>
         )}
-      </div>
+      </div>}
       {/* Live region (matches the app's StatusBanner pattern): the auto-review
           streams progress for minutes — announce each state change to screen
           readers, who otherwise get no feedback during the long-running op. */}

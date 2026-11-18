@@ -18,7 +18,7 @@ it('honors a batch deep link and preserves its paper key when switching modes', 
   </MemoryRouter>);
 
   expect(await screen.findByText('Batch verdict queue')).toBeTruthy();
-  expect(screen.getByRole('tab', { name: 'Select & label' }).getAttribute('aria-selected')).toBe('true');
+  expect(screen.getByRole('tab', { name: 'My verdicts' }).getAttribute('aria-selected')).toBe('true');
   fireEvent.click(screen.getByRole('tab', { name: 'Read next' }));
   expect(await screen.findByText('Read-next queue')).toBeTruthy();
   await waitFor(() => expect(screen.getByTestId('query').textContent).toBe('?item_key=P1'));

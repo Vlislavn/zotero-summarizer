@@ -6,7 +6,7 @@ import PageTitle from '../components/ui/PageTitle.jsx';
 
 // Library page — one surface, two modes (Increment 3 nav collapse). The default
 // "Read next" mode is the unchanged ranked reading queue (LibraryReadNext); the
-// "Batch label" mode is the former Annotate page (AnnotationVerdict), which owns
+// "My verdicts" mode is the former Annotate page (AnnotationVerdict), which owns
 // the shared VerdictPicker + the 1/2/3/4 priority keys + j/k navigation flow.
 // Folding it in here drops a top-level nav entry (Hick's Law) while keeping the
 // whole keyboard-driven labelling workflow reachable — and the deep-link the
@@ -18,7 +18,7 @@ import PageTitle from '../components/ui/PageTitle.jsx';
 
 const MODES = [
   { id: 'read', label: 'Read next' },
-  { id: 'batch', label: 'Select & label' },
+  { id: 'batch', label: 'My verdicts' },
 ];
 
 const VALID_MODES = new Set(MODES.map((m) => m.id));

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   isCoolUndecided, coolUndecidedKeys, scoreToBand,
   sortQueue, serializeSort, hydrateSort, DEFAULT_SORT,
+  EMPTY_FILTERS, hydrateFilters, serializeFilters, buildPredicate, isFilterActive, bandCounts,
 } from './relevanceBands.js';
 
 describe('isCoolUndecided — the auto-review work-list predicate', () => {
@@ -105,5 +106,32 @@ describe('sort URL (de)serialize — compact keys, defaults omitted', () => {
 
   it('an unknown field in the URL falls back to the default sort', () => {
     expect(hydrateSort(new URLSearchParams('s=nope'))).toEqual(DEFAULT_SORT);
+  });
+});
+
+describe('the retired Why filter (w)', () => {
+  const rows = [{ item_key: 'A', relevance_score: 2.5, why_reason: 'x' }, { item_key: 'B', relevance_score: 2.6, why_reason: 'y' }];
+
+  it('is not read from an old link: only b applies', () => {
+    const f = hydrateFilters(new URLSearchParams('w=x&b=could_read'));
+    expect(f).toEqual({ ...EMPTY_FILTERS, bands: ['could_read'] });
+    expect(rows.filter(buildPredicate(f, {})).map((r) => r.item_key)).toEqual(['A', 'B']);
+  });
+
+  it('is not written, and a lone w is no active filter', () => {
+    expect(serializeFilters({ ...EMPTY_FILTERS, why: ['x'], bands: ['could_read'] })).toEqual({ b: 'could_read' });
+    expect(isFilterActive(hydrateFilters(new URLSearchParams('w=x')))).toBeFalsy();
+  });
+});
+
+describe('bandCounts — the Model guess chip counts', () => {
+  it('counts scored rows per band and skips unscored ones', () => {
+    const rows = [{ relevance_score: 4.6 }, { relevance_score: 3.6 }, { relevance_score: 3.0 }, { relevance_score: 2.0 }, { relevance_score: 1.0 }, {}];
+    expect(bandCounts(rows)).toEqual({ must_read: 1, should_read: 1, could_read: 2, dont_read: 1 });
+  });
+
+  it('counts what the band filter keeps when the prestige floor demotes a row', () => {
+    const rows = [{ item_key: 'A', relevance_score: 4.6, prestige_known: true, prestige_score: 1.0 }];
+    expect(bandCounts(rows, 3.0)).toEqual({ must_read: 0, should_read: 1, could_read: 0, dont_read: 0 });
   });
 });
