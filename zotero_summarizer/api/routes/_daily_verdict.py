@@ -167,7 +167,10 @@ async def undo_daily_verdict(body: DailyVerdictUndoRequest) -> dict[str, Any]:
         label_verdicts.retract_label_verdict,
         _db_path(), item_key=golden_key, surface="today_card",
     )
-    return {"deleted": bool(deleted), "item_key": golden_key}
+    # The parked Zotero Add belongs to the withdrawn decision: leaving it would keep
+    # the card dead and let a later Apply write the item without a label.
+    released = await asyncio.to_thread(verdict_effects.release_pending_feed_add, _db_path(), golden_key)
+    return {"deleted": bool(deleted), "item_key": golden_key, "released_pending_add": released}
 
 
 router.add_api_route("/api/daily/verdict", submit_daily_verdict, methods=["POST"])

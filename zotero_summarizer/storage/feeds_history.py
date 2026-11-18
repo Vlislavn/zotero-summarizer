@@ -141,6 +141,26 @@ def cancel_pending_materialization(conn: sqlite3.Connection, stable_feed_key: st
     return int(cursor.rowcount or 0)
 
 
+def release_pending_materialization(conn: sqlite3.Connection, stable_feed_key: str) -> int:
+    """An undone verdict returns its parked Add to the undecided, shortlistable state.
+
+    Restores the live daemon's pre-verdict state; the reserved ``planned_zotero_key``
+    stays as the no-replay guard for any later Add."""
+    if not stable_feed_key:
+        return 0
+    cursor = conn.execute(
+        """UPDATE processed_feed_items
+           SET decision = ?, decision_reason = 'pending_daily_selection',
+               zotero_sync_status = NULL, final_outcome = NULL,
+               outcome_signal_weight = NULL, outcome_detected_at = NULL,
+               updated_at = datetime('now')
+           WHERE stable_feed_key = ? AND decision = ? AND zotero_sync_status = 'pending'
+             AND materialized_zotero_key IS NULL""",
+        (DECISION_TRIAGED_PENDING, stable_feed_key, DECISION_USER_APPROVED),
+    )
+    return int(cursor.rowcount or 0)
+
+
 _ORDER_BY = {
     "score": "COALESCE(composite_score, 0) DESC",
     "recent": "created_at DESC, id DESC",

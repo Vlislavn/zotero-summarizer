@@ -472,6 +472,7 @@ from zotero_summarizer.storage.feeds_history import (  # noqa: F401,E402
     mark_pending_if_current,
     due_outcome_checks,
     record_outcome,
+    release_pending_materialization,
     reserve_materialization_key,
     select_by_decisions,
     select_pending_triaged,

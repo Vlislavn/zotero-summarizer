@@ -4,7 +4,7 @@ import { addToLibrary, fetchDailyMembers, fetchDailySlate, submitDailyVerdict, t
 import { readStorage } from '../utils/safeStorage.js';
 import {
   TODAY_MEMBERS_QUERY, TODAY_STORAGE_KEY, TODAY_VISIT_QUERY, VISIT_LIMIT,
-  actionReply, applyMemberFacts, createTodayVisit, memberNeedsCarry, memberPresentation, readTodayVisit, updateTodayVisit,
+  actionReply, applyMemberFacts, createTodayVisit, memberInFlight, memberNeedsCarry, memberParked, memberPresentation, readTodayVisit, updateTodayVisit,
 } from '../utils/todayVisit.js';
 
 export default function useTodayVisit(enabled) {
@@ -48,7 +48,7 @@ export default function useTodayVisit(enabled) {
     // every card to "Status not current" and disable it (#37/T16). Status refreshes
     // on mount, reconnect, explicit Refresh, and while a carried action resolves.
     refetchOnMount: 'always', refetchOnWindowFocus: false, refetchOnReconnect: 'always',
-    refetchInterval: visit?.members.some(memberNeedsCarry) ? 3000 : false,
+    refetchInterval: visit?.members.some(memberInFlight) ? 3000 : false,
     // Keep the last result across navigation (stale-while-revalidate): a return from the
     // paper page shows it at once while the mount refetch revalidates. An invalidated
     // entry (verdict/review finished elsewhere, explicit Refresh) is NOT trusted below.
@@ -121,6 +121,11 @@ export default function useTodayVisit(enabled) {
     mutationFn: request => request.kind === 'undo'
       ? undoDailyVerdict(request.itemId)
       : submitDailyVerdict({ itemId: request.itemId, priority: request.priority, chips: request.chips }),
+    // The undone decision's carried review action no longer matches the server facts and would hold the card.
+    onSuccess: (_response, request) => {
+      if (request.kind === 'undo') update(current => ({ ...current, members: current.members.map(member =>
+        member.paper.item_id === request.itemId ? { ...member, action: null } : member) }));
+    },
     onSettled: refresh,
     retry: false,
   });
@@ -144,12 +149,14 @@ export default function useTodayVisit(enabled) {
     setSelected(next);
   }, [effectiveVisit, setSelected]);
 
-  const carryCount = effectiveVisit?.members.filter(memberNeedsCarry).length || 0;
+  const carryCount = effectiveVisit?.members.filter(memberNeedsCarry).length || 0; // slots held by retained cards
+  const inFlightCount = effectiveVisit?.members.filter(memberInFlight).length || 0;
+  const parkedCount = effectiveVisit?.members.filter(member => memberParked(member) && !memberInFlight(member)).length || 0;
   const busy = Boolean(activeActions || activeSelections);
   const busyRef = useRef(busy);
   busyRef.current = busy;
   return {
-    visit: effectiveVisit, fresh, busy, carryCount, persistenceFailed,
+    visit: effectiveVisit, fresh, busy, carryCount, inFlightCount, parkedCount, persistenceFailed,
     loading: !visit && selection.isPending, renewing: selection.isPending,
     selectionError: selection.error, statusError: membersQuery.error,
     actionError: actionMutation.error || decisionMutation.error,

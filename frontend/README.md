@@ -69,6 +69,10 @@ source tasks open with `?task=`; the old Settings hashes resolve through `LEGACY
   Today renders it at once and revalidates on mount; only a first load or an invalidated entry
   (verdict/review finished elsewhere, Refresh) shows "Checking…"/disabled until the reply. A review already seen stays ready during that refresh (`reviewReady`); the "needs a review" hint needs `reviewKnown`.
   A verdict saved on the paper page opened from Today is written into the retained visit and the cached members reply at once (`finishTodayReviewAction`), so the card shows "Decision: X" on return; a skip of a feed-only paper (`feed:…`) does not call reject-tag.
+- Parked Zotero Add (`memberParked`, #205): a saved decision whose item is not in Zotero (`zotero_sync_status='pending'`, nothing retries it) shows
+  «Zotero must be closed» + one link to Ops › Feed review (Apply approved → Zotero); the banner reads «N papers wait for Zotero». Only
+  `memberInFlight` members (an unanswered action, a pending note) are polled every 3 s; parked ones are not. Undo also clears the card's carried review action
+  and the server releases the parked Add (`released_pending_add`), so the four decision buttons return.
 - Today per-card decision (#37): `PaperCard` shows must/should/could/Not interested with undo and an
   optional one-tap reason chip; it posts to `POST /api/daily/verdict` (undo: `/verdict/undo`)
   and reflects the saved verdict from the member facts. The bulk Add / Not interested bar appears only

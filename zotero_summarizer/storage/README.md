@@ -40,6 +40,9 @@ becomes stale; new mutations still require review before storage is called.
 `feeds_history.cancel_pending_materialization` conditionally cancels every
 unmaterialized approved sibling when a newer negative verdict wins, clearing
 pending sync and its obsolete provisional outcome atomically.
+`release_pending_materialization` (an undone verdict) returns the same parked rows to
+`triaged_pending`/`pending_daily_selection` with no sync status or outcome, so daily selection can
+shortlist them again; the reserved `planned_zotero_key` is kept as the no-replay guard.
 `current_feed_verdict` resolves stable/unique-legacy intent by monotonic sync
 revision (or stored update time on pre-sync databases), not original row ID:
 updating a verdict cannot leave an older alias in control. `current_materialization_intent`

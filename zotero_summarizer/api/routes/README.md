@@ -21,7 +21,9 @@ chips (#37). The chip ids are validated against a fixed allowlist and stored as
 NULL (a decision with no reason), and a fresh verdict without chips re-clears it. Reasons
 are per item — never set in a batch. Positive priorities still pass the shipped
 `require_review` gate (a write to the owner's Zotero), so the UI offers "Generate a review
-first" rather than writing an unreviewed paper.<br>
+first" rather than writing an unreviewed paper. Undo also releases the card's parked Zotero Add
+(`verdict_effects.release_pending_feed_add`; reply `released_pending_add`), so the card is undecided again and a later
+"Apply approved" cannot write the item without its label.<br>
 `conditions[]` is reserved in the payload for the later «depends-on» capture and is not
 populated yet.
 

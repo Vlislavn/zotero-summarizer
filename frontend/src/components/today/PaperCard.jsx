@@ -196,6 +196,10 @@ export default function PaperCard({ paper, selected, onToggleSelect, llmEnabled 
             currentStatus={currentFacts} statusFresh={statusFresh} retained={Boolean(visitId)}
             note={whyNote} />
           {memberState?.text && <p role="status" className="mt-2 text-xs text-slate-600">{memberState.text}</p>}
+          {memberState?.parked && <Link to="/ops?tab=review"
+            className="inline-flex min-h-11 items-center text-xs text-forest-800 underline underline-offset-2">
+            Ops › Feed review: Apply approved → Zotero
+          </Link>}
           {memberState?.canRetry && <button type="button" onClick={onRetry} disabled={busy}
             className="min-h-11 text-xs text-forest-800 underline disabled:opacity-50">
             Retry unfinished action

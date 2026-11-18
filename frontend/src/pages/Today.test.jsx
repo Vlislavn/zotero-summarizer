@@ -45,7 +45,7 @@ it('keeps the shared setup nudge and route compatible with AI or ML-only choices
 
 it.each([
   ['Add to library', { added: 1, pending_sync: 1 },
-    { decision: 'user_approved', zotero_sync_status: 'pending' }, /Decision saved; Zotero delivery pending/],
+    { decision: 'user_approved', zotero_sync_status: 'pending' }, /Decision saved\. Not in Zotero yet: Zotero must be closed/],
   ['Not interested (1 selected)', { trashed: 1, marked_read: 0, marked_read_error: 'locked' },
     { decision: 'user_rejected', user_priority: 'dont_read' }, /Feed read marking failed: locked/],
 ])('retained-card %s keeps a visible warning when Zotero side effects fail', async (button, response, outcome, warning) => {
@@ -105,7 +105,7 @@ it('selects only the visible source-filtered slate for batch actions', async () 
   fireEvent.click(screen.getByRole('button', { name: 'Add to library' }));
 
   await waitFor(() => expect(daily.addToLibrary).toHaveBeenCalledWith([1], ''));
-  expect(await screen.findByText(/Decision saved; Zotero delivery pending/)).toBeTruthy();
+  expect(await screen.findByText(/Decision saved\. Not in Zotero yet: Zotero must be closed/)).toBeTruthy();
   // After the action the card is handled, selection clears and the bulk bar hides.
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Add to library' })).toBeNull());
   expect(daily.fetchDailyMembers).toHaveBeenCalledWith([1, 2], expect.any(AbortSignal));

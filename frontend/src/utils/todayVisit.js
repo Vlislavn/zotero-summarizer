@@ -90,6 +90,17 @@ export function matchesMember(paper, facts) {
     && (facts.stable_feed_key || '') === (paper.stable_feed_key || '');
 }
 
+// A parked Add: the decision is saved but the item is not in Zotero (the write was refused,
+// usually because Zotero was open). Nothing retries it; the owner applies it in Ops › Feed review.
+export const memberParked = member => member.facts?.zotero_sync_status === 'pending';
+
+// Only something that can still resolve by itself justifies polling: a parked Add cannot.
+export function memberInFlight(member) {
+  if (!memberParked(member)) return memberNeedsCarry(member);
+  return member.action?.phase === 'unconfirmed'
+    || Boolean(member.facts.note_delivery?.pending && member.facts.note_delivery.target_key);
+}
+
 export function memberNeedsCarry(member) {
   const facts = member.facts;
   const action = member.action;
@@ -203,7 +214,7 @@ export function memberPresentation(member, fresh) {
   let text = '';
   if (rejected) text = 'Decision saved: don’t read.';
   else if (materialized) text = 'Zotero item recorded.';
-  else if (pending) text = 'Decision saved; Zotero delivery pending.';
+  else if (pending) text = 'Decision saved. Not in Zotero yet: Zotero must be closed to add it.';
   else if (facts?.user_priority) text = `Decision saved: ${facts.user_priority.replaceAll('_', ' ')}.`;
   if (facts?.note_delivery?.pending && facts.note_delivery.target_key) text += ' Note delivery pending.';
   if (action?.failure) text += ` ${action.failure.error || 'Action failed.'}`;
@@ -227,6 +238,7 @@ export function memberPresentation(member, fresh) {
     && (action.phase === 'replied' || materialized || (rejected && action.kind === 'trash'));
   return {
     text, unresolved, canRetry,
+    parked: fresh && available && pending && !materialized,
     selectable: fresh && available && !handled && !unresolved,
     // A review already seen stays ready while status refreshes (no flash after Add/verdict);
     // reviewKnown says whether "no review" is a fact, not a refresh in flight.
