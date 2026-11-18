@@ -18,7 +18,7 @@ import LibraryFilters from '../components/library/LibraryFilterSheet.jsx';
 import LibraryJobsPanel from '../components/library/LibraryJobsPanel.jsx';
 import LibraryStatusLine, { LibraryEmptyState } from '../components/library/LibraryStatusLine.jsx';
 import { emptyState } from '../components/library/libraryStatus.js';
-import { fetchSheet, forceSheet, sendReceipt, sendSheet } from '../components/library/zoteroCopy.js';
+import { addToCollectionSheet, fetchSheet, forceSheet, sendReceipt, sendSheet } from '../components/library/zoteroCopy.js';
 import useConfirmSheet from '../hooks/useConfirmSheet.jsx';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import { useReviewCoolLoop } from '../hooks/useReviewCoolLoop.js';
@@ -358,6 +358,7 @@ export default function LibraryReadNext() {
   async function handleAddToCollection(collectionKey, force = false) {
     if (!visibleSelected.size || !collectionKey) return;
     const name = flatCollections.find((c) => c.key === collectionKey)?.name || collectionKey;
+    if (!force && !(await ask(addToCollectionSheet(visibleSelected.size, name)))) return;
     setAddingToCollection(true);
     setMessage('');
     let added = 0;

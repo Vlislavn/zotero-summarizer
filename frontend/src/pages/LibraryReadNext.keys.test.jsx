@@ -151,3 +151,24 @@ it('z takes the last verdict back while its toast shows', async () => {
   expect(golden.deleteVerdict).toHaveBeenCalledWith('K1');
   expect(heading()).toBe('Paper 1');
 });
+
+it('with a confirmation sheet open the list keys do nothing; Esc still closes the sheet', async () => {
+  await mount({ desktop: true });
+  key(document.body, 'j');
+  expect(selected()).toBe('K1');
+  fireEvent.click(screen.getByText('Library jobs'));
+  fireEvent.click(screen.getByRole('button', { name: 'Send to Zotero…' }));
+  const dialog = screen.getByRole('dialog');
+
+  for (const name of ['1', 'Enter', 'j', 'k', 'z', '/']) key(dialog.querySelector('h2'), name);
+  await flush();
+  expect(golden.submitVerdict).not.toHaveBeenCalled();
+  expect(selected()).toBe('K1');
+  expect(screen.queryByTestId('library-detail')).toBeNull();
+  expect(document.activeElement).not.toBe(search());
+
+  key(document.body, 'Escape');
+  await flush();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(api.syncRelTags).not.toHaveBeenCalled();
+});

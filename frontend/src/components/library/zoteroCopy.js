@@ -37,6 +37,18 @@ export const notInterestedSheet = (n) => ({
   confirm: 'Mark Not interested',
 });
 
+export const addToCollectionSheet = (n, name) => ({
+  title: `Add ${plural(n, 'paper')} to “${name}”?`,
+  lines: ['Each paper is added to the collection in Zotero.', BACKUP, CLOSED],
+  confirm: 'Add to collection',
+});
+
+export const markReadSheet = (n) => ({
+  title: `Mark ${plural(n, 'paper')} read?`,
+  lines: ['Each gets the 👀 (skimmed) tag in Zotero and leaves Read next.', BACKUP, CLOSED],
+  confirm: 'Mark read',
+});
+
 // Zotero turned out to be running: the second sheet. `what` finishes «Zotero is running. … anyway?».
 export const forceSheet = (what) => ({
   title: 'Zotero is running…',

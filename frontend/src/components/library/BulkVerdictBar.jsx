@@ -3,7 +3,7 @@ import { updateItemTags } from '../../api/libraryApi.js';
 import { decide } from '../../utils/verdictUndo.js';
 import { pretty } from '../../utils/priorityLabels.js';
 import useConfirmSheet from '../../hooks/useConfirmSheet.jsx';
-import { forceSheet, notInterestedSheet } from './zoteroCopy.js';
+import { forceSheet, markReadSheet, notInterestedSheet } from './zoteroCopy.js';
 
 // Bulk verdict + "mark read" for the Read-next selection bar (L-11): verdicts go through
 // utils/verdictUndo like the detail's pills (surface library_bulk; dont_read queues its ❌ tag after the
@@ -50,7 +50,7 @@ export default function BulkVerdictBar({ keys, disabled, onDone, onVerdicts, pri
     );
   };
 
-  const markRead = () => apply('Marked read', '', async (key) => {
+  const markRead = () => apply('Marked read', markReadSheet(n), async (key) => {
     let data = await updateItemTags(key, { addTags: ['👀'] });
     if (data?.requires_force) {
       if (!(await ask(forceSheet('change the tags')))) throw new Error('cancelled');

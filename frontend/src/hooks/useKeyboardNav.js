@@ -16,6 +16,9 @@ import { useEffect } from 'react';
 //     one action: a held '4' is ONE verdict)
 //   - `allowFrom`: a control matching this selector (rows, verdict pills) keeps the
 //     list keys, so they work right after a click focused it
+//   - an open modal dialog (`[role=dialog][aria-modal=true]`, e.g. a Sheet) silences every key: the page behind
+//     it is inert, so its list must not act. `allowModal`: a selector for content that makes a modal ours
+//     (the Library detail Sheet keeps its verdict keys)
 //   - listens on window; re-binds when its deps change
 //
 // Params (single options object):
@@ -25,6 +28,7 @@ import { useEffect } from 'react';
 //   - hasSelection: boolean — gate action keys (no-op with nothing selected)
 //   - onEnter, onEscape, onUndo, onSlash: () => void — optional, see above
 //   - allowFrom: string — CSS selector of controls that do not silence the keys
+//   - allowModal: string — CSS selector; a modal dialog containing a match does not silence the keys
 //   - enabled: boolean (default true) — master switch
 //   - deps: unknown[] — extra deps so handlers see fresh closures
 export function useKeyboardNav({
@@ -38,6 +42,7 @@ export function useKeyboardNav({
   onUndo,
   onSlash,
   allowFrom,
+  allowModal,
   enabled = true,
   deps = [],
 }) {
@@ -55,6 +60,9 @@ export function useKeyboardNav({
       );
       if (control && !(allowFrom && control.matches(allowFrom))) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const foreign = [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')]
+        .some((dialog) => !(allowModal && dialog.querySelector(allowModal)));
+      if (foreign) return;
 
       if (e.key === 'j') {
         e.preventDefault();
@@ -81,7 +89,7 @@ export function useKeyboardNav({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, onPrev, onNext, onAction, hasSelection, onEnter, onEscape, onUndo, onSlash, allowFrom, ...deps]);
+  }, [enabled, onPrev, onNext, onAction, hasSelection, onEnter, onEscape, onUndo, onSlash, allowFrom, allowModal, ...deps]);
 }
 
 export default useKeyboardNav;

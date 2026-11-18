@@ -101,3 +101,22 @@ it('calls onEnter / onEscape / onUndo / onSlash only where a handler is given, a
   press({ key: 'j', repeat: true });  // holding j still scrolls
   expect(onNext).toHaveBeenCalledTimes(1);
 });
+
+it('an open modal dialog silences every key, unless it holds the allowModal content', () => {
+  const onNext = vi.fn(), onAction = vi.fn(), onEnter = vi.fn();
+  renderHook(() => useKeyboardNav({
+    onNext, onAction, onEnter, actionKeys: { 1: 'must' }, allowModal: '[data-ours]',
+  }));
+  const press = () => ['j', '1', 'Enter'].forEach((key) => fireEvent.keyDown(document.body, { key }));
+  const { container } = render(<div role="dialog" aria-modal="true" />);
+  press();
+  expect(onNext).not.toHaveBeenCalled();
+  expect(onAction).not.toHaveBeenCalled();
+  expect(onEnter).not.toHaveBeenCalled();
+
+  container.firstElementChild.innerHTML = '<p data-ours></p>';
+  press();
+  expect(onNext).toHaveBeenCalledTimes(1);
+  expect(onAction).toHaveBeenCalledTimes(1);
+  expect(onEnter).toHaveBeenCalledTimes(1);
+});

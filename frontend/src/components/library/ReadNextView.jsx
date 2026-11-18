@@ -220,6 +220,7 @@ export default function ReadNextView({
     onUndo: flow.toast?.kind === 'saved' ? flow.undo : undefined,
     onSlash: onFocusSearch && (!openKey || isDesktop) ? onFocusSearch : undefined,
     allowFrom: KEYS_FROM,
+    allowModal: '[data-testid="library-detail"]',  // the phone detail Sheet; any other modal (a confirmation) silences the list
   });
 
   // Rows are memoised: they get one stable callback that reads the latest state. A tap opens
