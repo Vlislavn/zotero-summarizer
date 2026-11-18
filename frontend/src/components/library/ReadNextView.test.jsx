@@ -46,10 +46,7 @@ function renderView(props = {}, entry = '/library') {
       status="ready"
       modelReady
       error={null}
-      computedAt={null}
-      scoresStale={false}
       distribution={null}
-      onRescore={vi.fn()}
       selectMode={false}
       onToggleSelectMode={vi.fn()}
       selected={new Set()}
@@ -80,15 +77,12 @@ afterEach(() => {
 });
 
 describe('ReadNextView detail', () => {
-  it('offers Rescore after a queue read fails even if the retained rows were fully scored', () => {
-    const onRescore = vi.fn();
+  it('keeps the retained rows after a failed read and leaves Rescore to the Library jobs panel', () => {
     const err = Object.assign(new Error('Reading cache is corrupt'), { status: 500 });
-    renderView({ computedAt: '2026-09-06T12:00:00Z', err, onRescore });
+    renderView({ err });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Rescore' }));
-
-    expect(onRescore).toHaveBeenCalledTimes(1);
     expect(screen.getByText('First paper')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Rescore|Scoring/ })).toBeNull();
   });
 
   it('opens the tapped paper in a detail over the list, which stays mounted', () => {

@@ -25,10 +25,17 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-function startFetch() {
+const flush = () => act(async () => {});
+const status = () => screen.getByTestId('library-status');
+// The result of a job is the status line's text (not a banner at the page bottom).
+const inStatusLine = async (text) => (await screen.findByText(text)).closest('[data-testid="library-status"]');
+
+async function startFetch() {
   render(<MemoryRouter><LibraryReadNext /></MemoryRouter>);
-  fireEvent.click(screen.getByText('Zotero'));
-  fireEvent.click(screen.getByRole('button', { name: 'Fetch full text' }));
+  await flush();
+  api.fetchFulltextStatus.mockClear();  // the on-open probe is not the fetch under test
+  fireEvent.click(screen.getByText('Library jobs'));
+  fireEvent.click(screen.getByRole('button', { name: 'Fetch missing PDFs…' }));
 }
 
 it.each([
@@ -44,13 +51,13 @@ it.each([
     outcomes: statuses.map((status, i) => ({ item_key: String(i), status })),
   } });
 
-  startFetch();
+  await startFetch();
 
-  expect(await screen.findByText(
+  expect(await inStatusLine(
     `Attached ${attached} full-text PDF(s) to Zotero (skipped ${skipped} already attached; ${unavailable} unavailable).`
     + (attached ? ' They upload to zotero.org on the next sync.' : '')
     + ' Backup: /backup/zotero.sqlite.',
-  )).toBeTruthy();
+  )).not.toBeNull();
   expect(api.fetchFulltext).toHaveBeenCalledWith({ force: false });
   expect(api.fetchFulltextStatus).toHaveBeenCalledTimes(1);
 });
@@ -58,17 +65,17 @@ it.each([
 it.each([
   [{ running: false, result: null }, 'Full-text result is missing outcomes'],
   [{ running: false, result: { error: 'resolver failed' } }, 'resolver failed'],
-])('does not report an absent or failed result as success', async (status, message) => {
-  api.fetchFulltextStatus.mockResolvedValue(status);
-  startFetch();
-  expect(await screen.findByText(`Full-text fetch failed: ${message}`)).toBeTruthy();
+])('does not report an absent or failed result as success', async (state, message) => {
+  api.fetchFulltextStatus.mockResolvedValue(state);
+  await startFetch();
+  expect(await inStatusLine(`Full-text fetch failed: ${message}`)).not.toBeNull();
   expect(screen.queryByText(/Attached 0/)).toBeNull();
 });
 
 it('surfaces a status request failure instead of silently retrying', async () => {
   vi.useFakeTimers();
   api.fetchFulltextStatus.mockRejectedValue(new Error('status endpoint unavailable'));
-  startFetch();
+  await startFetch();
   await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
   expect(screen.getByText(/Full-text status unavailable: status endpoint unavailable/)).toBeTruthy();
   expect(api.fetchFulltextStatus).toHaveBeenCalledTimes(1);
@@ -84,4 +91,27 @@ it('reflects a running review fleet on open: one status GET, no run POST', async
   expect(await screen.findByText(/Reviewing paper 2 of 5/)).toBeTruthy();
   expect(api.fetchReviewFleetStatus).toHaveBeenCalledTimes(1);
   expect(api.runReviewFleet).not.toHaveBeenCalled();
+});
+
+it('resumes a running full-text fetch on open as the status line, without starting another', async () => {
+  api.fetchFulltextStatus.mockResolvedValue({ running: true, progress: { done: 1, total: 4 } });
+
+  render(<MemoryRouter><LibraryReadNext /></MemoryRouter>);
+  await flush();
+
+  expect(status().textContent).toMatch(/Fetching full text… 1\/4 checked/);
+  expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();  // progress, not a result to dismiss
+  fireEvent.click(screen.getByText('Library jobs'));
+  expect(screen.getByRole('button', { name: 'Fetching…' }).disabled).toBe(true);
+  expect(api.fetchFulltext).not.toHaveBeenCalled();
+});
+
+it('does not show a finished old full-text result on open', async () => {
+  api.fetchFulltextStatus.mockResolvedValue({ running: false, result: { attached: 3, outcomes: [] } });
+
+  render(<MemoryRouter><LibraryReadNext /></MemoryRouter>);
+  await flush();
+
+  expect(screen.queryByText(/Attached 3/)).toBeNull();
+  expect(api.fetchFulltextStatus).toHaveBeenCalledTimes(1);
 });

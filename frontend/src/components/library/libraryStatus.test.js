@@ -29,6 +29,11 @@ describe('libraryStatus: the first of eight priorities wins, with one sentence a
     expect(message.action?.label ?? null).toBe(action);
   });
 
+  it('a running job’s progress is a receipt with a spinner and nothing to dismiss', () => {
+    const message = libraryStatus({ ...ok, receipt: { text: 'Fetching full text… 1/4 checked', busy: true } });
+    expect(message).toMatchObject({ id: 'receipt', tone: 'info', busy: true, action: null });
+  });
+
   it('walks down the priorities as each trigger clears', () => {
     const ctx = { ...ok, ...LOWER, offline: true, err: { status: 500 }, scoringError: 'x' };
     const seen = [libraryStatus(ctx).id];

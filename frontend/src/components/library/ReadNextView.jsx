@@ -6,7 +6,6 @@ import UndoToast from './UndoToast.jsx';
 import useLibraryVerdict, { nextUndecided } from '../../hooks/useLibraryVerdict.js';
 import useKeyboardNav from '../../hooks/useKeyboardNav.js';
 import { DECISIONS } from '../decisionVocab.js';
-import { formatShortDate } from './shared.jsx';
 import { groupRows } from './readNextCopy.js';
 import { CustomPanel, OrderCaption, OrderSelect } from './OrderControls.jsx';
 import { WhyHerePanel } from './WhyHere.jsx';
@@ -84,7 +83,7 @@ const FLASH_MS = 2000;  // the row you came back from stays highlighted this lon
 
 export default function ReadNextView({
   items, loading, err, includeRead, onToggleIncludeRead,
-  queueItems = items, onSaved, status, modelReady, computedAt, scoresStale, onRescore,
+  queueItems = items, onSaved, modelReady,
   selectMode, onToggleSelectMode, selected, onToggleItem, onRunTriage, onBulkDone, starting,
   // Bulk "Add to collection" (the Meaning-search → Zotero collection shortcut):
   // flat collection list + handler from Library; last target remembered so the
@@ -115,12 +114,6 @@ export default function ReadNextView({
   // `/` puts the cursor in the page's search box.
   onFocusSearch = null,
 }) {
-  const computing = status === 'computing';
-  // A failed read must leave Rescore available even with retained last-good rows.
-  const errored = status === 'error';
-  const rescoreActionable =
-    computing || errored || err != null || scoresStale || !computedAt
-    || items.some((it) => typeof it.relevance_score !== 'number');
   const openKey = openState.key;
   const [notesDirty, setNotesDirty] = useState(false);
   const [leave, setLeave] = useState(null);  // the exit waiting for «Leave without saving?»
@@ -391,24 +384,6 @@ export default function ReadNextView({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {modelReady && rescoreActionable && (
-            // One control, only when actionable; the stale state IS the button
-            // (amber), the single accent (Von Restorff). Current + fully scored →
-            // no button at all.
-            <button
-              type="button"
-              onClick={onRescore}
-              disabled={computing || !serverAvailable}
-              title={`Recompute relevance scores for your whole library against the current model${computedAt ? ` · scores as of ${formatShortDate(computedAt)}` : ''}. First full scan (~2,400 papers) can take a few minutes; re-scans are fast.`}
-              className={`px-2 py-0.5 rounded-md border text-[11px] disabled:opacity-50 disabled:cursor-not-allowed ${
-                scoresStale
-                  ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
-                  : 'border-slate-300 text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              {computing ? 'Scoring…' : 'Rescore'}
-            </button>
-          )}
           <button
             type="button"
             onClick={() => (openKey && !selectMode ? guarded(() => { openState.close(); onToggleSelectMode(); }) : onToggleSelectMode())}

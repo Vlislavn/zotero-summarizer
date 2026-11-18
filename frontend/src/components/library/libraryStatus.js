@@ -12,10 +12,13 @@ const SYNC = { id: 'sync', label: 'Sync now' };
 const RETRY = { id: 'retry', label: 'Retry' };
 const count = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+// The state of the scores in one phrase (the summary line and the jobs panel's Scores section).
+export const scoresText = (c) => (!c.modelReady ? 'Ranked by recency — the model is not ready'
+  : !c.computedAt ? 'Papers are not scored yet'
+    : `Scores updated ${timeAgo(c.computedAt)}${c.scoresStale ? ' (older model)' : ''}`);
+
 function summary(c) {
-  const scores = !c.modelReady ? 'Ranked by recency — the model is not ready'
-    : !c.computedAt ? 'Papers are not scored yet'
-      : `Scores updated ${timeAgo(c.computedAt)}${c.scoresStale ? ' (older model)' : ''}`;
+  const scores = scoresText(c);
   const unscored = c.modelReady && c.unscored > 0 ? `${c.unscored} not scored` : '';
   const pending = c.pending > 0 ? count(c.pending, 'Zotero change') + ' to apply' : '';
   if (c.modelReady && c.computedAt && !c.scoresStale && !unscored && !pending) {
@@ -26,7 +29,7 @@ function summary(c) {
 }
 
 // c: {connection 'ok'|'busy'|'mac'|'checking', slow, loading, offline, rows, err, scoringError, computing,
-//     receipt {text, error}, modelReady, computedAt, scoresStale, unscored (over the WHOLE queue), pending}
+//     receipt {text, error, busy} (a busy one is a running job's progress: a spinner, nothing to dismiss), modelReady, computedAt, scoresStale, unscored (over the WHOLE queue), pending}
 // → the message, or null while the first answer is still out (nothing true to say yet).
 export function libraryStatus(c) {
   const rows = c.rows || 0;
@@ -49,6 +52,7 @@ export function libraryStatus(c) {
   if (waiting || c.connection === 'busy') return say('slow', 'warning', 'The app is slow to answer — still trying.', SYNC);
   if (c.loading && rows === 0) return null;
   if (c.computing) return say('computing', 'info', 'Scoring your library… the order updates when it finishes.', null, { busy: true });
+  if (c.receipt?.text && c.receipt.busy) return say('receipt', 'info', c.receipt.text, null, { busy: true });
   if (c.receipt?.text) return say('receipt', c.receipt.error ? 'error' : 'info', c.receipt.text, { id: 'dismiss', label: 'Dismiss' });
   return summary(c);
 }

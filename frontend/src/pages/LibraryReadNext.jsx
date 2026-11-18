@@ -15,15 +15,13 @@ import {
 import ReadNextView from '../components/library/ReadNextView.jsx';
 import LibraryFilterBar from '../components/library/LibraryFilterBar.jsx';
 import ExpandableList from '../components/library/ExpandableList.jsx';
-import PredictionsBar from '../components/library/PredictionsBar.jsx';
+import LibraryJobsPanel from '../components/library/LibraryJobsPanel.jsx';
 import LibraryStatusLine, { LibraryEmptyState } from '../components/library/LibraryStatusLine.jsx';
 import { emptyState } from '../components/library/libraryStatus.js';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import { useReviewCoolLoop } from '../hooks/useReviewCoolLoop.js';
 import usePendingCount from '../hooks/usePendingCount.js';
 import { syncNow } from '../syncClient.js';
-import ZoteroActionsMenu from '../components/library/ZoteroActionsMenu.jsx';
-import { StatusBanner, formatShortDate } from '../components/library/shared.jsx';
 import { Section } from '../components/paper/review/primitives.jsx';
 import {
   EMPTY_FILTERS, buildPredicate, goalHighKeys, isFilterActive,
@@ -45,7 +43,7 @@ import { allPapers } from '../offlineStore.js';
 // Library page — a single "Read next" surface (Stage 2). The former Browse tab
 // and Triage monitor are merged in: the sidebar collection/tag filters + a
 // search box scope the ranked queue, and an opt-in "Select" mode sends papers to
-// triage. Scoring never runs on open; the Rescore button owns recompute.
+// triage. Scoring never runs on open; the Rescore button (Library jobs panel) owns recompute.
 
 // Fetch the WHOLE ranked library in one request (the backend ranks every item);
 // ReadNextView reveals it incrementally so the DOM stays light. High cap, not
@@ -366,7 +364,7 @@ export default function LibraryReadNext() {
       }
     } catch (err) {
       // Preserve the last-good list on a transient failure (don't blank the page);
-      // the banner surfaces the error. err.status drives the message in ReadNextView.
+      // the status line surfaces the error. err.status drives its message (libraryStatus.js).
       if (current()) setQueueErr(err);
     } finally {
       request.settled = true;
@@ -508,37 +506,53 @@ export default function LibraryReadNext() {
   }
 
   // ------ Bulk: acquire OA full-text PDFs → Zotero (background job) ------
-  function pollFulltext() {
+  // Show one status answer: progress while it runs (and poll again), else the finished result.
+  function showFulltext(s) {
     if (ftPollRef.current) { clearTimeout(ftPollRef.current); ftPollRef.current = null; }
-    fetchFulltextStatus().then((s) => {
-      const p = s?.progress || {};
-      if (s?.running) {
-        setMessage(`Fetching full text… ${p.done || 0}/${p.total || 0} checked (this can take several minutes).`);
-        ftPollRef.current = setTimeout(pollFulltext, 4000);
-        return;
-      }
-      const r = s?.result || {};
-      setFetchingFulltext(false);
-      if (r.error) { setMessage(`Full-text fetch failed: ${r.error}`); setIsError(true); return; }
-      const pdf = fulltextMessage(r);
-      if (!pdf) {
-        setMessage('Full-text fetch failed: Full-text result is missing outcomes');
-        setIsError(true);
-        return;
-      }
-      setMessage(
-        `Attached ${r.attached || 0} full-text PDF(s) to Zotero`
-        + ` (skipped ${r.skipped_has_pdf || 0} already attached; ${pdf.unavailable} unavailable).`
-        + (r.attached ? ' They upload to zotero.org on the next sync.' : '')
-        + (r.backup_path ? ` Backup: ${r.backup_path}.` : ''),
-      );
-      setIsError(false);
-    }).catch((err) => {
+    const p = s?.progress || {};
+    if (s?.running) {
+      setMessage(`Fetching full text… ${p.done || 0}/${p.total || 0} checked (this can take several minutes).`);
+      ftPollRef.current = setTimeout(pollFulltext, 4000);
+      return;
+    }
+    const r = s?.result || {};
+    setFetchingFulltext(false);
+    if (r.error) { setMessage(`Full-text fetch failed: ${r.error}`); setIsError(true); return; }
+    const pdf = fulltextMessage(r);
+    if (!pdf) {
+      setMessage('Full-text fetch failed: Full-text result is missing outcomes');
+      setIsError(true);
+      return;
+    }
+    setMessage(
+      `Attached ${r.attached || 0} full-text PDF(s) to Zotero`
+      + ` (skipped ${r.skipped_has_pdf || 0} already attached; ${pdf.unavailable} unavailable).`
+      + (r.attached ? ' They upload to zotero.org on the next sync.' : '')
+      + (r.backup_path ? ` Backup: ${r.backup_path}.` : ''),
+    );
+    setIsError(false);
+  }
+
+  function pollFulltext() {
+    fetchFulltextStatus().then(showFulltext).catch((err) => {
       setFetchingFulltext(false);
       setMessage(`Full-text status unavailable: ${err.message || err}. The server job may still be running.`);
       setIsError(true);
     });
   }
+
+  // Opening the page while a fetch is still running resumes its progress (a finished old result is not shown).
+  useEffect(() => {
+    if (!zoteroConnected || !serverAvailable) return undefined;
+    let cancelled = false;
+    Promise.resolve(fetchFulltextStatus()).then((s) => {
+      if (cancelled || !s?.running) return;
+      setFetchingFulltext(true);
+      showFulltext(s);
+    }).catch(() => {});  // a probe: no answer means nothing to resume
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoteroConnected, serverAvailable]);
 
   // ------ "Review cool papers" auto-review loop ------
   // The fleet orchestration — pin the cool keys, dedup via an attempted-ledger, drain
@@ -595,7 +609,7 @@ export default function LibraryReadNext() {
         if (window.confirm('Zotero opened mid-sync. Finish anyway? (a backup is taken first)')) {
           return await handleSyncAll(true);
         }
-        setMessage('Tags synced; rank stamping cancelled — close Zotero, then run “Sync all” again.');
+        setMessage('Tags synced; rank stamping cancelled — close Zotero, then run “Send to Zotero” again.');
         setIsError(false);
         return;
       }
@@ -655,6 +669,9 @@ export default function LibraryReadNext() {
   const statusCtx = {
     ...base, rows: queue.length, connection: serverAvailable ? 'ok' : connectionKind,
     scoresStale: queueMeta.scores_stale, unscored, pending,
+    // What the page's actions last said (sync, fetch, add to collection, triage, bulk verdict): a job still
+    // running shows its progress, a finished one stays until dismissed.
+    receipt: message ? { text: message, error: isError, busy: syncingAll || fetchingFulltext } : null,
   };
   const empty = emptyState({
     ...base, rows: displayedQueue.length, rawCount: queue.length, hasActiveFilters: queueMeta.model_ready && filtersActive,
@@ -663,7 +680,7 @@ export default function LibraryReadNext() {
   const statusHandlers = {
     sync: () => syncNow(), retry: () => loadQueue(false), reload: () => window.location.reload(),
     rescore: () => loadQueue(true), clearFilters: () => setClientFilters(EMPTY_FILTERS), clearSearch, clearScope,
-    showRead: () => setIncludeRead(true),
+    showRead: () => setIncludeRead(true), dismiss: () => { setMessage(''); setIsError(false); },
   };
 
   // Active scope shown in the collapsed drawer summary so folding it never hides
@@ -677,11 +694,24 @@ export default function LibraryReadNext() {
   return (
     <div>
       <LibraryStatusLine ctx={statusCtx} handlers={statusHandlers} />
+      <LibraryJobsPanel
+        ctx={statusCtx}
+        onRescore={statusHandlers.rescore}
+        unavailable={serverAvailable ? '' : sayUnavailable('Jobs need the Mac (offline)')}
+        zotero={zoteroConnected ? {
+          pending, syncing: syncingAll, fetching: fetchingFulltext, syncedAt: zoteroSyncedAt,
+          onSend: () => handleSyncAll(false), onFetch: () => handleFetchFulltext(false),
+        } : null}
+        picks={{
+          fleetStatus, onRun: handleReviewCool, onStop: stopReviewCool, autoActive: autoReview.active,
+          stopping: autoReview.stopping, coolCount: coolUndecided, proposedCount, queueAtLimit: queue.length >= QUEUE_LIMIT,
+        }}
+      />
       {/* ----- Single full-width Read-next surface (Stage 2). Collections, tags,
           and smart filters fold into ONE "Browse & filter" drawer so the ranked
-          queue + decision card own the whole width. Three labelled regions keep
-          the read-only find region, the suggestion-making review queue, and the
-          whole-library WRITE EXPORT distinct; one outer border, hairline rhythm between. ----- */}
+          queue owns the whole width; two regions (find, then the list), one outer
+          border, hairline rhythm between. The whole-library jobs sit above, in the
+          Library jobs panel. ----- */}
       <div className="glass rounded-2xl border border-slate-200 p-3 divide-y divide-slate-200/60">
         {/* Region A — find: read-only, instant scoping (search + browse drawer). */}
         <Section>
@@ -814,22 +844,8 @@ export default function LibraryReadNext() {
           </details>
         </Section>
 
-        {/* Region B — review queue: the work surface. Predict lives HERE, atop the
-            rows whose Confirm/Override cards it produces, with its own feedback. */}
+        {/* Region B — the ranked list: the work surface. */}
         <Section>
-          <fieldset disabled={!serverAvailable}>
-          <PredictionsBar
-            fleetStatus={fleetStatus}
-            onRun={handleReviewCool}
-            onStop={stopReviewCool}
-            autoActive={autoReview.active}
-            stopping={autoReview.stopping}
-            coolCount={coolUndecided}
-            proposedCount={proposedCount}
-            queueAtLimit={queue.length >= QUEUE_LIMIT}
-          />
-          </fieldset>
-          <div className="mt-3">
             <ReadNextView
           // Remount on a deliberate SERVER filter change so the incremental-reveal
           // count and any expanded row reset — but NOT on the 4s status poll, and
@@ -853,11 +869,7 @@ export default function LibraryReadNext() {
           totalUnread={queueMeta.total_unread}
           decidedCount={queueMeta.decided_count}
           queueItems={queue}
-          status={queueMeta.status}
           modelReady={queueMeta.model_ready}
-          computedAt={queueMeta.computed_at}
-          scoresStale={queueMeta.scores_stale}
-          onRescore={() => loadQueue(true)}
           onSaved={() => loadQueue()}
           openState={openPaper}
           onFocusSearch={() => searchRef.current?.focus()}
@@ -884,45 +896,7 @@ export default function LibraryReadNext() {
           cohortFull={!selectedCollection && !selectedTag}
         />
             <LibraryEmptyState state={empty} handlers={statusHandlers} />
-          </div>
         </Section>
-
-        {/* Region C — EXPORT TO ZOTERO: the heavy, occasional whole-library WRITES
-            and their last-synced status, which belongs HERE beside Sync — never
-            under Predict (the conflation that made Predict look like it should
-            change a sync timestamp). Hick's/Miller's Law: the four actions stay in
-            one grouped disclosure. */}
-        {zoteroConnected && (
-          <Section label="Export to Zotero">
-            <div className="flex flex-wrap gap-2 items-center">
-              <ZoteroActionsMenu
-                disabled={syncingAll || !serverAvailable}
-                actions={[
-                  {
-                    label: 'Sync all → Zotero', busy: syncingAll, busyLabel: 'Syncing…',
-                    onClick: () => handleSyncAll(false),
-                    title: 'One click, whole chain: rescore the library if the model changed since, then write zs:rel/<band> relevance tags AND stamp the Call-Number ranks (zr0001…) into Zotero. Backup-first; needs Zotero closed (you\'ll be asked to force otherwise). Then just sort the Call Number column in Zotero.',
-                  },
-                  {
-                    label: 'Fetch full text', busy: fetchingFulltext, busyLabel: 'Fetching…',
-                    disabled: fetchingFulltext, onClick: () => handleFetchFulltext(false),
-                    title: 'Download the arXiv full-text PDF for every library paper that has an arXiv link but no PDF, and attach it natively to Zotero. Skips papers that already have a PDF. Backs up first; runs with Zotero closed; PDFs upload to zotero.org on the next sync.',
-                  },
-                ]}
-              />
-            </div>
-            {(zoteroSyncedAt.tags || zoteroSyncedAt.ranks) && (
-              <p className="mt-2 text-[11px] text-slate-400">
-                Last synced — relevance tags: {formatShortDate(zoteroSyncedAt.tags) || 'never'} ·
-                Call-Number ranks: {formatShortDate(zoteroSyncedAt.ranks) || 'never'}
-              </p>
-            )}
-          </Section>
-        )}
-
-        {/* One shared transient slot for action results (sync / add-to-collection /
-            triage). Self-gates to null when empty, so no stray hairline. */}
-        <StatusBanner message={message} isError={isError} />
       </div>
     </div>
   );

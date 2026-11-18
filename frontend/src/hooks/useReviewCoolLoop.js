@@ -11,7 +11,7 @@ import { coolUndecidedKeys } from '../utils/relevanceBands.js';
 // Injected deps couple it to the page's queue: `queue` drives the cool count;
 // `queueArgs(force)` builds the reading-queue request; `applyQueueData(data)`
 // renders a fetched queue (streaming reloads); `loadQueue(force)` is the page's
-// full reload; `setMessage`/`setIsError` drive the shared status banner;
+// full reload; `setMessage`/`setIsError` drive the page's status line (its receipt);
 // `zoteroReady` gates the mount-resume effect.
 const FLEET_CHUNK = 5;              // picks per fleet round (stays inside its batch budget)
 const AUTO_REVIEW_MAX_DRAINS = 5;   // bound: how many foreign (prewarm) runs to wait out before our keys run
