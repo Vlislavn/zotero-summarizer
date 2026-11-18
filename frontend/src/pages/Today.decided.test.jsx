@@ -130,3 +130,29 @@ it('a parked Add is visible only through the banner, never as a card', async () 
   expect(screen.queryByText('Paper 1')).toBeNull();
   client.clear();
 });
+
+it('a positive pill whose Add parked says so in the toast, and the banner follows the refreshed facts', async () => {
+  daily.submitDailyVerdict.mockImplementation(async ({ itemId, priority }) => {
+    facts.set(itemId, { ...facts.get(itemId), user_priority: priority, decision: 'user_approved', zotero_sync_status: 'pending' });
+    return { id: itemId, add_attempted: true, add_status: 'zotero_pending', added_to_library: false, add_error: null };
+  });
+  const client = mount();
+  await pick('Paper 1', 'must');
+  await waitFor(() => expect(screen.getByTestId('undo-toast').textContent).toContain('Not in Zotero yet'));
+  await screen.findByText(/1 paper waits for Zotero/);
+  client.clear();
+});
+
+it('Undo of a decision whose Add already reached Zotero says the item stays there', async () => {
+  daily.undoDailyVerdict.mockImplementation(async itemId => {
+    facts.set(itemId, open(papers[itemId - 1]));
+    return { deleted: true, released_pending_add: 0, item_stays_in_zotero: true, zotero_key: 'ZK1' };
+  });
+  const client = mount();
+  await pick('Paper 1', 'should');
+  await waitFor(() => expect(titles()).toEqual(['Paper 2']));
+  fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+  await waitFor(() => expect(screen.getByTestId('undo-toast').textContent).toContain('“Paper 1” stays in Zotero'));
+  expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+  client.clear();
+});

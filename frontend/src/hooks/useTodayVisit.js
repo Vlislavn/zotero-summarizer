@@ -135,9 +135,9 @@ export default function useTodayVisit(enabled) {
     decisionMutation.mutate({ kind: 'decide', itemId, priority, chips }, callbacks);
     return true;
   }, [decisionMutation]);
-  const undoDecision = useCallback(itemId => {
+  const undoDecision = useCallback((itemId, callbacks) => {
     if (busyRef.current) return false;
-    decisionMutation.mutate({ kind: 'undo', itemId });
+    decisionMutation.mutate({ kind: 'undo', itemId }, callbacks);
     return true;
   }, [decisionMutation]);
 

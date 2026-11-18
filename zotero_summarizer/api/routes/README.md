@@ -24,6 +24,13 @@ are per item — never set in a batch. Positive priorities still pass the shippe
 first" rather than writing an unreviewed paper. Undo also releases the card's parked Zotero Add
 (`verdict_effects.release_pending_feed_add`; reply `released_pending_add`), so the card is undecided again and a later
 "Apply approved" cannot write the item without its label.<br>
+A positive pill also takes the paper-page Add (#207): after the label is committed it calls
+`verdict_effects.add_feed_verdict_to_library` once (idempotent through the materialized/reserved key; backup-first and the
+connector guard stay inside `materialize_feed_verdict`; a refused write parks the Add). Reply adds `add_attempted`,
+`add_status` (`added` / `zotero_pending` / `zotero_unavailable` / `already_in_library` / `error` / `unchanged` for a
+reasons-only re-submit of the same priority / `not_applicable` for Not interested), `added_to_library`, `add_error`,
+`zotero_key`. Not interested attempts no Add and cancels a parked one. **Undo never deletes a Zotero item**: it withdraws
+the label, releases a parked Add, and reports `item_stays_in_zotero` + `zotero_key` when the Add already materialized.<br>
 `conditions[]` is reserved in the payload for the later «depends-on» capture and is not
 populated yet.
 

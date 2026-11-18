@@ -73,6 +73,10 @@ source tasks open with `?task=`; the old Settings hashes resolve through `LEGACY
   «Zotero must be closed» + one link to Ops › Feed review (Apply approved → Zotero); the banner reads «N papers wait for Zotero». Only
   `memberInFlight` members (an unanswered action, a pending note) are polled every 3 s; parked ones are not. Undo also clears the card's carried review action
   and the server releases the parked Add (`released_pending_add`), so the four decision buttons return.
+- A positive Today pill also adds the paper to Zotero (#207, server-side; one attempt per decision, a reasons-only re-submit
+  attempts none). `useTodayDecisionToast` reads the reply: a parked Add (`add_status` `zotero_pending`/`zotero_unavailable`) or an
+  error puts a note under the toast, the banner follows the refreshed member facts. Undo never deletes a Zotero item: when the
+  reply has `item_stays_in_zotero` a short `info` toast (`UndoToast`, Dismiss only) says «Decision withdrawn. “Title” stays in Zotero.»
 - Today per-card decision (#37): `PaperCard` shows must/should/could/Not interested with undo and an
   optional one-tap reason chip; it posts to `POST /api/daily/verdict` (undo: `/verdict/undo`)
   and reflects the saved verdict from the member facts. The bulk Add / Not interested bar appears only

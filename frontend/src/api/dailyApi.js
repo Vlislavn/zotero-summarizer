@@ -137,7 +137,8 @@ export async function postTodayEvents(slateId, events) {
  * Record ONE card's decision (must_read | should_read | could_read | dont_read)
  * plus optional canonical reason-chip ids. Omit/empty `chips` → reasons_json NULL
  * (a decision with no reason). Reasons are per item — never sent in batch.
- * Returns { id, item_key, reasons_saved }.
+ * A positive priority also tries the Zotero Add once per decision (not on a reasons-only re-submit).
+ * Returns { id, item_key, reasons_saved, add_attempted, add_status, added_to_library, add_error, zotero_key }.
  */
 export async function submitDailyVerdict({ itemId, priority, chips = [] }) {
   if (!Number.isInteger(itemId)) throw new Error('submitDailyVerdict: itemId must be an integer');
@@ -151,7 +152,7 @@ export async function submitDailyVerdict({ itemId, priority, chips = [] }) {
 /**
  * POST /api/daily/verdict/undo
  * Retract one card's decision (and its reasons), restoring the undecided card.
- * Returns { deleted, item_key }.
+ * Never deletes a Zotero item. Returns { deleted, item_key, released_pending_add, item_stays_in_zotero, zotero_key }.
  */
 export async function undoDailyVerdict(itemId) {
   if (!Number.isInteger(itemId)) throw new Error('undoDailyVerdict: itemId must be an integer');

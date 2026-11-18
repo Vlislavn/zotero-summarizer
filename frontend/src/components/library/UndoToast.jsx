@@ -1,7 +1,7 @@
 import { NEG_CHIPS, chipClass } from '../decisionVocab.js';
 
 // What the last verdict did, one line, with the way back (F-final-plan §3.2): «Not interested: “Title” [Undo]».
-// A Not-interested verdict adds one scrolling row of reason chips. A failed save says so and offers Retry.
+// A Not-interested verdict adds one scrolling row of reason chips. A failed save says so and offers Retry; an `info` toast (Today Undo of an Add that stays in Zotero) only informs.
 const BTN = 'min-h-11 shrink-0 px-3 text-[13px] font-medium text-forest-800 underline underline-offset-2';
 
 // `chips` — the reason set offered with `toast.reasons` (Library: Not interested only; Today also offers the positive set).
@@ -18,7 +18,9 @@ export default function UndoToast({ toast, onUndo, onReason, onDismiss, chips = 
             {toast.retry && <button type="button" className={BTN} onClick={toast.retry}>Retry</button>}
             <button type="button" className={BTN} onClick={onDismiss}>Dismiss</button>
           </span>
-        ) : <button type="button" className={BTN} onClick={onUndo}>Undo</button>}
+        ) : toast.kind === 'info'
+          ? <button type="button" className={BTN} onClick={onDismiss}>Dismiss</button>
+          : <button type="button" className={BTN} onClick={onUndo}>Undo</button>}
       </div>
       {toast.note && <p className="pb-2 text-xs text-amber-800">{toast.note}</p>}
       {toast.reasons && (
