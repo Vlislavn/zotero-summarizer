@@ -98,7 +98,7 @@ it('distinguishes abstention, unsupported evidence and failed retrieval', () => 
 it('keeps compact content folded and non-paper scientific criteria suppressed', () => {
   const { container } = render(<PaperReview flat compact deep={{ ...deep, quality: { ...deep.quality, basis: 'non_paper', grade: 'A' } }} />);
   expect(container.querySelector('.review-reading')).toBeNull();
-  expect(container.textContent).not.toContain('Quality A');
+  expect(container.textContent).not.toContain('Rigor A');
   expect(container.textContent).toContain('Not peer-reviewed');
   const contribution = [...container.querySelectorAll('p')].find(el => el.textContent === deep.digest.tldr);
   expect(contribution.closest('details')).toBeNull();  // the TL;DR leads the glance card
@@ -142,7 +142,7 @@ it('retains non-paper findings when scientific critique is suppressed', () => {
     quality: { basis: 'non_paper', grade: 'A', overstatements: ['Claim'] },
   }} />);
   expect(container.textContent).toContain('Claim');
-  expect(container.textContent).not.toContain('Quality A');
+  expect(container.textContent).not.toContain('Rigor A');
   expect(container.textContent).not.toContain('Possible overstatement');
 });
 

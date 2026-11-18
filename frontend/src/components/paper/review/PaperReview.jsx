@@ -108,7 +108,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
   if (!digest && quality && quality.grade && quality.basis !== 'non_paper' && !goals.length) {
     return (
       <div className={`text-[13px] text-slate-600 ${flat ? 'review-reading' : ''}`}>
-        <Chip tone={gradeTone(quality.grade, quality.quality_band)}>{['Quality ' + quality.grade, qualityBasis(quality)].filter(Boolean).join(' · ')}</Chip>
+        <Chip tone={gradeTone(quality.grade, quality.quality_band)}>{['Rigor ' + quality.grade, qualityBasis(quality)].filter(Boolean).join(' · ')}</Chip>
         {quality.verdict ? <span className="ml-2">{quality.verdict}</span> : null}
         <div className="mt-1 text-[11px] text-slate-400">Older review — re-run for the new digest.</div>
       </div>

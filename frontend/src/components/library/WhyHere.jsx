@@ -26,7 +26,7 @@ export function WhyHereButton({ open, onToggle, panelId }) {
 const f2 = (n) => n.toFixed(2);
 
 // The answer to «why here?»: group, each signal's weight × term, the key — and, in
-// Balanced, the quality reorder inside the ★ band — plus the model's own main reason.
+// Balanced, the rigor reorder inside the ★ band — plus the model's own main reason.
 export function WhyHerePanel({ item, order, meta, mustCount, panelId }) {
   const { rows, key } = explainRow(item, order, meta);
   const balanced = order.preset === 'balanced';
@@ -54,7 +54,7 @@ export function WhyHerePanel({ item, order, meta, mustCount, panelId }) {
       <div className="font-medium">
         Key {f2(key)}
         {balanced && grade && band && (
-          <span className="font-normal"> · Quality {grade}: reorders it within its ★ {BAND_RANGE[band]} band, never across it</span>
+          <span className="font-normal"> · Rigor {grade}: reorders it within its ★ {BAND_RANGE[band]} band, never across it</span>
         )}
       </div>
       {item.why_reason && <div>Main model reason: {item.why_reason}</div>}

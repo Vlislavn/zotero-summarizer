@@ -9,7 +9,7 @@ import { readStoredJson } from './safeStorage.js';
 
 export const ORDER_STORAGE_KEY = 'zs:readNextOrder';
 export const SIGNALS = ['relevance', 'goals', 'quality', 'prestige'];
-export const SIGNAL_LABEL = { relevance: 'Relevance', goals: 'Goals', quality: 'Quality', prestige: 'Prestige' };
+export const SIGNAL_LABEL = { relevance: 'Relevance', goals: 'Goals', quality: 'Rigor', prestige: 'Prestige' };
 export const SLIDER_MAX = 10;
 export const SLIDER_STEP = 0.5;
 
@@ -19,7 +19,7 @@ export const PRESETS = [
   { id: 'balanced', label: 'Balanced' },
   { id: 'relevance', label: 'Relevance', weights: { relevance: 10, goals: 0, quality: 0, prestige: 0 } },
   { id: 'goals', label: 'My goals', weights: { relevance: 3, goals: 7, quality: 0, prestige: 0 } },
-  { id: 'quality', label: 'Quality first', weights: { relevance: 3, goals: 2, quality: 5, prestige: 0 } },
+  { id: 'quality', label: 'Rigor first', weights: { relevance: 3, goals: 2, quality: 5, prestige: 0 } },
   { id: 'custom', label: 'Custom' },
 ];
 export const BALANCED_ORDER = { preset: 'balanced' };

@@ -3,7 +3,7 @@
 // `data-feedback-field="<id>"` (spread `feedbackField(id)`); FeedbackMode finds them by that attribute.
 export const WHOLE = 'whole';
 export const FEEDBACK_PARTS = [
-  ['verdict', 'Verdict'], ['top_sentence', 'Top sentence'], ['quality', 'Quality'], ['red_flags', 'Red flags'],
+  ['verdict', 'Verdict'], ['top_sentence', 'Top sentence'], ['quality', 'Rigor'], ['red_flags', 'Red flags'],
   ['metrics', 'Metrics'], ['strength_weakness', 'Strength / Weakness'], ['reading_plan', 'Reading plan'],
   ['findings', 'Findings and applicability'], ['assessment', 'Assessment'], ['relevance', 'Relevance'],
   ['methods_limits', 'Methods and limitations'], ['code_link', 'Code link'],

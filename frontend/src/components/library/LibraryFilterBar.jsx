@@ -19,7 +19,7 @@ const GOAL_OPTS = [
   { value: 'high', label: 'strong' },
   { value: 'low', label: 'weak' },
 ];
-// Deep-review quality grade: A/B = "quality papers", C/D = weak. Only shown when
+// Deep-review rigor letter: A/B = high rigor, C/D = weak. Only shown when
 // some rows carry a grade (i.e. have been deep-reviewed).
 const QUALITY_OPTS = [
   { value: 'high', label: 'A/B' },
@@ -77,9 +77,9 @@ export default function LibraryFilterBar({
           </Cluster>
         )}
 
-        {/* Quality — single-select; only when some rows carry a deep-review grade. */}
+        {/* Rigor — single-select; only when some rows carry a deep-review grade. */}
         {qualityEnabled && (
-          <Cluster label="Quality">
+          <Cluster label="Rigor">
             {QUALITY_OPTS.map((o) => (
               <FilterChip
                 key={o.value}

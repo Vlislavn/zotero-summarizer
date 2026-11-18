@@ -139,7 +139,7 @@ call cap, a daily token cap and a circuit breaker. [Code](../zotero_summarizer/s
 
 ### Read next order
 
-Library → Read next with Sort = Best match has an **Order** list: Balanced (the server order), Relevance, My goals, Quality first and Custom (four sliders). A change re-sorts the list at once on this device, remembered per device; your own Must read stay first, nothing is hidden, a line under the toolbar shows the shares and how many papers each signal is known for, and **Why here** on a row shows its group, each signal's weight × value and the key. Order is hidden during a search and when the model is not ready. It changes only this list: Zotero rank numbers, «Review top N» and Today keep their own order. [Code](../frontend/src/utils/readNextOrder.js) · [Tests](../frontend/src/utils/readNextOrder.test.js).
+Library → Read next with Sort = Best match has an **Order** list: Balanced (the server order), Relevance, My goals, Rigor first and Custom (four sliders). A change re-sorts the list at once on this device, remembered per device; your own Must read stay first, nothing is hidden, a line under the toolbar shows the shares and how many papers each signal is known for, and **Why here** on a row shows its group, each signal's weight × value and the key. Order is hidden during a search and when the model is not ready. It changes only this list: Zotero rank numbers, «Review top N» and Today keep their own order. [Code](../frontend/src/utils/readNextOrder.js) · [Tests](../frontend/src/utils/readNextOrder.test.js).
 
 ### Reading reviews
 
@@ -170,7 +170,7 @@ and leaving never saves it silently. A note saved in the app is not yet confirme
 
 ### Review feedback
 
-On a paper page, **Give feedback** outlines each part of the review (verdict, top sentence, quality, red flags,
+On a paper page, **Give feedback** outlines each part of the review (verdict, top sentence, rigor, red flags,
 metrics, strength/weakness, reading plan, findings, assessment, relevance, methods, code link; **Whole review** in the
 bar). Tap a part, pick any of eight reasons (such as "unsupported fact", "too long", "good as is") and/or write a note up
 to 1000 characters, then **Save**; Esc or **Done** leaves the mode. Feedback is stored per part, paper and review

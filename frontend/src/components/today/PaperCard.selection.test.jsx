@@ -104,8 +104,8 @@ it('distinguishes same-relevance current evidence grades without implying scient
   show(card());
   show(card({ item_id: 2, title: 'Second paper', quality: { grade: 'D' } }));
   expect(screen.getAllByText('Relevance: moderate')).toHaveLength(2);
-  expect(screen.getByText('Quality A')).toBeTruthy();
-  expect(screen.getByText('Quality D')).toBeTruthy();
+  expect(screen.getByText('Rigor A')).toBeTruthy();
+  expect(screen.getByText('Rigor D')).toBeTruthy();
   expect(screen.getAllByText(/not independent scientific validation/)).toHaveLength(2);
 });
 
@@ -115,7 +115,7 @@ it.each([
   show(card({ quality }));
   expect(screen.queryByText(/evidence grade unknown/)).toBeNull();
   expect(screen.getByText(/A current usable review matched/)).toBeTruthy();
-  expect(screen.queryByText(/^Quality [A-D]/)).toBeNull();
+  expect(screen.queryByText(/^Rigor [A-D]/)).toBeNull();
 });
 
 it('labels a legacy grade as unconfirmed when the current review join misses', () => {
@@ -123,8 +123,8 @@ it('labels a legacy grade as unconfirmed when the current review join misses', (
     join: 'unavailable', join_basis: null, quality_origin: 'legacy_row',
     needs_pdf: null, digest_usable: null,
   } }) }));
-  expect(screen.getByText('Legacy quality A · current review unconfirmed')).toBeTruthy();
-  expect(screen.queryByText('Quality A')).toBeNull();
+  expect(screen.getByText('Legacy rigor A · current review unconfirmed')).toBeTruthy();
+  expect(screen.queryByText('Rigor A')).toBeNull();
   expect(screen.getByText(/does not establish whether a review is absent, stale or failed/)).toBeTruthy();
 });
 
@@ -144,7 +144,7 @@ it('shows missing full text separately, never as poor science', () => {
     needs_pdf: true, digest_usable: false,
   } }) }));
   expect(screen.getByText('Review: full text unavailable')).toBeTruthy();
-  expect(screen.queryByText('Quality A')).toBeNull();
+  expect(screen.queryByText('Rigor A')).toBeNull();
 });
 
 it('does not call an unusable joined digest a failed scientific review', () => {
@@ -161,7 +161,7 @@ it('does not call an unusable joined digest a failed scientific review', () => {
 it('does not upgrade old payload quality to a current review', () => {
   show(card({ selection_evidence: undefined }));
   expect(screen.queryByText(/evidence origin unrecorded/)).toBeNull();
-  expect(screen.queryByText('Quality A')).toBeNull();
+  expect(screen.queryByText('Rigor A')).toBeNull();
   expect(screen.getByText('Selection details were not recorded for this card.')).toBeTruthy();
 });
 
@@ -203,7 +203,7 @@ it('retains observed zero keys and leaves missing keys unknown without rebuildin
   expect(valueFor('Cohort key')).toBe('Unknown');
   expect(valueFor('Picker key')).toBe('0');
   expect(valueFor('Quality adjustment')).toBe('0');
-  expect(screen.getByText('Quality A')).toBeTruthy();
+  expect(screen.getByText('Rigor A')).toBeTruthy();
 });
 
 it.each([
@@ -217,7 +217,7 @@ it.each([
   expect(screen.getByText('Review evidence: unavailable (blinded selection)')).toBeTruthy();
   const details = screen.getByText('more').closest('details');
   expect(within(details).getByText(/withheld to keep this selection blinded/)).toBeTruthy();
-  for (const secret of ['PRIVATE-SENTINEL', 'Private arm hint', 'Quality D', '0.62', '0.67', 'model_fallback']) {
+  for (const secret of ['PRIVATE-SENTINEL', 'Private arm hint', 'Rigor D', '0.62', '0.67', 'model_fallback']) {
     expect(container.textContent).not.toContain(secret);
   }
 });

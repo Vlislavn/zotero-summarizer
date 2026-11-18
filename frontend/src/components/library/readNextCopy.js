@@ -50,7 +50,7 @@ export const ORDER_INFO = 'Changes only this list. Zotero rank numbers, “Revie
   + 'order (relevance + goals + prestige, without your verdict groups).';
 
 const pct = (share) => `${Math.round(share * 100)}%`;
-const SIGNAL_NAME = { relevance: 'relevance', goals: 'goals', quality: 'quality', prestige: 'prestige' };
+const SIGNAL_NAME = { relevance: 'relevance', goals: 'goals', quality: 'rigor', prestige: 'prestige' };
 
 // "known for 42 of 2012" — only when the signal is not known for every scored paper.
 export function coverageNote(meta, signal) {
@@ -65,14 +65,14 @@ export function orderCaption(label, shares, meta, balanced) {
     const note = coverageNote(meta, s);
     return `${SIGNAL_NAME[s]} ${pct(shares[s])}${note ? ` (${note})` : ''}`;
   });
-  if (balanced) parts.push('quality lifts within its ★ band');
+  if (balanced) parts.push('rigor lifts within its ★ band');
   return [label, ...parts].join(' · ');
 }
 
-// Tooltip of the quality chip: «within the relevance band, never across it» holds for Balanced only.
+// Tooltip of the rigor-letter chip: «within the relevance band, never across it» holds for Balanced only.
 export function qualityHint(balanced, base) {
   return balanced
-    ? `${base} — floats high-quality papers up within their relevance band, never across it.`
+    ? `${base} — floats papers with stronger rigor up within their relevance band, never across it.`
     : `${base} — counts as a full weight in this order (its share of passed checklist items), not limited to a relevance band.`;
 }
 

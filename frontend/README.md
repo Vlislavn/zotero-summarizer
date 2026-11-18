@@ -133,7 +133,7 @@ source tasks open with `?task=`; the old Settings hashes resolve through `LEGACY
   with one ≤68ch reading column inside it. Order: title/authors/links →
   ONE at-a-glance card (#308, `review/Recommendation.jsx`, the same on the paper page, the Library expanded row and
   Annotate: verdict chip, minutes → what the paper does (`digest.tldr`) + the one-line `digest.verdict` →
-  `review/Glance.jsx`: Quality tile (grade letter, «n of m checks», one segment per check, the model's notes count; letter rule D below), Metrics tile
+  `review/Glance.jsx`: Rigor tile (the A–D letter is shown as «Rigor», code names stay `quality`; grade letter, «n of m checks», one segment per check, the model's notes count; letter rule D below), Metrics tile
   («as reported»: the first `digest.parameters.metrics` string leads with its number large and the full string under it;
   a bar/pair/range is drawn by `review/metricModel.js` only when that number is the only one in the string), one
   strength and one weakness → the why → `ReadingPlan` «Read first / Skip / What the original adds» → policy reasons → code row

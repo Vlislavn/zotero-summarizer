@@ -538,7 +538,7 @@ export default function ReadNextView({
                           return (
                             <span
                               className={`inline-flex items-center px-1.5 py-0 rounded-full border font-semibold ${CHIP_TONE[gradeTone(grade, band)]}`}
-                              title={`${qualityHint(activeOrder.preset === 'balanced', 'Full-text deep-review quality grade (A–D)')}${letterMuted(grade, band) ? ` Grey A: checklist only — ${mutedReason(band)}.` : ''}`}
+                              title={`${qualityHint(activeOrder.preset === 'balanced', 'Full-text deep-review rigor letter (A–D)')}${letterMuted(grade, band) ? ` Grey A: checklist only — ${mutedReason(band)}.` : ''}`}
                             >
                               {[grade, gradeBasis(it.quality_met, it.quality_applicable)].filter(Boolean).join(' · ')}
                             </span>

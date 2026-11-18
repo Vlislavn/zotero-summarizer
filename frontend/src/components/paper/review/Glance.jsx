@@ -15,11 +15,11 @@ const LEGEND_ID = 'quality-letter-legend';
 const LETTER_LEGEND = "Letter = share of this paper type's checks met with a quote. Green = also no critical gap and no "
   + 'automatic warning. Model notes are suggestions to verify.';
 
-// The one-line legend behind the «?» next to the Quality label.
+// The one-line legend behind the «?» next to the Rigor label.
 function LegendButton({ open, onToggle }) {
   return (
     <button
-      type="button" onClick={onToggle} aria-expanded={open} aria-controls={LEGEND_ID} aria-label="What does the quality letter mean?"
+      type="button" onClick={onToggle} aria-expanded={open} aria-controls={LEGEND_ID} aria-label="What does the rigor letter mean?"
       className="no-tap-min relative inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 text-[11px] font-medium normal-case tracking-normal text-slate-600 after:absolute after:-inset-3 after:content-[''] hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-forest-700"
     >?</button>
   );
@@ -51,11 +51,11 @@ function QualityTile({ grade, band, quality, redFlags }) {
   return (
     <div className="min-w-0">
       <div className={`${EYEBROW} flex items-center gap-2`}>
-        Quality
+        Rigor
         {grade && <LegendButton open={legend} onToggle={() => setLegend((v) => !v)} />}
       </div>
       <div className="mt-1 flex items-center gap-3" data-feedback-field="quality">
-        {grade && <span title="Saved quality grade" className={`font-display text-[40px] font-light leading-none ${muted ? MUTED_INK : GRADE_INK[grade] || 'text-slate-700'}`}>{grade}</span>}
+        {grade && <span title="Saved rigor grade" className={`font-display text-[40px] font-light leading-none ${muted ? MUTED_INK : GRADE_INK[grade] || 'text-slate-700'}`}>{grade}</span>}
         <div className="min-w-0 flex-1 space-y-1.5 text-[13px] leading-snug text-slate-700">
           {(basis || facts) && <div>{[basis, facts].filter(Boolean).join(' · ')}</div>}
           {basis && <ChecksBar met={met} applicable={applicable} />}

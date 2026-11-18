@@ -69,7 +69,7 @@ function reviewPresentation(paper) {
       const current = review.quality_origin === 'current_entry';
       const greyA = current && letterMuted(grade, band) ? `Grey A: checklist only — ${mutedReason(band)}.` : '';
       return {
-        text: grade && current ? `Quality ${[grade, qualityBasis(paper.quality)].filter(Boolean).join(' · ')}` : null,
+        text: grade && current ? `Rigor ${[grade, qualityBasis(paper.quality)].filter(Boolean).join(' · ')}` : null,
         tone: current ? gradeTone(grade, band) : 'slate', title: greyA,
         detail: ['A current usable review matched. Its AI assessment is not independent scientific validation.', greyA].filter(Boolean).join(' '),
       };
@@ -80,7 +80,7 @@ function reviewPresentation(paper) {
     };
   }
   if (review?.quality_origin === 'legacy_row' && grade) return {
-    text: `Legacy quality ${[grade, qualityBasis(paper.quality)].filter(Boolean).join(' · ')} · current review unconfirmed`, tone: 'slate',
+    text: `Legacy rigor ${[grade, qualityBasis(paper.quality)].filter(Boolean).join(' · ')} · current review unconfirmed`, tone: 'slate',
     detail: 'This grade comes from the saved triage row. A current join miss does not establish whether a review is absent, stale or failed.',
   };
   if (paper.review_ready === true && review?.join !== 'unavailable') return {
