@@ -72,6 +72,7 @@ function useMediaQuery(query) {
 // Backend cap of hybrid meaning search (services/library/_search.py _TOP_N).
 const SEARCH_TOP_N = 50;
 const NO_OPEN = { key: null, open() {}, close() {}, position: null, total: 0, prev: null, next: null };
+const FLASH_MS = 2000;  // the row you came back from stays highlighted this long
 
 export default function ReadNextView({
   items, loading, err, includeRead, onToggleIncludeRead,
@@ -111,9 +112,12 @@ export default function ReadNextView({
   const openKey = openState.key;
   const [notesDirty, setNotesDirty] = useState(false);
   const [leave, setLeave] = useState(null);  // the exit waiting for «Leave without saving?»
+  const [returnKey, setReturnKey] = useState(null);  // row to bring back into view after the detail closes
+  const [flashKey, setFlashKey] = useState(null);
   const [mustAll, setMustAll] = useState(false);  // «Show all N» of your own Must read (this visit)
   const [decidedOpen, setDecidedOpen] = useState(false);  // the «Decided by you» block
   const orderOn = Boolean(orderMeta && onOrderChange);
+  const listRef = useRef(null);
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   // Target for the bulk "Add to collection" action. Defaults to the last-used
   // collection (validated against the current list) so the routine "send picks
@@ -161,6 +165,36 @@ export default function ReadNextView({
       else guarded(() => (key === openKey ? openState.close() : openState.open(key)));
     };
   });
+  // When the detail closes, the paper's row must be on screen: make sure it is rendered (the list
+  // reveals in chunks and folds groups), then scroll to it, focus it and mark it for a moment.
+  const lastOpen = useRef(openKey);
+  useEffect(() => {
+    const was = lastOpen.current;
+    lastOpen.current = openKey;
+    if (!was || openKey) return;
+    const inMust = groups ? groups.must.findIndex((it) => it.item_key === was) : -1;
+    const inTodo = (groups ? groups.todo : items).findIndex((it) => it.item_key === was);
+    if (inMust >= MUST_PREVIEW) setMustAll(true);
+    if (inTodo >= 0) setVisibleCount((n) => Math.max(n, inTodo + 1));
+    if (groups?.decided.some((it) => it.item_key === was)) setDecidedOpen(true);
+    setReturnKey(was);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openKey]);
+  useEffect(() => {
+    if (!returnKey) return;
+    const row = [...(listRef.current?.querySelectorAll('[data-row-key]') || [])].find((n) => n.dataset.rowKey === returnKey);
+    setReturnKey(null);
+    if (!row) return;
+    const { top, bottom } = row.getBoundingClientRect();
+    if (top < 0 || bottom > window.innerHeight) row.scrollIntoView?.({ block: 'center' });
+    row.querySelector('button')?.focus({ preventScroll: true });
+    setFlashKey(returnKey);
+  }, [returnKey]);
+  useEffect(() => {
+    if (!flashKey) return undefined;
+    const timer = setTimeout(() => setFlashKey(null), FLASH_MS);
+    return () => clearTimeout(timer);
+  }, [flashKey]);
   const goalHigh = useMemo(
     () => (cohortFull && modelReady && !offline && !searchQuery.trim() ? goalHighKeys(queueItems) : new Set()),
     [cohortFull, modelReady, offline, searchQuery, queueItems],
@@ -201,7 +235,7 @@ export default function ReadNextView({
 
   function renderRow(it, ownChip) {
     return (
-      <li key={it.item_key}>
+      <li key={it.item_key} data-row-key={it.item_key} className={flashKey === it.item_key ? 'rounded-xl ring-2 ring-teal-300' : ''}>
         <ReadNextRow
           item={it}
           expanded={openKey === it.item_key}
@@ -419,7 +453,7 @@ export default function ReadNextView({
           </div>
         )
       )}
-      <div className={openKey && isDesktop ? 'lg:flex lg:gap-3 lg:items-start' : ''}>
+      <div ref={listRef} className={openKey && isDesktop ? 'lg:flex lg:gap-3 lg:items-start' : ''}>
       <div className={openKey && isDesktop ? 'lg:flex-1 lg:min-w-0' : ''}>
         {groups && groups.must.length > 0 && (
           <section aria-label="Your must read">
@@ -475,6 +509,8 @@ export default function ReadNextView({
           onQueueRefresh={refreshOpen}
           onNotesDirtyChange={setNotesDirty}
           why={whyHere(detailItem)}
+          goalsStrong={goalHigh.has(openKey)}
+          modelReady={modelReady}
         />
       )}
       </div>

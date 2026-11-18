@@ -1,5 +1,6 @@
 import PaperDetailView from '../paper/PaperDetailView/index.jsx';
 import { StatusBanner } from './shared.jsx';
+import AbstractBlock from '../paper/PaperDetailView/AbstractBlock.jsx';
 import usePaperReview from '../../hooks/usePaperReview.js';
 
 // Body of the Read-next detail (LibraryDetail). The rich paper-detail
@@ -10,7 +11,9 @@ import usePaperReview from '../../hooks/usePaperReview.js';
 // `dont_read` IS the one reject path — it also queues a ❌ Zotero tag, so there
 // is ONE reject path (Occam's Razor). onSaved closes the detail + refetches (a
 // verdicted/engagement-tagged paper drops out); onQueueRefresh refetches without
-// closing. `showTitle`: the paper has no list row to supply the title.
+// closing. A paper with no review digest (≈3 in 4 of the queue) shows its abstract
+// and says «No review yet» — the decision needs something to read. `showTitle`: the
+// paper has no list row to supply the title.
 export default function InlineAnnotate({ itemKey, collections = [], showTitle = false, onSaved, onQueueRefresh, onNotesDirtyChange }) {
   const { detail, isLoading, error, refreshDetail, onTagsChanged, onCollectionsChanged, verdict } =
     usePaperReview(itemKey, { onSaved, onQueueRefresh });
@@ -24,6 +27,13 @@ export default function InlineAnnotate({ itemKey, collections = [], showTitle = 
         <StatusBanner message={`Detail load failed: ${error.message || error}`} isError />
       )}
       {detail && showTitle && <p className="text-sm font-medium text-slate-900">{detail.title}</p>}
+      {detail && !detail.deep_review?.digest && (
+        <div className="space-y-1">
+          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">Abstract</p>
+          {detail.abstract ? <AbstractBlock abstract={detail.abstract} /> : <p className="text-[13px] text-slate-500">No abstract on file.</p>}
+          <p className="text-[12px] text-slate-500">No review yet</p>
+        </div>
+      )}
       {detail && (
         <PaperDetailView
           mode="editable"

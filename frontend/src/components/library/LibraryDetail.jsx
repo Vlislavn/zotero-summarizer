@@ -1,8 +1,10 @@
+import { rowByline, rowSignals } from './readNextCopy.js';
 import InlineAnnotate from './InlineAnnotate.jsx';
 import Sheet from '../ui/Sheet.jsx';
 
 // The paper opened from the Read-next list. Phones: a full-screen Sheet over the still-mounted
-// list. ≥1024 px: the right half of a split view. The title comes from the list row.
+// list. ≥1024 px: the right half of a split view. The header comes from the list row, so the
+// paper shows at once; `review-detail` (InlineAnnotate) fills in the rest.
 // An exit with an unsaved note (✕, Close, scrim, Esc, ‹ ›, another row) asks inside the detail:
 // the parent passes `leave` = the exit waiting for the answer; the announcement lives here too,
 // because an open Sheet silences live regions in other portals.
@@ -40,9 +42,11 @@ function Stepper({ position, total, onPrev, onNext, notInList }) {
 
 export default function LibraryDetail({
   itemKey, item = null, sheet, inList, nav, collections, onClose, onStep, leave, onStay, onLeave,
-  onSaved, onQueueRefresh, onNotesDirtyChange, why = null,
+  onSaved, onQueueRefresh, onNotesDirtyChange, why = null, goalsStrong = false, modelReady = true,
 }) {
   const title = item?.title || 'Paper details';
+  const { byline, year } = item ? rowByline(item) : {};
+  const signals = item ? rowSignals(item, { goalsStrong, modelReady }) : [];
   const spot = nav.position ? `, ${nav.position} of ${nav.total}` : '';
   const body = (
     <>
@@ -52,6 +56,12 @@ export default function LibraryDetail({
         onPrev={nav.prev && (() => onStep(nav.prev))} onNext={nav.next && (() => onStep(nav.next))}
       />
       {leave && <LeaveQuestion onStay={onStay} onLeave={onLeave} />}
+      {item && (
+        <div className="mb-2 space-y-0.5 text-xs text-slate-500">
+          <p>{[byline, year, item.has_pdf && 'PDF'].filter(Boolean).join(' · ')}</p>
+          <p className="text-[11px]">{signals.map((s) => s.text).join(' · ')}</p>
+        </div>
+      )}
       <InlineAnnotate
         itemKey={itemKey}
         collections={collections}

@@ -149,6 +149,30 @@ describe('ReadNextView detail', () => {
     expect(within(dialog).getByTestId('inline-annotate').textContent).toContain('GONE');
   });
 
+  it('on close brings the paper’s row back: rendered past the first 60, scrolled to, focused', () => {
+    const many = Array.from({ length: 100 }, (_, i) => ({ item_key: `R${i}`, title: `Row paper ${i}`, relevance_score: 3 }));
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ top: 5000, bottom: 5040 });
+    renderView({ items: many, totalUnread: 100 }, '/library?open=R90');
+    expect(screen.queryByText('Row paper 90', { selector: 'span' })).toBeNull();  // the list reveals 60 rows at first
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    const row = screen.getByText('Row paper 90', { selector: 'span' }).closest('li');
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    expect(Element.prototype.scrollIntoView.mock.contexts).toContain(row);
+    expect(document.activeElement).toBe(row.querySelector('button'));
+  });
+
+  it('opens a decided paper that sits behind «Decided by you» and unfolds it on close', () => {
+    const decided = { item_key: 'D1', title: 'Decided one', decided: true, user_priority: 'should_read' };
+    renderView({ items: [...items, decided] }, '/library?open=D1');
+    expect(screen.queryByText('Decided one', { selector: 'span' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(screen.getByText('Decided one', { selector: 'span' })).toBeTruthy();
+  });
+
   it('in Select mode a tap ticks the row and opens nothing', () => {
     const onToggleItem = vi.fn();
     renderView({ selectMode: true, onToggleItem });

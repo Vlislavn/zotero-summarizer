@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -38,6 +38,18 @@ function mount(entry = '/library?open=K1') {
 }
 const dialog = () => screen.getByRole('dialog');
 
+it('shows the abstract and «No review yet» for a paper without a digest, and neither with one', async () => {
+  mount();
+
+  expect(await within(dialog()).findByText('The plain abstract text.')).toBeTruthy();
+  expect(within(dialog()).getByText('No review yet')).toBeTruthy();
+  fireEvent.click(within(dialog()).getByRole('button', { name: 'Next paper' }));
+
+  await waitFor(() => expect(within(dialog()).getByText('It works.')).toBeTruthy());
+  expect(within(dialog()).queryByText('No review yet')).toBeNull();
+  expect(within(dialog()).queryByText('The reviewed abstract text.')).toBeNull();
+});
+
 it('asks inside the detail before an exit that would lose an unsaved note, whichever exit it is', async () => {
   mount();
   const note = await within(dialog()).findByRole('textbox', { name: 'Manual notes', exact: true });
@@ -64,7 +76,7 @@ it('opening a detail only reads: one GET review-detail, no verdict, no build, no
   mount('/library');
 
   fireEvent.click(screen.getByText('Plain paper', { selector: 'span' }));
-  await within(dialog()).findByRole('textbox', { name: 'Manual notes', exact: true });  // the loaded detail
+  await within(dialog()).findByText('The plain abstract text.');
 
   expect(golden.fetchReviewDetail).toHaveBeenCalledTimes(1);
   expect(golden.fetchReviewDetail).toHaveBeenCalledWith('K1');
