@@ -47,6 +47,9 @@ import { allPapers } from '../offlineStore.js';
 // ReadNextView reveals it incrementally so the DOM stays light. High cap, not
 // truly unbounded, so a pathological library can't build a multi-MB response.
 const QUEUE_LIMIT = 5000;
+// A verdict patches its row in place (no queue re-read, H07); one re-read reconciles when the detail
+// closes, the window regains focus or 30 s pass without a verdict.
+const RECONCILE_IDLE_MS = 30000;
 
 function flattenCollections(nodes, depth = 0, parent = '') {
   const flat = [];
@@ -206,6 +209,32 @@ export default function LibraryReadNext() {
     [displayedQueue],
   );
   const openPaper = useOpenPaper(navKeys);
+  const loadQueueRef = useRef(null);
+  const rowsStale = useRef(false);
+  const idleTimer = useRef(null);
+  const writes = useRef(new Set());  // verdict writes in flight: a re-read must not overtake them
+  const reconcile = useCallback(() => {
+    clearTimeout(idleTimer.current);
+    if (!rowsStale.current) return;
+    rowsStale.current = false;
+    Promise.allSettled([...writes.current]).then(() => loadQueueRef.current());
+  }, []);
+  const patchRows = useCallback((patches) => {
+    const fields = new Map(patches);
+    setQueue((rows) => rows.map((row) => (fields.has(row.item_key) ? { ...row, ...fields.get(row.item_key) } : row)));
+    rowsStale.current = true;
+    clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(reconcile, RECONCILE_IDLE_MS);
+  }, [reconcile]);
+  const trackWrite = useCallback((write) => {
+    writes.current.add(write);
+    write.then(() => writes.current.delete(write), () => writes.current.delete(write));
+  }, []);
+  useEffect(() => {
+    window.addEventListener('focus', reconcile);
+    return () => { window.removeEventListener('focus', reconcile); clearTimeout(idleTimer.current); };
+  }, [reconcile]);
+  useEffect(() => { if (!openPaper.key) reconcile(); }, [openPaper.key, reconcile]);
   const visibleSelected = useMemo(
     () => new Set((queueLoading || queueErr ? [] : displayedQueue)
       .filter((row) => selected.has(row.item_key)).map((row) => row.item_key)),
@@ -340,6 +369,7 @@ export default function LibraryReadNext() {
     }
   }, [queueArgs, applyQueueData]);
 
+  loadQueueRef.current = loadQueue;
   useEffect(() => {
     loadQueue();
     return () => {
@@ -796,6 +826,8 @@ export default function LibraryReadNext() {
           onReload={() => loadQueue(false)}
           onSaved={() => loadQueue()}
           openState={openPaper}
+          onRowsChange={patchRows}
+          onWrite={trackWrite}
           selectMode={selectMode}
           onToggleSelectMode={() => { setSelectMode((v) => !v); setSelected(new Set()); }}
           selected={visibleSelected}

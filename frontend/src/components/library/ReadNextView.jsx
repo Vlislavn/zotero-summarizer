@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import LibraryDetail from './LibraryDetail.jsx';
 import BulkVerdictBar from './BulkVerdictBar.jsx';
 import ReadNextRow from './ReadNextRow.jsx';
+import UndoToast from './UndoToast.jsx';
+import useLibraryVerdict from '../../hooks/useLibraryVerdict.js';
 import { StatusBanner, formatShortDate } from './shared.jsx';
 import { groupRows, scoreStatus } from './readNextCopy.js';
 import { CustomPanel, OrderCaption, OrderSelect } from './OrderControls.jsx';
@@ -102,6 +104,8 @@ export default function ReadNextView({
   cohortFull = false,
   // The open paper: {key, open(key), close(), position, total, prev, next} from useOpenPaper.
   openState = NO_OPEN,
+  // A verdict patches its row in place (the page owns the rows): onRowsChange([[key, fields]…]), onWrite(promise).
+  onRowsChange = () => {}, onWrite = () => {},
 }) {
   const computing = status === 'computing';
   // A failed read must leave Rescore available even with retained last-good rows.
@@ -154,6 +158,13 @@ export default function ReadNextView({
     action?.();
   }
   useEffect(() => { setNotesDirty(false); setLeave(null); }, [openKey]);
+  const surface = isDesktop ? 'library_split' : 'library_sheet';
+  const flow = useLibraryVerdict({ queueItems, items, openState, notesDirty, guarded, surface, onRowsChange, onWrite });
+  // The toast rides inside the phone Sheet (it silences the page behind it); otherwise it sticks above the list.
+  const toast = flow.toast && (
+    <UndoToast toast={flow.toast} onUndo={flow.undo} onReason={flow.toggleReason} onDismiss={flow.dismiss} />
+  );
+  const toastInSheet = Boolean(openKey && !isDesktop);
 
   // Rows are memoised: they get one stable callback that reads the latest state. A tap opens
   // that paper's detail (the open one closes it); in Select mode it ticks the row instead.
@@ -453,6 +464,7 @@ export default function ReadNextView({
           </div>
         )
       )}
+      {!toastInSheet && toast && <div className="sticky top-2 z-20 mb-2">{toast}</div>}
       <div ref={listRef} className={openKey && isDesktop ? 'lg:flex lg:gap-3 lg:items-start' : ''}>
       <div className={openKey && isDesktop ? 'lg:flex-1 lg:min-w-0' : ''}>
         {groups && groups.must.length > 0 && (
@@ -511,6 +523,10 @@ export default function ReadNextView({
           why={whyHere(detailItem)}
           goalsStrong={goalHigh.has(openKey)}
           modelReady={modelReady}
+          surface={surface}
+          onVerdict={(priority, prior) => flow.verdict(openKey, priority, { prior })}
+          caughtUp={flow.caughtUp}
+          toast={toastInSheet ? toast : null}
         />
       )}
       </div>

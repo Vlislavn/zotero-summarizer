@@ -6,8 +6,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, Link, RouterProvider } from 'react-router-dom';
 import InlineAnnotate from '../components/library/InlineAnnotate.jsx';
+import usePaperReview from '../hooks/usePaperReview.js';
 import PaperReviewPage from './PaperReviewPage.jsx';
 import { cachedReviewDetail, pendingMutations, publishStatus } from '../offlineStore.js';
+function CompactDetail() { return <InlineAnnotate itemKey="P1" review={usePaperReview('P1')} />; }
 
 afterEach(async () => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); await publishStatus('', 'unchecked'); });
 
@@ -267,7 +269,7 @@ it.each(['page', 'compact'])('%s keeps verdict comments until an explicit edit i
   render(
     <QueryClientProvider client={client}>
       <RouterProvider router={createMemoryRouter([{ path: '/paper/:itemKey', element: surface === 'page'
-        ? <PaperReviewPage /> : <InlineAnnotate itemKey="P1" /> }], { initialEntries: ['/paper/P1'] })} />
+        ? <PaperReviewPage /> : <CompactDetail /> }], { initialEntries: ['/paper/P1'] })} />
     </QueryClientProvider>,
   );
 

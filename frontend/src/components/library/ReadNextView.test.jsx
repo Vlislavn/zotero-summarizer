@@ -7,6 +7,9 @@ vi.mock('./InlineAnnotate.jsx', () => ({
   default: ({ itemKey }) => <div data-testid="inline-annotate">Detail {itemKey}</div>,
 }));
 
+// The detail reads its paper through usePaperReview; these list tests have no QueryClient and no paper.
+vi.mock('../../hooks/usePaperReview.js', () => ({ default: () => ({ detail: null }) }));
+
 import ReadNextView from './ReadNextView.testkit.jsx';
 
 function setViewport({ desktop }) {

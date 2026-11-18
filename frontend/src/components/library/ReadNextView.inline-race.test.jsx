@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -43,10 +43,14 @@ it.each([
       if (dirty) fireEvent.change(note, { target: { value: 'New dirty note while verdict is in flight' } });
       fireEvent.click(screen.getByRole('button', { name: 'Native tag ACK', exact: true }));
     } else if (operation === 'submit') {
-      fireEvent.click(screen.getByRole('button', { name: 'Should read', exact: true }));
-      fireEvent.click(screen.getByRole('button', { name: 'Save verdict', exact: true }));
+      const summary = screen.getByText('Verdict comment');
+      fireEvent.click(summary);  // the editor lives in the «Verdict comment» disclosure
+      const editor = within(summary.closest('details'));
+      fireEvent.click(editor.getByRole('button', { name: 'Should read', exact: true }));
+      fireEvent.click(editor.getByRole('button', { name: 'Save verdict', exact: true }));
       await waitFor(() => expect(golden.submitVerdict).toHaveBeenCalledOnce());
     } else {
+      fireEvent.click(screen.getByText('Verdict comment'));
       fireEvent.click(screen.getByRole('button', { name: 'Delete', exact: true }));
       await waitFor(() => expect(golden.deleteVerdict).toHaveBeenCalledOnce());
     }

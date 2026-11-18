@@ -2,7 +2,7 @@
 import 'fake-indexeddb/auto';
 import '../../testSetup.js';
 import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, Route, RouterProvider, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { submitVerdict } from '../../api/goldenApi.js';
@@ -97,16 +97,19 @@ it('opens the cached page from the compact link for a known Mac outage even whil
   expect(fetch.mock.calls.some(([url]) => url.startsWith('/api/library/render/'))).toBe(false);
 });
 
-// Not interested (dont_read) is set from the expanded row's own verdict panel:
+// Not interested (dont_read) is set from the detail's «Verdict comment» editor:
 // the same path the full page uses, so the offline ordering and the tag-after-verdict
 // rules live in one place. A paper that already has a verdict opens its editor first.
 async function markNotInterested(paper) {
   fireEvent.click(screen.getByText(paper.title));
   await screen.findByRole('link', { name: 'Open full review ↗' });
-  const edit = screen.queryByRole('button', { name: 'Edit' });
+  const summary = screen.getByText('Verdict comment');
+  fireEvent.click(summary);
+  const editor = within(summary.closest('details'));
+  const edit = editor.queryByRole('button', { name: 'Edit' });
   if (edit) fireEvent.click(edit);
-  fireEvent.click(await screen.findByRole('button', { name: 'Not interested' }));
-  fireEvent.click(screen.getByRole('button', { name: /^(Save verdict|Update)$/ }));
+  fireEvent.click(await editor.findByRole('button', { name: 'Not interested' }));
+  fireEvent.click(editor.getByRole('button', { name: /^(Save verdict|Update)$/ }));
 }
 
 it('saves offline Not interested after an earlier verdict as one ordered durable intent, not a retryable failure', async () => {
