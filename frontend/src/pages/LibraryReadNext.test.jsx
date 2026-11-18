@@ -4,20 +4,20 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom';
 import * as api from '../api/libraryApi.js';
 import LibraryReadNext from './LibraryReadNext.jsx';
+import { useReviewCoolLoop } from '../hooks/useReviewCoolLoop.js';
 
 vi.mock('../api/libraryApi.js');
 vi.mock('../hooks/useServerAvailable.js', () => ({ default: () => true }));
 vi.mock('../hooks/useSetupStatus.js', () => ({
   useSetupStatus: () => ({ status: { zotero: { db_found: true } } }),
 }));
-vi.mock('../hooks/useReviewCoolLoop.js', () => ({
-  useReviewCoolLoop: () => ({ autoReview: {}, coolUndecided: 0 }),
-}));
+vi.mock('../hooks/useReviewCoolLoop.js', () => ({ useReviewCoolLoop: vi.fn() }));
 vi.mock('../components/library/ReadNextView.jsx', () => ({ default: () => null }));
 
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubGlobal('localStorage', { getItem: vi.fn(() => null), setItem: vi.fn() });
+  useReviewCoolLoop.mockReturnValue({ autoReview: {}, coolUndecided: 0 });
   api.fetchCollections.mockResolvedValue({ items: [] });
   api.fetchTags.mockResolvedValue({ items: [] });
   api.fetchReadingQueue.mockResolvedValue({ items: [] });
@@ -72,4 +72,16 @@ it('surfaces a status request failure instead of silently retrying', async () =>
   await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
   expect(screen.getByText(/Full-text status unavailable: status endpoint unavailable/)).toBeTruthy();
   expect(api.fetchFulltextStatus).toHaveBeenCalledTimes(1);
+});
+
+it('reflects a running review fleet on open: one status GET, no run POST', async () => {
+  const actual = await vi.importActual('../hooks/useReviewCoolLoop.js');
+  useReviewCoolLoop.mockImplementation(actual.useReviewCoolLoop);
+  api.fetchReviewFleetStatus.mockResolvedValue({ status: 'running', total: 5, completed: 1 });
+
+  render(<MemoryRouter><LibraryReadNext /></MemoryRouter>);
+
+  expect(await screen.findByText(/Reviewing paper 2 of 5/)).toBeTruthy();
+  expect(api.fetchReviewFleetStatus).toHaveBeenCalledTimes(1);
+  expect(api.runReviewFleet).not.toHaveBeenCalled();
 });

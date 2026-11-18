@@ -497,7 +497,7 @@ export default function LibraryReadNext() {
   const {
     fleetStatus, autoReview, coolUndecided, handleReviewCool, stopReviewCool,
   } = useReviewCoolLoop({
-    queue, queueArgs, applyQueueData, loadQueue, zoteroConnected, setMessage, setIsError,
+    queue, queueArgs, applyQueueData, loadQueue, zoteroReady: zoteroConnected, setMessage, setIsError,
     prestigeFloor: filterCtx.prestigeFloor,
   });
 
