@@ -93,6 +93,7 @@ implementation contract.
 | RSS, summarization and daily selection | [`services/triage/`](../zotero_summarizer/services/triage/README.md) |
 | Reading, full-text review, paper brief and Q&A | [`services/library/`](../zotero_summarizer/services/library/README.md) |
 | Query-driven Search and explicit Add recovery | [`services/search/`](../zotero_summarizer/services/search/README.md) |
+| Owner-defined conference lists, kept apart from the pool | [`services/conferences/`](../zotero_summarizer/services/conferences/README.md) |
 | Weekly research-feed reports | [`services/research_feed/`](../zotero_summarizer/services/research_feed/README.md) |
 | Proposed/native Zotero changes | [`services/zotero/`](../zotero_summarizer/services/zotero/README.md) |
 | Device snapshots, mutation receipts and conflicts | [`services/sync/`](../zotero_summarizer/services/sync/README.md) |

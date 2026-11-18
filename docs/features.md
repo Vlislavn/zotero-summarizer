@@ -102,6 +102,14 @@ already in your library. Search providers receive only public metadata; sending 
 private seed comments to the named model needs separate consent. Stale results are
 rechecked, and discovery never adds a paper: Add stays your explicit action. [Code](../zotero_summarizer/services/search/) · [Tests](../tests/test_discovery_server.py).
 
+### Conferences
+
+List the conferences you follow in `data/conferences/config.yaml`, open **Conferences** and press **Update**: the page shows
+«≈N requests» first, and only that press reads the free Crossref list (ASCO 2026 so far). You get **Late-breaking** (abstract
+number starting `LBA`), then **All abstracts** by page with title search; all other levels are shown as unknown, with the rule
+that decided each. Abstract text is collapsed, stored only under `data/conferences/` and never enters Today, Search or the
+paper pool. A failed download keeps the previous list. No scoring, topics or model. [Code](../zotero_summarizer/services/conferences/) · [Test](../tests/test_conferences_leak.py).
+
 ## Choose and read
 
 ### Daily triage

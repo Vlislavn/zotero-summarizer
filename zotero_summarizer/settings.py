@@ -160,6 +160,15 @@ class Settings:
         return self.data_dir / "review_feedback"
 
     @property
+    def conferences_dir(self) -> Path:
+        """Conference lists (``<id>/<year>.json``) and their own owner config; read only by ``services.conferences``."""
+        return self.data_dir / "conferences"
+
+    @property
+    def conferences_config_path(self) -> Path:
+        return self.conferences_dir / "config.yaml"
+
+    @property
     def feedback_schedule_dir(self) -> Path:
         return self.feedback_analysis_dir / "schedule"
 

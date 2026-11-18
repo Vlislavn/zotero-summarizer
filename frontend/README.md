@@ -35,9 +35,9 @@ src/
                       via hooks/usePendingCount.js · unsent device outbox); details/Sync now/install
                       guide collapse, and open by themselves on outage, error or conflict
   pages/              route orchestration: Library(+ReadNext/AnnotationVerdict batch mode), Search,
-                      Today, Weekly, Settings, Ops (Feed review / Triage jobs / Pending changes / System tabs),
+                      Today, Weekly, Conferences, Settings, Ops (Feed review / Triage jobs / Pending changes / System tabs),
                       PaperReviewPage (/paper/:itemKey), SetupFlow (/setup); *Helpers.js beside pages
-  components/         shared UI and workflows by domain: paper/ (review, RelatedPapers), library/,
+  components/         shared UI and workflows by domain: paper/ (review, RelatedPapers), conferences/ (EditionPanel: Update + preflight, Late-breaking, paged All abstracts, lazy abstract), library/,
                       today/, search/, settings/ (task pages), setup/, form/Fields, ui/ primitives
   hooks/              usePaperReview, useDeepReviewRunner, useConnectionTask, useTodayVisit,
                       useReviewCoolLoop, useServerAvailable, useKeyboardNav, useOptimisticAction, …
@@ -50,7 +50,7 @@ src/
 public/               sw.js (app-shell cache; never caches /api), manifest.webmanifest
 ```
 
-Routes: `/` → `/today` (default), `/library` (`?mode=batch`), `/search`, `/weekly`, `/settings`,
+Routes: `/` → `/today` (default), `/library` (`?mode=batch`), `/search`, `/weekly`, `/conferences`, `/settings`,
 `/ops` (`?tab=`), `/setup`, `/paper/:itemKey`. `/annotate`, `/review`, `/triage`, `/pending`
 redirect through `RedirectTo` in `src/App.jsx`, carrying the query string. Settings and
 source tasks open with `?task=`; the old Settings hashes resolve through `LEGACY` in

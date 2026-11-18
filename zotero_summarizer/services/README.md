@@ -68,6 +68,7 @@ or incompatible required cached gate fails explicitly instead of training.
       └────────────────────────────> zotero/ (queue + apply writes)
    mobile PWA ←typed mutations/cursor→ sync/ ──> golden label history
    research_feed/ ──projects existing RSS + deep reviews──> weekly digest
+   conferences/ ──Crossref on an explicit click──> data/conferences/ (read by nothing else)
    card/ ──reuses library full-text + code cascade + OpenAlex──> Today card facts
 ```
 

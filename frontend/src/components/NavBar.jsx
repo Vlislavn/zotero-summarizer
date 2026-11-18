@@ -7,6 +7,7 @@ const PRIMARY = [
   { to: '/library', label: 'Library' },
   { to: '/search', label: 'Search' },
   { to: '/weekly', label: 'Weekly' },
+  { to: '/conferences', label: 'Conferences' },
   { to: '/settings', label: 'Settings' },
   { to: '/ops', label: 'Ops' },
 ];
