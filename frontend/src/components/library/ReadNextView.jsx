@@ -110,6 +110,9 @@ function ExpandedPaperPanel({
   );
 }
 
+// Backend cap of hybrid meaning search (services/library/_search.py _TOP_N).
+const SEARCH_TOP_N = 50;
+
 export default function ReadNextView({
   items, loading, err, includeRead, onToggleIncludeRead,
   queueItems = items, onSaved, status, modelReady, error, computedAt, scoresStale, onRescore, onReload,
@@ -304,7 +307,14 @@ export default function ReadNextView({
           {orderOn && <OrderSelect order={order} meta={orderMeta} onChange={onOrderChange} />}
           {sort.field === 'best' && (
             offline ? <span>· cached working set order</span> : semantic
-              ? <span>· ranked by similarity to “{searchQuery}”</span>
+              ? (
+                // The backend caps meaning search at 50 rows; say so, and that filters cut within them.
+                <span data-testid="search-caption">
+                  {rawCount >= SEARCH_TOP_N
+                    ? `· Top ${SEARCH_TOP_N} by meaning for “${searchQuery}”${hasActiveFilters ? ` · ${items.length} of ${SEARCH_TOP_N} match filters` : ''}`
+                    : `· ranked by similarity to “${searchQuery}”`}
+                </span>
+              )
               : (modelReady
                 ? orderOn ? <OrderCaption order={order} meta={orderMeta} /> : (
                   <span title="Best first: your own Must read papers, then model relevance + goal match + author/venue and quality evidence. Review suggestions do not affect this order.">

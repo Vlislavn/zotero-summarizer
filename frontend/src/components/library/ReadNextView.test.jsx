@@ -228,3 +228,23 @@ describe('proposal chip', () => {
     expect(screen.queryByText(/Review suggests/)).toBeNull();
   });
 });
+
+describe('ReadNextView meaning-search caption', () => {
+  const fifty = Array.from({ length: 50 }, (_, i) => ({ item_key: `S${i}`, title: `Hit ${i}`, relevance_score: 3 }));
+
+  it('says Top 50 by meaning when 50 rows come back, and N of 50 under filters', () => {
+    renderView({ items: fifty, rawCount: 50, semantic: true, searchQuery: 'agents' });
+    expect(screen.getByTestId('search-caption').textContent).toBe('· Top 50 by meaning for “agents”');
+    cleanup();
+
+    renderView({ items: fifty.slice(0, 7), rawCount: 50, hasActiveFilters: true, semantic: true, searchQuery: 'agents' });
+    expect(screen.getByTestId('search-caption').textContent)
+      .toBe('· Top 50 by meaning for “agents” · 7 of 50 match filters');
+  });
+
+  it('shows no caption without a search', () => {
+    renderView({ items: fifty, rawCount: 50 });
+    expect(screen.queryByTestId('search-caption')).toBeNull();
+    expect(screen.queryByText(/Top 50 by meaning/)).toBeNull();
+  });
+});
