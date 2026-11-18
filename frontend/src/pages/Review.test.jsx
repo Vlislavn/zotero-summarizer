@@ -40,7 +40,7 @@ it('requires a review for positive relabels while keeping rejection available', 
   render(<MemoryRouter><Review /></MemoryRouter>);
   await screen.findByText('Awaiting full review');
   expect(screen.getByRole('button', { name: /Must read/i }).disabled).toBe(true);
-  expect(screen.getByRole('button', { name: /Remove/i }).disabled).toBe(false);
+  expect(screen.getByRole('button', { name: /Not interested/i }).disabled).toBe(false);
   expect(screen.getByText('Generate a review before adding').getAttribute('href')).toContain('/paper/feed%3Ag%3Aabcdef');
 });
 
@@ -60,7 +60,7 @@ it.each([
   ['must_read', /Must read/i, 'user_approved', 'approved'],
   ['should_read', /Should read/i, 'user_approved', 'approved'],
   ['could_read', /Could read/i, 'user_approved', 'approved'],
-  ['dont_read', /Remove/i, 'user_rejected', 'rejected'],
+  ['dont_read', /Not interested/i, 'user_rejected', 'rejected'],
 ])('acknowledges an exact item/state receipt for %s', async (priority, button, state, localState) => {
   fetchReview.mockResolvedValue({ items: [{ id: 9, title: 'Receipt control', review_ready: true }] });
   reviewAction.mockResolvedValue({ processed_id: 9, state });
@@ -82,7 +82,7 @@ it.each([
   ['missing ID', /Must read/i, { state: 'user_approved' }],
   ['missing state', /Must read/i, { processed_id: 9 }],
   ['opposite positive state', /Must read/i, { processed_id: 9, state: 'user_rejected' }],
-  ['opposite rejection state', /Remove/i, { processed_id: 9, state: 'user_approved' }],
+  ['opposite rejection state', /Not interested/i, { processed_id: 9, state: 'user_approved' }],
   ['unknown state', /Must read/i, { processed_id: 9, state: 'awaiting_review' }],
   ['empty receipt', /Must read/i, {}],
   ['null receipt', /Must read/i, null],

@@ -95,26 +95,26 @@ it('opens the cached page from the compact link for a known Mac outage even whil
   expect(fetch.mock.calls.some(([url]) => url.startsWith('/api/library/render/'))).toBe(false);
 });
 
-// Remove (dont_read) is set from the expanded row's own verdict panel:
+// Not interested (dont_read) is set from the expanded row's own verdict panel:
 // the same path the full page uses, so the offline ordering and the tag-after-verdict
 // rules live in one place. A paper that already has a verdict opens its editor first.
-async function removeFromPanel(paper) {
+async function markNotInterested(paper) {
   fireEvent.click(screen.getByText(paper.title));
   await screen.findByRole('link', { name: 'Open full review ↗' });
   const edit = screen.queryByRole('button', { name: 'Edit' });
   if (edit) fireEvent.click(edit);
-  fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Not interested' }));
   fireEvent.click(screen.getByRole('button', { name: /^(Save verdict|Update)$/ }));
 }
 
-it('saves offline Remove after an earlier verdict as one ordered durable intent, not a retryable failure', async () => {
-  const key = 'OFFLINE_REMOVE_CONFIRM';
+it('saves offline Not interested after an earlier verdict as one ordered durable intent, not a retryable failure', async () => {
+  const key = 'OFFLINE_NOT_INTERESTED';
   const paper = await seed(key);
   await submitVerdict({ item_key: key, user_priority: 'could_read', comment: 'Earlier intentional edit' });
   const previous = (await outbox(key))[0];
   queue(paper);
 
-  await removeFromPanel(paper);
+  await markNotInterested(paper);
 
   await waitFor(async () => expect((await outbox(key)).length).toBe(2));
   expect(screen.queryByText(/Couldn’t save/)).toBeNull();
@@ -130,10 +130,10 @@ it('saves offline Remove after an earlier verdict as one ordered durable intent,
   expect(fetch.mock.calls.some(([url]) => url === '/api/library/reject-tag')).toBe(false);
 });
 
-it('queues the reject tag once after an online Remove verdict and never repeats the verdict when the tag fails', async () => {
+it('queues the reject tag once after an online Not interested verdict and never repeats the verdict when the tag fails', async () => {
   browserOnline.mockReturnValue(true);
   onlineManager.setOnline(true);
-  const key = 'ONLINE_REMOVE_TAG_FAILURE';
+  const key = 'ONLINE_NOT_INTERESTED_TAG_FAILURE';
   const paper = await seed(key);
   fetch.mockImplementation(async url => {
     if (url.startsWith('/api/golden/review-detail')) return json(detailOf(paper));
@@ -144,7 +144,7 @@ it('queues the reject tag once after an online Remove verdict and never repeats 
   const onSaved = vi.fn();
   queue(paper, onSaved);
 
-  await removeFromPanel(paper);
+  await markNotInterested(paper);
 
   await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
   const writes = fetch.mock.calls.map(([url]) => url)
@@ -160,7 +160,7 @@ it('keeps a primary verdict rejection retryable without claiming a device save o
     ? json(detailOf(paper)) : json({ detail: 'Synthetic verdict rejected' }, 403));
   queue(paper);
 
-  await removeFromPanel(paper);
+  await markNotInterested(paper);
 
   expect(await screen.findByText(/HTTP 403/)).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Save verdict' }).disabled).toBe(false);

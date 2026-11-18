@@ -200,11 +200,12 @@ export default function Today() {
           Add to library
         </button>
         <button type="button" onClick={() => commit('trash')} disabled={view.busy}
+          aria-label={`Not interested (${selected.length} selected)`}
           className="min-h-11 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-rose-700 hover:border-rose-500 disabled:opacity-40">
-          Trash
+          Not interested
         </button>
         {selected.length > selectedReady.length && <span className="basis-full text-xs text-amber-800">
-          {llmEnabled ? 'Papers without a review are skipped by Add — Trash still works.' : 'Enable AI in Settings before adding unreviewed papers.'}
+          {llmEnabled ? 'Papers without a review are skipped by Add — Not interested still works.' : 'Enable AI in Settings before adding unreviewed papers.'}
         </span>}
       </div>}
       <div className="space-y-3">

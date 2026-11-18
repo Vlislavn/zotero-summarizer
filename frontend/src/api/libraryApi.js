@@ -236,7 +236,7 @@ export async function runUniversityLogin() {
 
 /**
  * POST /api/library/reject-tag { item_key }
- * Queues a Pending ❌ tag for the item (Deep Review "Remove"). The dont_read
+ * Queues a Pending ❌ tag for the item (the dont_read "Not interested" path). The dont_read
  * verdict (drop + training) is a separate submitVerdict call.
  */
 export async function queueRejectTag(itemKey) {

@@ -75,7 +75,7 @@ it.each([
     await screen.findByRole('option', { name: /^Reading/ });
     fireEvent.change(screen.getByTitle('Target Zotero collection'), { target: { value: 'C1' } });
     fireEvent.change(screen.getByLabelText('Feed source'), { target: { value: 'arXiv' } });
-    const button = screen.getByRole('button', { name: action === 'trash' ? 'Trash' : 'Add to library' });
+    const button = screen.getByRole('button', { name: action === 'trash' ? /^Not interested \(\d+ selected\)$/ : 'Add to library' });
     fireEvent.click(button);
   } else {
     fireEvent.click(screen.getByRole('button', { name: 'Select', exact: true }));

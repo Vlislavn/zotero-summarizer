@@ -112,7 +112,7 @@ export default function useTodayVisit(enabled) {
       ? { ...member, action: request } : member) }), effectiveVisit.id).updated) actionMutation.mutate(request);
   }, [fresh, actionMutation, activeActions, activeSelections, effectiveVisit, update]);
 
-  // Per-card decision (#37): one-tap must/should/could/skip + optional reason chips,
+  // Per-card decision (#37): one-tap must/should/could/Not interested + optional reason chips,
   // written through the Today verdict endpoint; undo retracts the row. The decision
   // persists in the DB (facts.user_priority, shown after the next members refresh)
   // and is reflected optimistically on the card by the mutation's pending state.

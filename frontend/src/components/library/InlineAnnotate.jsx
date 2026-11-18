@@ -7,7 +7,7 @@ import usePaperReview from '../../hooks/usePaperReview.js';
 // collection) is the shared PaperDetailView in `editable` mode; the detail-fetch
 // + verdict-mutation wiring is the shared usePaperReview hook (also used by the
 // full-page /paper/:key review), so neither surface re-implements it. Picking
-// `dont_read` IS the old "Remove" path — it also queues a ❌ Zotero tag, so there
+// `dont_read` IS the one reject path — it also queues a ❌ Zotero tag, so there
 // is ONE reject path (Occam's Razor). onSaved collapses + refetches (a
 // verdicted/engagement-tagged paper drops out); onQueueRefresh refetches without
 // collapsing.

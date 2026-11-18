@@ -26,7 +26,7 @@ const BAND_CARD_CLS = {
   dont_read: 'border border-slate-200 border-l-2 border-l-slate-300 bg-slate-50 opacity-70',
 };
 const PILL = 'inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-medium';
-// One Today DECISION vocabulary (#37/T10): must / should / could / skip — shared by
+// One Today DECISION vocabulary (#37/T10): must / should / could / Not interested — shared by
 // the recommendation hint (analyzed picks) and the owner's own decision buttons.
 // The relevance band stays a descriptive MAGNITUDE (a different axis); reusing
 // skip for "weak relevance" would conflate a magnitude with a verdict.
@@ -232,8 +232,8 @@ export default function PaperCard({ paper, selected, onToggleSelect, llmEnabled 
               </div>
               {!reviewReady && (!memberState || memberState.reviewKnown) && paper.stable_feed_key && <p className="mt-1.5 text-[11px] text-amber-800">
                 must/should/could need a review. {llmEnabled
-                  ? <>Open the paper to generate one; skip works right away.</>
-                  : <><Link className="underline" to="/settings">Enable AI</Link> for reviews; skip works right away.</>}
+                  ? <>Open the paper to generate one; Not interested works right away.</>
+                  : <><Link className="underline" to="/settings">Enable AI</Link> for reviews; Not interested works right away.</>}
               </p>}
             </div>
           ))}

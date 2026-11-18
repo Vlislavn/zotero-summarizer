@@ -33,7 +33,7 @@ export default function BulkVerdictBar({ keys, disabled, onDone }) {
 
   const verdict = (priority) => apply(
     `Verdict “${pretty(priority)}”`,
-    priority === 'dont_read' ? `Remove ${n} paper${n === 1 ? '' : 's'}? Each gets a ❌ tag queued for Zotero.` : '',
+    priority === 'dont_read' ? `Mark ${n} paper${n === 1 ? '' : 's'} Not interested? Each gets a ❌ tag queued for Zotero.` : '',
     async (key) => {
       const result = await submitVerdict({ item_key: key, user_priority: priority });
       if (priority === 'dont_read' && !result?.saved_offline) await queueRejectTag(key);

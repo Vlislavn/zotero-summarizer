@@ -27,7 +27,7 @@ export const PRIORITIES = [
 ].map((p) => ({ ...p, label: PRIORITY_LABELS[p.key] }));
 
 // Text-colour per priority so the saved-verdict word reads its own tone — fixes
-// the bug where every "Previously" value was hardcoded emerald (a saved Remove
+// the bug where every "Previously" value was hardcoded emerald (a saved Not interested
 // rendered green). Pretty label + correct colour, not the raw enum.
 const PRIORITY_TEXT = {
   must_read: 'text-emerald-700',

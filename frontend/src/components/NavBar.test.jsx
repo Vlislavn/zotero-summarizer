@@ -41,7 +41,7 @@ it('shows both conflict values and comments, and persists the explicit chosen re
     }],
   } })));
   expect(screen.getByLabelText('Server').value).toBe('Must read\n\nComment:\nStrong method');
-  expect(screen.getByLabelText('This device').value).toBe('Remove\n\nComment:\nWeak validation');
+  expect(screen.getByLabelText('This device').value).toBe('Not interested\n\nComment:\nWeak validation');
   expect(screen.getByLabelText('Server').rows).toBe(4);
   expect(screen.getByLabelText('This device').rows).toBe(4);
   expect(screen.getByRole('button', { name: 'Sync now' }).disabled).toBe(true);
