@@ -117,6 +117,31 @@ describe('ReadNextView mobile expansion', () => {
 
 });
 
+describe('ReadNextView Goals strong', () => {
+  const rows = [
+    { item_key: 'G1', title: 'Close to goals', goal_sim: 0.9, relevance_score: 3 },
+    { item_key: 'G2', title: 'Middle', goal_sim: 0.5, relevance_score: 3 },
+    { item_key: 'G3', title: 'Far', goal_sim: 0.1, relevance_score: 3 },
+  ];
+
+  it('marks the top of the list on the full list, and nowhere under a scope, a search or offline', () => {
+    renderView({ items: rows, cohortFull: true });
+    const [close, , far] = screen.getAllByRole('listitem');
+    expect(within(close).getByText('Goals strong')).toBeTruthy();
+    expect(within(far).queryByText('Goals strong')).toBeNull();
+    cleanup();
+
+    renderView({ items: rows });  // a collection / tag is applied: cohortFull is false
+    expect(screen.queryByText('Goals strong')).toBeNull();
+    cleanup();
+    renderView({ items: rows, cohortFull: true, searchQuery: 'agents', semantic: true });
+    expect(screen.queryByText('Goals strong')).toBeNull();
+    cleanup();
+    renderView({ items: rows, cohortFull: true, offline: true, status: 'offline' });
+    expect(screen.queryByText('Goals strong')).toBeNull();
+  });
+});
+
 describe('ReadNextView groups', () => {
   const must = (n) => Array.from({ length: n }, (_, i) => (
     { item_key: `M${i}`, title: `Must paper ${i}`, decided: true, user_priority: 'must_read', relevance_score: 4 }
@@ -139,7 +164,7 @@ describe('ReadNextView groups', () => {
     expect(screen.queryByText('Must paper 3')).toBeNull();
     // The old counts sentence and the repeated «You: must read» are gone.
     expect(screen.queryByText('About these counts')).toBeNull();
-    expect(screen.queryByText(/You: must read/)).toBeNull();
+    expect(screen.queryByText(/You: Must read/)).toBeNull();
   });
 
   it('keeps decided papers behind one «Decided by you · N · Show» press', () => {
@@ -152,7 +177,8 @@ describe('ReadNextView groups', () => {
 
     expect(screen.getByText('Decided one')).toBeTruthy();
     expect(screen.getByText('Decided two')).toBeTruthy();
-    expect(screen.getByText('You: should read')).toBeTruthy();
+    expect(screen.getByText('You: Should read')).toBeTruthy();
+    expect(screen.queryByText('AI summary:')).toBeNull();  // decided rows are compact
     expect(screen.getByRole('button', { name: 'Decided by you · 2 · Hide' }).getAttribute('aria-expanded')).toBe('true');
   });
 

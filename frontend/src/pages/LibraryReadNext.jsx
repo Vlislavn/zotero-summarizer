@@ -804,6 +804,7 @@ export default function LibraryReadNext() {
           rerankerLoading={queueMeta.reranker_loading}
           semanticUnavailable={queueMeta.semantic_unavailable}
           prestigeFloor={filterCtx.prestigeFloor}
+          cohortFull={!selectedCollection && !selectedTag}
         />
           </div>
         </Section>

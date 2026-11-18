@@ -1,17 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import InlineAnnotate from './InlineAnnotate.jsx';
 import BulkVerdictBar from './BulkVerdictBar.jsx';
-import { StatusBanner, formatShortDate, truncateAuthors } from './shared.jsx';
-import { pretty } from '../../utils/priorityLabels.js';
-import { groupRows, isDecided, qualityHint, scoreStatus } from './readNextCopy.js';
+import ReadNextRow from './ReadNextRow.jsx';
+import { StatusBanner, formatShortDate } from './shared.jsx';
+import { groupRows, scoreStatus } from './readNextCopy.js';
 import { CustomPanel, OrderCaption, OrderSelect } from './OrderControls.jsx';
 import { WhyHerePanel } from './WhyHere.jsx';
 import { BALANCED_ORDER } from '../../utils/readNextOrder.js';
-import { CHIP_TONE, bandTone, gradeTone, gradeBasis, letterMuted, mutedReason, BAND_LABEL } from '../paper/review/tones.js';
 import { Disclosure } from '../paper/review/primitives.jsx';
 import { humanizeError } from '../../utils/humanizeError.js';
-import { cleanAbstract } from '../../utils/feedText.js';
-import { SORT_FIELDS, SORT_DEFAULT_DIR, DEFAULT_SORT } from '../../utils/relevanceBands.js';
+import { SORT_FIELDS, SORT_DEFAULT_DIR, DEFAULT_SORT, goalHighKeys } from '../../utils/relevanceBands.js';
 import Spinner from '../ui/Spinner.jsx';
 import { readStorage } from '../../utils/safeStorage.js';
 
@@ -22,19 +20,6 @@ import { readStorage } from '../../utils/safeStorage.js';
 const REVEAL_STEP = 60;  // rows revealed initially and per "Show more" click
 const MUST_PREVIEW = 3;  // your own Must read rows shown before "Show all"
 const DESKTOP_QUERY = '(min-width: 1024px)';
-
-// Your own verdict. A decided paper carries this chip, so it stays findable instead
-// of vanishing (dont_read is handled-filtered, so it never reaches the queue). In the
-// default order the list is grouped (`groupRows`); the chip names the verdict wherever
-// the group header does not (the Must group, by its header).
-const USER_PRIORITY_LABEL = { must_read: 'must read', should_read: 'should read', could_read: 'could read' };
-
-// The fleet's proposal never writes anything: the chip says whether it is flagged,
-// else how sure it is. Acting on it is the row's own verdict panel.
-function proposalNote(proposal) {
-  if ((proposal.flags || []).some(Boolean)) return 'flagged';
-  return `${Math.round((typeof proposal.confidence === 'number' ? proposal.confidence : 0) * 100)}%`;
-}
 
 function GroupHeader({ children, action = null }) {
   return (
@@ -125,10 +110,6 @@ function ExpandedPaperPanel({
   );
 }
 
-// Feed abstracts arrive as clipped HTML ("<p>Nature, Published online… <a hr"): show the
-// text, without the tags or a tag cut off by the clip.
-const previewText = (text) => cleanAbstract(text).replace(/<\/?[a-z][^>]*$/i, '').trim();
-
 export default function ReadNextView({
   items, loading, err, includeRead, onToggleIncludeRead,
   queueItems = items, onSaved, status, modelReady, error, computedAt, scoresStale, onRescore, onReload,
@@ -152,6 +133,9 @@ export default function ReadNextView({
   // where the Order control exists (Best match, no search, parts in the response);
   // Library owns `order` and has already sorted `items` by it.
   order = BALANCED_ORDER, onOrderChange, orderMeta = null,
+  // True while the list is the whole library (no collection / tag scope): only then is
+  // «Goals strong» (top third of goal_sim in the loaded list) the same word for a paper everywhere.
+  cohortFull = false,
 }) {
   const computing = status === 'computing';
   // A failed read must leave Rescore available even with retained last-good rows.
@@ -164,7 +148,6 @@ export default function ReadNextView({
   const [mustAll, setMustAll] = useState(false);  // «Show all N» of your own Must read (this visit)
   const [decidedOpen, setDecidedOpen] = useState(false);  // the «Decided by you» block
   const orderOn = Boolean(orderMeta && onOrderChange);
-  const activeOrder = orderOn ? order : BALANCED_ORDER;
   const expandedPanelRef = useRef(null);
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   // Target for the bulk "Add to collection" action. Defaults to the last-used
@@ -204,6 +187,15 @@ export default function ReadNextView({
     }
   }, [expandedKey, isDesktop]);
 
+  // Rows are memoised: they get one stable callback that reads the latest state.
+  const toggleRef = useRef(null);
+  const toggleRow = useCallback((key) => toggleRef.current(key), []);
+  useEffect(() => { toggleRef.current = (key) => chooseExpanded(expandedKey === key ? null : key); });
+  const goalHigh = useMemo(
+    () => (cohortFull && modelReady && !offline && !searchQuery.trim() ? goalHighKeys(queueItems) : new Set()),
+    [cohortFull, modelReady, offline, searchQuery, queueItems],
+  );
+
   function chooseExpanded(key) {
     if (notesDirty && !window.confirm('You have unsaved notes on this paper. Leave without saving them?')) return;
     setNotesDirty(false);
@@ -240,127 +232,23 @@ export default function ReadNextView({
   }
 
   const rows = (list, ownChip) => (
-    <ol className="space-y-2">{list.map((it, idx) => renderRow(it, idx + 1, ownChip))}</ol>
+    <ol className="space-y-2">{list.map((it) => renderRow(it, ownChip))}</ol>
   );
 
-  function renderRow(it, number, ownChip) {
+  function renderRow(it, ownChip) {
     return (
       <li key={it.item_key}>
-        <div
-          className={`w-full flex items-start gap-2 p-2.5 rounded-xl border bg-white hover:border-teal-300 hover:bg-teal-50/30 ${
-            expandedKey === it.item_key ? 'border-teal-400 ring-1 ring-teal-200' : 'border-slate-200'
-          }`}
-        >
-          {selectMode && (
-            <input
-              type="checkbox"
-              checked={selected?.has(it.item_key) || false}
-              onChange={() => onToggleItem(it.item_key)}
-              className="mt-1 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-            />
-          )}
-          <button
-            type="button"
-            onClick={() => chooseExpanded(expandedKey === it.item_key ? null : it.item_key)}
-            aria-expanded={expandedKey === it.item_key}
-            className="min-w-0 flex-1 text-left flex items-start gap-2 sm:gap-3"
-          >
-            <span className="mono text-xs text-slate-400 mt-0.5 w-6 shrink-0 text-right">{number}</span>
-            <span className="min-w-0 flex-1">
-              <span className="text-sm font-medium text-slate-900 line-clamp-2 sm:line-clamp-1">{it.title || '(untitled)'}</span>
-              <span className="text-xs text-slate-500 line-clamp-1">{truncateAuthors(it.authors)}</span>
-              {(it.review_digest?.tldr || it.abstract_preview) && (
-                <span className="mt-1 text-xs text-slate-600 line-clamp-2">
-                  {it.review_digest?.tldr || previewText(it.abstract_preview)}
-                </span>
-              )}
-              {(it.user_priority || it.proposed_verdict?.proposed || typeof it.relevance_score === 'number') && (
-                <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-5">
-                  {/* Your own verdict leads the row (Von Restorff): a decided
-                      paper is flagged here, so deciding makes it findable,
-                      never hidden. */}
-                  {ownChip && isDecided(it) && USER_PRIORITY_LABEL[it.user_priority] && (
-                    <span
-                      className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-amber-100 text-amber-900 border border-amber-300 font-semibold"
-                      title="Your own verdict — you already decided this paper."
-                    >
-                      You: {USER_PRIORITY_LABEL[it.user_priority]}
-                    </span>
-                  )}
-                  {/* The fleet's pre-decided verdict — a quiet in-row marker, never
-                      an action. Hidden once you've set your own label. */}
-                  {!it.user_priority && it.proposed_verdict?.proposed && (
-                    <span
-                      className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200"
-                      title="Full-text review suggestion — it does not affect list order. Set your own verdict by opening the paper."
-                    >
-                      ◇ Review suggests: {pretty(it.proposed_verdict.proposed)} · {proposalNote(it.proposed_verdict)}
-                    </span>
-                  )}
-                  {typeof it.relevance_score === 'number' ? (
-                    <span className="font-semibold text-teal-700" title="Model relevance score (1–5)">
-                      ★ {it.relevance_score.toFixed(1)}
-                    </span>
-                  ) : (
-                    <span className="text-slate-500" title="Not scored yet — run Rescore to rank this paper">
-                      not scored yet
-                    </span>
-                  )}
-                  {/* Why it surfaced — the top signal behind its rank (topic
-                      match / library affinity / prestige). Answers "why did I
-                      get this paper?" at a glance without opening the row. */}
-                  {it.why_reason && !(orderOn && it.rank_parts) && (
-                    <span className="min-w-0 max-w-full truncate text-slate-600" title={`Main model reason — the strongest signal behind its score: ${it.why_reason}`}>
-                      · {it.why_reason}
-                    </span>
-                  )}
-                  {/* Author/venue prestige is NOT a row chip — it's already
-                      baked into the best-first order (position encodes it), so
-                      a per-row violet "◆ top author/venue" pill was the 4th
-                      colour for a signal the rank already carries. Subtracted;
-                      it stays in the paper's detail. */}
-                  {/* The deep-review QUALITY cause for the lift — ONE word per
-                      card: the decisive verdict (Highlight/Flag) when present,
-                      else the A–D grade. "Quality", never "band" (band = the
-                      relevance tier). Reuses the shared review tones so a
-                      Highlight reads the same emerald everywhere. */}
-                  {(() => {
-                    const band = String(it.quality_band || '').toLowerCase();
-                    const grade = String(it.quality_grade || '').toUpperCase();
-                    if (band === 'highlight' || band === 'flag') {
-                      return (
-                        <span
-                          className={`inline-flex items-center px-1.5 py-0 rounded-full border font-semibold ${CHIP_TONE[bandTone(band)]}`}
-                          title={qualityHint(activeOrder.preset === 'balanced', 'Deep-review quality verdict')}
-                        >
-                          {BAND_LABEL[band]}
-                        </span>
-                      );
-                    }
-                    if (grade) {
-                      return (
-                        <span
-                          className={`inline-flex items-center px-1.5 py-0 rounded-full border font-semibold ${CHIP_TONE[gradeTone(grade, band)]}`}
-                          title={`${qualityHint(activeOrder.preset === 'balanced', 'Full-text deep-review rigor letter (A–D)')}${letterMuted(grade, band) ? ` Grey A: checklist only — ${mutedReason(band)}.` : ''}`}
-                        >
-                          {[grade, gradeBasis(it.quality_met, it.quality_applicable)].filter(Boolean).join(' · ')}
-                        </span>
-                      );
-                    }
-                    return null;
-                  })()}
-                </span>
-              )}
-            </span>
-            <span className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 shrink-0">
-              {it.read && <span title="already read" className="text-xs">🧠</span>}
-              <span className="inline-flex items-center gap-1" title={it.has_pdf ? 'PDF attached' : 'No PDF'}>
-                <span className={`inline-block w-2.5 h-2.5 rounded-full ${it.has_pdf ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                {it.has_pdf && <span className="text-[10px] font-medium text-emerald-700">PDF</span>}
-              </span>
-            </span>
-          </button>
-        </div>
+        <ReadNextRow
+          item={it}
+          expanded={expandedKey === it.item_key}
+          ownChip={ownChip}
+          goalsStrong={goalHigh.has(it.item_key)}
+          modelReady={modelReady}
+          selectMode={selectMode}
+          checked={selectMode && (selected?.has(it.item_key) || false)}
+          onToggleOpen={toggleRow}
+          onToggleSelect={onToggleItem}
+        />
         {expandedKey === it.item_key && !isDesktop && (
           <ExpandedPaperPanel
             item={it}
