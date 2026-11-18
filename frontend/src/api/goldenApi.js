@@ -104,17 +104,18 @@ export async function fetchReviewDetail(itemKey) {
 
 /**
  * POST /api/golden/verdict
- * Body: { item_key, user_priority, comment }
+ * Body: { item_key, user_priority, comment, surface? }
+ * `surface` (optional) names the UI path; the server defaults it. Offline mutations omit it.
  * Returns: { id, created_at, ... }.
  */
-export async function submitVerdict({ item_key, user_priority, comment }) {
+export async function submitVerdict({ item_key, user_priority, comment, surface }) {
   if (!item_key) throw new Error('submitVerdict: item_key is required');
   if (!user_priority) throw new Error('submitVerdict: user_priority is required');
   const mutation = { item_key, field: 'verdict', value: user_priority, comment: comment ?? '' };
   if (transportUnavailable()) return queueMutation(mutation);
   try {
     const result = await request('/verdict', {
-      method: 'POST', body: JSON.stringify({ item_key, user_priority, comment: comment ?? '' }),
+      method: 'POST', body: JSON.stringify({ item_key, user_priority, comment: comment ?? '', surface }),
     }, true);
     requestSync();
     return result;
