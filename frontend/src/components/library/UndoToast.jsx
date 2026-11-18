@@ -4,7 +4,8 @@ import { NEG_CHIPS, chipClass } from '../decisionVocab.js';
 // A Not-interested verdict adds one scrolling row of reason chips. A failed save says so and offers Retry.
 const BTN = 'min-h-11 shrink-0 px-3 text-[13px] font-medium text-forest-800 underline underline-offset-2';
 
-export default function UndoToast({ toast, onUndo, onReason, onDismiss }) {
+// `chips` — the reason set offered with `toast.reasons` (Library: Not interested only; Today also offers the positive set).
+export default function UndoToast({ toast, onUndo, onReason, onDismiss, chips = NEG_CHIPS }) {
   if (!toast) return null;
   const failed = toast.kind === 'failed';
   return (
@@ -22,7 +23,7 @@ export default function UndoToast({ toast, onUndo, onReason, onDismiss }) {
       {toast.note && <p className="pb-2 text-xs text-amber-800">{toast.note}</p>}
       {toast.reasons && (
         <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-2" aria-label="Why? (optional)" role="group">
-          {NEG_CHIPS.map(([id, label]) => (
+          {chips.map(([id, label]) => (
             <button key={id} type="button" aria-pressed={toast.reasons.includes(id)} onClick={() => onReason(id)}
               className={`${chipClass(toast.reasons.includes(id))} shrink-0 whitespace-nowrap`}>{label}</button>
           ))}

@@ -101,6 +101,12 @@ export function memberInFlight(member) {
     || Boolean(member.facts.note_delivery?.pending && member.facts.note_delivery.target_key);
 }
 
+// The owner has decided this paper (Today pill, paper page, or a bulk Add / Not interested). It stays in
+// the retained visit for identity and carry, but no longer renders as a card.
+export const memberDecided = member => Boolean(member.facts?.user_priority
+  || member.facts?.decision === 'user_rejected' || member.facts?.decision === 'user_approved'
+  || member.facts?.materialized_zotero_key || memberParked(member));
+
 export function memberNeedsCarry(member) {
   const facts = member.facts;
   const action = member.action;
@@ -217,6 +223,7 @@ export function memberPresentation(member, fresh) {
   else if (pending) text = 'Decision saved. Not in Zotero yet: Zotero must be closed to add it.';
   else if (facts?.user_priority) text = `Decision saved: ${facts.user_priority.replaceAll('_', ' ')}.`;
   if (facts?.note_delivery?.pending && facts.note_delivery.target_key) text += ' Note delivery pending.';
+  const settledText = text; // anything appended below is a problem the owner must still see
   if (action?.failure) text += ` ${action.failure.error || 'Action failed.'}`;
   if (action?.phase === 'unconfirmed') text += ' Previous action reply unconfirmed; current facts are shown separately.';
   if (action?.error) text += ` ${action.error}`;
@@ -232,13 +239,15 @@ export function memberPresentation(member, fresh) {
     ? (text ? `Updating status. Last known: ${text}` : 'Updating status…')
     : 'Loading this paper…';
   else if (!available) text = 'This member is unavailable or its identity changed. No replacement was selected.';
+  const problem = text !== settledText;
   const handled = rejected || materialized || Boolean(facts?.user_priority)
     || ['selected', 'black_swan', 'user_approved', 'dedup_library', 'dedup_processed'].includes(facts?.decision);
   const canRetry = fresh && available && unresolved && ['add', 'trash'].includes(action?.kind)
     && (action.phase === 'replied' || materialized || (rejected && action.kind === 'trash'));
   return {
     text, unresolved, canRetry,
-    parked: fresh && available && pending && !materialized,
+    // A decided card leaves the slate (#206) unless something about it needs the owner's eye.
+    leaves: available && memberDecided(member) && !problem && (!canRetry || pending),
     selectable: fresh && available && !handled && !unresolved,
     // A review already seen stays ready while status refreshes (no flash after Add/verdict);
     // reviewKnown says whether "no review" is a fact, not a refresh in flight.

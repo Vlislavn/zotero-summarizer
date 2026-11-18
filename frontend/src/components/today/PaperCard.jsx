@@ -1,13 +1,10 @@
 // Today cull card: relevance is separate from review evidence. Selection
 // observations explain the existing server order; rendering never rescores.
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 import AuthorByline from '../AuthorByline.jsx';
 import PaperFactsCard, { CardMore } from '../card/PaperFactsCard.jsx';
-import Icon from '../ui/Icon.jsx';
-import {
-  DECISIONS, DECISION_BTN, DECISION_HOVER, DECISION_TINT, DECISION_WORD, NEG_CHIPS, POS_CHIPS,
-} from '../decisionVocab.js';
+import { DECISIONS, DECISION_BTN, DECISION_HOVER, DECISION_TINT } from '../decisionVocab.js';
 import useCardExposure from '../../hooks/useCardExposure.js';
 import { trackToday } from '../../utils/todayEvents.js';
 import OutdatedReviewNote from './OutdatedReviewNote.jsx';
@@ -73,7 +70,7 @@ function parseAuthorsString(s) {
 }
 
 export default function PaperCard({ paper, selected, onToggleSelect, llmEnabled = true, selectionPolicy,
-  visitId, memberState, currentFacts, statusFresh, busy, onRetry, onDecide, onUndo, decisionPending = false }) {
+  visitId, memberState, currentFacts, statusFresh, busy, onRetry, onDecide, decisionPending = false }) {
   const authors = parseAuthorsString(paper.authors);
   // Only the LAST author carries an h-index, and it is that author's own (0 is real;
   // missing = unknown). The max over authors is never attributed to a name.
@@ -103,28 +100,18 @@ export default function PaperCard({ paper, selected, onToggleSelect, llmEnabled 
     item_key: paper.stable_feed_key || paper.item_key, item_id: paper.item_id, kind, target,
   });
 
-  // Per-card decision (#37): one tap = verdict, one optional tap = reason. The
-  // saved decision comes from the current facts; local state gives instant feedback.
+  // Per-card decision (#37): one tap = verdict. The card then leaves the slate (#206); Undo and the
+  // optional reason chips live in the toast Today shows for it. A decided card that stays (a failed
+  // side effect) shows its status line instead of the buttons.
   const savedPriority = currentFacts?.user_priority || null;
-  const [decision, setDecision] = useState(savedPriority);
-  const [chips, setChips] = useState([]);
-  useEffect(() => { setDecision(savedPriority); if (!savedPriority) setChips([]); }, [savedPriority]);
   const canDecide = typeof onDecide === 'function' && !decisionPending && !busy
-    && (memberState ? memberState.selectable || Boolean(savedPriority) : true);
+    && (memberState ? memberState.selectable : true);
   const reviewReady = memberState ? memberState.reviewReady : paper.review_ready === true;
   const handleDecide = priority => {
     if (!canDecide) return;
     if (priority !== 'dont_read' && !reviewReady) return;  // Owner-kept review gate on Zotero writes.
-    setDecision(priority); setChips([]);
-    onDecide(paper.item_id, priority, []);  // Fresh decision owns its reasons: starts with none (NULL).
+    onDecide(paper.item_id, priority);
   };
-  const toggleChip = id => {
-    const next = chips.includes(id) ? chips.filter(chip => chip !== id) : [...chips, id];
-    setChips(next);
-    onDecide(paper.item_id, decision, next);
-  };
-  const handleUndo = () => { setDecision(null); setChips([]); onUndo?.(paper.item_id); };
-  const chipSet = decision === 'dont_read' ? NEG_CHIPS : POS_CHIPS;
 
   // The title opens the full review (the paper page accepts feed keys and Zotero keys alike);
   // the publisher page stays one quiet «Source ↗» link.
@@ -196,34 +183,12 @@ export default function PaperCard({ paper, selected, onToggleSelect, llmEnabled 
             currentStatus={currentFacts} statusFresh={statusFresh} retained={Boolean(visitId)}
             note={whyNote} />
           {memberState?.text && <p role="status" className="mt-2 text-xs text-slate-600">{memberState.text}</p>}
-          {memberState?.parked && <Link to="/ops?tab=review"
-            className="inline-flex min-h-11 items-center text-xs text-forest-800 underline underline-offset-2">
-            Ops › Feed review: Apply approved → Zotero
-          </Link>}
           {memberState?.canRetry && <button type="button" onClick={onRetry} disabled={busy}
             className="min-h-11 text-xs text-forest-800 underline disabled:opacity-50">
             Retry unfinished action
           </button>}
 
-          {typeof onDecide === 'function' && (decision ? (
-            <div className="mt-3">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span className={`inline-flex h-11 items-center gap-1.5 rounded-lg border px-3 text-[13px] font-medium sm:h-8 ${DECISION_TINT[decision]} border-forest-800`}>
-                  <Icon name="check" size={14} strokeWidth={2} />Decision: {DECISION_WORD[decision]}
-                </span>
-                <button type="button" onClick={handleUndo} disabled={decisionPending}
-                  className="min-h-11 px-1 text-xs text-forest-800 underline underline-offset-2 disabled:opacity-50 sm:min-h-8">Undo</button>
-              </div>
-              <p className="mt-1 text-[11px] text-slate-500">Reason (optional, one tap)</p>
-              <div className="mt-1 flex flex-wrap gap-1.5">
-                {chipSet.map(([id, label]) => <button key={id} type="button" onClick={() => toggleChip(id)}
-                  aria-pressed={chips.includes(id)} disabled={decisionPending}
-                  className={`inline-flex min-h-11 items-center gap-1 rounded-lg border px-2.5 text-[12px] disabled:opacity-50 sm:min-h-8 ${
-                    chips.includes(id) ? 'border-forest-800 bg-sage-100 text-forest-800' : 'border-slate-300 bg-white text-slate-600 hover:border-slate-400'}`}>
-                  {chips.includes(id) && <Icon name="check" size={12} strokeWidth={2} />}{label}</button>)}
-              </div>
-            </div>
-          ) : (
+          {typeof onDecide === 'function' && !savedPriority && (
             <div className="mt-3">
               <div className="flex flex-wrap gap-2">
                 {DECISIONS.map(([priority, label]) => {
@@ -240,7 +205,7 @@ export default function PaperCard({ paper, selected, onToggleSelect, llmEnabled 
                   : <><Link className="underline" to="/settings">Enable AI</Link> for reviews; Not interested works right away.</>}
               </p>}
             </div>
-          ))}
+          )}
 
           {typeof onDecide !== 'function' && paper.stable_feed_key
             && (memberState ? memberState.selectable && !memberState.reviewReady : !paper.review_ready) && (

@@ -41,12 +41,12 @@ const mount = () => {
   return client;
 };
 
-it('shows the owner what to do for a parked Add: Zotero must be closed, one link to Ops › Feed review', async () => {
+it('shows the owner what to do for a parked Add: one link to Ops › Feed review, in the banner, no card', async () => {
   const client = mount();
-  const card = await screen.findByRole('article');
-  await within(card).findByText(/Not in Zotero yet: Zotero must be closed/);
+  const banner = await screen.findByText('1 paper waits for Zotero. Close Zotero, then apply them in Ops › Feed review.');
+  expect(screen.queryByRole('article')).toBeNull();
   expect(screen.queryByText(/delivery pending/)).toBeNull();
-  const link = within(card).getByRole('link', { name: /Apply approved → Zotero/ });
+  const link = within(banner).getByRole('link', { name: /Apply approved → Zotero/ });
   expect(link.getAttribute('href')).toBe('/ops?tab=review');
   fireEvent.click(link);
   expect(await screen.findByText('Ops page')).toBeTruthy();
@@ -65,11 +65,10 @@ it('does not poll the members while the only unresolved paper is a parked Add', 
   vi.useFakeTimers();
   const client = mount();
   try {
-    await act(() => vi.advanceTimersByTimeAsync(100));
-    expect(screen.getByRole('article')).toBeTruthy();
+    for (let tick = 0; tick < 5; tick++) await act(() => vi.advanceTimersByTimeAsync(100)); // slate, then members, then facts
+    expect(screen.getByText(/1 paper waits for Zotero/)).toBeTruthy();
     const calls = daily.fetchDailyMembers.mock.calls.length;
     for (let second = 0; second < 10; second++) await act(() => vi.advanceTimersByTimeAsync(1000));
-    console.log('CALLS', calls, daily.fetchDailyMembers.mock.calls.length);
     expect(daily.fetchDailyMembers.mock.calls.length).toBe(calls);
   } finally {
     client.clear();
@@ -77,27 +76,28 @@ it('does not poll the members while the only unresolved paper is a parked Add', 
   }
 });
 
-it('Undo on a decided parked card frees it: four decision buttons enabled again', async () => {
-  let facts = parked;
+it('Undo in the toast frees a decision that parked its Add: the card is back with four enabled buttons', async () => {
+  let facts = { ...parked, decision: 'triaged_pending', zotero_sync_status: null, user_priority: null };
   daily.fetchDailyMembers.mockImplementation(async () => ({ members: [facts] }));
+  daily.submitDailyVerdict.mockImplementation(async () => { facts = parked; return { id: 1 }; });
   daily.undoDailyVerdict.mockImplementation(async () => {
     facts = { ...parked, decision: 'triaged_pending', zotero_sync_status: null, user_priority: null };
     return { deleted: true, released_pending_add: 1 };
   });
-  // As decided on the paper page: the visit carries the review action that set the decision.
-  localStorage.setItem('zs.todayVisit.v1', JSON.stringify({ version: 1, id: 'v1', createdAt: '2026-11-16T18:00:00Z', unreviewed: [],
-    members: [{ paper, selectionPolicy: null, selectionId: 'v1', facts: null,
-      action: { id: 'a1', kind: 'review', priority: 'must_read', phase: 'replied' } }] }));
   const client = mount();
-  const card = await screen.findByRole('article');
-  fireEvent.click(await within(card).findByRole('button', { name: 'Undo' }));
+  const card0 = await screen.findByRole('article');
+  await waitFor(() => expect(within(card0).getByRole('button', { name: 'must' }).disabled).toBe(false));
+  fireEvent.click(within(card0).getByRole('button', { name: 'must' }));
+  await screen.findByText(/1 paper waits for Zotero/);
+  expect(screen.queryByRole('article')).toBeNull();
+  fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
   await waitFor(() => expect(daily.undoDailyVerdict).toHaveBeenCalledWith(32384));
+  const card = await screen.findByRole('article');
   await waitFor(() => {
     for (const name of ['must', 'should', 'could', 'Not interested']) {
       expect(within(card).getByRole('button', { name }).disabled).toBe(false);
     }
   });
-  expect(within(card).queryByRole('link', { name: /Apply approved/ })).toBeNull();
   expect(screen.queryByText(/wait for Zotero|waits for Zotero/)).toBeNull();
   client.clear();
 });

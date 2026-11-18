@@ -1,5 +1,5 @@
 // One retained shortlist; current facts refresh without selecting replacements.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import ConfigTask from '../components/settings/ConfigTask.jsx';
@@ -15,7 +15,9 @@ import Icon from '../components/ui/Icon.jsx';
 import Skeleton from '../components/ui/Skeleton.jsx';
 import { ErrorBanner, StatusBanner } from '../components/library/shared.jsx';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
+import UndoToast from '../components/library/UndoToast.jsx';
 import useTodayVisit from '../hooks/useTodayVisit.js';
+import useTodayDecisionToast from '../hooks/useTodayDecisionToast.js';
 import { memberPresentation, preparationText } from '../utils/todayVisit.js';
 import { formatWhen } from '../utils/stepModelStatus.js';
 import { feedLabel } from '../utils/feedText.js';
@@ -36,9 +38,19 @@ export default function Today() {
     if (!task && location.state?.focusTask) document.getElementById(`task-${location.state.focusTask}`)?.focus();
   }, [task, location.state?.focusTask]);
 
-  const members = useMemo(() => (view.visit?.members || []).map(member => ({
+  const flow = useTodayDecisionToast({ decide: view.decide, undo: view.undoDecision, busy: view.busy });
+  const allMembers = useMemo(() => (view.visit?.members || []).map(member => ({
     ...member, display: memberPresentation(member, view.fresh),
   })), [view.visit, view.fresh]);
+  // Decided cards leave the slate (#206): they stay in the retained visit (identity, carry, the
+  // «wait for Zotero» banner) but only undecided cards, and decided ones with a problem, render.
+  const members = useMemo(() => allMembers.filter(member =>
+    !member.display.leaves && !flow.left.has(member.paper.item_id)), [allMembers, flow.left]);
+  const listRef = useRef(null);
+  const decideCard = useCallback((paper, priority) => {
+    // The focused button goes away with its card: keep keyboard and screen-reader position in the list.
+    if (flow.decide(paper, priority)) requestAnimationFrame(() => listRef.current?.focus({ preventScroll: true }));
+  }, [flow]);
   const feedNames = useMemo(() => [...new Set(members.map(member => member.paper.feed_name).filter(Boolean))].sort(), [members]);
   const visible = members.filter(member => !feedFilter || member.paper.feed_name === feedFilter);
   const selectable = visible.filter(member => member.display.selectable);
@@ -58,7 +70,7 @@ export default function Today() {
   const [renewResult, setRenewResult] = useState(null);
   const startRenewal = () => {
     setRenewResult(null);
-    setRenewal({ visitId: view.visit?.id, ids: new Set(members.map(member => member.paper.item_id)),
+    setRenewal({ visitId: view.visit?.id, ids: new Set(allMembers.map(member => member.paper.item_id)),
       at: view.visit?.createdAt });
     view.renew();
   };
@@ -99,6 +111,7 @@ export default function Today() {
 
   const showMore = moreOpen || draining || triageStatusQuery.isError;
   const hasVisit = view.visit && !view.visit.invalid;
+  const caughtUp = hasVisit && allMembers.length > 0 && members.length === 0;
 
   // One readable column (≤ 760 px): the cards are a one-at-a-time cull queue, so a
   // single column keeps the server's order; wider text lines only hurt reading.
@@ -153,7 +166,10 @@ export default function Today() {
     {view.persistenceFailed && <StatusBanner tone="warn" message="Browser storage is unavailable. This shortlist stays open here but may not survive reload. The shortlist itself never resends actions." />}
     {view.visit?.invalid && <StatusBanner tone="warn" message="The saved shortlist could not be read. New shortlist explicitly replaces it; no saved action is replayed." />}
     {view.inFlightCount > 0 && <StatusBanner tone="warn" message={`${view.inFlightCount} ${view.inFlightCount === 1 ? 'paper is' : 'papers are'} still being added. New shortlist is available once they finish.`} />}
-    {view.parkedCount > 0 && <StatusBanner tone="warn" message={`${view.parkedCount} ${view.parkedCount === 1 ? 'paper waits' : 'papers wait'} for Zotero. Close Zotero, then apply them in Ops › Feed review.`} />}
+    {view.parkedCount > 0 && <StatusBanner tone="warn" message={<>
+      {`${view.parkedCount} ${view.parkedCount === 1 ? 'paper waits' : 'papers wait'} for Zotero. Close Zotero, then apply them in Ops › Feed review.`}
+      {' '}<Link to="/ops?tab=review" className="inline-flex min-h-11 items-center underline underline-offset-2">Apply approved → Zotero</Link>
+    </>} />}
     {view.loading && <div role="status" aria-label="Loading today’s papers…" className="space-y-3">
       <p className="flex items-center gap-2 text-sm text-slate-600"><Spinner size="sm" color="teal" />Loading today’s papers…</p>
       {[0, 1].map(i => <div key={i} aria-hidden="true" className="space-y-3 rounded-xl border border-slate-200 p-4">
@@ -161,7 +177,7 @@ export default function Today() {
         <div className="grid grid-cols-4 gap-2">{[0, 1, 2, 3].map(j => <Skeleton key={j} height="h-11" rounded="rounded-lg" />)}</div>
       </div>)}
     </div>}
-    {hasVisit && members.length === 0 && <div className="my-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+    {hasVisit && allMembers.length === 0 && <div className="my-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
       <p className="text-sm font-medium text-slate-800">No papers in today’s shortlist yet.</p>
       <p className="mt-1 text-xs text-slate-600">
         Today only shows feed papers that already have a full-text review.
@@ -172,6 +188,10 @@ export default function Today() {
         <li><span className="font-medium text-slate-800">Triage backlog</span> (under More) ranks the un-triaged feed by relevance and marks those items read, so reviews can be prepared.</li>
         <li><Link to="/library" className="text-forest-800 underline">Library</Link> lists everything already saved in Zotero.</li>
       </ul>
+    </div>}
+    {caughtUp && <div role="status" className="my-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <p className="text-sm font-medium text-slate-800">All caught up</p>
+      <p className="mt-1 text-xs text-slate-600">You decided every paper in this shortlist. <span className="font-medium text-slate-800">New shortlist</span> (above) picks the next ones.</p>
     </div>}
     {members.length > 0 && <>
       {(selectable.length > 0 || feedNames.length > 1 || feedFilter) &&
@@ -209,7 +229,7 @@ export default function Today() {
           {llmEnabled ? 'Papers without a review are skipped by Add — Not interested still works.' : 'Enable AI in Settings before adding unreviewed papers.'}
         </span>}
       </div>}
-      <div className="space-y-3">
+      <div ref={listRef} tabIndex={-1} role="group" aria-label="Papers to decide" className="space-y-3 outline-none">
         {!visible.length && <p className="text-xs text-slate-500 p-3">This source filter hides the shortlist.{' '}
           <button type="button" onClick={() => setFeedFilter('')} className="min-h-11 text-forest-800 underline">Show all sources</button>
         </p>}
@@ -218,10 +238,13 @@ export default function Today() {
           onToggleSelect={toggleSelect} llmEnabled={llmEnabled} visitId={view.visit.id}
           memberState={member.display} currentFacts={member.facts} statusFresh={view.fresh}
           busy={view.busy} onRetry={() => view.retry(member)}
-          onDecide={view.decide} onUndo={view.undoDecision} decisionPending={view.decisionPending} />)}
+          onDecide={(_id, priority) => decideCard(member.paper, priority)} decisionPending={view.decisionPending} />)}
       </div>
       {preparing && <p role="status" className="mt-3 text-xs text-slate-600">{preparing}</p>}
     </>}
     {hasVisit && <NotReviewedShelf papers={view.visit.unreviewed} visitId={view.visit.id} />}
+    {flow.toast && <div className="sticky bottom-2 z-20 mt-3">
+      <UndoToast toast={flow.toast} chips={flow.chips} onUndo={flow.undo} onReason={flow.toggleReason} onDismiss={flow.dismiss} />
+    </div>}
   </section>;
 }

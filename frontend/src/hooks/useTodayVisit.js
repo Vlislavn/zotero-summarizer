@@ -129,13 +129,16 @@ export default function useTodayVisit(enabled) {
     onSettled: refresh,
     retry: false,
   });
-  const decide = useCallback((itemId, priority, chips = []) => {
-    if (busyRef.current) return;
-    decisionMutation.mutate({ kind: 'decide', itemId, priority, chips });
+  // Both return whether the write started (a write already running refuses the next one).
+  const decide = useCallback((itemId, priority, chips = [], callbacks) => {
+    if (busyRef.current) return false;
+    decisionMutation.mutate({ kind: 'decide', itemId, priority, chips }, callbacks);
+    return true;
   }, [decisionMutation]);
   const undoDecision = useCallback(itemId => {
-    if (busyRef.current) return;
+    if (busyRef.current) return false;
     decisionMutation.mutate({ kind: 'undo', itemId });
+    return true;
   }, [decisionMutation]);
 
   // Selection (checkbox ticks) lives in the retained visit so it survives a round
