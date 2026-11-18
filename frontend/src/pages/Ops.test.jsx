@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { expect, it, vi } from 'vitest';
 
@@ -40,4 +40,18 @@ it('opens the deep-linked Ops tab and retains unrelated query state when switchi
 
   expect(await screen.findByText('Pending change tools')).toBeTruthy();
   await waitFor(() => expect(screen.getByTestId('current-search').textContent).toBe('?tab=pending&job=J42'));
+});
+
+it('gives /ops exactly one h1 (the page title)', () => {
+  cleanup(); // the previous test leaves its tree mounted
+  for (const url of ['/ops', '/ops?tab=system']) {
+    const view = render(<MemoryRouter initialEntries={[url]}><Ops /></MemoryRouter>);
+    try {
+      expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    } finally {
+      view.unmount();
+    }
+  }
+  render(<MemoryRouter initialEntries={['/ops']}><Ops /></MemoryRouter>);
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Ops');
 });

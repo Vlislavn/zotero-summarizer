@@ -6,6 +6,7 @@ export const PAGE_PURPOSE = {
   library: 'Papers already in Zotero — pick what to read next, or label what you have read.',
   search: 'Find new papers on a topic from open sources (not your library).',
   weekly: 'Saved weekly digests of your RSS and Telegram reading.',
+  ops: 'Operator tools: feed review, triage jobs, pending Zotero changes and system maintenance.',
   conferences: 'Late-breaking and all abstracts of conferences you define — stored only on this computer.',
 };
 

@@ -105,7 +105,7 @@ export default function Today() {
   return <section className="mx-auto w-full max-w-[760px] px-1 sm:px-0">
     <NotConfiguredCard />
     <header className="mb-3">
-      <h2 className="font-display text-2xl font-light text-slate-900">Today’s reading</h2>
+      <h1 className="font-display text-2xl font-light text-slate-900">Today’s reading</h1>
       <p className="mt-0.5 text-xs text-slate-500">
         {hasVisit && members.length > 0
           ? `Showing ${members.length} of 15 · kept until the next shortlist`

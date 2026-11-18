@@ -284,9 +284,9 @@ export default function PaperReviewPage() {
   const runner = useDeepReviewRunner(itemKey, { deep: detail?.deep_review, onDone: onReviewDone, autoRun: hasPdf && autoRun });
   const showFigures = runner.online && runner.serverAvailable && (figuresBuildable || renderCompleted || render?.status === 'running');
 
-  if (isLoading) return <div className="py-4 text-sm text-slate-500">Loading review…</div>;
+  if (isLoading) return <div className="py-4 text-sm text-slate-500"><h1 className="sr-only">Paper review</h1>Loading review…</div>;
   if (error) {
-    return <div className="py-4"><StatusBanner message={`Could not load this paper: ${error.message || error}`} isError />
+    return <div className="py-4"><h1 className="sr-only">Paper review</h1><StatusBanner message={`Could not load this paper: ${error.message || error}`} isError />
       {fromToday && <Link to="/today" className="text-teal-700 underline">← Back to Today</Link>}
     </div>;
   }

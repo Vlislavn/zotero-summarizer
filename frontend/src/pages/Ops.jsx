@@ -9,6 +9,7 @@ import Triage from './Triage.jsx';
 import Pending from './Pending.jsx';
 import AdminSection from '../components/AdminSection.jsx';
 import ModelCard from '../components/ModelCard.jsx';
+import PageTitle from '../components/ui/PageTitle.jsx';
 import FeedbackAnalysisCard from '../components/FeedbackAnalysisCard.jsx';
 
 function SystemOps() {
@@ -68,10 +69,13 @@ export default function Ops() {
     navigate({ search: `?${next.toString()}` }, { replace: true });
   }
 
+  // A System task page (TaskPage) owns its own h1; one h1 per page.
+  const inTask = tab === 'system' && ['readiness', 'calibration'].includes(searchParams.get('task'));
   const ActiveBody = (TABS.find((t) => t.id === tab) ?? TABS[0]).Body;
 
   return (
     <div>
+      {!inTask && <PageTitle title="Ops" page="ops" />}
       <div
         role="tablist"
         aria-label="Ops sections"
