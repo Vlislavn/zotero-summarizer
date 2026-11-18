@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import * as golden from '../../api/goldenApi.js';
 import * as library from '../../api/libraryApi.js';
 import * as settings from '../../api/settingsApi.js';
-import ReadNextView from './ReadNextView.jsx';
+import ReadNextView from './ReadNextView.testkit.jsx';
 
 vi.mock('../../api/goldenApi.js');
 vi.mock('../../api/libraryApi.js');
@@ -58,11 +58,11 @@ it.each([
   if (dirty) {
     expect(screen.getByRole('textbox', { name: 'Manual notes', exact: true }).value)
       .toBe('New dirty note while verdict is in flight');
-    expect(screen.getByTestId('expanded-paper-panel')).toBeTruthy();
+    expect(screen.getByTestId('library-detail')).toBeTruthy();
     expect(onSaved).not.toHaveBeenCalled();
   } else {
     await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
-    if (operation === 'refresh') expect(screen.getByTestId('expanded-paper-panel')).toBeTruthy();
-    else expect(screen.queryByTestId('expanded-paper-panel')).toBeNull();
+    if (operation === 'refresh') expect(screen.getByTestId('library-detail')).toBeTruthy();
+    else expect(screen.queryByTestId('library-detail')).toBeNull();
   }
 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import InlineAnnotate from './InlineAnnotate.jsx';
+import LibraryDetail from './LibraryDetail.jsx';
 import BulkVerdictBar from './BulkVerdictBar.jsx';
 import ReadNextRow from './ReadNextRow.jsx';
 import { StatusBanner, formatShortDate } from './shared.jsx';
@@ -14,7 +14,9 @@ import Spinner from '../ui/Spinner.jsx';
 import { readStorage } from '../../utils/safeStorage.js';
 
 // Stage-2 "Read next": the single Library surface. Ranked queue over the WHOLE
-// library with an inline annotate panel (links, tags, per-paper deep review).
+// library; a tap opens the paper's detail (LibraryDetail: a Sheet on phones, the right half
+// on wide screens) over the still-mounted list. The open paper is `openState`
+// (hooks/useOpenPaper, owned by the page so it survives a server-filter remount).
 // Read/handled items are hidden unless toggled. An opt-in "Select" mode reveals
 // checkboxes for bulk triage (the merged Browse/triage flow), kept secondary.
 const REVEAL_STEP = 60;  // rows revealed initially and per "Show more" click
@@ -67,51 +69,9 @@ function useMediaQuery(query) {
   return matches;
 }
 
-function ExpandedPaperPanel({
-  item, collections, onClose, onSaved, onQueueRefresh, onNotesDirtyChange, panelRef, why = null, variant = 'mobile',
-}) {
-  const desktop = variant === 'desktop';
-  return (
-    <aside
-      ref={panelRef}
-      data-testid="expanded-paper-panel"
-      aria-label={`Review ${item.title || item.item_key}`}
-      className={
-        desktop
-          ? 'mt-2 lg:mt-0 lg:w-[44%] lg:shrink-0 lg:sticky lg:top-2 lg:self-start lg:max-h-[86vh] lg:overflow-auto rounded-xl border border-teal-200 bg-white shadow-sm'
-          : 'mt-2 rounded-xl border border-teal-200 bg-white'
-      }
-    >
-      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-100">
-        <span className="min-w-0 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-400 truncate">
-          {item.title || '(untitled)'}
-        </span>
-        <button
-          type="button"
-          onClick={onClose}
-          title="Close review"
-          aria-label="Close review"
-          className="shrink-0 px-2 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-        >
-          ✕
-        </button>
-      </div>
-      <div className={desktop ? 'p-1' : 'p-2 overflow-x-hidden'}>
-        <InlineAnnotate
-          itemKey={item.item_key}
-          collections={collections}
-          onSaved={onSaved}
-          onQueueRefresh={onQueueRefresh}
-          onNotesDirtyChange={onNotesDirtyChange}
-        />
-        {why && <div className="px-1 pb-2 pt-1">{why}</div>}
-      </div>
-    </aside>
-  );
-}
-
 // Backend cap of hybrid meaning search (services/library/_search.py _TOP_N).
 const SEARCH_TOP_N = 50;
+const NO_OPEN = { key: null, open() {}, close() {}, position: null, total: 0, prev: null, next: null };
 
 export default function ReadNextView({
   items, loading, err, includeRead, onToggleIncludeRead,
@@ -139,6 +99,8 @@ export default function ReadNextView({
   // True while the list is the whole library (no collection / tag scope): only then is
   // «Goals strong» (top third of goal_sim in the loaded list) the same word for a paper everywhere.
   cohortFull = false,
+  // The open paper: {key, open(key), close(), position, total, prev, next} from useOpenPaper.
+  openState = NO_OPEN,
 }) {
   const computing = status === 'computing';
   // A failed read must leave Rescore available even with retained last-good rows.
@@ -146,12 +108,12 @@ export default function ReadNextView({
   const rescoreActionable =
     computing || errored || err != null || scoresStale || !computedAt
     || items.some((it) => typeof it.relevance_score !== 'number');
-  const [expandedKey, setExpandedKey] = useState(null);
+  const openKey = openState.key;
   const [notesDirty, setNotesDirty] = useState(false);
+  const [leave, setLeave] = useState(null);  // the exit waiting for «Leave without saving?»
   const [mustAll, setMustAll] = useState(false);  // «Show all N» of your own Must read (this visit)
   const [decidedOpen, setDecidedOpen] = useState(false);  // the «Decided by you» block
   const orderOn = Boolean(orderMeta && onOrderChange);
-  const expandedPanelRef = useRef(null);
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   // Target for the bulk "Add to collection" action. Defaults to the last-used
   // collection (validated against the current list) so the routine "send picks
@@ -176,52 +138,47 @@ export default function ReadNextView({
   const pagedTotal = groups ? groups.todo.length : items.length;
   // Counts in the headers are a live answer; the offline copy shows none.
   const count = (n) => (offline ? '' : ` · ${n}`);
-  // Desktop keeps the review beside the list. Mobile renders it directly under
-  // the tapped row; otherwise the panel lands after the whole revealed list.
-  const expandedItem = expandedKey ? items.find((it) => it.item_key === expandedKey) : null;
-  useEffect(() => {
-    if (!expandedKey || isDesktop) return;
-    const node = expandedPanelRef.current;
-    if (node && typeof node.scrollIntoView === 'function') {
-      const schedule = typeof window.requestAnimationFrame === 'function'
-        ? window.requestAnimationFrame
-        : (fn) => setTimeout(fn, 0);
-      schedule(() => node.scrollIntoView({ block: 'start', behavior: 'smooth' }));
-    }
-  }, [expandedKey, isDesktop]);
+  // Every exit from the open paper (close, ‹ ›, another row, Select) goes through here: an
+  // unsaved note turns it into a question inside the detail instead of losing the note.
+  function guarded(action) {
+    if (notesDirty) setLeave(() => action); else action();
+  }
+  function leaveNow() {
+    const action = leave;
+    setLeave(null);
+    setNotesDirty(false);
+    action?.();
+  }
+  useEffect(() => { setNotesDirty(false); setLeave(null); }, [openKey]);
 
-  // Rows are memoised: they get one stable callback that reads the latest state.
+  // Rows are memoised: they get one stable callback that reads the latest state. A tap opens
+  // that paper's detail (the open one closes it); in Select mode it ticks the row instead.
   const toggleRef = useRef(null);
   const toggleRow = useCallback((key) => toggleRef.current(key), []);
-  useEffect(() => { toggleRef.current = (key) => chooseExpanded(expandedKey === key ? null : key); });
+  useEffect(() => {
+    toggleRef.current = (key) => {
+      if (selectMode) onToggleItem?.(key);
+      else guarded(() => (key === openKey ? openState.close() : openState.open(key)));
+    };
+  });
   const goalHigh = useMemo(
     () => (cohortFull && modelReady && !offline && !searchQuery.trim() ? goalHighKeys(queueItems) : new Set()),
     [cohortFull, modelReady, offline, searchQuery, queueItems],
   );
 
-  function chooseExpanded(key) {
-    if (notesDirty && !window.confirm('You have unsaved notes on this paper. Leave without saving them?')) return;
-    setNotesDirty(false);
-    setExpandedKey(key);
-  }
-
-  function closeExpanded() {
-    chooseExpanded(null);
-  }
-
-  function refreshExpanded() {
-    if (!notesDirty) onSaved?.();
-  }
-
-  function saveExpanded() {
+  function saveOpen() {
     if (notesDirty) return;
-    setExpandedKey(null);
+    openState.close();
     onSaved?.();
   }
 
-  // «Why it's here» lives inside the expanded paper (Order presets only).
+  function refreshOpen() {
+    if (!notesDirty) onSaved?.();
+  }
+
+  // «Why it's here» lives inside the open paper (Order presets only).
   function whyHere(it) {
-    if (!orderOn || !it.rank_parts) return null;
+    if (!orderOn || !it?.rank_parts) return null;
     return (
       <Disclosure summary="Why it's here">
         <WhyHerePanel
@@ -234,6 +191,10 @@ export default function ReadNextView({
     );
   }
 
+  const detailItem = useMemo(
+    () => (openKey ? queueItems.find((it) => it.item_key === openKey) || null : null),
+    [openKey, queueItems],
+  );
   const rows = (list, ownChip) => (
     <ol className="space-y-2">{list.map((it) => renderRow(it, ownChip))}</ol>
   );
@@ -243,7 +204,7 @@ export default function ReadNextView({
       <li key={it.item_key}>
         <ReadNextRow
           item={it}
-          expanded={expandedKey === it.item_key}
+          expanded={openKey === it.item_key}
           ownChip={ownChip}
           goalsStrong={goalHigh.has(it.item_key)}
           modelReady={modelReady}
@@ -252,18 +213,6 @@ export default function ReadNextView({
           onToggleOpen={toggleRow}
           onToggleSelect={onToggleItem}
         />
-        {expandedKey === it.item_key && !isDesktop && (
-          <ExpandedPaperPanel
-            item={it}
-            collections={collections}
-            panelRef={expandedPanelRef}
-            onClose={closeExpanded}
-            onSaved={saveExpanded}
-            onNotesDirtyChange={setNotesDirty}
-            onQueueRefresh={refreshExpanded}
-            why={whyHere(it)}
-          />
-        )}
       </li>
     );
   }
@@ -357,11 +306,11 @@ export default function ReadNextView({
           )}
           <button
             type="button"
-            onClick={onToggleSelectMode}
+            onClick={() => (openKey && !selectMode ? guarded(() => { openState.close(); onToggleSelectMode(); }) : onToggleSelectMode())}
             className={`px-2 py-0.5 rounded-md text-[11px] font-medium border ${
               selectMode ? 'bg-teal-600 text-white border-teal-600' : 'border-slate-300 text-slate-700 hover:bg-slate-50'
             }`}
-            title="Select multiple papers for a bulk action: add them all to a Zotero collection, or send to triage. (To file a single paper, just expand its row.)"
+            title="Select multiple papers for a bulk action: add them all to a Zotero collection, or send to triage. (To file a single paper, just open it.)"
           >
             {selectMode ? 'Done selecting' : 'Select'}
           </button>
@@ -470,8 +419,8 @@ export default function ReadNextView({
           </div>
         )
       )}
-      <div className={expandedItem && isDesktop ? 'lg:flex lg:gap-3 lg:items-start' : ''}>
-      <div className={expandedItem && isDesktop ? 'lg:flex-1 lg:min-w-0' : ''}>
+      <div className={openKey && isDesktop ? 'lg:flex lg:gap-3 lg:items-start' : ''}>
+      <div className={openKey && isDesktop ? 'lg:flex-1 lg:min-w-0' : ''}>
         {groups && groups.must.length > 0 && (
           <section aria-label="Your must read">
             <GroupHeader
@@ -509,18 +458,23 @@ export default function ReadNextView({
           </section>
         )}
       </div>
-      {/* Right-side review panel — the expanded paper detail, sticky beside the list
-          on desktop. Narrower than the list, so the queue stays usable. */}
-      {expandedItem && isDesktop && (
-        <ExpandedPaperPanel
-          item={expandedItem}
+      {openKey && (
+        <LibraryDetail
+          itemKey={openKey}
+          item={detailItem}
+          sheet={!isDesktop}
+          inList={loading || Boolean(err) || items.some((it) => it.item_key === openKey)}
+          nav={openState}
           collections={collections}
-          onClose={closeExpanded}
-          onSaved={saveExpanded}
+          onClose={() => guarded(openState.close)}
+          onStep={(key) => guarded(() => openState.open(key))}
+          leave={leave}
+          onStay={() => setLeave(null)}
+          onLeave={leaveNow}
+          onSaved={saveOpen}
+          onQueueRefresh={refreshOpen}
           onNotesDirtyChange={setNotesDirty}
-          onQueueRefresh={refreshExpanded}
-          why={whyHere(expandedItem)}
-          variant="desktop"
+          why={whyHere(detailItem)}
         />
       )}
       </div>

@@ -2,16 +2,16 @@ import PaperDetailView from '../paper/PaperDetailView/index.jsx';
 import { StatusBanner } from './shared.jsx';
 import usePaperReview from '../../hooks/usePaperReview.js';
 
-// Inline review panel: expands under a Read-next row. The rich paper-detail
+// Body of the Read-next detail (LibraryDetail). The rich paper-detail
 // assembly (the DECIDE/ACT zones — digest, brief, abstract, ask, verdict, tags,
 // collection) is the shared PaperDetailView in `editable` mode; the detail-fetch
 // + verdict-mutation wiring is the shared usePaperReview hook (also used by the
 // full-page /paper/:key review), so neither surface re-implements it. Picking
 // `dont_read` IS the one reject path — it also queues a ❌ Zotero tag, so there
-// is ONE reject path (Occam's Razor). onSaved collapses + refetches (a
+// is ONE reject path (Occam's Razor). onSaved closes the detail + refetches (a
 // verdicted/engagement-tagged paper drops out); onQueueRefresh refetches without
-// collapsing.
-export default function InlineAnnotate({ itemKey, collections = [], onSaved, onQueueRefresh, onNotesDirtyChange }) {
+// closing. `showTitle`: the paper has no list row to supply the title.
+export default function InlineAnnotate({ itemKey, collections = [], showTitle = false, onSaved, onQueueRefresh, onNotesDirtyChange }) {
   const { detail, isLoading, error, refreshDetail, onTagsChanged, onCollectionsChanged, verdict } =
     usePaperReview(itemKey, { onSaved, onQueueRefresh });
 
@@ -23,6 +23,7 @@ export default function InlineAnnotate({ itemKey, collections = [], onSaved, onQ
       {error && (
         <StatusBanner message={`Detail load failed: ${error.message || error}`} isError />
       )}
+      {detail && showTitle && <p className="text-sm font-medium text-slate-900">{detail.title}</p>}
       {detail && (
         <PaperDetailView
           mode="editable"

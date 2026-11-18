@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { submitVerdict } from '../../api/goldenApi.js';
 import { cacheReviewDetail, cachedResponse, pendingMutations, publishStatus, savePapers } from '../../offlineStore.js';
 import PaperReviewPage from '../../pages/PaperReviewPage.jsx';
-import ReadNextView from './ReadNextView.jsx';
+import ReadNextView from './ReadNextView.testkit.jsx';
 
 const clients = [];
 let browserOnline;
@@ -78,8 +78,10 @@ it('opens cached context in the same tab from the expanded compact "Open full re
   expect(await outbox(key)).toEqual([]);
   expect(screen.getByRole('textbox', { name: 'Manual notes' }).value).toBe('Preserved manual note');
   fireEvent.click(screen.getByRole('link', { name: '← Back' }));
-  expect(await screen.findByText(paper.title)).toBeTruthy();
-  expect(`${router.state.location.pathname}${router.state.location.search}`).toBe('/library?c=COLL');
+  // Back lands on the exact Library URL it left, the paper still open over its list.
+  expect(await screen.findByRole('dialog', { name: paper.title })).toBeTruthy();
+  expect(`${router.state.location.pathname}${router.state.location.search}`)
+    .toBe(`/library?${new URLSearchParams({ c: 'COLL', open: key })}`);
 });
 
 it('opens the cached page from the compact link for a known Mac outage even while the browser is online', async () => {

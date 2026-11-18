@@ -32,6 +32,8 @@ import { readStorage, writeStorage } from '../utils/safeStorage.js';
 import {
   ORDER_STORAGE_KEY, BALANCED_ORDER, orderAvailable, readStoredOrder, sortByPreset,
 } from '../utils/readNextOrder.js';
+import useOpenPaper from '../hooks/useOpenPaper.js';
+import { isDecided } from '../components/library/readNextCopy.js';
 import useServerAvailable from '../hooks/useServerAvailable.js';
 import useUnavailableText from '../hooks/useUnavailableText.js';
 import { allPapers } from '../offlineStore.js';
@@ -197,6 +199,13 @@ export default function LibraryReadNext() {
     setOrder(next);
     writeStorage(ORDER_STORAGE_KEY, JSON.stringify(next));
   }
+  // The open paper (`?open=KEY`) is owned here: ReadNextView remounts on a server filter change.
+  // ‹ › and «3 of N» walk the undecided rows of the displayed list.
+  const navKeys = useMemo(
+    () => displayedQueue.filter((row) => !isDecided(row)).map((row) => row.item_key),
+    [displayedQueue],
+  );
+  const openPaper = useOpenPaper(navKeys);
   const visibleSelected = useMemo(
     () => new Set((queueLoading || queueErr ? [] : displayedQueue)
       .filter((row) => selected.has(row.item_key)).map((row) => row.item_key)),
@@ -786,6 +795,7 @@ export default function LibraryReadNext() {
           onRescore={() => loadQueue(true)}
           onReload={() => loadQueue(false)}
           onSaved={() => loadQueue()}
+          openState={openPaper}
           selectMode={selectMode}
           onToggleSelectMode={() => { setSelectMode((v) => !v); setSelected(new Set()); }}
           selected={visibleSelected}

@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('./InlineAnnotate.jsx', () => ({
   default: ({ itemKey }) => <div data-testid="inline-annotate">Detail {itemKey}</div>,
 }));
 
-import ReadNextView from './ReadNextView.jsx';
+import ReadNextView from './ReadNextView.testkit.jsx';
 
 function setViewport({ desktop }) {
   Object.defineProperty(window, 'matchMedia', {
@@ -28,9 +29,9 @@ const items = [
   { item_key: 'K3', title: 'Third paper', authors: 'Third Author', has_pdf: true, relevance_score: 3.9 },
 ];
 
-function renderView(props = {}) {
+function renderView(props = {}, entry = '/library') {
   return render(
-    <ReadNextView
+    <MemoryRouter initialEntries={[entry]}><ReadNextView
       items={items}
       loading={false}
       err={null}
@@ -53,9 +54,10 @@ function renderView(props = {}) {
       onRunTriage={vi.fn()}
       starting={false}
       {...props}
-    />,
+    /></MemoryRouter>,
   );
 }
+const where = () => screen.getByTestId('location').textContent;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -74,7 +76,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('ReadNextView mobile expansion', () => {
+describe('ReadNextView detail', () => {
   it('offers Rescore after a queue read fails even if the retained rows were fully scored', () => {
     const onRescore = vi.fn();
     const err = Object.assign(new Error('Reading cache is corrupt'), { status: 500 });
@@ -87,15 +89,75 @@ describe('ReadNextView mobile expansion', () => {
     expect(screen.getByText('First paper')).toBeTruthy();
   });
 
-  it('renders the expanded detail inside the tapped row on mobile', () => {
+  it('opens the tapped paper in a detail over the list, which stays mounted', () => {
     renderView();
 
     fireEvent.click(screen.getByText('Second paper'));
 
-    const rows = screen.getAllByRole('listitem');
-    expect(within(rows[1]).getByTestId('expanded-paper-panel')).toBeTruthy();
-    expect(within(rows[1]).getByTestId('inline-annotate').textContent).toContain('K2');
-    expect(within(rows[2]).queryByTestId('expanded-paper-panel')).toBeNull();
+    const dialog = screen.getByRole('dialog', { name: 'Second paper' });
+    expect(within(dialog).getByTestId('inline-annotate').textContent).toContain('K2');
+    expect(where()).toBe('/library?open=K2');
+    expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toHaveLength(3);
+    expect(screen.getByText('First paper')).toBeTruthy();
+    expect(screen.getByText('Third paper')).toBeTruthy();
+  });
+
+  it('puts the detail beside the list on a wide screen, both interactive', () => {
+    setViewport({ desktop: true });
+    renderView();
+
+    fireEvent.click(screen.getByText('First paper'));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(within(screen.getByTestId('library-detail')).getByTestId('inline-annotate').textContent).toContain('K1');
+
+    fireEvent.click(screen.getByText('Third paper'));  // the list is not blocked: another row replaces the detail
+    expect(screen.getByTestId('inline-annotate').textContent).toContain('K3');
+    expect(where()).toBe('/library?open=K3');
+    fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+    expect(screen.queryByTestId('library-detail')).toBeNull();
+  });
+
+  it('opened from a link: closing keeps the page and only drops `open`', () => {
+    renderView({}, '/library?c=COLL&open=K2');
+
+    expect(screen.getByRole('dialog', { name: 'Second paper' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(where()).toBe('/library?c=COLL');
+  });
+
+  it('closing after a tap goes back to the list entry; stepping does not add history entries', () => {
+    renderView({}, '/library?c=COLL');
+
+    fireEvent.click(screen.getByText('First paper'));
+    expect(screen.getByText('1 of 3')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Next paper' }));
+    expect(where()).toBe('/library?c=COLL&open=K2');
+    expect(screen.getByText('2 of 3')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(where()).toBe('/library?c=COLL');
+  });
+
+  it('shows a paper that is not in the list without ‹ › and says so', () => {
+    renderView({}, '/library?open=GONE');
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Not in the current list')).toBeTruthy();
+    expect(within(dialog).queryByRole('button', { name: /Previous paper|Next paper/ })).toBeNull();
+    expect(within(dialog).getByTestId('inline-annotate').textContent).toContain('GONE');
+  });
+
+  it('in Select mode a tap ticks the row and opens nothing', () => {
+    const onToggleItem = vi.fn();
+    renderView({ selectMode: true, onToggleItem });
+
+    fireEvent.click(screen.getByText('Second paper'));
+
+    expect(onToggleItem).toHaveBeenCalledWith('K2');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(where()).toBe('/library');
   });
 
   it('says whether a paper has a PDF in its own row, with no brief button beside it', () => {
