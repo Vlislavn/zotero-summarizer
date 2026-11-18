@@ -7,7 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 - Library → Read next: grouped «Your must read · N» (3 rows + Show all) / «To decide · N» / collapsed «Decided by you», also offline; new row (signal line, AI summary, one state label); the per-row ℹ, «Why here» and Confirm/Override card are gone (the suggestion is a quiet chip).
 - Library: «Model guess» chips with counts replace the score histogram; the Why filter, duplicate Clear buttons and Find / Review queue captions are gone; «Select & label» is now «My verdicts».
 - Phone navigation is a single row; Settings and Ops moved behind ⋯; every page has exactly one heading.
-- The expanded paper panel opens on «Your verdict»; «Open full review» opens the paper page in the same tab without building the artifact and Back returns to the exact Library URL.
+- «Open full review» in the paper detail opens the paper page in the same tab without building the artifact and Back returns to the exact Library URL.
+- Library: tapping a paper opens its detail in a full-screen sheet (phone) or a split view (wide screen) with ‹ › and `?open=` in the address; closing returns to the row and an unsaved note asks first.
+- Library: verdict bar in the paper detail with auto-advance to the next undecided paper and an 8 s Undo toast; a verdict updates its row in place instead of re-reading the queue; a batch of verdicts has one Undo.
+- Library: keyboard for Read next (`j k 1–4 z Enter Esc /`) — works right after a click on a row, one verdict per key press, silent in text fields.
 - The «Remove»/«skip»/«Trash» verdict is now named «Not interested» everywhere; verdict pills stay on one row on phones.
 - Fixed: Library meaning search with the corpus off no longer shows the whole queue under «exact text matches»; «Show already-read» respects the query; the 50-row cap is visible («Top 50 by meaning»).
 - Fixed: Library reflects an already-running review-fleet run when the page opens. The My verdicts hint no longer claims a verdict retrains the model.
