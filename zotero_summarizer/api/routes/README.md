@@ -52,6 +52,10 @@ reviews remain unknown on a current join miss.
 `POST /api/golden/verdict` checks a new positive feed verdict for a current,
 usable full-text review **before** writing its label. Missing/empty/failed
 reviews return HTTP 409 `review_required`; negative verdicts remain immediate.
+`POST /api/golden/verdict` takes an optional `surface` (`annotate_verdict` default,
+`library_sheet`, `library_split`, `library_key`, `library_bulk`, `library_verdicts`;
+any other value → 422); it is recorded on the label transition and in the
+proposal snapshot, so Library paths can be told apart.
 Both `/api/daily/verdict` and `/api/golden/verdict` gate a new positive feed
 label before it can hide a paper from Today. Today Add reports the same code
 per blocked item while processing eligible batch members. The server, not the frontend badge, enforces this invariant.

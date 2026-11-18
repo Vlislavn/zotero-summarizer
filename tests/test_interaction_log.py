@@ -208,3 +208,62 @@ def test_golden_routes_emit_through_the_real_chain(tmp_path: Path):
         (e["previous_user_priority"], e["new_user_priority"])
         for e in transitions
     ] == [(None, "should_read"), ("should_read", "dont_read"), ("dont_read", None)]
+
+
+def _verdict_surface_env(tmp_path: Path) -> Settings:
+    settings = Settings.load(project_root=tmp_path)
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    settings.golden_csv_path.write_text(
+        "item_key,title,abstract,gold_priority_final\n", encoding="utf-8",
+    )
+    with repositories.with_db_path(settings.triage_db_path):
+        repositories.init_db()
+    set_context(AppContext(settings=settings))
+    return settings
+
+
+def test_verdict_surface_defaults_and_reaches_transition_and_snapshot(tmp_path: Path):
+    import json
+
+    from zotero_summarizer.api.routes import golden
+
+    settings = _verdict_surface_env(tmp_path)
+    asyncio.run(golden.submit_verdict(
+        golden.VerdictRequest(item_key="ZKEY1", user_priority="should_read")  # old client
+    ))
+    asyncio.run(golden.submit_verdict(
+        golden.VerdictRequest(
+            item_key="ZKEY1", user_priority="must_read", surface="library_sheet",
+        )
+    ))
+
+    stored = repositories.get_label_verdict(settings.triage_db_path, "ZKEY1")
+    assert json.loads(stored["proposal_json"])["surface"] == "library_sheet"
+    transitions = [
+        e for e in run_log.load_runs(settings.interaction_log_path)
+        if e["event"] == "label_transition"
+    ]
+    assert [e["surface"] for e in transitions] == ["annotate_verdict", "library_sheet"]
+
+
+def test_verdict_surface_unknown_value_is_422(tmp_path: Path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from zotero_summarizer.api.errors import install_error_handlers
+    from zotero_summarizer.api.routes import golden
+
+    settings = _verdict_surface_env(tmp_path)
+    app = FastAPI()
+    app.include_router(golden.router)
+    install_error_handlers(app)
+    with repositories.with_db_path(settings.triage_db_path), TestClient(app) as client:
+        bad = client.post("/api/golden/verdict", json={
+            "item_key": "ZKEY1", "user_priority": "must_read", "surface": "nope",
+        })
+        assert bad.status_code == 422
+        assert repositories.get_label_verdict(settings.triage_db_path, "ZKEY1") is None
+        ok = client.post("/api/golden/verdict", json={
+            "item_key": "ZKEY1", "user_priority": "must_read", "surface": "library_bulk",
+        })
+        assert ok.status_code == 200, ok.text
