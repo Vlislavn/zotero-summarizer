@@ -6,14 +6,6 @@ vi.mock('./InlineAnnotate.jsx', () => ({
   default: ({ itemKey }) => <div data-testid="inline-annotate">Detail {itemKey}</div>,
 }));
 
-vi.mock('./OpenBriefButton.jsx', () => ({
-  default: ({ itemKey, hasPdf }) => (
-    <button type="button" data-testid={`brief-${itemKey}`} data-has-pdf={String(hasPdf)}>
-      brief
-    </button>
-  ),
-}));
-
 import ReadNextView from './ReadNextView.jsx';
 
 function setViewport({ desktop }) {
@@ -106,46 +98,107 @@ describe('ReadNextView mobile expansion', () => {
     expect(within(rows[2]).queryByTestId('expanded-paper-panel')).toBeNull();
   });
 
-  it('passes PDF availability to the one-click brief control', () => {
+  it('says whether a paper has a PDF in its own row, with no brief button beside it', () => {
     renderView();
 
-    expect(screen.getByTestId('brief-K1').dataset.hasPdf).toBe('true');
-    expect(screen.getByTestId('brief-K2').dataset.hasPdf).toBe('false');
+    const rows = screen.getAllByRole('listitem');
+    expect(within(rows[0]).getByText('PDF')).toBeTruthy();
+    expect(within(rows[1]).queryByText('PDF')).toBeNull();
+    expect(screen.queryByRole('button', { name: /brief|Open cached review/i })).toBeNull();
+  });
+
+  it('shows no empty state when the queue failed to load and there are no rows', () => {
+    const err = Object.assign(new Error('boom'), { status: 500 });
+    renderView({ items: [], rawCount: 0, totalUnread: 0, err });
+
+    expect(screen.getByText(/Failed to load queue:/)).toBeTruthy();
+    expect(screen.queryByText(/Nothing to read/)).toBeNull();
+  });
+
+});
+
+describe('ReadNextView groups', () => {
+  const must = (n) => Array.from({ length: n }, (_, i) => (
+    { item_key: `M${i}`, title: `Must paper ${i}`, decided: true, user_priority: 'must_read', relevance_score: 4 }
+  ));
+  const decidedRows = [
+    { item_key: 'D1', title: 'Decided one', decided: true, user_priority: 'should_read', relevance_score: 3 },
+    { item_key: 'D2', title: 'Decided two', decided: true, user_priority: 'could_read', relevance_score: 2.5 },
+  ];
+
+  it('shows 3 of 23 Must read rows and one control for the rest', () => {
+    renderView({ items: [...must(23), ...items] });
+
+    expect(screen.getByRole('heading', { name: 'Your must read · 23' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'To decide · 3' })).toBeTruthy();
+    expect(screen.getByText('Must paper 2')).toBeTruthy();
+    expect(screen.queryByText('Must paper 3')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 23' }));
+    expect(screen.getByText('Must paper 22')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Show fewer' }));
+    expect(screen.queryByText('Must paper 3')).toBeNull();
+    // The old counts sentence and the repeated «You: must read» are gone.
+    expect(screen.queryByText('About these counts')).toBeNull();
+    expect(screen.queryByText(/You: must read/)).toBeNull();
+  });
+
+  it('keeps decided papers behind one «Decided by you · N · Show» press', () => {
+    renderView({ items: [...items, ...decidedRows] });
+
+    expect(screen.queryByText('Decided one')).toBeNull();
+    const toggle = screen.getByRole('button', { name: 'Decided by you · 2 · Show' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+
+    expect(screen.getByText('Decided one')).toBeTruthy();
+    expect(screen.getByText('Decided two')).toBeTruthy();
+    expect(screen.getByText('You: should read')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Decided by you · 2 · Hide' }).getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('groups an offline working set (no `decided`, no counts) by each row’s own verdict', () => {
+    const offlineRows = [
+      { item_key: 'O1', title: 'Offline undecided', user_priority: null },
+      { item_key: 'O2', title: 'Offline must', user_priority: 'must_read' },
+      { item_key: 'O3', title: 'Offline should', user_priority: 'should_read' },
+    ];
+    renderView({ items: offlineRows, offline: true, status: 'offline', modelReady: false });
+
+    // Must lead even though the cached order has it second; no live numbers are printed.
+    expect(screen.getByRole('heading', { name: 'Your must read' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'To decide' })).toBeTruthy();
+    const titles = screen.getAllByRole('listitem').map((li) => li.textContent);
+    expect(titles[0]).toContain('Offline must');
+    expect(titles[1]).toContain('Offline undecided');
+    fireEvent.click(screen.getByRole('button', { name: 'Decided by you · Show' }));
+    expect(screen.getByText('Offline should')).toBeTruthy();
   });
 });
 
-describe('ProposedVerdictCard wiring', () => {
+describe('proposal chip', () => {
   const proposal = { proposed: 'should_read', confidence: 0.85, flags: [] };
 
-  it('shows one-tap Confirm for a confident proposal, hides it once the row is expanded', () => {
+  it('shows «Review suggests» with its confidence and no Confirm / Override buttons', () => {
     renderView({ items: [{ ...items[0], proposed_verdict: proposal }, items[1]] });
 
-    // Card renders under the K1 row with both actions.
-    expect(screen.getByText(/Review suggests: Should read/i)).toBeTruthy();
-    expect(screen.getByText(/not used for rank/i)).toBeTruthy();
-    expect(screen.getByRole('button', { name: /Confirm — Should read/i })).toBeTruthy();
-    const override = screen.getByRole('button', { name: 'Override' });
-
-    // Override expands the row (full editor) and the card gives way to it.
-    fireEvent.click(override);
-    expect(screen.getByTestId('inline-annotate').textContent).toContain('K1');
-    expect(screen.queryByRole('button', { name: /Confirm — /i })).toBeNull();
+    expect(screen.getByText('◇ Review suggests: Should read · 85%')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Confirm|Override/ })).toBeNull();
+    expect(screen.queryByText(/not used for rank/i)).toBeNull();
   });
 
-  it('withholds Confirm on a low-confidence or flagged proposal', () => {
+  it('says «flagged» instead of the percentage when the review raised a flag', () => {
     renderView({
-      items: [{ ...items[0], proposed_verdict: { proposed: 'could_read', confidence: 0.4, flags: [] } }],
+      items: [{ ...items[0], proposed_verdict: { proposed: 'could_read', confidence: 0.4, flags: ['overstated'] } }],
     });
 
-    expect(screen.queryByRole('button', { name: /Confirm — /i })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Override' })).toBeTruthy();
+    expect(screen.getByText('◇ Review suggests: Could read · flagged')).toBeTruthy();
   });
 
-  it('never renders the card for a row the user already labelled', () => {
+  it('is hidden for a row the user already labelled', () => {
     renderView({
-      items: [{ ...items[0], user_priority: 'must_read', proposed_verdict: proposal }],
+      items: [{ ...items[0], decided: true, user_priority: 'should_read', proposed_verdict: proposal }],
     });
 
-    expect(screen.queryByRole('button', { name: 'Override' })).toBeNull();
+    expect(screen.queryByText(/Review suggests/)).toBeNull();
   });
 });

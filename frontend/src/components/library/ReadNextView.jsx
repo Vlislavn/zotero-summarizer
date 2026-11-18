@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import InlineAnnotate from './InlineAnnotate.jsx';
-import OpenBriefButton from './OpenBriefButton.jsx';
-import ProposedVerdictCard from './ProposedVerdictCard.jsx';
 import BulkVerdictBar from './BulkVerdictBar.jsx';
 import { StatusBanner, formatShortDate, truncateAuthors } from './shared.jsx';
 import { pretty } from '../../utils/priorityLabels.js';
-import { COUNTS_EXPLAINER, isDecided, mustGroupSize, qualityHint, queueCounts, scoreStatus } from './readNextCopy.js';
+import { groupRows, isDecided, qualityHint, scoreStatus } from './readNextCopy.js';
 import { CustomPanel, OrderCaption, OrderSelect } from './OrderControls.jsx';
-import { WhyHereButton, WhyHerePanel } from './WhyHere.jsx';
+import { WhyHerePanel } from './WhyHere.jsx';
 import { BALANCED_ORDER } from '../../utils/readNextOrder.js';
 import { CHIP_TONE, bandTone, gradeTone, gradeBasis, letterMuted, mutedReason, BAND_LABEL } from '../paper/review/tones.js';
 import { Disclosure } from '../paper/review/primitives.jsx';
@@ -22,19 +20,41 @@ import { readStorage } from '../../utils/safeStorage.js';
 // Read/handled items are hidden unless toggled. An opt-in "Select" mode reveals
 // checkboxes for bulk triage (the merged Browse/triage flow), kept secondary.
 const REVEAL_STEP = 60;  // rows revealed initially and per "Show more" click
+const MUST_PREVIEW = 3;  // your own Must read rows shown before "Show all"
 const DESKTOP_QUERY = '(min-width: 1024px)';
 
 // Your own verdict. A decided paper carries this chip, so it stays findable instead
-// of vanishing (dont_read is handled-filtered, so it never reaches the queue). In
-// the default order the backend leads with your Must read and sorts the other
-// decided ones AFTER the undecided ones.
+// of vanishing (dont_read is handled-filtered, so it never reaches the queue). In the
+// default order the list is grouped (`groupRows`); the chip names the verdict wherever
+// the group header does not (the Must group, by its header).
 const USER_PRIORITY_LABEL = { must_read: 'must read', should_read: 'should read', could_read: 'could read' };
 
-function GroupLabel({ children }) {
+// The fleet's proposal never writes anything: the chip says whether it is flagged,
+// else how sure it is. Acting on it is the row's own verdict panel.
+function proposalNote(proposal) {
+  if ((proposal.flags || []).some(Boolean)) return 'flagged';
+  return `${Math.round((typeof proposal.confidence === 'number' ? proposal.confidence : 0) * 100)}%`;
+}
+
+function GroupHeader({ children, action = null }) {
   return (
-    <div className="mb-2 mt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500" role="separator">
-      {children}
+    <div className="mb-2 mt-3 flex items-center justify-between gap-2">
+      <h3 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500">{children}</h3>
+      {action}
     </div>
+  );
+}
+
+function GroupAction({ expanded, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={expanded}
+      className="shrink-0 px-2 py-1.5 -my-1 rounded-md text-xs font-medium text-teal-700 hover:bg-teal-50"
+    >
+      {children}
+    </button>
   );
 }
 
@@ -63,7 +83,7 @@ function useMediaQuery(query) {
 }
 
 function ExpandedPaperPanel({
-  item, collections, onClose, onSaved, onQueueRefresh, onNotesDirtyChange, panelRef, variant = 'mobile',
+  item, collections, onClose, onSaved, onQueueRefresh, onNotesDirtyChange, panelRef, why = null, variant = 'mobile',
 }) {
   const desktop = variant === 'desktop';
   return (
@@ -99,6 +119,7 @@ function ExpandedPaperPanel({
           onQueueRefresh={onQueueRefresh}
           onNotesDirtyChange={onNotesDirtyChange}
         />
+        {why && <div className="px-1 pb-2 pt-1">{why}</div>}
       </div>
     </aside>
   );
@@ -110,7 +131,7 @@ const previewText = (text) => cleanAbstract(text).replace(/<\/?[a-z][^>]*$/i, ''
 
 export default function ReadNextView({
   items, loading, err, includeRead, onToggleIncludeRead,
-  readHidden, totalUnread, decidedCount = 0, queueItems = items, onSaved, status, modelReady, error, computedAt, scoresStale, onRescore, onReload,
+  queueItems = items, onSaved, status, modelReady, error, computedAt, scoresStale, onRescore, onReload,
   selectMode, onToggleSelectMode, selected, onToggleItem, onRunTriage, onBulkDone, starting,
   // Bulk "Add to collection" (the Meaning-search → Zotero collection shortcut):
   // flat collection list + handler from Library; last target remembered so the
@@ -140,7 +161,8 @@ export default function ReadNextView({
     || items.some((it) => typeof it.relevance_score !== 'number');
   const [expandedKey, setExpandedKey] = useState(null);
   const [notesDirty, setNotesDirty] = useState(false);
-  const [whyKey, setWhyKey] = useState(null);  // the row whose «Why here» is open
+  const [mustAll, setMustAll] = useState(false);  // «Show all N» of your own Must read (this visit)
+  const [decidedOpen, setDecidedOpen] = useState(false);  // the «Decided by you» block
   const orderOn = Boolean(orderMeta && onOrderChange);
   const activeOrder = orderOn ? order : BALANCED_ORDER;
   const expandedPanelRef = useRef(null);
@@ -160,13 +182,14 @@ export default function ReadNextView({
   // client filter doesn't remount the view (server filters do, via the key), so
   // reset the reveal here instead.
   useEffect(() => { setVisibleCount(REVEAL_STEP); }, [filterSig]);
-  const shown = items.slice(0, visibleCount);
-  // Default order: your own Must read lead as a group, the other decided papers
-  // come last — label where each group starts (a text search has no Must read group).
-  const groupDecided = sort.field === 'best' && !semantic && !offline;
-  const groupMust = groupDecided && !searchQuery.trim();
-  const mustCount = groupMust ? mustGroupSize(items) : 0;  // shown rows (client filters applied)
-  const firstDecided = groupDecided ? shown.findIndex((it, i) => i >= mustCount && isDecided(it)) : -1;
+  // Default order without a search: three groups, computed from each row's own verdict
+  // (so the offline working set groups too). Any other sort, or a search, is one flat
+  // list where a decided row says so itself. The reveal pages through the undecided rows.
+  const groups = sort.field === 'best' && !semantic && !searchQuery.trim() ? groupRows(items) : null;
+  const shown = (groups ? groups.todo : items).slice(0, visibleCount);
+  const pagedTotal = groups ? groups.todo.length : items.length;
+  // Counts in the headers are a live answer; the offline copy shows none.
+  const count = (n) => (offline ? '' : ` · ${n}`);
   // Desktop keeps the review beside the list. Mobile renders it directly under
   // the tapped row; otherwise the panel lands after the whole revealed list.
   const expandedItem = expandedKey ? items.find((it) => it.item_key === expandedKey) : null;
@@ -201,21 +224,163 @@ export default function ReadNextView({
     onSaved?.();
   }
 
+  // «Why it's here» lives inside the expanded paper (Order presets only).
+  function whyHere(it) {
+    if (!orderOn || !it.rank_parts) return null;
+    return (
+      <Disclosure summary="Why it's here">
+        <WhyHerePanel
+          item={it}
+          order={order}
+          meta={orderMeta}
+          mustCount={queueItems.filter((r) => r.rank_group === 0).length}
+        />
+      </Disclosure>
+    );
+  }
+
+  const rows = (list, ownChip) => (
+    <ol className="space-y-2">{list.map((it, idx) => renderRow(it, idx + 1, ownChip))}</ol>
+  );
+
+  function renderRow(it, number, ownChip) {
+    return (
+      <li key={it.item_key}>
+        <div
+          className={`w-full flex items-start gap-2 p-2.5 rounded-xl border bg-white hover:border-teal-300 hover:bg-teal-50/30 ${
+            expandedKey === it.item_key ? 'border-teal-400 ring-1 ring-teal-200' : 'border-slate-200'
+          }`}
+        >
+          {selectMode && (
+            <input
+              type="checkbox"
+              checked={selected?.has(it.item_key) || false}
+              onChange={() => onToggleItem(it.item_key)}
+              className="mt-1 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+            />
+          )}
+          <button
+            type="button"
+            onClick={() => chooseExpanded(expandedKey === it.item_key ? null : it.item_key)}
+            aria-expanded={expandedKey === it.item_key}
+            className="min-w-0 flex-1 text-left flex items-start gap-2 sm:gap-3"
+          >
+            <span className="mono text-xs text-slate-400 mt-0.5 w-6 shrink-0 text-right">{number}</span>
+            <span className="min-w-0 flex-1">
+              <span className="text-sm font-medium text-slate-900 line-clamp-2 sm:line-clamp-1">{it.title || '(untitled)'}</span>
+              <span className="text-xs text-slate-500 line-clamp-1">{truncateAuthors(it.authors)}</span>
+              {(it.review_digest?.tldr || it.abstract_preview) && (
+                <span className="mt-1 text-xs text-slate-600 line-clamp-2">
+                  {it.review_digest?.tldr || previewText(it.abstract_preview)}
+                </span>
+              )}
+              {(it.user_priority || it.proposed_verdict?.proposed || typeof it.relevance_score === 'number') && (
+                <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-5">
+                  {/* Your own verdict leads the row (Von Restorff): a decided
+                      paper is flagged here, so deciding makes it findable,
+                      never hidden. */}
+                  {ownChip && isDecided(it) && USER_PRIORITY_LABEL[it.user_priority] && (
+                    <span
+                      className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-amber-100 text-amber-900 border border-amber-300 font-semibold"
+                      title="Your own verdict — you already decided this paper."
+                    >
+                      You: {USER_PRIORITY_LABEL[it.user_priority]}
+                    </span>
+                  )}
+                  {/* The fleet's pre-decided verdict — a quiet in-row marker, never
+                      an action. Hidden once you've set your own label. */}
+                  {!it.user_priority && it.proposed_verdict?.proposed && (
+                    <span
+                      className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200"
+                      title="Full-text review suggestion — it does not affect list order. Set your own verdict by opening the paper."
+                    >
+                      ◇ Review suggests: {pretty(it.proposed_verdict.proposed)} · {proposalNote(it.proposed_verdict)}
+                    </span>
+                  )}
+                  {typeof it.relevance_score === 'number' ? (
+                    <span className="font-semibold text-teal-700" title="Model relevance score (1–5)">
+                      ★ {it.relevance_score.toFixed(1)}
+                    </span>
+                  ) : (
+                    <span className="text-slate-500" title="Not scored yet — run Rescore to rank this paper">
+                      not scored yet
+                    </span>
+                  )}
+                  {/* Why it surfaced — the top signal behind its rank (topic
+                      match / library affinity / prestige). Answers "why did I
+                      get this paper?" at a glance without opening the row. */}
+                  {it.why_reason && !(orderOn && it.rank_parts) && (
+                    <span className="min-w-0 max-w-full truncate text-slate-600" title={`Main model reason — the strongest signal behind its score: ${it.why_reason}`}>
+                      · {it.why_reason}
+                    </span>
+                  )}
+                  {/* Author/venue prestige is NOT a row chip — it's already
+                      baked into the best-first order (position encodes it), so
+                      a per-row violet "◆ top author/venue" pill was the 4th
+                      colour for a signal the rank already carries. Subtracted;
+                      it stays in the paper's detail. */}
+                  {/* The deep-review QUALITY cause for the lift — ONE word per
+                      card: the decisive verdict (Highlight/Flag) when present,
+                      else the A–D grade. "Quality", never "band" (band = the
+                      relevance tier). Reuses the shared review tones so a
+                      Highlight reads the same emerald everywhere. */}
+                  {(() => {
+                    const band = String(it.quality_band || '').toLowerCase();
+                    const grade = String(it.quality_grade || '').toUpperCase();
+                    if (band === 'highlight' || band === 'flag') {
+                      return (
+                        <span
+                          className={`inline-flex items-center px-1.5 py-0 rounded-full border font-semibold ${CHIP_TONE[bandTone(band)]}`}
+                          title={qualityHint(activeOrder.preset === 'balanced', 'Deep-review quality verdict')}
+                        >
+                          {BAND_LABEL[band]}
+                        </span>
+                      );
+                    }
+                    if (grade) {
+                      return (
+                        <span
+                          className={`inline-flex items-center px-1.5 py-0 rounded-full border font-semibold ${CHIP_TONE[gradeTone(grade, band)]}`}
+                          title={`${qualityHint(activeOrder.preset === 'balanced', 'Full-text deep-review rigor letter (A–D)')}${letterMuted(grade, band) ? ` Grey A: checklist only — ${mutedReason(band)}.` : ''}`}
+                        >
+                          {[grade, gradeBasis(it.quality_met, it.quality_applicable)].filter(Boolean).join(' · ')}
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
+                </span>
+              )}
+            </span>
+            <span className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 shrink-0">
+              {it.read && <span title="already read" className="text-xs">🧠</span>}
+              <span className="inline-flex items-center gap-1" title={it.has_pdf ? 'PDF attached' : 'No PDF'}>
+                <span className={`inline-block w-2.5 h-2.5 rounded-full ${it.has_pdf ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                {it.has_pdf && <span className="text-[10px] font-medium text-emerald-700">PDF</span>}
+              </span>
+            </span>
+          </button>
+        </div>
+        {expandedKey === it.item_key && !isDesktop && (
+          <ExpandedPaperPanel
+            item={it}
+            collections={collections}
+            panelRef={expandedPanelRef}
+            onClose={closeExpanded}
+            onSaved={saveExpanded}
+            onNotesDirtyChange={setNotesDirty}
+            onQueueRefresh={refreshExpanded}
+            why={whyHere(it)}
+          />
+        )}
+      </li>
+    );
+  }
+
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <div className="text-xs text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span title={COUNTS_EXPLAINER}>
-            {queueCounts({
-              totalUnread, decidedCount, readHidden, includeRead,
-              mustCount: groupMust ? mustGroupSize(queueItems) : 0,
-              shown: items.length, filtered: hasActiveFilters,
-            }).map((part, i) => (
-              <span key={part} className={i === 0 ? '' : 'text-slate-500'}>
-                {i > 0 && ' · '}{i === 0 ? <strong>{part}</strong> : part}
-              </span>
-            ))}
-          </span>
           {/* Zotero-column sort (Jakob's Law: same field names as Zotero's item
               table). One select + one direction toggle; 'Best match' restores the
               blended server order and hides the toggle. */}
@@ -351,11 +516,6 @@ export default function ReadNextView({
       {orderOn && order.preset === 'custom' && (
         <CustomPanel order={order} meta={orderMeta} onChange={onOrderChange} />
       )}
-      <div className="-mt-1 mb-3">
-        <Disclosure summary="About these counts">
-          <p className="text-[11px] text-slate-500" data-testid="counts-explainer">{COUNTS_EXPLAINER}</p>
-        </Disclosure>
-      </div>
       {rerankerLoading && (
         <div className="mb-2 flex items-center gap-2 text-xs text-slate-600">
           <Spinner size="sm" color="teal" />
@@ -400,7 +560,7 @@ export default function ReadNextView({
         </div>
       )}
       {loading && items.length === 0 && <div className="p-4 text-center text-xs text-slate-500">Loading reading queue…</div>}
-      {!loading && items.length === 0 && !computing && !errored && (
+      {!loading && items.length === 0 && !computing && !errored && !err && (
         hasActiveFilters && rawCount > 0 ? (
           <div className="p-6 text-center text-xs text-slate-500">
             No papers match your filters — Clear all, above, shows the whole list again.
@@ -413,180 +573,44 @@ export default function ReadNextView({
         )
       )}
       <div className={expandedItem && isDesktop ? 'lg:flex lg:gap-3 lg:items-start' : ''}>
-      <ol className={`space-y-2 ${expandedItem && isDesktop ? 'lg:flex-1 lg:min-w-0' : ''}`}>
-        {shown.map((it, idx) => (
-          <li key={it.item_key}>
-            {/* Your own Must read lead under one labelled header, then the papers
-                still to decide; your other verdicts follow under a divider (only in
-                the default order, where they are grouped). */}
-            {idx === 0 && mustCount > 0 && <GroupLabel>Your Must read ({mustCount})</GroupLabel>}
-            {groupDecided && idx === firstDecided && <GroupLabel>Already decided by you</GroupLabel>}
-            <div
-              className={`w-full flex items-start gap-2 p-2.5 rounded-xl border bg-white hover:border-teal-300 hover:bg-teal-50/30 ${
-                expandedKey === it.item_key ? 'border-teal-400 ring-1 ring-teal-200' : 'border-slate-200'
-              }`}
-            >
-              {selectMode && (
-                <input
-                  type="checkbox"
-                  checked={selected?.has(it.item_key) || false}
-                  onChange={() => onToggleItem(it.item_key)}
-                  className="mt-1 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                />
+      <div className={expandedItem && isDesktop ? 'lg:flex-1 lg:min-w-0' : ''}>
+        {groups && groups.must.length > 0 && (
+          <section aria-label="Your must read">
+            <GroupHeader
+              action={groups.must.length > MUST_PREVIEW && (
+                <GroupAction expanded={mustAll} onClick={() => setMustAll((v) => !v)}>
+                  {mustAll ? 'Show fewer' : `Show all${offline ? '' : ` ${groups.must.length}`}`}
+                </GroupAction>
               )}
-              <button
-                type="button"
-                onClick={() => chooseExpanded(expandedKey === it.item_key ? null : it.item_key)}
-                aria-expanded={expandedKey === it.item_key}
-                className="min-w-0 flex-1 text-left flex items-start gap-2 sm:gap-3"
-              >
-                <span className="mono text-xs text-slate-400 mt-0.5 w-6 shrink-0 text-right">{idx + 1}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="text-sm font-medium text-slate-900 line-clamp-2 sm:line-clamp-1">{it.title || '(untitled)'}</span>
-                  <span className="text-xs text-slate-500 line-clamp-1">{truncateAuthors(it.authors)}</span>
-                  {(it.review_digest?.tldr || it.abstract_preview) && (
-                    <span className="mt-1 text-xs text-slate-600 line-clamp-2">
-                      {it.review_digest?.tldr || previewText(it.abstract_preview)}
-                    </span>
-                  )}
-                  {(it.user_priority || it.proposed_verdict?.proposed || typeof it.relevance_score === 'number') && (
-                    <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-5">
-                      {/* Your own verdict leads the row (Von Restorff): a decided
-                          paper is flagged here, so deciding makes it findable,
-                          never hidden. */}
-                      {isDecided(it) && USER_PRIORITY_LABEL[it.user_priority] && (
-                        <span
-                          className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-amber-100 text-amber-900 border border-amber-300 font-semibold"
-                          title="Your own verdict — you already decided this paper. Your Must read lead the list; the other decided ones come after the undecided."
-                        >
-                          You: {USER_PRIORITY_LABEL[it.user_priority]}
-                        </span>
-                      )}
-                      {/* The fleet's pre-decided verdict — quiet in-row marker;
-                          the actions live on the Confirm/Override card right
-                          below the row. Hidden once you've set your own label. */}
-                      {!it.user_priority && it.proposed_verdict?.proposed && (
-                        <span
-                          className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200"
-                          title="Full-text review suggestion — it does not affect list order. Confirm or Override on the card below."
-                        >
-                          ◇ Review suggests: {pretty(it.proposed_verdict.proposed)}
-                        </span>
-                      )}
-                      {typeof it.relevance_score === 'number' ? (
-                        <span className="font-semibold text-teal-700" title="Model relevance score (1–5)">
-                          ★ {it.relevance_score.toFixed(1)}
-                        </span>
-                      ) : (
-                        <span className="text-slate-500" title="Not scored yet — run Rescore to rank this paper">
-                          not scored yet
-                        </span>
-                      )}
-                      {/* Why it surfaced — the top signal behind its rank (topic
-                          match / library affinity / prestige). Answers "why did I
-                          get this paper?" at a glance without opening the row. */}
-                      {it.why_reason && !(orderOn && it.rank_parts) && (
-                        <span className="min-w-0 max-w-full truncate text-slate-600" title={`Main model reason — the strongest signal behind its score: ${it.why_reason}`}>
-                          · {it.why_reason}
-                        </span>
-                      )}
-                      {/* Author/venue prestige is NOT a row chip — it's already
-                          baked into the best-first order (position encodes it), so
-                          a per-row violet "◆ top author/venue" pill was the 4th
-                          colour for a signal the rank already carries. Subtracted;
-                          it stays in the paper's detail. */}
-                      {/* The deep-review QUALITY cause for the lift — ONE word per
-                          card: the decisive verdict (Highlight/Flag) when present,
-                          else the A–D grade. "Quality", never "band" (band = the
-                          relevance tier). Reuses the shared review tones so a
-                          Highlight reads the same emerald everywhere. */}
-                      {(() => {
-                        const band = String(it.quality_band || '').toLowerCase();
-                        const grade = String(it.quality_grade || '').toUpperCase();
-                        if (band === 'highlight' || band === 'flag') {
-                          return (
-                            <span
-                              className={`inline-flex items-center px-1.5 py-0 rounded-full border font-semibold ${CHIP_TONE[bandTone(band)]}`}
-                              title={qualityHint(activeOrder.preset === 'balanced', 'Deep-review quality verdict')}
-                            >
-                              {BAND_LABEL[band]}
-                            </span>
-                          );
-                        }
-                        if (grade) {
-                          return (
-                            <span
-                              className={`inline-flex items-center px-1.5 py-0 rounded-full border font-semibold ${CHIP_TONE[gradeTone(grade, band)]}`}
-                              title={`${qualityHint(activeOrder.preset === 'balanced', 'Full-text deep-review rigor letter (A–D)')}${letterMuted(grade, band) ? ` Grey A: checklist only — ${mutedReason(band)}.` : ''}`}
-                            >
-                              {[grade, gradeBasis(it.quality_met, it.quality_applicable)].filter(Boolean).join(' · ')}
-                            </span>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </span>
-                  )}
-                </span>
-                <span className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 shrink-0">
-                  {it.read && <span title="already read" className="text-xs">🧠</span>}
-                  <span className="inline-flex items-center gap-1" title={it.has_pdf ? 'PDF attached' : 'No PDF'}>
-                    <span className={`inline-block w-2.5 h-2.5 rounded-full ${it.has_pdf ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                    {it.has_pdf && <span className="text-[10px] font-medium text-emerald-700">PDF</span>}
-                  </span>
-                </span>
-              </button>
-              {/* Direct shortcut to the standalone HTML brief — a sibling of the
-                  expand button (not nested inside it). Builds on demand if the
-                  brief hasn't been generated yet, then opens it in a new tab. */}
-              <span className="shrink-0 flex flex-col items-end gap-1">
-                <OpenBriefButton itemKey={it.item_key} hasPdf={Boolean(it.has_pdf)} />
-                {/* «Why here»: a sibling button too — tap / keyboard, never hover. */}
-                {orderOn && it.rank_parts && (
-                  <WhyHereButton
-                    open={whyKey === it.item_key}
-                    onToggle={() => setWhyKey(whyKey === it.item_key ? null : it.item_key)}
-                    panelId={`why-here-${it.item_key}`}
-                  />
-                )}
-              </span>
-            </div>
-            {orderOn && it.rank_parts && whyKey === it.item_key && (
-              <WhyHerePanel
-                item={it}
-                order={order}
-                meta={orderMeta}
-                mustCount={queueItems.filter((r) => r.rank_group === 0).length}
-                panelId={`why-here-${it.item_key}`}
-              />
-            )}
-            {/* One-tap Confirm/Override for the fleet's proposal — the card
-                PredictionsBar's state line promises ("Confirm or Override on the
-                rows below"). Hidden while the row is expanded (Override opens the
-                full editor) and in select mode (bulk actions own the row then). */}
-            {!it.user_priority && it.proposed_verdict?.proposed
-              && expandedKey !== it.item_key && !selectMode && (
-              <ProposedVerdictCard
-                itemKey={it.item_key}
-                proposal={it.proposed_verdict}
-                onSaved={saveExpanded}
-                onOverride={() => chooseExpanded(it.item_key)}
-              />
-            )}
-            {expandedKey === it.item_key && !isDesktop && (
-              <ExpandedPaperPanel
-                item={it}
-                collections={collections}
-                panelRef={expandedPanelRef}
-                onClose={closeExpanded}
-                onSaved={saveExpanded}
-                onNotesDirtyChange={setNotesDirty}
-                onQueueRefresh={refreshExpanded}
-              />
-            )}
-          </li>
-        ))}
-      </ol>
+            >
+              Your must read{count(groups.must.length)}
+            </GroupHeader>
+            {rows(mustAll ? groups.must : groups.must.slice(0, MUST_PREVIEW), false)}
+          </section>
+        )}
+        {groups && <GroupHeader>To decide{count(groups.todo.length)}</GroupHeader>}
+        {rows(shown, true)}
+        {pagedTotal > shown.length && (
+          <div className="mt-3 flex items-center justify-center gap-3 text-xs text-slate-500">
+            <span>Showing {shown.length} of {pagedTotal}</span>
+            <button
+              type="button"
+              onClick={() => setVisibleCount((v) => v + REVEAL_STEP * 4)}
+              className="px-3 py-1 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
+            >
+              Show more
+            </button>
+          </div>
+        )}
+        {groups && groups.decided.length > 0 && (
+          <section aria-label="Decided by you" className="mt-3">
+            <GroupAction expanded={decidedOpen} onClick={() => setDecidedOpen((v) => !v)}>
+              Decided by you{count(groups.decided.length)} · {decidedOpen ? 'Hide' : 'Show'}
+            </GroupAction>
+            {decidedOpen && <div className="mt-2">{rows(groups.decided, true)}</div>}
+          </section>
+        )}
+      </div>
       {/* Right-side review panel — the expanded paper detail, sticky beside the list
           on desktop. Narrower than the list, so the queue stays usable. */}
       {expandedItem && isDesktop && (
@@ -597,22 +621,11 @@ export default function ReadNextView({
           onSaved={saveExpanded}
           onNotesDirtyChange={setNotesDirty}
           onQueueRefresh={refreshExpanded}
+          why={whyHere(expandedItem)}
           variant="desktop"
         />
       )}
       </div>
-      {items.length > shown.length && (
-        <div className="mt-3 flex items-center justify-center gap-3 text-xs text-slate-500">
-          <span>Showing {shown.length} of {items.length}</span>
-          <button
-            type="button"
-            onClick={() => setVisibleCount((v) => v + REVEAL_STEP * 4)}
-            className="px-3 py-1 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
-          >
-            Show more
-          </button>
-        </div>
-      )}
     </div>
   );
 }

@@ -55,7 +55,7 @@ export const PRIORITY_BY_KEY = {
 // not the user's head (Tesler's Law).
 export const ANNOTATE_HINT_KEY = 'annotate_hint_dismissed_v1';
 export const ANNOTATE_HINT_TEXT =
-  'Select & label: give papers you’ve read your own verdict — must / should / could / not interested '
+  'My verdicts: give papers you’ve read your own verdict — must / should / could / not interested '
   + '(keys 1–4 · j/k to move between papers). It starts on one verdict group at a time; '
   + 'pick another chip to see the rest. Your verdict is saved as a label and mirrored to Zotero as a note; retraining is manual, in Ops.';
 
