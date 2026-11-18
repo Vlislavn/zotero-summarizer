@@ -67,7 +67,8 @@ export const EMPTY_FILTERS = {
   bands: [],        // multi-select subset of BANDS; [] = all bands
   prestige: 'any',  // any | high | low | new
   goal: 'any',      // any | high | low
-  quality: 'any',   // any | high (deep-review grade A/B) | low (C/D); the "quality papers" filter
+  quality: 'any',   // any | high (deep-review grade A/B) | low (C/D) | nr (no grade: not reviewed)
+  code: 'any',      // any | found (code link found) | none (reviewed, no link) | nr (not reviewed)
   venue: '',        // exact journal/venue name; '' = any
 };
 
@@ -78,6 +79,7 @@ export function isFilterActive(f) {
     || f.prestige !== 'any'
     || f.goal !== 'any'
     || f.quality !== 'any'
+    || f.code !== 'any'
     || (f.venue && f.venue.length > 0)
   );
 }
@@ -133,6 +135,26 @@ export function goalHighKeys(items, pct = 0.66) {
   return new Set(withSim.filter((i) => i.goal_sim >= cut).map((i) => i.item_key));
 }
 
+// A paper's code bucket, from the row's `has_code` (true found · false reviewed, no link · null not reviewed).
+const codeBucket = (it) => (it.has_code === true ? 'found' : it.has_code === false ? 'none' : 'nr');
+const rigorBucket = (it) => {
+  const grade = String(it.quality_grade || '').toUpperCase();
+  return grade === 'A' || grade === 'B' ? 'high' : grade === 'C' || grade === 'D' ? 'low' : 'nr';
+};
+
+// Rows per bucket of the facets that come from a deep review or the goal signal, so a chip says how many it
+// keeps BEFORE the click and the buckets add up to the list (Rigor and Code: the papers without a review are
+// their own `nr` bucket, never silently dropped). Goals: strong / weak among rows that carry goal_sim.
+export function facetCounts(items, goalHigh = new Set()) {
+  const c = { rigor: { high: 0, low: 0, nr: 0 }, code: { found: 0, none: 0, nr: 0 }, goal: { high: 0, low: 0 } };
+  for (const it of items || []) {
+    c.rigor[rigorBucket(it)] += 1;
+    c.code[codeBucket(it)] += 1;
+    if (typeof it.goal_sim === 'number') c.goal[goalHigh.has(it.item_key) ? 'high' : 'low'] += 1;
+  }
+  return c;
+}
+
 // Build an O(1)-per-row predicate. ctx = { goalHigh: Set, prestigeFloor: number|null }.
 export function buildPredicate(filters, ctx) {
   const f = filters || EMPTY_FILTERS;
@@ -161,14 +183,10 @@ export function buildPredicate(filters, ctx) {
     if (f.goal === 'high' && !(typeof it.goal_sim === 'number' && goalHigh.has(it.item_key))) return false;
     if (f.goal === 'low' && !(typeof it.goal_sim === 'number' && !goalHigh.has(it.item_key))) return false;
 
-    // Deep-review quality grade (only set on reviewed rows). When the filter is on,
-    // un-reviewed (ungraded) rows match neither high nor low — i.e. "quality papers"
-    // shows only the deep-reviewed, well-graded ones.
-    if (f.quality && f.quality !== 'any') {
-      const g = String(it.quality_grade || '').toUpperCase();
-      if (f.quality === 'high' && !(g === 'A' || g === 'B')) return false;
-      if (f.quality === 'low' && !(g === 'C' || g === 'D')) return false;
-    }
+    // Deep-review quality grade (only set on reviewed rows): the ungraded rows are the `nr` bucket,
+    // so choosing A/B or C/D hides them in plain sight (the sheet shows their count), not silently.
+    if (f.quality && f.quality !== 'any' && rigorBucket(it) !== f.quality) return false;
+    if (f.code && f.code !== 'any' && codeBucket(it) !== f.code) return false;
 
     return true;
   };
@@ -182,6 +200,7 @@ export function serializeFilters(f) {
   if (f.prestige && f.prestige !== 'any') out.pr = f.prestige;
   if (f.goal && f.goal !== 'any') out.g = f.goal;
   if (f.quality && f.quality !== 'any') out.q = f.quality;
+  if (f.code && f.code !== 'any') out.code = f.code;
   if (f.venue) out.vn = f.venue;
   return out;
 }
@@ -191,9 +210,10 @@ export function hydrateFilters(searchParams) {
   const bands = (get('b') || '').split(',').filter((x) => BANDS.includes(x));
   const prestige = ['high', 'low', 'new'].includes(get('pr')) ? get('pr') : 'any';
   const goal = ['high', 'low'].includes(get('g')) ? get('g') : 'any';
-  const quality = ['high', 'low'].includes(get('q')) ? get('q') : 'any';
+  const quality = ['high', 'low', 'nr'].includes(get('q')) ? get('q') : 'any';
+  const code = ['found', 'none', 'nr'].includes(get('code')) ? get('code') : 'any';
   const venue = get('vn') || '';
-  return { bands, prestige, goal, quality, venue };
+  return { bands, prestige, goal, quality, code, venue };
 }
 
 // ---------- Zotero-column sort (explicit user sort over the loaded queue) ------

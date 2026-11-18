@@ -6,11 +6,11 @@ import {
 } from '../utils/relevanceBands.js';
 
 // Everything that narrows or orders the Library list, and its URL: the server scope (collection `c`,
-// tag `t`, search text `text`, Show read `rd=1`) and the client filters and sort (`b pr g q vn`, `s sd`).
+// tag `t`, search text `text`, Show read `rd=1`) and the client filters and sort (`b pr g q code vn`, `s sd`).
 // The state is the source;
 // an effect mirrors it into the URL (`replace`, defaults omitted, other keys such as `open` kept).
 // `w` (the retired Why filter) is no longer read: an old link loses it on open, and so does any unknown value.
-const OWN_KEYS = ['c', 't', 'text', 'rd', 'b', 'pr', 'g', 'w', 'q', 'vn', 's', 'sd'];
+const OWN_KEYS = ['c', 't', 'text', 'rd', 'b', 'pr', 'g', 'w', 'q', 'code', 'vn', 's', 'sd'];
 const canon = (params) => [...params].map(([k, v]) => `${k}=${v}`).sort().join('&');
 
 // `onScopeChange` runs when the collection or tag is picked (the page drops its row selection).

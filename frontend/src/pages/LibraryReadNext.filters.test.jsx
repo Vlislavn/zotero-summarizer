@@ -69,6 +69,7 @@ it('has one Clear all, and it resets the scope and the smart filters together', 
 it('Model guess chips carry their counts and filter the list', async () => {
   open('/library');
   await screen.findByText('Alpha');
+  fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
 
   for (const label of ['must 1', 'should 1', 'could 2']) {
     expect(screen.getByText(label)).toBeTruthy();

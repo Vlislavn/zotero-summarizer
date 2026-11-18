@@ -4,7 +4,8 @@ import { BAND_LABEL, DEFAULT_SORT, SORT_FIELDS } from '../../utils/relevanceBand
 // `f` is the useLibraryFilters value; the smart filters count only while the model is ready
 // (otherwise the list is not filtered by them).
 const GOAL = { high: 'strong', low: 'weak' };
-const RIGOR = { high: 'A/B', low: 'C/D' };
+const RIGOR = { high: 'A/B', low: 'C/D', nr: 'Not reviewed' };
+const CODE = { found: 'found', none: 'no link', nr: 'Not reviewed' };
 
 function chips(f, collectionName, modelReady) {
   const { clientFilters: cf, setClientFilters, sort } = f;
@@ -18,6 +19,7 @@ function chips(f, collectionName, modelReady) {
     cf.bands.forEach((b) => add(`Model guess ${BAND_LABEL[b]}`, () => setClientFilters({ ...cf, bands: cf.bands.filter((x) => x !== b) })));
     if (cf.goal !== 'any') add(`Goals ${GOAL[cf.goal]}`, () => setClientFilters({ ...cf, goal: 'any' }));
     if (cf.quality !== 'any') add(`Rigor ${RIGOR[cf.quality]}`, () => setClientFilters({ ...cf, quality: 'any' }));
+    if (cf.code !== 'any') add(`Code ${CODE[cf.code]}`, () => setClientFilters({ ...cf, code: 'any' }));
     if (cf.prestige !== 'any') add(`Prestige ${cf.prestige}`, () => setClientFilters({ ...cf, prestige: 'any' }));
     if (cf.venue) add(`Journal ${cf.venue}`, () => setClientFilters({ ...cf, venue: '' }));
   }

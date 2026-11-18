@@ -87,8 +87,9 @@ it.each([
       fireEvent.click(checkbox);
     }
     if (filter === 'quality') {
-      fireEvent.click(screen.getByText('Browse & filter'));
-      fireEvent.click(screen.getByRole('button', { name: 'A/B', exact: true }));
+      fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+      fireEvent.click(screen.getByRole('button', { name: 'A/B 1' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Show 1 paper' }));
     } else if (filter === 'search') {
       const input = screen.getByPlaceholderText(/^Search by meaning/);
       fireEvent.change(input, { target: { value: 'Alpha' } });
