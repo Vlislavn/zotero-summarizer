@@ -78,7 +78,7 @@ function ReviewZone({ deep, runner, sectionOverlay, itemKey, onFeedbackActive })
   const showReview = reviewed && !running;
   const facts = <PaperFactsCard cardKey={itemKey} variant="paper" rubric={deep?.quality?.rubric} />;
   const review = showReview && <PaperReview deep={settling ? { ...deep, review_freshness: null } : deep} flat sectionOverlay={sectionOverlay} facts={facts}
-    methodCard={<MethodCard itemKey={itemKey} codeLink={deep.code_link} />}
+    methodCard={<MethodCard itemKey={itemKey} />}
     evidence={<EvidenceFold itemKey={itemKey} lost={deep.not_established_fields || []} />}
     onRegenerate={runner.checkingStatus ? null : () => runner.run()} />;
   return (

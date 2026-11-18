@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { buildMethodCard, fetchMethodCard } from '../../../api/libraryApi.js';
 import Button from '../../ui/Button.jsx';
 import Spinner from '../../ui/Spinner.jsx';
-import CodeLink from './CodeLink.jsx';
 
 // "How it works": the paper's mechanism, what it was compared against, what the authors claim is new
 // and how to repeat it — each row tied to a sentence that exists in the paper (opened by its §).
@@ -45,7 +44,7 @@ function Row({ children, row }) {
   return <div>{children}<Ref section={row.section} quote={row.quote} /></div>;
 }
 
-function CardBody({ card, codeLink }) {
+function CardBody({ card }) {
   const { core_idea: core, compared = [], novelty, reuse = [], caveat, use_when: useWhen } = card;
   return (
     <dl className="space-y-4">
@@ -75,7 +74,6 @@ function CardBody({ card, codeLink }) {
             ))}
           </ol>
         )}
-        {codeLink && <CodeLink codeLink={codeLink} />}
       </Block>
       {useWhen && <Block label="Use it when"><p>{useWhen}</p></Block>}
     </dl>
@@ -93,7 +91,7 @@ function useCountdown(seconds) {
   return left;
 }
 
-export function MethodCardView({ data, onBuild, building = false, buildError = '', codeLink = null }) {
+export function MethodCardView({ data, onBuild, building = false, buildError = '' }) {
   const [expanded, setExpanded] = useState(false);
   const wait = useCountdown(data.retry_in_seconds || 0);
   const card = data.card;
@@ -102,7 +100,7 @@ export function MethodCardView({ data, onBuild, building = false, buildError = '
   if (data.state === 'ready' && card) {
     body = (
       <div className="space-y-3">
-        {expanded ? <CardBody card={card} codeLink={codeLink} /> : <p>{card.short_text}</p>}
+        {expanded ? <CardBody card={card} /> : <p>{card.short_text}</p>}
         <button type="button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}
           className="min-h-11 rounded px-1 text-[13px] font-medium text-forest-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest-400">
           {expanded ? 'Collapse \u25B4' : 'Expand \u25BE'}
@@ -133,7 +131,7 @@ export function MethodCardView({ data, onBuild, building = false, buildError = '
   );
 }
 
-export default function MethodCard({ itemKey, codeLink = null }) {
+export default function MethodCard({ itemKey }) {
   const queryClient = useQueryClient();
   const key = ['method-card', itemKey];
   const query = useQuery({
@@ -146,5 +144,5 @@ export default function MethodCard({ itemKey, codeLink = null }) {
   // Nothing to say until the server answers, and no card for a paper that has no review to read from.
   if (!data || data.reason === 'no_review') return null;
   return <MethodCardView data={data} onBuild={() => build.mutate()} building={build.isPending}
-    buildError={build.isError ? 'Could not start the build. Check the connection and try again.' : ''} codeLink={codeLink} />;
+    buildError={build.isError ? 'Could not start the build. Check the connection and try again.' : ''} />;
 }
