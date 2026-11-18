@@ -4,6 +4,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ## [Unreleased]
 
+- Items the app adds to Zotero: a feed's whole author list in one string now becomes one creator per author (and no creator name exceeds 255 chars), so Zotero sync no longer rejects them («creator name … too long to sync»). Items already stored are repaired separately.
 - Conferences tab (ASCO 2026): you list conferences in `data/conferences/config.yaml`; **Update** (after «≈N requests» is shown) downloads the Crossref list; Late-breaking, then all abstracts with title search; abstracts stay local, outside the paper pool; no scoring, no model.
 - Paper page: «How it works» card (core idea, compared against, what's new, reuse) built on request; every row is tied to a quote found in the paper; «Novelty N/5» is no longer shown.
 - Library → Read next («Best match»): an **Order** list (Balanced, Relevance, My goals, Rigor first, Custom sliders) re-sorts the list on this device, plus a «Why here» button per row. Balanced is the server order; Zotero ranks, «Review top N» and Today are unchanged. Response grows ≈5 %.
