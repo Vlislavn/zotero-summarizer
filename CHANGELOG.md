@@ -4,6 +4,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ## [Unreleased]
 
+- Library: list shortcuts no longer act behind an open confirmation sheet; Add to collection and Mark read now ask before writing to Zotero.
+- Changed: Library on a phone starts higher — no subtitle, tabs in the title row, one status row with a small Library jobs control, one Order row (shares line behind ⓘ), Your must read shows 2 rows.
+- Library: Back from the full review page now scrolls the list to the open paper's row (also past the first 60 rows and in the Decided group); an off-screen row lands in the top third of the screen.
 - Library → Read next: grouped «Your must read · N» (3 rows + Show all) / «To decide · N» / collapsed «Decided by you», also offline; new row (signal line, AI summary, one state label); the per-row ℹ, «Why here» and Confirm/Override card are gone (the suggestion is a quiet chip).
 - Library: the Why filter, duplicate Clear buttons and Find / Review queue captions are gone; «Select & label» is now «My verdicts» (its filter pills use the shared vocabulary; overwriting a verdict saves with an 8 s Undo toast or `z`, no confirmation).
 - Phone navigation is a single row; Settings and Ops moved behind ⋯; every page has exactly one heading.
