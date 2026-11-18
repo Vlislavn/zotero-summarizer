@@ -138,3 +138,11 @@ def order_unread_semantic(
         "reranked": bool(status.get("reranked")),
         "reranker_loading": bool(status.get("reranker_loading")),
     }
+
+
+def match_read_semantic(search: str, read: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The read rows that match ``search`` by meaning (best first); none when nothing
+    ranks. Read rows bypass the reader's substring filter in "Meaning" mode, so
+    ``include_read`` would otherwise append every read paper after the results."""
+    matched, flags = order_unread_semantic(search, read)
+    return matched if flags["semantic"] else []

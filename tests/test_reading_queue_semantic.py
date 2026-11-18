@@ -132,3 +132,43 @@ def test_semantic_reranker_loading_flag(monkeypatch):
                  {"reranked": False, "reranker_loading": True, "semantic_unavailable": False})
     res = reading_queue.build_reading_queue(search="x", semantic=True)
     assert res["reranker_loading"] is True and res["reranked"] is False and res["semantic"] is True
+
+
+class _SubstringReader(_FakeReader):
+    """Like the real reader: a ``search`` argument keeps only rows whose title contains it."""
+
+    def get_all_items(self, *, collection_key=None, search=None, tag=None, page_size=500, include_abstract=True):
+        res = super().get_all_items(collection_key=collection_key, search=search, tag=tag)
+        if search:
+            res["items"] = [i for i in res["items"] if search.lower() in i["title"].lower()]
+        return res
+
+
+def test_semantic_unavailable_returns_exact_text_matches_only(monkeypatch):
+    # The banner promises "exact text matches": corpus off / no candidates must not return the whole queue.
+    reader = _SubstringReader([_item("A"), _item("B"), {**_item("C"), "title": "brain atlas"}])
+    _patch_state(monkeypatch, reader, _FakeGate("sha"))
+    _seed("sha", A=2.0, B=4.0, C=3.0)
+    _fake_hybrid(monkeypatch, [], {},
+                 {"reranked": False, "reranker_loading": False, "semantic_unavailable": True})
+    res = reading_queue.build_reading_queue(search="brain", semantic=True)
+    assert res["semantic"] is False and res["semantic_unavailable"] is True
+    assert [i["item_key"] for i in res["items"]] == ["C"]
+    assert res["total_unread"] == 1
+    none = reading_queue.build_reading_queue(search="zzzzqq", semantic=True)
+    assert none["items"] == [] and none["total_unread"] == 0 and none["semantic_unavailable"] is True
+
+
+def test_semantic_include_read_filters_read_rows_by_the_query(monkeypatch):
+    read = lambda key: {**_item(key), "tags": ["👀"]}  # noqa: E731
+    reader = _FakeReader([_item("A"), _item("B"), read("R1"), read("R2")])
+    _patch_state(monkeypatch, reader, _FakeGate("sha"))
+    _seed("sha", A=2.0, B=4.0)
+
+    def _hybrid(q, keys, **kw):  # only R2 and A match "brain"
+        ordered = [k for k in ("R2", "A") if k in keys]
+        return ordered, {k: 0.5 for k in ordered}, {
+            "reranked": False, "reranker_loading": False, "semantic_unavailable": not ordered}
+    monkeypatch.setattr(search_mod, "hybrid_search", _hybrid)
+    res = reading_queue.build_reading_queue(search="brain", semantic=True, include_read=True)
+    assert [i["item_key"] for i in res["items"]] == ["A", "R2"]   # R1 does not match the query

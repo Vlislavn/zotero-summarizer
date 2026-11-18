@@ -402,6 +402,17 @@ def build_reading_queue(
         unread, read, search=search, semantic_requested=semantic_requested,
         model_ready=model_ready,
     )
+    if semantic_requested and not search_flags.get("semantic"):
+        # Corpus off / no candidates: the UI promises "exact text matches", so
+        # answer with the reader's substring filter, not the whole queue.
+        exact = build_reading_queue(
+            include_read=include_read, limit=limit, refresh=refresh, collection=collection,
+            tag=tag, search=search, include_abstract=include_abstract,
+        )
+        return {**exact, "semantic_unavailable": True}
+    if semantic_requested and include_read:
+        from zotero_summarizer.services.library import _search
+        read = _search.match_read_semantic(search, read)
 
     # Compute ONLY on an explicit refresh (Rescore). A prior crash (last_error
     # set) is surfaced and not auto-retried — Rescore clears it.
