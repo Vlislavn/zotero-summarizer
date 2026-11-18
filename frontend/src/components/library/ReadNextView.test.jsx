@@ -12,11 +12,12 @@ vi.mock('../../hooks/usePaperReview.js', () => ({ default: () => ({ detail: null
 
 import ReadNextView from './ReadNextView.testkit.jsx';
 
-function setViewport({ desktop }) {
+// `desktop`: the ≥1024 px split view; `phone`: below Tailwind's `sm` (640 px).
+function setViewport({ desktop, phone = false }) {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
     value: vi.fn().mockImplementation((query) => ({
-      matches: desktop,
+      matches: query.includes('max-width') ? phone : desktop,
       media: query,
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
@@ -244,6 +245,20 @@ describe('ReadNextView groups', () => {
     // The old counts sentence and the repeated «You: must read» are gone.
     expect(screen.queryByText('About these counts')).toBeNull();
     expect(screen.queryByText(/You: Must read/)).toBeNull();
+  });
+
+  it('on a phone shows 2 of 23 Must read rows and keeps «Show all 23»', () => {
+    setViewport({ desktop: false, phone: true });
+    renderView({ items: [...must(23), ...items] });
+
+    expect(screen.getByRole('heading', { name: 'Your must read · 23' })).toBeTruthy();
+    expect(screen.getByText('Must paper 1')).toBeTruthy();
+    expect(screen.queryByText('Must paper 2')).toBeNull();
+    expect(screen.queryByText('AI summary:')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 23' }));
+    expect(screen.getByText('Must paper 22')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Show fewer' }));
+    expect(screen.queryByText('Must paper 2')).toBeNull();
   });
 
   it('keeps decided papers behind one «Decided by you · N · Show» press', () => {

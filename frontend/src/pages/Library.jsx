@@ -51,33 +51,35 @@ export default function Library() {
 
   return (
     <div>
-      <PageTitle title="Library" page="library" />
-      <div
-        role="tablist"
-        aria-label="Library modes"
-        className="flex flex-wrap gap-1.5 mb-4"
-      >
-        {MODES.map((m) => {
-          const active = m.id === mode;
-          return (
-            <button
-              key={m.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => selectMode(m.id)}
-              className={[
-                'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border',
-                active
-                  ? 'bg-forest-800 text-white border-forest-800'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100',
-              ].join(' ')}
-            >
-              {m.label}
-            </button>
-          );
-        })}
-      </div>
+      <PageTitle
+        title="Library"
+        page="library"
+        phoneSubtitle={false}
+        actions={(
+          <div role="tablist" aria-label="Library modes" className="flex gap-1.5">
+            {MODES.map((m) => {
+              const active = m.id === mode;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => selectMode(m.id)}
+                  className={[
+                    'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border',
+                    active
+                      ? 'bg-forest-800 text-white border-forest-800'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100',
+                  ].join(' ')}
+                >
+                  {m.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      />
       {mode === 'batch' ? <AnnotationVerdict /> : <LibraryReadNext />}
     </div>
   );

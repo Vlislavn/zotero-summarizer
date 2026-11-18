@@ -600,6 +600,7 @@ export default function LibraryReadNext() {
   return (
     <div>
       {confirmDialog}
+      <div data-testid="library-status-row" className="my-2 flex flex-wrap items-center gap-2">
       <LibraryStatusLine ctx={statusCtx} handlers={statusHandlers} />
       <LibraryJobsPanel
         ctx={statusCtx}
@@ -614,6 +615,7 @@ export default function LibraryReadNext() {
           stopping: autoReview.stopping, coolCount: coolUndecided, proposedCount, queueAtLimit: queue.length >= QUEUE_LIMIT,
         }}
       />
+      </div>
       {/* ----- Single full-width Read-next surface (Stage 2). Collections, tags and
           smart filters are one «Filter» sheet beside the search, so the ranked
           queue owns the whole width; two regions (find, then the list), one outer
@@ -633,7 +635,7 @@ export default function LibraryReadNext() {
               onKeyUp={(e) => { if (e.key === 'Enter') applySearch(); }}
               disabled={!serverAvailable}
               placeholder={serverAvailable ? 'Search by meaning… (e.g. hallucination mitigation)' : sayUnavailable('Meaning search needs the Mac (offline)')}
-              className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+              className="min-h-11 flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 sm:min-h-0"
             />
             <button
               type="button"

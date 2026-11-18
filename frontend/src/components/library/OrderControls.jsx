@@ -10,7 +10,8 @@ const BTN = 'px-1.5 py-0.5 rounded-md border border-slate-300 text-[11px] text-s
 // ONE «Order» list: the presets, then the Zotero fields (same names as Zotero's columns). A field also
 // writes the direction (arrow button); a preset puts the list back to the ranked order. With `reason`
 // the presets are disabled and «Best match» (the server order) stands in as the way back.
-export function OrderControl({ order, meta, sort, reason, onOrderChange, onSortChange }) {
+// `caption`: the shares line, handed in on a phone, where it waits behind ⓘ instead of taking a row of its own.
+export function OrderControl({ order, meta, sort, reason, caption = null, onOrderChange, onSortChange }) {
   const [infoOpen, setInfoOpen] = useState(false);
   const field = sort.field !== DEFAULT_SORT.field;
   const value = field ? `field:${sort.field}` : reason ? 'best' : `preset:${order.preset}`;
@@ -29,7 +30,7 @@ export function OrderControl({ order, meta, sort, reason, onOrderChange, onSortC
         <select
           value={value}
           onChange={(e) => choose(e.target.value)}
-          className={BTN}
+          className={`${BTN} min-h-11 sm:min-h-0`}
           aria-label="Order"
           aria-describedby={reason ? 'order-reason' : undefined}
         >
@@ -58,12 +59,17 @@ export function OrderControl({ order, meta, sort, reason, onOrderChange, onSortC
         onClick={() => setInfoOpen((v) => !v)}
         aria-expanded={infoOpen}
         aria-label="What does Order change?"
-        className="w-5 h-5 rounded-full text-[11px] leading-none text-slate-500 hover:bg-slate-100"
+        className="h-11 w-11 rounded-full text-sm leading-none text-slate-500 hover:bg-slate-100 sm:h-5 sm:w-5 sm:text-[11px]"
       >
         ⓘ
       </button>
       {reason && <span id="order-reason" className="text-[11px] text-slate-500">{reason}</span>}
-      {infoOpen && <span role="note" className="basis-full text-[11px] text-slate-500">{ORDER_INFO}</span>}
+      {infoOpen && (
+        <span role="note" className="basis-full text-[11px] text-slate-500">
+          {caption && <span className="mb-1 block text-slate-600">{caption}</span>}
+          {ORDER_INFO}
+        </span>
+      )}
     </span>
   );
 }

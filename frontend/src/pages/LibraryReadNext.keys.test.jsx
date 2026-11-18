@@ -31,7 +31,7 @@ const verdicts = () => golden.submitVerdict.mock.calls.map(([body]) => `${body.i
 
 function setViewport(desktop) {
   window.matchMedia = vi.fn().mockImplementation((query) => ({
-    matches: desktop, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(),
+    matches: query.includes('max-width') ? false : desktop, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(),
   }));
 }
 

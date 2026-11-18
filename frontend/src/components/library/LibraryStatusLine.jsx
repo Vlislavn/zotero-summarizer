@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import Spinner from '../ui/Spinner.jsx';
 import { libraryStatus } from './libraryStatus.js';
 
-// The page's one status line under the tabs, plus the empty-list message. Both render a
+// The page's one status line (it shares a row with the Library jobs control, so it fills what is left), plus the empty-list message. Both render a
 // {text, action} from libraryStatus.js: errors announce at once (role="alert") and say «Error»,
 // the rest wait their turn (role="status"); a warning says «Warning» — severity never rests on colour alone.
 const TONE = {
@@ -27,7 +27,7 @@ function Message({ message, handlers }) {
       data-testid="library-status"
       data-state={message.id}
       role={message.tone === 'error' ? 'alert' : 'status'}
-      className={`my-2 flex flex-wrap items-center gap-x-2 rounded-lg border px-3 py-1.5 text-xs ${tone.box}`}
+      className={`flex min-w-0 flex-1 flex-wrap items-center gap-x-2 rounded-lg border px-3 py-1.5 text-xs ${tone.box}`}
     >
       {message.busy && <Spinner size="sm" color="teal" />}
       <p className="min-w-0 flex-1 py-1">

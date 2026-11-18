@@ -10,11 +10,16 @@ export const PAGE_PURPOSE = {
   conferences: 'Late-breaking and all abstracts of conferences you define — stored only on this computer.',
 };
 
-export default function PageTitle({ title, page, children }) {
+// `actions` sits at the right of the title (the Library's mode tabs), so the title row is one row.
+// `phoneSubtitle={false}` drops the purpose line below 640 px, where the list should start higher.
+export default function PageTitle({ title, page, actions = null, phoneSubtitle = true, children }) {
   return (
     <header className="mb-3">
-      <h1 className="font-display text-2xl font-light text-forest-800">{title}</h1>
-      <p className="text-sm text-slate-600">{PAGE_PURPOSE[page]}</p>
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <h1 className="font-display text-2xl font-light text-forest-800">{title}</h1>
+        {actions}
+      </div>
+      <p className={`text-sm text-slate-600 ${phoneSubtitle ? '' : 'hidden sm:block'}`}>{PAGE_PURPOSE[page]}</p>
       {children}
     </header>
   );

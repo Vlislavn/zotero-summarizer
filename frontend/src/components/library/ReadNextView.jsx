@@ -22,8 +22,10 @@ import { readStorage } from '../../utils/safeStorage.js';
 // Read/handled items are hidden unless toggled. An opt-in "Select" mode reveals
 // checkboxes for bulk triage (the merged Browse/triage flow), kept secondary.
 const REVEAL_STEP = 60;  // rows revealed initially and per "Show more" click
-const MUST_PREVIEW = 3;  // your own Must read rows shown before "Show all"
+const MUST_PREVIEW = 3;  // your own Must read rows shown before "Show all" (2 on a phone: the first undecided paper stays near the top)
+const MUST_PREVIEW_PHONE = 2;
 const DESKTOP_QUERY = '(min-width: 1024px)';
+const PHONE_QUERY = '(max-width: 639px)';  // Tailwind's `sm` starts at 640
 // Keys (F-final-plan §3.4): 1–4 are the pills left to right; the rows and the pills keep the keys after a click focused them.
 const KEY_PRIORITY = Object.fromEntries(DECISIONS.map(([priority], i) => [i + 1, priority]));
 const KEYS_FROM = '[data-row-key] button, [data-verdict-bar] button';
@@ -124,6 +126,8 @@ export default function ReadNextView({
   const orderOn = Boolean(orderMeta && onOrderChange && sort.field === 'best');  // a Zotero field replaces the preset
   const listRef = useRef(null);
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
+  const phone = useMediaQuery(PHONE_QUERY);
+  const mustPreview = phone ? MUST_PREVIEW_PHONE : MUST_PREVIEW;
   // Target for the bulk "Add to collection" action. Defaults to the last-used
   // collection (validated against the current list) so the routine "send picks
   // to my reading collection" is select → one click.
@@ -242,7 +246,7 @@ export default function ReadNextView({
     if (!was || openKey) return;
     const inMust = groups ? groups.must.findIndex((it) => it.item_key === was) : -1;
     const inTodo = (groups ? groups.todo : items).findIndex((it) => it.item_key === was);
-    if (inMust >= MUST_PREVIEW) setMustAll(true);
+    if (inMust >= mustPreview) setMustAll(true);
     if (inTodo >= 0) setVisibleCount((n) => Math.max(n, inTodo + 1));
     if (groups?.decided.some((it) => it.item_key === was)) setDecidedOpen(true);
     setReturnKey(was);
@@ -337,6 +341,7 @@ export default function ReadNextView({
               reason={presetsOffReason({ offline, searching: Boolean(searchQuery.trim()), modelReady, hasMeta: Boolean(orderMeta) })}
               onOrderChange={onOrderChange}
               onSortChange={onSortChange}
+              caption={phone && orderOn && sort.field === 'best' ? <OrderCaption order={order} meta={orderMeta} /> : null}
             />
           )}
           {sort.field === 'best' && (
@@ -354,7 +359,7 @@ export default function ReadNextView({
               : searchQuery.trim() && semanticUnavailable
                 ? <span data-testid="search-caption">· exact text matches for “{searchQuery}” — meaning search is off</span>
               : (modelReady
-                ? orderOn ? <OrderCaption order={order} meta={orderMeta} /> : (
+                ? orderOn ? (phone ? null : <OrderCaption order={order} meta={orderMeta} />) : (
                   <span title="Best first: your own Must read papers, then model relevance + goal match + author/venue and quality evidence. Review suggestions do not affect this order.">
                     · relevance + goals + evidence
                   </span>
@@ -426,7 +431,7 @@ export default function ReadNextView({
         {groups && groups.must.length > 0 && (
           <section aria-label="Your must read">
             <GroupHeader
-              action={groups.must.length > MUST_PREVIEW && (
+              action={groups.must.length > mustPreview && (
                 <GroupAction expanded={mustAll} onClick={() => setMustAll((v) => !v)}>
                   {mustAll ? 'Show fewer' : `Show all${offline ? '' : ` ${groups.must.length}`}`}
                 </GroupAction>
@@ -434,7 +439,7 @@ export default function ReadNextView({
             >
               Your must read{count(groups.must.length)}
             </GroupHeader>
-            {rows(mustAll ? groups.must : groups.must.slice(0, MUST_PREVIEW), false)}
+            {rows(mustAll ? groups.must : groups.must.slice(0, mustPreview), false)}
           </section>
         )}
         {groups && <GroupHeader>To decide{count(groups.todo.length)}</GroupHeader>}

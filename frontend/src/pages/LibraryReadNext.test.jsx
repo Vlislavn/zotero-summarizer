@@ -196,3 +196,17 @@ it('a clean receipt is not a warning and still names the backup', async () => {
   expect(status().textContent).not.toMatch(/Warning/);
   expect(status().textContent).toMatch(/Backup: \/b\/tags\.sqlite/);
 });
+
+it('shows the status sentence and the Library jobs control in one row; the control opens the panel', async () => {
+  api.fetchReadingQueue.mockResolvedValue({ items: [], model_ready: true, status: 'ready', computed_at: '2026-11-01T00:00:00Z', total_unread: 12, read_hidden: 3 });
+  render(<MemoryRouter><LibraryReadNext /></MemoryRouter>);
+  await flush();
+
+  const row = screen.getByTestId('library-status-row');
+  expect(within(row).getByTestId('library-status')).toBeTruthy();
+  const toggle = within(row).getByRole('button', { name: 'Library jobs' });
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(within(row).getByRole('region', { name: 'Scores' })).toBeTruthy();
+});

@@ -39,6 +39,23 @@ const pick = (value) => fireEvent.change(screen.getByRole('combobox', { name: 'O
 const query = () => screen.getByTestId('query').textContent;
 const labels = (group) => within(screen.getByRole('group', { name: group })).getAllByRole('option').map((o) => o.textContent);
 
+describe('Order on a phone', () => {
+  it('keeps the shares caption behind ⓘ, in one row with Order, and says it on request', () => {
+    vi.stubGlobal('matchMedia', (query) => ({ matches: query.includes('max-width'), media: query, addEventListener() {}, removeEventListener() {} }));
+    try {
+      show();
+      expect(screen.queryByTestId('order-caption')).toBeNull();
+      expect(screen.getByRole('combobox', { name: 'Order' })).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'What does Order change?' }));
+      const note = screen.getByRole('note');
+      expect(within(note).getByTestId('order-caption').textContent).toBe('Balanced · relevance 45% · goals 40% · prestige 15%');
+      expect(note.textContent).toMatch(/★ band/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe('one Order list', () => {
   it('replaces Sort by + Order: presets and Zotero fields in one select, one caption, ★ legend inside ⓘ', () => {
     show();
