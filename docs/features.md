@@ -117,7 +117,7 @@ into any list, offline. No scoring, topics or model. [Code](../zotero_summarizer
 
 **Today** ranks RSS papers against your research goals and lets you **Add** or mark **Not interested**
 them; start and watch backlog triage there, while **Ops** monitors or cancels review jobs
-started from Library. Add requires a current full-text review; Not interested does not. The optional
+started from Library. Add requires a current full-text review; Not interested does not. must / should / could adds the paper to your Zotero Inbox in one tap (if Zotero is open, the Add waits — the banner and toast say to close Zotero and apply it in Ops › Feed review); Not interested adds nothing. Undo takes back the decision, never an item already in Zotero. Deciding a card (must / should / could / Not interested, or the bulk Add / Not interested) removes it from the list at once and shows one toast for 8 s: Undo restores the card undecided in place, and optional reason chips (positive set for must/should/could, negative set for Not interested) are offered in the toast. Decided papers are kept in the retained visit, so they are not re-shortlisted and do not come back on reload; a card that needs attention (failed action, read-marking or note error) stays. Adds that wait for Zotero show only in the banner “N papers wait for Zotero” with a link to Ops › Feed review. When every paper is decided Today says “All caught up”. The optional
 background daemon runs the same pipeline but never adds a paper to Zotero. Abstract-only
 triage never recommends a full read; that decision comes from the full-text review.
 Today also records, locally only (`data/today-exposure/<day>.jsonl`; `ZS_TODAY_EXPOSURE_LOG=0`

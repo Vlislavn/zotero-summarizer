@@ -4,6 +4,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ## [Unreleased]
 
+- Today: a must / should / could pill now also adds the paper to Zotero (one attempt; with Zotero open the Add waits and the toast says so); Undo withdraws only the decision — an item already added stays in Zotero and the toast says so.
+- Today: a decided card now leaves the shortlist and one 8 s Undo toast (with the matching reason chips) replaces the on-card Decision/Undo/Reason block; parked Adds appear only in the “N papers wait for Zotero” banner; “All caught up” when every paper is decided.
+- Today: a saved decision whose Zotero Add is parked now says Zotero must be closed and links to Ops › Feed review; the banner reads “N papers wait for Zotero” and the 3 s polling stops; Undo also releases the parked Add.
 - Library: list shortcuts no longer act behind an open confirmation sheet; Add to collection and Mark read now ask before writing to Zotero.
 - Changed: Library on a phone starts higher — no subtitle, tabs in the title row, one status row with a small Library jobs control, one Order row (shares line behind ⓘ), Your must read shows 2 rows.
 - Library: Back from the full review page now scrolls the list to the open paper's row (also past the first 60 rows and in the Decided group); an off-screen row lands in the top third of the screen.
@@ -79,7 +82,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 - Your decisions (#47, #218): Ops → System analyses your accumulated verdicts (what changed, agreement with saved predictions, per-class ranges, data gaps) with “Run now”; also weekly with the feed daemon (switch in that card). Read-only: labels and models never change.
 - Review depth (#143): Settings choice Thorough (default) or Fast. Fast turns off the digest model's reasoning and runs the rubric once: writing step 50–75% quicker, but wording changed on 3 of 4 test papers and 1 grade changed. Other-depth reviews show as outdated.
 - Paper page: **Evidence** fold (#40) with the verbatim quotes behind each verified claim, grouped by field (read-only `GET /api/library/review-audit/{key}`); summary card with verdict, why, read first, code row; sticky verdict bar; collapsible sections.
-- Today (#37, #124, #151, #159, #163, #165, #172, #183): one column, one «New shortlist», per-card must/should/could/skip with undo and reason chips; decision shown after a verdict; «Not reviewed yet» shelf; outdated reviews get a badge + Regenerate; «k of n checks».
+- Today (#37, #124, #151, #159, #163, #165, #172, #183): one column, one «New shortlist», per-card must/should/could/skip with an Undo toast and reason chips; «Not reviewed yet» shelf; outdated reviews get a badge + Regenerate; «k of n checks».
 - Cards (#98, #108, #114, #127): AI card with TL;DR, key result, novelty/code/h-index strip and one plain why-line naming the goal; ≤4 labelled bullets, English UI; generated ahead for Today's top-15 under per-paper and daily caps and a circuit breaker.
 - Zotero note (#152): carries the whole review: digest fields, rubric with quotes, k of n checks, red flags, overstatements, type, goal board, code link, section lines, verification. Writes still follow approval and a backup.
 - Paper types (#169, #180): `experience_report`; stricter position-paper checklist; «type uncertain» graded by the generic checklist.

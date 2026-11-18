@@ -68,18 +68,24 @@ source tasks open with `?task=`; the old Settings hashes resolve through `LEGACY
   the cards to "Status not current". The members result is kept 5 min (`gcTime`), so a return to
   Today renders it at once and revalidates on mount; only a first load or an invalidated entry
   (verdict/review finished elsewhere, Refresh) shows "Checking…"/disabled until the reply. A review already seen stays ready during that refresh (`reviewReady`); the "needs a review" hint needs `reviewKnown`.
-  A verdict saved on the paper page opened from Today is written into the retained visit and the cached members reply at once (`finishTodayReviewAction`), so the card shows "Decision: X" on return; a skip of a feed-only paper (`feed:…`) does not call reject-tag.
-- Parked Zotero Add (`memberParked`, #205): a saved decision whose item is not in Zotero (`zotero_sync_status='pending'`, nothing retries it) shows
-  «Zotero must be closed» + one link to Ops › Feed review (Apply approved → Zotero); the banner reads «N papers wait for Zotero». Only
-  `memberInFlight` members (an unanswered action, a pending note) are polled every 3 s; parked ones are not. Undo also clears the card's carried review action
-  and the server releases the parked Add (`released_pending_add`), so the four decision buttons return.
+  A verdict saved on the paper page opened from Today is written into the retained visit and the cached members reply at once (`finishTodayReviewAction`), so a decided card is already gone on return; a skip of a feed-only paper (`feed:…`) does not call reject-tag.
+- Decided card (#206, `utils/todayVisit.js` `memberDecided`/`leaves`): a decided member stays in the retained visit (identity, carry,
+  banner) but renders no card unless something needs attention (failed action, read-marking or note error, Retry); when every paper
+  is decided Today says «All caught up». `PaperCard` has no decision/Undo/reason block.
+- `hooks/useTodayDecisionToast.js`: one Undo toast per Today decision (8 s, `components/library/UndoToast.jsx` with the chip set for
+  the decision — optional `chips` prop, default the Not-interested set; positive set for must/should/could). `UndoToast` also has an
+  `info` kind (Dismiss only).
 - A positive Today pill also adds the paper to Zotero (#207, server-side; one attempt per decision, a reasons-only re-submit
-  attempts none). `useTodayDecisionToast` reads the reply: a parked Add (`add_status` `zotero_pending`/`zotero_unavailable`) or an
-  error puts a note under the toast, the banner follows the refreshed member facts. Undo never deletes a Zotero item: when the
-  reply has `item_stays_in_zotero` a short `info` toast (`UndoToast`, Dismiss only) says «Decision withdrawn. “Title” stays in Zotero.»
-- Today per-card decision (#37): `PaperCard` shows must/should/could/Not interested with undo and an
-  optional one-tap reason chip; it posts to `POST /api/daily/verdict` (undo: `/verdict/undo`)
-  and reflects the saved verdict from the member facts. The bulk Add / Not interested bar appears only
+  attempts none). The hook reads the reply: a parked Add (`add_status` `zotero_pending`/`zotero_unavailable`) or an error puts a note
+  under the toast, the banner follows the refreshed member facts. Undo withdraws only the decision, never deletes a Zotero item: when the
+  reply has `item_stays_in_zotero` an `info` toast says «Decision withdrawn. “Title” stays in Zotero.»
+- Parked Zotero Add (`memberParked`, #205): a saved decision whose item is not in Zotero (`zotero_sync_status='pending'`, nothing retries it)
+  is counted in the Today banner «N papers wait for Zotero. Close Zotero, then apply them in Ops › Feed review.» (one link to Ops › Feed
+  review: Apply approved → Zotero; it does not block **New shortlist**) — the link lives in the banner, not on a card. Only
+  `memberInFlight` members (an unanswered action, a pending note) are polled every 3 s; parked ones are not. Undo clears the carried review
+  action and the server releases the parked Add (`released_pending_add`; the reserved `planned_zotero_key` stays as the no-replay guard), so the row returns to the shortlist.
+- Today per-card decision (#37): `PaperCard` shows the must/should/could/Not interested pills; the decision posts to `POST /api/daily/verdict` (undo: `/verdict/undo`)
+  and the saved verdict comes back in the member facts. The bulk Add / Not interested bar appears only
   once ≥1 card is ticked (no always-on 210 px toolbar). **Owner decision (supersedes "keep
   `require_review` current-only"):** must/should/could (and bulk Add) still require a full-text
   review, but a current **or** outdated-same-PDF review now counts — the `require_review`
@@ -87,7 +93,7 @@ source tasks open with `?task=`; the old Settings hashes resolve through `LEGACY
   review keeps the card recommended with a “review outdated” badge and enabled buttons, while a
   missing/invalid/`pdf_changed` review still shows the "needs a review first — Generate" note,
   and Not interested is always available.
-  Reason chips are never pre-ticked and are captured per item, never in a batch.
+  Reason chips (in the toast) are never pre-ticked and are captured per item, never in a batch.
 - Card on Today + paper page (#98, redesigned #124, English + terse TL;DR #127): `components/card/PaperFactsCard.jsx`
   (+ `AiSummary.jsx`, `FactStrip.jsx`, pure `cardModel.js`, `api/cardApi.js`) renders `GET /api/card/{key}` under the
   title. Order: **AI TL;DR** → **fact icon row** → one quiet who-is-behind line. The TL;DR is ≤4 labelled one-line
