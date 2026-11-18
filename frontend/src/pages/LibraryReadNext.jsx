@@ -18,6 +18,8 @@ import ExpandableList from '../components/library/ExpandableList.jsx';
 import LibraryJobsPanel from '../components/library/LibraryJobsPanel.jsx';
 import LibraryStatusLine, { LibraryEmptyState } from '../components/library/LibraryStatusLine.jsx';
 import { emptyState } from '../components/library/libraryStatus.js';
+import { fetchSheet, forceSheet, sendReceipt, sendSheet } from '../components/library/zoteroCopy.js';
+import useConfirmSheet from '../hooks/useConfirmSheet.jsx';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import { useReviewCoolLoop } from '../hooks/useReviewCoolLoop.js';
 import usePendingCount from '../hooks/usePendingCount.js';
@@ -143,6 +145,8 @@ export default function LibraryReadNext() {
   const ftPollRef = useRef(null);
   const [message, setMessage] = useState('');
   const [isError, setIsError] = useState(false);
+  const [warned, setWarned] = useState('');  // the receipt text that carries a warning (it stops being one when the message changes)
+  const [ask, confirmDialog] = useConfirmSheet();
 
   const flatCollections = useMemo(() => flattenCollections(collections), [collections]);
   // Browse list: hide empty leaf collections; two collections with one name show
@@ -455,7 +459,7 @@ export default function LibraryReadNext() {
         const data = await addItemToCollection(key, { collectionKey, force });
         if (data?.requires_force) {
           setAddingToCollection(false);
-          if (window.confirm('Zotero appears to be running. Add anyway? (a backup is taken first)')) {
+          if (await ask(forceSheet(`add ${visibleSelected.size} paper${visibleSelected.size === 1 ? '' : 's'} to “${name}”`))) {
             return await handleAddToCollection(collectionKey, true);
           }
           setMessage(`Cancelled — ${added} of ${visibleSelected.size} added to “${name}”. Close Zotero, then retry.`);
@@ -565,7 +569,9 @@ export default function LibraryReadNext() {
     prestigeFloor: filterCtx.prestigeFloor,
   });
 
-  // One-click Zotero export chain (Tesler: the system owns the rescore→tags→
+  // The sheets name a paper count only when the list is unscoped (then it is the whole library).
+  const libraryCount = !selectedCollection && !selectedTag && !search ? queueMeta.total_unread + queueMeta.read_hidden : 0;
+  // Zotero export chain, after a confirmation sheet (Tesler: the system owns the rescore→tags→
   // ranks sequence the user previously had to remember and order correctly):
   // 1. rescore the library IF the cached scores predate the current model (or
   //    were never computed), waiting on the cheap status poll;
@@ -573,6 +579,7 @@ export default function LibraryReadNext() {
   // Staleness is re-checked from the SERVER at every entry (not the closure),
   // so the force-retry recursion never re-runs a rescore that just finished.
   async function handleSyncAll(force = false) {
+    if (!force && !(await ask(sendSheet({ papers: libraryCount, scoresStale: queueMeta.scores_stale })))) return;
     setSyncingAll(true);
     setMessage('');
     try {
@@ -591,7 +598,7 @@ export default function LibraryReadNext() {
       const tags = await syncRelTags({ force });
       if (tags?.requires_force) {
         setSyncingAll(false);
-        if (window.confirm('Zotero appears to be running. Sync anyway? (a backup is taken first)')) {
+        if (await ask(forceSheet('write the tags and ranks'))) {
           return await handleSyncAll(true);
         }
         setMessage('Sync cancelled — close Zotero, then retry.');
@@ -606,7 +613,7 @@ export default function LibraryReadNext() {
         // Zotero opened BETWEEN the steps; the tag step is idempotent, so a
         // forced rerun of the whole chain is safe and keeps the code one path.
         setSyncingAll(false);
-        if (window.confirm('Zotero opened mid-sync. Finish anyway? (a backup is taken first)')) {
+        if (await ask(forceSheet('finish writing'))) {
           return await handleSyncAll(true);
         }
         setMessage('Tags synced; rank stamping cancelled — close Zotero, then run “Send to Zotero” again.');
@@ -615,12 +622,10 @@ export default function LibraryReadNext() {
       }
       if (ranks?.stale) { setMessage(ranks.message); setIsError(false); return; }
       recordZoteroSync('ranks');
-      setMessage(
-        `Zotero is up to date — ${tags?.tagged || 0} relevance tag(s) refreshed, `
-        + `${ranks?.ranked || 0} papers ranked into Call Number. `
-        + 'In Zotero, sort the Call Number column ascending to read best-first.',
-      );
+      const receipt = sendReceipt(tags, ranks);
+      setMessage(receipt.text);
       setIsError(false);
+      setWarned(receipt.warning ? receipt.text : '');
       loadQueue(false);
     } catch (err) {
       setMessage(`Sync-all failed: ${err.message || err}`);
@@ -631,13 +636,14 @@ export default function LibraryReadNext() {
   }
 
   async function handleFetchFulltext(force = false) {
+    if (!force && !(await ask(fetchSheet({ papers: libraryCount })))) return;
     setFetchingFulltext(true);
     setMessage('');
     try {
       const data = await fetchFulltext({ force });
       if (data?.requires_force) {
         setFetchingFulltext(false);
-        if (window.confirm('Zotero appears to be running. Fetch + attach anyway? (a backup is taken first)')) {
+        if (await ask(forceSheet('fetch and attach the PDFs'))) {
           return await handleFetchFulltext(true);
         }
         setMessage('Full-text fetch cancelled — close Zotero, then retry.');
@@ -671,7 +677,7 @@ export default function LibraryReadNext() {
     scoresStale: queueMeta.scores_stale, unscored, pending,
     // What the page's actions last said (sync, fetch, add to collection, triage, bulk verdict): a job still
     // running shows its progress, a finished one stays until dismissed.
-    receipt: message ? { text: message, error: isError, busy: syncingAll || fetchingFulltext } : null,
+    receipt: message ? { text: message, error: isError, warning: warned === message, busy: syncingAll || fetchingFulltext } : null,
   };
   const empty = emptyState({
     ...base, rows: displayedQueue.length, rawCount: queue.length, hasActiveFilters: queueMeta.model_ready && filtersActive,
@@ -680,7 +686,7 @@ export default function LibraryReadNext() {
   const statusHandlers = {
     sync: () => syncNow(), retry: () => loadQueue(false), reload: () => window.location.reload(),
     rescore: () => loadQueue(true), clearFilters: () => setClientFilters(EMPTY_FILTERS), clearSearch, clearScope,
-    showRead: () => setIncludeRead(true), dismiss: () => { setMessage(''); setIsError(false); },
+    showRead: () => setIncludeRead(true), dismiss: () => { setMessage(''); setIsError(false); setWarned(''); },
   };
 
   // Active scope shown in the collapsed drawer summary so folding it never hides
@@ -693,6 +699,7 @@ export default function LibraryReadNext() {
 
   return (
     <div>
+      {confirmDialog}
       <LibraryStatusLine ctx={statusCtx} handlers={statusHandlers} />
       <LibraryJobsPanel
         ctx={statusCtx}

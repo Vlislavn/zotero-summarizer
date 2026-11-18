@@ -55,7 +55,7 @@ export default function LibraryJobsPanel({ ctx, onRescore, zotero, picks, unavai
           <Job title="Zotero">
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={zotero.onSend} disabled={zotero.syncing} className={PLAIN}
-                title="One click, whole chain: rescore the library if the model changed since, then write zs:rel/<band> relevance tags AND stamp the Call-Number ranks (zr0001…) into Zotero. Backup-first; needs Zotero closed (you'll be asked to force otherwise). Then sort the Call Number column in Zotero.">
+                title="Asks first, then the whole chain: rescore the library if the model changed since, then write zs:rel/<band> relevance tags AND stamp the Call-Number ranks (zr0001…) into Zotero. Backup-first; needs Zotero closed (you'll be asked again otherwise). Then sort the Call Number column in Zotero.">
                 {zotero.syncing ? 'Sending…' : 'Send to Zotero…'}
               </button>
               <button type="button" onClick={zotero.onFetch} disabled={zotero.syncing || zotero.fetching} className={PLAIN}

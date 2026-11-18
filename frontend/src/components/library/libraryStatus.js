@@ -29,7 +29,7 @@ function summary(c) {
 }
 
 // c: {connection 'ok'|'busy'|'mac'|'checking', slow, loading, offline, rows, err, scoringError, computing,
-//     receipt {text, error, busy} (a busy one is a running job's progress: a spinner, nothing to dismiss), modelReady, computedAt, scoresStale, unscored (over the WHOLE queue), pending}
+//     receipt {text, error, warning, busy} (a busy one is a running job's progress: a spinner, nothing to dismiss), modelReady, computedAt, scoresStale, unscored (over the WHOLE queue), pending}
 // → the message, or null while the first answer is still out (nothing true to say yet).
 export function libraryStatus(c) {
   const rows = c.rows || 0;
@@ -53,7 +53,7 @@ export function libraryStatus(c) {
   if (c.loading && rows === 0) return null;
   if (c.computing) return say('computing', 'info', 'Scoring your library… the order updates when it finishes.', null, { busy: true });
   if (c.receipt?.text && c.receipt.busy) return say('receipt', 'info', c.receipt.text, null, { busy: true });
-  if (c.receipt?.text) return say('receipt', c.receipt.error ? 'error' : 'info', c.receipt.text, { id: 'dismiss', label: 'Dismiss' });
+  if (c.receipt?.text) return say('receipt', c.receipt.error ? 'error' : c.receipt.warning ? 'warning' : 'info', c.receipt.text, { id: 'dismiss', label: 'Dismiss' });
   return summary(c);
 }
 

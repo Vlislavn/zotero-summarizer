@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { updateItemTags } from '../../api/libraryApi.js';
 import { decide } from '../../utils/verdictUndo.js';
 import { pretty } from '../../utils/priorityLabels.js';
+import useConfirmSheet from '../../hooks/useConfirmSheet.jsx';
+import { forceSheet, notInterestedSheet } from './zoteroCopy.js';
 
 // Bulk verdict + "mark read" for the Read-next selection bar (L-11): verdicts go through
 // utils/verdictUndo like the detail's pills (surface library_bulk; dont_read queues its ❌ tag after the
@@ -12,10 +14,12 @@ const BTN = 'px-2 py-0.5 rounded-md border border-slate-300 bg-white text-[11px]
 
 export default function BulkVerdictBar({ keys, disabled, onDone, onVerdicts, priorOf }) {
   const [busy, setBusy] = useState(false);
+  const [ask, dialog] = useConfirmSheet();
   const n = keys.length;
 
-  async function apply(label, confirmText, write, landed) {
-    if (!n || (confirmText && !window.confirm(confirmText))) return;
+  // `sheet`: the confirmation to ask first (null = none).
+  async function apply(label, sheet, write, landed) {
+    if (!n || (sheet && !(await ask(sheet)))) return;
     setBusy(true);
     let done = 0;
     try {
@@ -36,7 +40,7 @@ export default function BulkVerdictBar({ keys, disabled, onDone, onVerdicts, pri
     const batch = [];
     return apply(
       `Verdict “${pretty(priority)}”`,
-      priority === 'dont_read' ? `Mark ${n} paper${n === 1 ? '' : 's'} Not interested? Each gets a ❌ tag queued for Zotero.` : '',
+      priority === 'dont_read' ? notInterestedSheet(n) : null,
       async (key) => {
         const handle = decide(key, priority, { prior: priorOf(key), surface: 'library_bulk', keepOpen: batch.length > 0 });
         batch.push({ key, handle });
@@ -49,7 +53,7 @@ export default function BulkVerdictBar({ keys, disabled, onDone, onVerdicts, pri
   const markRead = () => apply('Marked read', '', async (key) => {
     let data = await updateItemTags(key, { addTags: ['👀'] });
     if (data?.requires_force) {
-      if (!window.confirm('Zotero appears to be running. Change tags anyway? (a backup is taken first)')) throw new Error('cancelled');
+      if (!(await ask(forceSheet('change the tags')))) throw new Error('cancelled');
       data = await updateItemTags(key, { addTags: ['👀'], force: true });
     }
     if (data?.requires_force) throw new Error('tag change not applied');
@@ -58,6 +62,7 @@ export default function BulkVerdictBar({ keys, disabled, onDone, onVerdicts, pri
   const off = disabled || busy || n === 0;
   return (
     <span className="inline-flex flex-wrap items-center gap-1" role="group" aria-label="Bulk verdict">
+      {dialog}
       <span className="text-[11px] text-slate-500">{busy ? 'Saving…' : `Set verdict (${n}):`}</span>
       {VERDICTS.map((priority) => (
         <button key={priority} type="button" disabled={off} className={BTN}
