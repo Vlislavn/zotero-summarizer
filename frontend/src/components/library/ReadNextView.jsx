@@ -81,6 +81,7 @@ function useMediaQuery(query) {
 // Backend cap of hybrid meaning search (services/library/_search.py _TOP_N).
 const SEARCH_TOP_N = 50;
 const NO_OPEN = { key: null, open() {}, close() {}, position: null, total: 0, prev: null, next: null };
+const REVEAL_AT = 0.3;  // a row brought into view lands this far down the screen: the top third, where reading starts
 const FLASH_MS = 2000;  // the row you came back from stays highlighted this long
 
 export default function ReadNextView({
@@ -119,7 +120,7 @@ export default function ReadNextView({
   const openKey = openState.key;
   const [notesDirty, setNotesDirty] = useState(false);
   const [leave, setLeave] = useState(null);  // the exit waiting for «Leave without saving?»
-  const [returnKey, setReturnKey] = useState(null);  // row to bring back into view after the detail closes
+  const [returnKey, setReturnKey] = useState(null);  // {key, focus}: the row to bring into view
   const [flashKey, setFlashKey] = useState(null);
   const [mustAll, setMustAll] = useState(false);  // «Show all N» of your own Must read (this visit)
   const [decidedOpen, setDecidedOpen] = useState(false);  // the «Decided by you» block
@@ -237,30 +238,41 @@ export default function ReadNextView({
       else guarded(() => (key === openKey ? openState.close() : openState.open(key)));
     };
   });
-  // When the detail closes, the paper's row must be on screen: make sure it is rendered (the list
-  // reveals in chunks and folds groups), then scroll to it, focus it and mark it for a moment.
+  // The open paper's row must be on screen when the detail closes and when the page is entered with
+  // `?open=KEY` (a link, a reload, Back from the full review): make sure it is rendered (the list reveals in
+  // chunks and folds groups), then scroll to it and mark it for a moment. Closing also focuses it.
+  function revealRow(key, focus) {
+    const inMust = groups ? groups.must.findIndex((it) => it.item_key === key) : -1;
+    const inTodo = (groups ? groups.todo : items).findIndex((it) => it.item_key === key);
+    if (inMust >= mustPreview) setMustAll(true);
+    if (inTodo >= 0) setVisibleCount((n) => Math.max(n, inTodo + 1 + REVEAL_STEP));  // rows below it too, so the page can scroll it up
+    if (groups?.decided.some((it) => it.item_key === key)) setDecidedOpen(true);
+    setReturnKey({ key, focus });
+  }
   const lastOpen = useRef(openKey);
   useEffect(() => {
     const was = lastOpen.current;
     lastOpen.current = openKey;
-    if (!was || openKey) return;
-    const inMust = groups ? groups.must.findIndex((it) => it.item_key === was) : -1;
-    const inTodo = (groups ? groups.todo : items).findIndex((it) => it.item_key === was);
-    if (inMust >= mustPreview) setMustAll(true);
-    if (inTodo >= 0) setVisibleCount((n) => Math.max(n, inTodo + 1));
-    if (groups?.decided.some((it) => it.item_key === was)) setDecidedOpen(true);
-    setReturnKey(was);
+    if (was && !openKey) revealRow(was, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openKey]);
+  const entryKey = useRef(openKey);  // the paper open when the list mounted; revealed once the loaded list has it
+  useEffect(() => {
+    if (entryKey.current !== openKey) entryKey.current = null;
+    if (!entryKey.current || !items.some((it) => it.item_key === openKey)) return;
+    entryKey.current = null;
+    revealRow(openKey, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openKey, items]);
   useEffect(() => {
     if (!returnKey) return;
-    const row = rowNodes().find((n) => n.dataset.rowKey === returnKey);
+    const row = rowNodes().find((n) => n.dataset.rowKey === returnKey.key);
     setReturnKey(null);
     if (!row) return;
     const { top, bottom } = row.getBoundingClientRect();
-    if (top < 0 || bottom > window.innerHeight) row.scrollIntoView?.({ block: 'center' });
-    row.querySelector('button')?.focus({ preventScroll: true });
-    setFlashKey(returnKey);
+    if (top < 0 || bottom > window.innerHeight) window.scrollBy?.({ top: top - window.innerHeight * REVEAL_AT });
+    if (returnKey.focus) row.querySelector('button')?.focus({ preventScroll: true });
+    setFlashKey(returnKey.key);
   }, [returnKey]);
   useEffect(() => {
     if (!flashKey) return undefined;

@@ -33,8 +33,8 @@ const items = [
   { item_key: 'K3', title: 'Third paper', authors: 'Third Author', has_pdf: true, relevance_score: 3.9 },
 ];
 
-function renderView(props = {}, entry = '/library') {
-  return render(
+function viewElement(props = {}, entry = '/library') {
+  return (
     <MemoryRouter initialEntries={[entry]}><ReadNextView
       items={items}
       loading={false}
@@ -53,9 +53,10 @@ function renderView(props = {}, entry = '/library') {
       onRunTriage={vi.fn()}
       starting={false}
       {...props}
-    /></MemoryRouter>,
+    /></MemoryRouter>
   );
 }
+const renderView = (props, entry) => render(viewElement(props, entry));
 const where = () => screen.getByTestId('location').textContent;
 
 beforeEach(() => {
@@ -66,6 +67,7 @@ beforeEach(() => {
     removeItem: vi.fn(),
   });
   Element.prototype.scrollIntoView = vi.fn();
+  window.scrollBy = vi.fn();
   setViewport({ desktop: false });
 });
 
@@ -144,28 +146,59 @@ describe('ReadNextView detail', () => {
     expect(within(dialog).getByTestId('inline-annotate').textContent).toContain('GONE');
   });
 
-  it('on close brings the paper’s row back: rendered past the first 60, scrolled to, focused', () => {
+  describe('the open paper’s row is brought into view', () => {
     const many = Array.from({ length: 100 }, (_, i) => ({ item_key: `R${i}`, title: `Row paper ${i}`, relevance_score: 3 }));
-    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ top: 5000, bottom: 5040 });
-    renderView({ items: many, totalUnread: 100 }, '/library?open=R90');
-    expect(screen.queryByText('Row paper 90', { selector: 'span' })).toBeNull();  // the list reveals 60 rows at first
+    const rowOf = (n) => screen.getByText(`Row paper ${n}`, { selector: 'span' }).closest('li');
+    const farAway = () => vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ top: 5000, bottom: 5040 });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    it('on entry with ?open=KEY (a link, a reload, Back from the full page): rendered past the first 60 and scrolled to', () => {
+      farAway();
+      renderView({ items: many, totalUnread: 100 }, '/library?open=R90');
 
-    const row = screen.getByText('Row paper 90', { selector: 'span' }).closest('li');
-    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
-    expect(Element.prototype.scrollIntoView.mock.contexts).toContain(row);
-    expect(document.activeElement).toBe(row.querySelector('button'));
-  });
+      const row = rowOf(90);
+      expect(window.scrollBy).toHaveBeenCalledWith({ top: 5000 - window.innerHeight * 0.3 });  // the row's top lands in the top third
+      expect(row.className).toContain('ring-teal-300');
+      expect(screen.getByRole('dialog', { name: 'Row paper 90' })).toBeTruthy();
+    });
 
-  it('opens a decided paper that sits behind «Decided by you» and unfolds it on close', () => {
-    const decided = { item_key: 'D1', title: 'Decided one', decided: true, user_priority: 'should_read' };
-    renderView({ items: [...items, decided] }, '/library?open=D1');
-    expect(screen.queryByText('Decided one', { selector: 'span' })).toBeNull();
+    it('on entry waits for the list to load, and does nothing for a key that is not in it', () => {
+      farAway();
+      const { rerender } = renderView({ items: [], loading: true }, '/library?open=K3');
+      expect(window.scrollBy).not.toHaveBeenCalled();
+      rerender(viewElement({ items }, '/library?open=K3'));
+      expect(window.scrollBy).toHaveBeenCalledTimes(1);
+      cleanup();
+      window.scrollBy.mockClear();
+      renderView({}, '/library?open=GONE');
+      expect(window.scrollBy).not.toHaveBeenCalled();
+    });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    it('on close: rendered past the first 60, scrolled to, focused', () => {
+      farAway();
+      const props = { items: many, totalUnread: 100 };
+      const { rerender } = renderView(props, '/library?open=R90');
+      rerender(viewElement({ ...props, filterSig: 'other' }, '/library?open=R90'));  // a filter change folds the list back to 60 rows
+      expect(screen.queryByText('Row paper 90', { selector: 'span' })).toBeNull();
+      window.scrollBy.mockClear();
 
-    expect(screen.getByText('Decided one', { selector: 'span' })).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+      const row = rowOf(90);
+      expect(window.scrollBy).toHaveBeenCalledWith({ top: 5000 - window.innerHeight * 0.3 });
+      expect(document.activeElement).toBe(row.querySelector('button'));
+    });
+
+    it('opens a decided paper that sits behind «Decided by you»: unfolded on entry, and again on close', () => {
+      const decided = { item_key: 'D1', title: 'Decided one', decided: true, user_priority: 'should_read' };
+      renderView({ items: [...items, decided] }, '/library?open=D1');
+      expect(screen.getByText('Decided one', { selector: 'span' })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole('button', { name: /Decided by you/ }));  // fold it again
+      expect(screen.queryByText('Decided one', { selector: 'span' })).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+      expect(screen.getByText('Decided one', { selector: 'span' })).toBeTruthy();
+    });
   });
 
   it('in Select mode a tap ticks the row and opens nothing', () => {
