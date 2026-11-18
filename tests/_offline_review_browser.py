@@ -18,6 +18,7 @@ import pytest
 from tests._zotero_fixtures import add_library_item, build_zotero_db
 from zotero_summarizer.api import app as api_app
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
+from zotero_summarizer.models import PaperDigest
 from zotero_summarizer.runtime import get_context
 from zotero_summarizer.services import lifecycle
 from zotero_summarizer.services._common import read_config, write_user_config
@@ -329,7 +330,8 @@ def synthetic_lab(monkeypatch, width=390):
             entry = _review(LIBRARY_KEY,
                 source_path=settings.zotero_data_dir / "storage/ATTACH01/fixture.pdf",
                 config=get_context().state.app_state.config, quality=None, goal_summaries=[], code_link=None,
-                digest={"tldr": "Compact synced context", "executive_summary": "Synthetic retained context.",
+                digest={**PaperDigest().model_dump(exclude={"basis"}),  # a new digest names every field
+                        "tldr": "Compact synced context", "executive_summary": "Synthetic retained context.",
                         "read_decision": "skip", "read_why": "Owned storage fixture only.",
                         "read_parts": [], "skip_parts": [], "estimated_read_minutes": 0,
                         "original_value": "", "writing_friction": "low", "writing_reasons": [],
