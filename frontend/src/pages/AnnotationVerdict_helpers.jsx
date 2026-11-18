@@ -3,17 +3,16 @@
 // only by the annotate-verdict workflow.
 
 import { pretty } from '../utils/priorityLabels.js';
+import { DECISIONS, DECISION_TINT } from '../components/decisionVocab.js';
 
 // Filter chips: the `key` stays the wire/enum value the backend filters on; the
-// `label` shows the shared human vocabulary (Mental Model / Jakob's Law) so the
-// raw `must_read` enum never reaches the user. 'all' and '🎯 border' are not
-// priorities — they keep their own labels.
+// pills are the shared decision vocabulary (components/decisionVocab.js — same
+// words and tints as Today and the verdict panel) so the raw `must_read` enum
+// never reaches the user. 'all' and '🎯 border' are not priorities — they keep
+// their own labels.
 export const PRIORITY_FILTERS = [
   { key: '', label: 'All', cls: 'bg-slate-700 text-white border-slate-700' },
-  { key: 'must_read', label: pretty('must_read'), cls: 'bg-emerald-600 text-white border-emerald-600' },
-  { key: 'should_read', label: pretty('should_read'), cls: 'bg-sky-600 text-white border-sky-600' },
-  { key: 'could_read', label: pretty('could_read'), cls: 'bg-amber-500 text-white border-amber-500' },
-  { key: 'dont_read', label: 'Not interested', cls: 'bg-rose-600 text-white border-rose-600' },
+  ...DECISIONS.map(([key, label]) => ({ key, label, cls: DECISION_TINT[key] })),
   // NOTE: 'border' (active-learning) is intentionally NOT a chip here — it swaps
   // the data source and polls for minutes while it re-scores the library, so it
   // renders as a distinct labelled button in AnnotationVerdict, not a cheap
@@ -56,7 +55,7 @@ export const PRIORITY_BY_KEY = {
 export const ANNOTATE_HINT_KEY = 'annotate_hint_dismissed_v1';
 export const ANNOTATE_HINT_TEXT =
   'My verdicts: give papers you’ve read your own verdict — must / should / could / not interested '
-  + '(keys 1–4 · j/k to move between papers). It starts on one verdict group at a time; '
+  + '(keys 1–4 · j/k to move between papers · z to undo). It starts on one verdict group at a time; '
   + 'pick another chip to see the rest. Your verdict is saved as a label and mirrored to Zotero as a note; retraining is manual, in Ops.';
 
 // Active-learning order for the border (uncertain-picks) list: surface the most

@@ -27,7 +27,8 @@ function closeAll() {
   [...windows.values()].forEach((win) => win.close());
 }
 
-export function decide(key, priority, { prior = null, surface, comment = '', onWarning, keepOpen = false } = {}) {
+// `rejectTag: false` — a surface that must not queue the ❌ tag (My verdicts) opts out.
+export function decide(key, priority, { prior = null, surface, comment = '', onWarning, keepOpen = false, rejectTag = true } = {}) {
   if (!keepOpen) closeAll();  // the previous toast is replaced: its ❌ request / reasons go out now
   if (typeof window !== 'undefined' && !hooked) {
     hooked = true;
@@ -46,7 +47,7 @@ export function decide(key, priority, { prior = null, surface, comment = '', onW
     if (reasons.length) {
       await submitVerdict({ item_key: key, user_priority: priority, comment: reasons.join(', '), surface });
     }
-    if (priority !== 'dont_read' || saved.saved_offline || key.startsWith('feed:')) return;
+    if (!rejectTag || priority !== 'dont_read' || saved.saved_offline || key.startsWith('feed:')) return;
     try { await queueRejectTag(key); } catch (error) {
       onWarning?.(`Verdict saved, but reject tag was not queued: ${error?.message || error}`);
     }

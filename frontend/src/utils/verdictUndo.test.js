@@ -59,6 +59,13 @@ it('queues the ❌ tag exactly once, only after the Undo window', async () => {
   expect(api.queueRejectTag).toHaveBeenCalledWith('A');
 });
 
+it('never queues the ❌ tag for a surface that opts out with rejectTag: false', async () => {
+  decide('A', 'dont_read', { rejectTag: false });
+  await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS * 2);
+  expect(api.queueRejectTag).not.toHaveBeenCalled();
+  expect(api.submitVerdict).toHaveBeenCalledTimes(1);
+});
+
 it('sends the tag early on the next verdict and on pagehide', async () => {
   decide('A', 'dont_read');
   decide('B', 'must_read');
