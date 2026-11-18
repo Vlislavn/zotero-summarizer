@@ -63,3 +63,41 @@ it.each(['claimed', 'composing', 'modifier'])('ignores %s events', (kind) => {
 
   expect(onAction).not.toHaveBeenCalled();
 });
+
+it('lets controls matching `allowFrom` keep j / k / action keys, but leaves them Enter and other controls', () => {
+  const onNext = vi.fn(), onAction = vi.fn(), onEnter = vi.fn();
+  renderHook(() => useKeyboardNav({ onNext, onAction, onEnter, actionKeys: { 2: 'should' }, allowFrom: '.row button' }));
+  const { getByText } = render(<><div className="row"><button>Row</button></div><button>Other</button></>);
+
+  const press = (node, key) => {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    fireEvent(node, event);
+    return event.defaultPrevented;
+  };
+  expect([press(getByText('Row'), 'j'), press(getByText('Row'), '2')]).toEqual([true, true]);
+  expect(press(getByText('Row'), 'Enter')).toBe(false);  // Enter stays the button's own: it opens the row
+  expect([press(getByText('Other'), 'j'), press(getByText('Other'), '2')]).toEqual([false, false]);
+  expect(onNext).toHaveBeenCalledTimes(1);
+  expect(onAction).toHaveBeenCalledTimes(1);
+  expect(onEnter).not.toHaveBeenCalled();
+});
+
+it('calls onEnter / onEscape / onUndo / onSlash only where a handler is given, and not for a held key', () => {
+  const onNext = vi.fn(), onAction = vi.fn(), onEnter = vi.fn(), onEscape = vi.fn(), onUndo = vi.fn(), onSlash = vi.fn();
+  renderHook(() => useKeyboardNav({ onNext, onAction, onEnter, onEscape, onUndo, onSlash, actionKeys: { 4: 'no' } }));
+  const press = (init) => {
+    const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+    fireEvent(document.body, event);
+    return event.defaultPrevented;
+  };
+
+  expect(['Enter', 'Escape', 'z', '/'].map((key) => press({ key }))).toEqual([true, true, true, true]);
+  expect([onEnter, onEscape, onUndo, onSlash].map((fn) => fn.mock.calls.length)).toEqual([1, 1, 1, 1]);
+
+  expect(press({ key: '4' })).toBe(true);
+  for (const key of ['Enter', 'Escape', 'z', '/', '4']) expect(press({ key, repeat: true })).toBe(false);
+  expect(onAction).toHaveBeenCalledTimes(1);
+  expect([onEnter, onEscape, onUndo, onSlash].map((fn) => fn.mock.calls.length)).toEqual([1, 1, 1, 1]);
+  press({ key: 'j', repeat: true });  // holding j still scrolls
+  expect(onNext).toHaveBeenCalledTimes(1);
+});

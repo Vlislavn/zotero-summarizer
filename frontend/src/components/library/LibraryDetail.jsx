@@ -51,7 +51,7 @@ const isTextField = (el) => Boolean(el?.matches?.(TEXT_FIELD));
 export default function LibraryDetail({
   itemKey, item = null, sheet, inList, nav, collections, onClose, onStep, leave, onStay, onLeave,
   onSaved, onQueueRefresh, onNotesDirtyChange, why = null, goalsStrong = false, modelReady = true,
-  onVerdict, surface, toast = null, caughtUp = false,
+  onVerdict, surface, toast = null, caughtUp = false, decideRef = null,
 }) {
   const review = usePaperReview(itemKey, { onSaved, onQueueRefresh, surface });
   const [typing, setTyping] = useState(false);
@@ -68,7 +68,7 @@ export default function LibraryDetail({
   const spot = nav.position ? `, ${nav.position} of ${nav.total}` : '';
   const bar = !caughtUp && (
     <VerdictBar itemKey={itemKey} title={name} current={prior?.user_priority ?? null} ready={ready} hidden={typing}
-      onDecide={(priority) => onVerdict(priority, prior)} />
+      onDecide={(priority) => onVerdict(priority, prior)} decideRef={decideRef} />
   );
   const body = (
     <>

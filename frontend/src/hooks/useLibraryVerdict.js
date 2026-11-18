@@ -15,7 +15,7 @@ const chipLabel = (id) => NEG_CHIPS.find(([key]) => key === id)?.[1];
 const NOTE_BLOCKS_ADVANCE = 'Unsaved note — save it, or leave this paper, to continue.';
 
 // The next row without a verdict of its own and not read, after `key` (wrapping to the top of the list).
-function nextUndecided(items, key) {
+export function nextUndecided(items, key) {
   const at = items.findIndex((it) => it.item_key === key);
   const rest = [...items.slice(at + 1), ...items.slice(0, at)];
   return rest.find((it) => !isDecided(it) && !it.read)?.item_key ?? null;

@@ -3,7 +3,9 @@ import LibraryDetail from './LibraryDetail.jsx';
 import BulkVerdictBar from './BulkVerdictBar.jsx';
 import ReadNextRow from './ReadNextRow.jsx';
 import UndoToast from './UndoToast.jsx';
-import useLibraryVerdict from '../../hooks/useLibraryVerdict.js';
+import useLibraryVerdict, { nextUndecided } from '../../hooks/useLibraryVerdict.js';
+import useKeyboardNav from '../../hooks/useKeyboardNav.js';
+import { DECISIONS } from '../decisionVocab.js';
 import { StatusBanner, formatShortDate } from './shared.jsx';
 import { groupRows, scoreStatus } from './readNextCopy.js';
 import { CustomPanel, OrderCaption, OrderSelect } from './OrderControls.jsx';
@@ -24,6 +26,11 @@ import { readStorage } from '../../utils/safeStorage.js';
 const REVEAL_STEP = 60;  // rows revealed initially and per "Show more" click
 const MUST_PREVIEW = 3;  // your own Must read rows shown before "Show all"
 const DESKTOP_QUERY = '(min-width: 1024px)';
+// Keys (F-final-plan §3.4): 1–4 are the pills left to right; the rows and the pills keep the keys after a click focused them.
+const KEY_PRIORITY = Object.fromEntries(DECISIONS.map(([priority], i) => [i + 1, priority]));
+const KEYS_FROM = '[data-row-key] button, [data-verdict-bar] button';
+const FOLLOW_MS = 250;  // the open paper follows j / k after this much calm: one review-detail read, not one per press
+const KEY_HINT = 'j / k move · 1–4 verdict · z undo · Enter open · Esc close · / search';
 
 function GroupHeader({ children, action = null }) {
   return (
@@ -106,6 +113,8 @@ export default function ReadNextView({
   openState = NO_OPEN,
   // A verdict patches its row in place (the page owns the rows): onRowsChange([[key, fields]…]), onWrite(promise).
   onRowsChange = () => {}, onWrite = () => {},
+  // `/` puts the cursor in the page's search box.
+  onFocusSearch = null,
 }) {
   const computing = status === 'computing';
   // A failed read must leave Rescore available even with retained last-good rows.
@@ -157,7 +166,7 @@ export default function ReadNextView({
     setNotesDirty(false);
     action?.();
   }
-  useEffect(() => { setNotesDirty(false); setLeave(null); }, [openKey]);
+  useEffect(() => { setNotesDirty(false); setLeave(null); clearTimeout(followTimer.current); }, [openKey]);
   const surface = isDesktop ? 'library_split' : 'library_sheet';
   const flow = useLibraryVerdict({ queueItems, items, openState, notesDirty, guarded, surface, onRowsChange, onWrite });
   // The toast rides inside the phone Sheet (it silences the page behind it); otherwise it sticks above the list.
@@ -169,6 +178,57 @@ export default function ReadNextView({
     return row?.user_priority ? { user_priority: row.user_priority, comment: '' } : null;
   };
   const toastInSheet = Boolean(openKey && !isDesktop);
+
+  // Keys act on `selKey`: the open paper, else the row last moved to with j / k. With a paper open j / k
+  // move the outline at once and the paper follows FOLLOW_MS later; 1–4 wait until it has (they would hit the old one).
+  const [selKey, setSelKey] = useState(null);
+  const decideRef = useRef(null);  // VerdictBar's gate: the same quiet period and readiness as a pill tap
+  const followTimer = useRef(null);
+  const moved = useRef(false);  // the selection came from a key: bring its row into view
+  const rowNodes = () => [...(listRef.current?.querySelectorAll('[data-row-key]') || [])];
+  useEffect(() => { if (openKey) setSelKey(openKey); }, [openKey]);
+  useEffect(() => () => clearTimeout(followTimer.current), []);
+  useEffect(() => {
+    if (!moved.current) return;
+    moved.current = false;
+    const row = rowNodes().find((n) => n.dataset.rowKey === selKey);
+    row?.scrollIntoView?.({ block: 'nearest' });
+    if (!openKey || isDesktop) row?.querySelector('button')?.focus({ preventScroll: true });  // a phone's Sheet makes the list inert
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selKey]);
+  function select(key) {
+    moved.current = true;
+    setSelKey(key);
+  }
+  function moveSelection(delta) {
+    const keys = rowNodes().map((n) => n.dataset.rowKey);
+    if (!keys.length) return;
+    const next = keys[Math.min(Math.max(keys.indexOf(selKey) + delta, 0), keys.length - 1)];
+    select(next);
+    clearTimeout(followTimer.current);
+    if (openKey && next !== openKey) followTimer.current = setTimeout(() => guarded(() => openState.open(next)), FOLLOW_MS);
+  }
+  function decideByKey(priority) {
+    if (openKey) {
+      if (selKey === openKey) decideRef.current?.(priority);
+      return;
+    }
+    flow.verdict(selKey, priority, { prior: priorOf(selKey) });
+    const next = nextUndecided(items, selKey);
+    if (next) select(next);
+  }
+  useKeyboardNav({
+    onPrev: () => moveSelection(-1),
+    onNext: () => moveSelection(1),
+    onAction: decideByKey,
+    actionKeys: KEY_PRIORITY,
+    hasSelection: Boolean(selKey) && !selectMode,
+    onEnter: selKey && selKey !== openKey ? () => toggleRef.current(selKey) : undefined,
+    onEscape: openKey ? () => guarded(openState.close) : undefined,
+    onUndo: flow.toast?.kind === 'saved' ? flow.undo : undefined,
+    onSlash: onFocusSearch && (!openKey || isDesktop) ? onFocusSearch : undefined,
+    allowFrom: KEYS_FROM,
+  });
 
   // Rows are memoised: they get one stable callback that reads the latest state. A tap opens
   // that paper's detail (the open one closes it); in Select mode it ticks the row instead.
@@ -197,7 +257,7 @@ export default function ReadNextView({
   }, [openKey]);
   useEffect(() => {
     if (!returnKey) return;
-    const row = [...(listRef.current?.querySelectorAll('[data-row-key]') || [])].find((n) => n.dataset.rowKey === returnKey);
+    const row = rowNodes().find((n) => n.dataset.rowKey === returnKey);
     setReturnKey(null);
     if (!row) return;
     const { top, bottom } = row.getBoundingClientRect();
@@ -250,7 +310,12 @@ export default function ReadNextView({
 
   function renderRow(it, ownChip) {
     return (
-      <li key={it.item_key} data-row-key={it.item_key} className={flashKey === it.item_key ? 'rounded-xl ring-2 ring-teal-300' : ''}>
+      <li
+        key={it.item_key}
+        data-row-key={it.item_key}
+        aria-current={selKey === it.item_key || undefined}
+        className={`rounded-xl ${selKey === it.item_key ? 'outline outline-2 outline-teal-600' : ''} ${flashKey === it.item_key ? 'ring-2 ring-teal-300' : ''}`}
+      >
         <ReadNextRow
           item={it}
           expanded={openKey === it.item_key}
@@ -507,6 +572,9 @@ export default function ReadNextView({
             {decidedOpen && <div className="mt-2">{rows(groups.decided, true)}</div>}
           </section>
         )}
+        {isDesktop && shown.length > 0 && (
+          <p data-testid="key-hint" className="sticky bottom-0 z-10 mt-3 bg-white py-1.5 text-[11px] text-slate-500">{KEY_HINT}</p>
+        )}
       </div>
       {openKey && (
         <LibraryDetail
@@ -519,7 +587,7 @@ export default function ReadNextView({
           onClose={() => guarded(openState.close)}
           onStep={(key) => guarded(() => openState.open(key))}
           leave={leave}
-          onStay={() => setLeave(null)}
+          onStay={() => { setLeave(null); setSelKey(openKey); }}
           onLeave={leaveNow}
           onSaved={saveOpen}
           onQueueRefresh={refreshOpen}
@@ -530,6 +598,7 @@ export default function ReadNextView({
           surface={surface}
           onVerdict={(priority, prior) => flow.verdict(openKey, priority, { prior })}
           caughtUp={flow.caughtUp}
+          decideRef={decideRef}
           toast={toastInSheet ? toast : null}
         />
       )}

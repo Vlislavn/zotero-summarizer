@@ -116,6 +116,7 @@ export default function LibraryReadNext() {
     writeStorage('zs:libraryBrowseOpen', open ? '1' : '0');
   }
   const [searchInput, setSearchInput] = useState('');
+  const searchRef = useRef(null);  // `/` focuses it (ReadNextView keys)
   const [search, setSearch] = useState('');
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
@@ -648,6 +649,7 @@ export default function LibraryReadNext() {
         <Section>
           <div className="flex flex-wrap gap-2 items-center">
             <input
+              ref={searchRef}
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
@@ -826,6 +828,7 @@ export default function LibraryReadNext() {
           onReload={() => loadQueue(false)}
           onSaved={() => loadQueue()}
           openState={openPaper}
+          onFocusSearch={() => searchRef.current?.focus()}
           onRowsChange={patchRows}
           onWrite={trackWrite}
           selectMode={selectMode}
