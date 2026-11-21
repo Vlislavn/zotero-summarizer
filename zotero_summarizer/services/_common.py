@@ -12,6 +12,8 @@ from typing import Any, Callable
 
 import yaml
 
+from zotero_summarizer.domain import unique_non_empty_strings  # noqa: F401  (re-exported for services)
+from zotero_summarizer.integrations.llm import to_text  # noqa: F401  (re-exported for services)
 from zotero_summarizer.models import GoalsConfig, SummarizeRequest
 from zotero_summarizer.models.config import USER_KNOBS, USER_OWNED_KEYS
 from zotero_summarizer.models.providers import ProviderConfig
@@ -292,18 +294,6 @@ def write_user_config(config_path: Path, config: GoalsConfig) -> None:
     write_config_atomic(config_path, payload)
 
 
-def to_text(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    if isinstance(value, dict):
-        for key in ("output_text", "text", "result", "summary"):
-            candidate = value.get(key)
-            if isinstance(candidate, str):
-                return candidate
-        return json.dumps(value, ensure_ascii=False)
-    return str(value)
-
-
 def extract_json_blob(text: str) -> dict[str, Any]:
     stripped = text.strip()
     try:
@@ -383,21 +373,6 @@ def connect_sqlite_ro(db_path: Path, *, timeout: float = 5.0) -> sqlite3.Connect
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=timeout)
     conn.row_factory = sqlite3.Row
     return conn
-
-
-def unique_non_empty_strings(values: Any) -> list[str]:
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for value in values or []:
-        text = str(value or "").strip()
-        if not text:
-            continue
-        folded = text.casefold()
-        if folded in seen:
-            continue
-        seen.add(folded)
-        normalized.append(text)
-    return normalized
 
 
 def is_app_rss_source(row: dict[str, Any]) -> bool:

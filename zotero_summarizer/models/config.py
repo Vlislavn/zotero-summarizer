@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from zotero_summarizer.models.access_config import UniversityAccessConfig
+from zotero_summarizer.models.access_config import UniversityAccessConfig, validate_choice
 from zotero_summarizer.models.enrichment_config import OpenReviewConfig, PrestigeConfig
 from zotero_summarizer.models.feeds_config import FeedsConfig
 from zotero_summarizer.models.providers import (
@@ -35,13 +35,6 @@ __all__ = [
     "USER_OWNED_KEYS",
     "USER_KNOBS",
 ]
-
-
-def _validate_choice(value: str, allowed: frozenset[str], field: str) -> str:
-    v = (value or "").strip().lower()
-    if v not in allowed:
-        raise ValueError(f"{field} must be one of {sorted(allowed)}, got {value!r}")
-    return v
 
 
 class LLMConfig(BaseModel):
@@ -286,7 +279,7 @@ class QualityReviewConfig(BaseModel):
     @field_validator("chunk_strategy")
     @classmethod
     def _validate_chunk_strategy(cls, value: str) -> str:
-        return _validate_choice(
+        return validate_choice(
             value, frozenset({"rank", "prefix", "map_reduce"}), "chunk_strategy"
         )
 
@@ -340,7 +333,7 @@ class ClassifierGateConfig(BaseModel):
     @field_validator("model_name")
     @classmethod
     def _validate_model_name(cls, value: str) -> str:
-        return _validate_choice(
+        return validate_choice(
             value, frozenset({"tabpfn", "lightgbm", "logreg"}), "model_name"
         )
 

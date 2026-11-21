@@ -54,3 +54,5 @@ pending/history rows using the item-key filter, so unrelated queue traffic does
 not consume its result window.
 
 Original native-preview client source is retained: displayed approval hashes, explicit refresh/force and direct-editor outcomes use the existing backend; no new controls or protocols are designed. Original synthetic client tests remain unchanged.
+
+Tools de-duplicate key/tag/path lists with `domain.unique_non_empty_strings` (`domain` is in the lowest layer, which `mcp/` may import).

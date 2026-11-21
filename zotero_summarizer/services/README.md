@@ -84,6 +84,8 @@ observed model/terminal guard before OnPrem discards metadata and closes the
 transport on construction failure or callback completion. Ordinary clients keep
 their prior options; all setup local-LLM requests must first pass admission.
 
+`_common.to_text` and `_common.unique_non_empty_strings` re-export `integrations.llm.to_text` and `domain.unique_non_empty_strings` (one implementation each).
+
 Shared files: `_common` (helpers: settings/logging/sqlite-ro/now_iso_z/html_to_text/
 `atomic_write` (callback) + `write_json_atomic`
 (dict→JSON; keyword-only `indent=None`, default output unchanged) for tmp+replace artifact/cache writes. JSON publication delegates to

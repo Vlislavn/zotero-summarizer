@@ -52,24 +52,6 @@ def _as_int(value: Any, default: int = 0) -> int:
         return default
 
 
-def _normalize_unique_strings(values: list[str] | None) -> list[str]:
-    if not values:
-        return []
-
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        text = str(value or "").strip()
-        if not text:
-            continue
-        folded = text.casefold()
-        if folded in seen:
-            continue
-        seen.add(folded)
-        normalized.append(text)
-    return normalized
-
-
 def _normalize_authors(raw_authors: Any) -> list[str]:
     if isinstance(raw_authors, list):
         return [str(author).strip() for author in raw_authors if str(author).strip()]
