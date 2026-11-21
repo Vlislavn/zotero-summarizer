@@ -155,12 +155,9 @@ def run_abstract_pipeline(
         corpus_context.get("matched_goal", ""),
     )
 
-    if (
-        corpus_context.get("has_corpus")
-        and float(corpus_context.get("affinity_score", 0.0)) < config.corpus.similarity_threshold
-    ):
-        log_context(prefix, "fast-rejected by corpus threshold=%.3f", config.corpus.similarity_threshold)
-        return _fast_reject_response(req, corpus_context, abstract_text)
+    fast_rejected = _corpus_fast_reject(config, req, corpus_context, abstract_text, prefix)
+    if fast_rejected is not None:
+        return fast_rejected
 
     return _score_abstract(config, req, llm, corpus_context, prefix, pipeline_started,
                            triage_prompt_override)
@@ -227,6 +224,19 @@ def _abstract_only_empty_response(reason: str) -> SummarizeResponse:
         triage_rationale=reason,
         triage_confidence=0.5,
     )
+
+
+def _corpus_fast_reject(
+    config: GoalsConfig, req: SummarizeRequest, corpus_context: dict, text: str, prefix: str,
+) -> SummarizeResponse | None:
+    """Return the fast-reject response when corpus affinity is below threshold, else None."""
+    if (
+        corpus_context.get("has_corpus")
+        and float(corpus_context.get("affinity_score", 0.0)) < config.corpus.similarity_threshold
+    ):
+        log_context(prefix, "fast-rejected by corpus threshold=%.3f", config.corpus.similarity_threshold)
+        return _fast_reject_response(req, corpus_context, text)
+    return None
 
 
 def _fast_reject_response(
@@ -385,12 +395,9 @@ def run_pipeline(
         corpus_context.get("negative_similarity", 0.0),
         corpus_context.get("matched_goal", ""),
     )
-    if (
-        corpus_context.get("has_corpus")
-        and float(corpus_context.get("affinity_score", 0.0)) < config.corpus.similarity_threshold
-    ):
-        log_context(prefix, "fast-rejected by corpus threshold=%.3f", config.corpus.similarity_threshold)
-        return _fast_reject_response(req, corpus_context, raw_text)
+    fast_rejected = _corpus_fast_reject(config, req, corpus_context, raw_text, prefix)
+    if fast_rejected is not None:
+        return fast_rejected
 
     source_context = ""
     # Same stage as ``llm`` above (resolve_stage_client(app_state, "feed")).

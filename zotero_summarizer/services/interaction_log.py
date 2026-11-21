@@ -124,8 +124,12 @@ def _log_label_transition(
     source: str = "user",
     comment: str = "",
     history_known: bool = True,
+    post_read: bool = False,
 ) -> None:
     """Append an explicit user-label assignment, change, or retraction.
+
+    ``post_read`` marks a change/retraction made after the paper had a usable
+    published review (a relabel after reading).
 
     ``None`` means no prior label was recorded locally; ``history_known=False``
     keeps a label first observed from another device from fabricating history.
@@ -156,6 +160,7 @@ def _log_label_transition(
                 model_priority if model_priority in READING_PRIORITY_SORT_RANK else None
             ),
             "history_known": history_known,
+            "post_read": bool(post_read and transition != "assigned"),
             "comment": comment,
         },
     )

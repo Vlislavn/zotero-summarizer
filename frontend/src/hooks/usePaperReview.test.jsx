@@ -78,3 +78,15 @@ it('keeps a saved verdict successful when the secondary reject tag fails', async
   expect(result.current.verdict.submitError).toBeNull();
   expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['paper-detail', 'P1'] });
 });
+
+it('passes the optional surface to the verdict POST', async () => {
+  fetchReviewDetail.mockResolvedValue({ verdict: null });
+  submitVerdict.mockResolvedValue({ verdict: { user_priority: 'must_read' } });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const wrapper = ({ children }) => createElement(QueryClientProvider, { client }, children);
+  const { result } = renderHook(() => usePaperReview('P1', { surface: 'library_sheet' }), { wrapper });
+  act(() => result.current.verdict.onSubmit({ user_priority: 'must_read', comment: '' }));
+  await waitFor(() => expect(submitVerdict).toHaveBeenCalledWith(
+    { item_key: 'P1', user_priority: 'must_read', comment: '', surface: 'library_sheet' }));
+  client.clear();
+});

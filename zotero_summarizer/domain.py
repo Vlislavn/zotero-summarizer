@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Any
 
 
 class ReadingPriority(str, Enum):
@@ -296,6 +297,11 @@ TRIAGE_APPROVED_TAG_TOKEN = "triage-approved"
 TRIAGE_REJECTED_TAG_TOKEN = "triage-rejected"
 
 
+def is_sha256_hex(value: object) -> bool:
+    """True for exactly a lowercase 64-char hex string (a full SHA-256 digest)."""
+    return type(value) is str and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
 def is_valid_reading_priority(value: str) -> bool:
     return value in READING_PRIORITY_VALUES
 
@@ -324,3 +330,19 @@ def feedback_verdict_from_signal(signal: str) -> str | None:
     if signal == FeedbackSignal.EXPLICIT_REJECT.value:
         return FeedbackVerdict.REJECT.value
     return None
+
+
+def unique_non_empty_strings(values: Any) -> list[str]:
+    """Stripped, non-empty strings of ``values`` in order, case-insensitively de-duplicated."""
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        folded = text.casefold()
+        if folded in seen:
+            continue
+        seen.add(folded)
+        normalized.append(text)
+    return normalized

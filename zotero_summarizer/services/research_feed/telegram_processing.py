@@ -107,7 +107,7 @@ def set_collect_consent(settings, allow: bool) -> dict:
 
 def set_remote_consent(settings, token: str, allow: bool) -> dict:
     """Record (or withdraw) consent for the CURRENT saved remote boundary."""
-    profile = profiles.load_profile(settings.data_dir, persist_default=False)
+    profile = profiles.load_profile(settings.data_dir)
     config = read_config(settings.config_path, settings.calibration_path)
     current = describe(settings, config, profile)
     if current is None or current["local"]:

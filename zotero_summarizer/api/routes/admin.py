@@ -91,9 +91,12 @@ async def refresh_labels() -> dict[str, Any]:
     """Re-export the golden CSV from Zotero.
 
     Synchronous because the export is dominated by SQLite reads on the
-    user's Zotero DB and finishes in a few seconds. User verdicts are
-    NOT folded in here — the CSV remains the derivation source. Hybrid
-    overlay happens at training time via ``hybrid_gt.apply_hybrid``.
+    user's Zotero DB and finishes in a few seconds. The export also
+    reconciles Zotero ``label:*`` tags into ``label_verdicts`` (a paper with no
+    verdict gets one; tag-sourced and machine-only rows follow the tag; an in-app user
+    verdict is never changed, differing tags come back as ``user_labels_differing``). The CSV stays
+    the derivation source; the hybrid overlay happens at training time via
+    ``hybrid_gt.apply_hybrid``.
     """
     settings = get_settings()
     csv_path = settings.golden_csv_path

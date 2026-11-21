@@ -4,7 +4,7 @@ import { DECISIONS, DECISION_BTN, DECISION_HOVER, DECISION_TINT, NEG_CHIPS, POS_
 
 // Sticky compact verdict bar for the paper page on phones (lg:hidden). It brings
 // the decision onto the first screen (the full rail editor is ~screens down), using
-// the SAME must/should/could/skip vocabulary and one-tap reason chips as the Today
+// the SAME must/should/could/Not interested vocabulary and one-tap reason chips as the Today
 // card (Jakob's Law — one decision surface the owner already knows). It drives the
 // SAME verdict path as the rail (`usePaperReview` → golden verdict); a fresh
 // decision owns its reasons (starts with none), chips update the saved comment.

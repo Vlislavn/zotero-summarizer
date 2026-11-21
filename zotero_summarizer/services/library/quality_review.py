@@ -102,6 +102,32 @@ def _verify_generated_digest(
     attempt['verifier_repairs'] = getattr(checks, '_repair_attempts', 0)
     return checks
 
+# Writing criteria for SHORT analytic prose (scientific-writing: precision, claim strength, full
+# sentences; writing-shape: one job per sentence, ground terms, cut what does not earn its place).
+# Contains no format braces: it is spliced into the ``str.format`` digest template.
+_WRITING_RULES = (
+    "### WRITING RULES — every text field (tldr, verdict, read_why, original_value, relevance, "
+    "controversies, impact, unknown_unknowns, executive_summary, methods, limitations, key_strength, "
+    "key_weakness, industry_impact, academy_impact) and every list item\n"
+    "- One job per sentence: one idea, subject first, active voice, concrete nouns and verbs, at most 25 words. "
+    "This refines the length caps and never licenses extra sentences.\n"
+    "- Every sentence adds a fact no other field holds. `tldr` is the headline: never paraphrase it, the title, "
+    "or the abstract's own sentences in another field; take the fact from the paper body (a mechanism, a number, "
+    "a stated limit). Fields must not echo each other (verdict is not tldr; key_strength is not verdict; "
+    "relevance is not impact).\n"
+    "- Ground each term at its first use in a field: a field is read alone, so give a coined name or abbreviation "
+    "a short plain-words gloss, or use the plain description instead; never lean on a term only another field defines.\n"
+    "- Precise claim strength: state each claim at the strength the paper gives it (shows only for tested "
+    "results, suggests for indirect evidence, the authors argue for untested claims); no causal wording for "
+    "correlational results; attach the number and its comparator when the text gives them; no vague quantifiers "
+    "(significantly, substantially, many) without a number.\n"
+    "- Prose, not notes: each text field is a complete grammatical sentence, never a fragment or keyword string; "
+    "list items are parallel (same grammatical form, one self-contained fact each).\n"
+    "- Cut what does not earn its place: no filler openers (\"This paper...\", \"The authors present a novel...\"), "
+    "no hedging boilerplate (\"it is worth noting\", \"may potentially\"), no praise words (novel, comprehensive, "
+    "robust, state-of-the-art) unless a measured claim backs them. An empty field beats padding.\n\n"
+)
+
 # Fallback when goals.yaml has no `prompts.paper_digest`. A referee-grade digest
 # (NeurIPS/ICLR rubric) condensed into scannable fields, personalised to the
 # reader's goals. Brevity is enforced hard — a note, not a wall of text — and
@@ -121,7 +147,8 @@ _DEFAULT_DIGEST_PROMPT = (
     "whether a detail is in the paper, omit it.\n\n"
     "Ground EVERY judgement in the paper's own evidence; if the text does not support a "
     "field, leave it empty (\"\") or neutral. Be terse: each text field is ONE short sentence "
-    "(<=25 words); lists hold at most 3 brief bullets. No fluff, do not restate the title.\n\n"
+    "(<=25 words), except `executive_summary` (below); lists hold at most 3 brief bullets.\n\n"
+    + _WRITING_RULES +
     "The reader's research goals: {research_goals}\n\n"
     "Title: {title}\n\nFull text: {full_text}\n\n"
     "Review like a referee: pin down the main CONTRIBUTION, weigh the EVIDENCE behind "
@@ -158,16 +185,27 @@ _DEFAULT_DIGEST_PROMPT = (
     'When uncertainty matters, state what the reported evidence does not establish, rather than '
     'hypothesizing a new failure or risk. Do not imply that described safeguards are absent.\n'
     '- "implementation": concrete reusable steps/artifacts only (<=3 bullets; [] if unsupported).\n'
-    '- "executive_summary": 3-5 sentence neutral overview — what the paper is, its contribution, the headline result.\n'
+    '- "executive_summary": the reader\'s answer to "what do the authors actually propose, and what came of it?" '
+    "First collect five facts from the body of the text, then write one 3-5 sentence paragraph in this order: (1) the problem; "
+    "(2) what the authors propose or build, named concretely, with the mechanism rather than the headline; (3) the headline "
+    "result, with a number only if it is in the text; (4) what the authors conclude; (5) the main caveat they state, as its own "
+    "sentence. Before keeping a sentence, test it: if it repeats or paraphrases `tldr`, `verdict`, the title, the abstract's "
+    "headline sentences or another sentence here (for example a result already given in (3)), replace it with a different "
+    "fact from the body or drop it. Apply the writing rules above to every sentence.\n"
     '- "key_findings": up to 5 concrete findings, each with its metric/number when stated (list of short strings).\n'
-    '- "methods": dataset provenance, preprocessing, architecture and training setup, in one sentence.\n'
+    '- "methods": the procedure in order — what the authors built or did and how it works, the data and how it was '
+    'prepared, the training or evaluation setup — as up to 3 sentences, one fact group per sentence, each at most '
+    '25 words (split a longer one; never chain items with commas).\n'
     '- "limitations": the stated limitations and the most material gaps, in one sentence.\n'
     '- "industry_impact": likely effect on industry/practice in one short line ("" if none).\n'
     '- "academy_impact": likely effect on academic research in one short line ("" if none).\n'
     '- "parameters": a JSON object of technical parameters extracted VERBATIM from the full text — '
     '"dataset" (name(s) + scale, one clause), "baselines" (<=3 named comparison methods), '
-    '"sample_size" (the reported N/cohort/epochs as a short string), "metrics" (<=3 named metrics '
-    'with their reported values when stated), "architecture" (model/system architecture in one '
+    '"sample_size" (the reported N/cohort/epochs as a short string), "metrics" (<=3 comparisons, '
+    'each one plain sentence of the form `<system> vs <comparator> on <benchmark or metric>: <value> vs <value>`: '
+    'the paper\'s own system first, named as the paper names it, then ONE comparator, with the value each scored; '
+    'values only as the text states them; drop an item whose comparator or either value the text does not give, '
+    'never guess it; the writing rules above apply), "architecture" (model/system architecture in one '
     'clause), "external_validation" (true/false/omit — was it validated on an external/out-of-sample '
     'set?). OMIT any field the paper does not state; an empty/omitted field is correct, an invented '
     'one is a failure. Set "parameters" to null for non-empirical papers (perspectives, surveys).\n'

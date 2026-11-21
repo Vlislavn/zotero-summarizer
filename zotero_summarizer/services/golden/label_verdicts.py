@@ -5,18 +5,48 @@ from pathlib import Path
 
 from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK, VERDICT_SOURCE_USER
 from zotero_summarizer.services import interaction_log
+from zotero_summarizer.services.golden import proposal_snapshot
 from zotero_summarizer.storage import repositories
+
+
+def _prior_user_verdict(db_path: Path | None, item_key: str, previous: dict) -> tuple[dict, list[str]]:
+    """The paper's previous human verdict and its alias keys.
+
+    A paper can hold a ``feed:g:`` row and a Zotero-key row; a relabel is a
+    ``changed`` transition from the latest human verdict of either, not a fresh
+    ``assigned``. Without ``db_path`` only the exact-key ``previous`` is known.
+    """
+    siblings = [] if db_path is None else [
+        row for row in repositories.list_label_verdict_family(db_path, item_key) if row["item_key"] != item_key
+    ]
+    keys = [item_key, *(row["item_key"] for row in siblings)]
+    candidates = [row for row in siblings if row["source"] == VERDICT_SOURCE_USER]
+    if previous.get("source") == VERDICT_SOURCE_USER:
+        if "created_at" not in previous:
+            return previous, keys
+        candidates.append(previous)
+    return (max(candidates, key=lambda row: row["created_at"]) if candidates else previous), keys
 
 
 def log_committed_transition(
     *, item_key: str, previous: dict, new_user_priority: str | None,
     surface: str, source: str, comment: str = "", model_priority: str | None = None,
-    history_known: bool = True,
+    history_known: bool = True, db_path: Path | None = None,
 ) -> None:
-    """Emit the shared #13 transition after another command committed its row."""
+    """Emit the shared #13 transition after another command committed its row.
+
+    ``db_path`` makes the previous value alias-aware (see :func:`_prior_user_verdict`)
+    and lets a change/retraction be marked ``post_read`` when the paper already had
+    a usable published review.
+    """
+    previous, keys = _prior_user_verdict(db_path, item_key, previous)
     prior_user = (
         previous.get("user_priority", previous.get("value"))
         if previous.get("source") == VERDICT_SOURCE_USER else None
+    )
+    post_read = (
+        db_path is not None and prior_user is not None and prior_user != new_user_priority
+        and bool(proposal_snapshot._review_for(keys))
     )
     interaction_log._log_label_transition(
         item_key=item_key, previous_user_priority=prior_user,
@@ -24,7 +54,7 @@ def log_committed_transition(
         model_priority=model_priority or previous.get("original_derived_priority")
         or previous.get("model_priority"), surface=surface,
         previous_source=previous.get("source"), source=source, comment=comment,
-        history_known=history_known or prior_user is not None,
+        history_known=history_known or prior_user is not None, post_read=post_read,
     )
 
 
@@ -59,12 +89,12 @@ def set_label_verdict(
     """
     existing = repositories.get_label_verdict(db_path, item_key)
     stored_key = str(existing.get("item_key") or item_key) if existing is not None else item_key
-    if (
-        source != VERDICT_SOURCE_USER
-        and existing is not None
-        and existing.get("source") == VERDICT_SOURCE_USER
-    ):
-        return int(existing["id"])
+    if source != VERDICT_SOURCE_USER:
+        # Machine writes never replace a deliberate verdict under ANY alias of the paper.
+        human = next((row for row in repositories.list_label_verdict_family(db_path, item_key)
+                      if row["source"] == VERDICT_SOURCE_USER), None)
+        if human is not None:
+            return int(human["id"])
 
     stored_original = original_derived_priority
     if stored_original is None:
@@ -94,7 +124,7 @@ def set_label_verdict(
             surface=surface,
             source=event_source or source,
             comment=comment if transition_comment is None else transition_comment,
-            history_known=history_known,
+            history_known=history_known, db_path=db_path,
         )
     return row_id
 
@@ -115,6 +145,6 @@ def retract_label_verdict(
             new_user_priority=None,
             previous=existing,
             surface=surface,
-            source=event_source,
+            source=event_source, db_path=db_path,
         )
     return deleted

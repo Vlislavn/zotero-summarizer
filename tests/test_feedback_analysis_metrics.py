@@ -34,7 +34,7 @@ def test_saved_prediction_preserved_with_unknowns_and_class_intervals(tmp_path):
     assert period["class_support"]["approve"]["unique_papers"] == 3
     assert len(period["disagreements"]) == 2
     unknown = next(e for e in result["events"] if e["item_key"] == "unknown" and e["channel"] == "current_feedback")
-    assert unknown["prediction"] is None
+    assert unknown.get("prediction") is None
 
 
 @pytest.mark.parametrize("n,approved", [(0, 0), (1, 0), (1, 1), (5, 5)])

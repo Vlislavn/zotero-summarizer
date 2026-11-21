@@ -108,11 +108,12 @@ def channel_metrics(events, status, channel):
     matched = [e for e in latest if e["value"] in classes]
     calibration, ci = agreement(matched)
     transitions = defaultdict(Counter)
-    changes = retractions = reversals = edits = 0
+    changes = retractions = reversals = edits = post_read = 0
     for event in primary:
         prior, value = event["previous"], event["value"]
         if event["kind"] == "feedback":
             continue
+        post_read += int(event.get("post_read", False) and prior != value)
         if prior == value:
             edits += int(event["kind"] == "label_state")
             continue
@@ -128,6 +129,7 @@ def channel_metrics(events, status, channel):
             "category_changes_lower_bound": changes if channel == "journal" else None,
             "retractions_lower_bound": retractions if channel == "journal" else None,
             "reversals_lower_bound": reversals if channel == "journal" else None, "comment_edits": edits,
+            "post_read_label_changes": post_read if channel == "interaction_log" else None,
             "recorded_transition_observations": {key: dict(value) for key, value in sorted(transitions.items())},
             "binary_feedback_class_support": support(feedback, FEEDBACK_CLASSES),
             "overlap_policy": "label_observations_preferred_over_binary_for_same_paper_not_added",

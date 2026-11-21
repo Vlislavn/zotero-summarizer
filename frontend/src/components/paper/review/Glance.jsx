@@ -1,4 +1,6 @@
-import { BAND_LABEL, gradeBasis } from './tones.js';
+import { useState } from 'react';
+import { BAND_LABEL, gradeBasis, letterMuted, mutedReason } from './tones.js';
+import { rubricLabel } from './briefModel.js';
 import { metricView } from './metricModel.js';
 
 // The paper at a glance, inside the verdict card: how well it is supported (grade,
@@ -8,6 +10,20 @@ import { metricView } from './metricModel.js';
 
 const EYEBROW = 'text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500';
 const GRADE_INK = { A: 'text-forest-800', B: 'text-sky-700', C: 'text-amber-800', D: 'text-rose-700' };
+const MUTED_INK = 'text-slate-500';
+const LEGEND_ID = 'quality-letter-legend';
+const LETTER_LEGEND = "Letter = share of this paper type's checks met with a quote. Green = also no critical gap and no "
+  + 'automatic warning. Model notes are suggestions to verify.';
+
+// The one-line legend behind the «?» next to the Rigor label.
+function LegendButton({ open, onToggle }) {
+  return (
+    <button
+      type="button" onClick={onToggle} aria-expanded={open} aria-controls={LEGEND_ID} aria-label="What does the rigor letter mean?"
+      className="no-tap-min relative inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 text-[11px] font-medium normal-case tracking-normal text-slate-600 after:absolute after:-inset-3 after:content-[''] hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-forest-700"
+    >?</button>
+  );
+}
 
 // One cell per applicable check: met = Forest, not met = clay.
 function ChecksBar({ met, applicable }) {
@@ -21,23 +37,35 @@ function ChecksBar({ met, applicable }) {
 }
 
 function QualityTile({ grade, band, quality, redFlags }) {
+  const [legend, setLegend] = useState(false);
   const met = Number(quality?.coverage_met) || 0;
   const applicable = Number(quality?.coverage_applicable) || 0;
   const basis = gradeBasis(quality?.coverage_met, quality?.coverage_applicable);
   const facts = [BAND_LABEL[band], quality?.type_uncertain ? 'type uncertain' : ''].filter(Boolean).join(' · ');
+  // Rule D: a green A needs band = highlight; otherwise it is grey and says why (one reason).
+  const gaps = (quality?.missing_critical || []).map((k) => String(k || '').trim()).filter(Boolean).map(rubricLabel);
+  const muted = letterMuted(grade, band);
+  const note = muted ? `checklist only — ${mutedReason(band, gaps)}` : grade === 'A' ? 'no critical gap found' : '';
+  const flagged = band === 'flag';
+  const plural = redFlags.length === 1 ? '' : 's';
   return (
     <div className="min-w-0">
-      <div className={EYEBROW}>Quality</div>
-      <div className="mt-1 flex items-center gap-3">
-        {grade && <span title="Saved quality grade" className={`font-display text-[40px] font-light leading-none ${GRADE_INK[grade] || 'text-slate-700'}`}>{grade}</span>}
+      <div className={`${EYEBROW} flex items-center gap-2`}>
+        Rigor
+        {grade && <LegendButton open={legend} onToggle={() => setLegend((v) => !v)} />}
+      </div>
+      <div className="mt-1 flex items-center gap-3" data-feedback-field="quality">
+        {grade && <span title="Saved rigor grade" className={`font-display text-[40px] font-light leading-none ${muted ? MUTED_INK : GRADE_INK[grade] || 'text-slate-700'}`}>{grade}</span>}
         <div className="min-w-0 flex-1 space-y-1.5 text-[13px] leading-snug text-slate-700">
           {(basis || facts) && <div>{[basis, facts].filter(Boolean).join(' · ')}</div>}
           {basis && <ChecksBar met={met} applicable={applicable} />}
+          {note && <div className={muted ? 'text-slate-600' : 'text-forest-800'}>{note}</div>}
         </div>
       </div>
+      {legend && <p id={LEGEND_ID} className="mt-2 max-w-[66ch] text-[12px] leading-snug text-slate-600">{LETTER_LEGEND}</p>}
       {redFlags.length > 0 && (
-        <div className="mt-2 text-[13px] leading-snug text-rose-700" title={redFlags.slice(0, 3).join('; ')}>
-          ⚠ {redFlags.length} red flag{redFlags.length === 1 ? '' : 's'} to verify
+        <div data-feedback-field="red_flags" className={`mt-2 text-[13px] leading-snug ${flagged ? 'text-rose-700' : 'text-slate-600'}`} title={redFlags.slice(0, 3).join('; ')}>
+          {flagged ? `⚠ ${redFlags.length} red flag${plural} to verify` : `Notes to verify (${redFlags.length})`}
         </div>
       )}
     </div>
@@ -71,7 +99,7 @@ function MetricVisual({ visual }) {
 function MetricsTile({ metrics }) {
   const [hero, ...rest] = metrics.map((text) => ({ text, ...metricView(text) }));
   return (
-    <div className="min-w-0">
+    <div className="min-w-0" data-feedback-field="metrics">
       <div className={EYEBROW}>{metrics.length > 1 ? 'Metrics' : 'Key metric'} · as reported</div>
       <div className="mt-1">
         {hero.lead && <div className="font-display text-[30px] font-light leading-tight tabular-nums text-forest-800">{hero.lead}</div>}
@@ -100,7 +128,7 @@ function ProsCons({ strength, weakness }) {
     </div>
   );
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5" data-feedback-field="strength_weakness">
       {row('+', 'Strength', strength, 'text-forest-700')}
       {row('−', 'Weakness', weakness, 'text-rose-700')}
     </div>

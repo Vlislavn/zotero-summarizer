@@ -75,22 +75,17 @@ def load_docs(conn, now: datetime, gists: dict[str, str]) -> list[dict]:
     since = now - 2 * WEEK
     posts = [row["post"] for row in store.list_posts(conn, limit=1000)
              if not row["post"].skip_reason and len(row["post"].text.strip()) >= MIN_CHARS
-             and since < _iso(row["post"].published_at) <= now]
+             and not relevance.is_ad_post(row["post"].text) and since < _iso(row["post"].published_at) <= now]
     kept, _ = relevance.dedup(posts)
     notes = _notes(conn, since)
     rank = {source_id: number for number, source_id in enumerate(gists)}  # digest order: most discussed first
     docs = []
     for post in kept:
         note = _REF.sub("", " ".join((gists.get(post.source_id) or "").split())) or notes.get(post.source_id, "")
-        docs.append({"id": post.source_id, "hot": rank.get(post.source_id), "channel": post.username or "канал", "at": _iso(post.published_at),
+        docs.append({"id": post.source_id, "hot": rank.get(post.source_id), "channel": post.username or "channel", "at": _iso(post.published_at),
                      "headline": _headline(post.text), "permalink": post.permalink, "note": note[:NOTE_CHARS * 2],
                      "text": " ".join(post.text.split())[:DOC_CHARS]})
     return sorted(docs, key=lambda d: (d["at"], d["id"]))
-
-
-def _unit(vectors: np.ndarray) -> np.ndarray:
-    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-    return vectors / np.where(norms == 0.0, 1.0, norms)
 
 
 def _stems(text: str) -> list[str]:
@@ -105,7 +100,8 @@ def _embed(scorer, docs: list[dict]) -> np.ndarray:
     dense = np.vstack([np.asarray(scorer(texts[i:i + EMBED_BATCH]), dtype=np.float32)
                        for i in range(0, len(texts), EMBED_BATCH)])
     lexical = TfidfVectorizer(analyzer=_stems, min_df=2, max_df=0.2, sublinear_tf=True).fit_transform(texts)
-    return _unit(np.hstack([_unit(dense - dense.mean(axis=0)), _unit(lexical.toarray().astype(np.float32))]))
+    unit = relevance.unit_rows
+    return unit(np.hstack([unit(dense - dense.mean(axis=0)), unit(lexical.toarray().astype(np.float32))]))
 
 
 def _groups(vectors: np.ndarray, indexes: list[int], distance: float) -> list[list[int]]:
@@ -134,7 +130,7 @@ def build_topics(week: list[dict], base: list[dict], scorer) -> list[dict]:
         mine = [i for i in group if i < len(week)]
         channels = [week[i]["channel"] for i in mine]
         if len(mine) >= MIN_POSTS and len(set(channels)) >= MIN_CHANNELS:
-            centroid = _unit(vectors[mine].mean(axis=0, keepdims=True))[0]
+            centroid = relevance.unit_rows(vectors[mine].mean(axis=0, keepdims=True))[0]
             topics.append({"members": sorted(mine, key=lambda i: -float(vectors[i] @ centroid)),
                            "baseline_posts": len(group) - len(mine), "posts": len(mine),
                            "channels": sorted(set(channels), key=lambda c: (-channels.count(c), c))})

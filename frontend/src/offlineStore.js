@@ -86,6 +86,11 @@ function localQuestion(mutation) {
   return { ...mutation.value, submitted_at: mutation.created_at, saved_offline: true, sync_status: mutation.status };
 }
 
+// Cached review detail carrying the paper row's verdict, note and questions.
+function withPaperState(detail, row) {
+  return { ...detail, verdict: row.verdict, user_note: row.review_note, questions: row.questions || [] };
+}
+
 function overlayReviewQuestions(itemKey, detail, mutations) {
   const local = mutations.filter((row) => row.field === 'review_question' && row.item_key === itemKey)
     .map(localQuestion);
@@ -166,10 +171,7 @@ export async function savePapers(rows, refreshDetails = false) {
         const cached = meta.get(key);
         cached.onsuccess = () => {
           if (!cached.result?.value) return;
-          meta.put({ key, value: {
-            ...cached.result.value, verdict: row.verdict, user_note: row.review_note,
-            questions: row.questions || [],
-          } });
+          meta.put({ key, value: withPaperState(cached.result.value, row) });
         };
       }
     }
@@ -506,10 +508,7 @@ export async function applyPull(payload, sequence) {
             deep_review: row.review_digest ? { digest: row.review_digest } : null,
             tags: [], collections: [], offline_snapshot: true,
           };
-          meta.put({ key, value: {
-            ...detail, verdict: merged.verdict, user_note: merged.review_note,
-            questions: merged.questions,
-          } });
+          meta.put({ key, value: withPaperState(detail, merged) });
         };
       }
       meta.put({ key: 'cursor', value: payload.cursor });

@@ -153,10 +153,10 @@ class AnthropicLLMClient:
         if not self._verification:
             yield
             return
-        if not self._invocation.acquire(blocking=False):
-            raise RuntimeError("Verification client already has an owned invocation")
+        from .llm_requests import begin_owned_invocation
+
+        self._request = begin_owned_invocation(self._invocation, self._request_owner)
         try:
-            self._request = self._request_owner()
             yield
         finally:
             self._request = None

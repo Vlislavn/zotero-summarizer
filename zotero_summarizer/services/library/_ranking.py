@@ -10,9 +10,10 @@ re-exports these so ``reading_queue._dedup_by_content`` etc. remain the public s
 from __future__ import annotations
 
 import re
+from statistics import median
 from typing import Any
 
-from zotero_summarizer.domain import score_to_priority
+from zotero_summarizer.domain import TRIAGE_APPROVED_TAG_TOKEN, score_to_priority
 from zotero_summarizer.services._common import band_primary_enabled
 from zotero_summarizer.services._common import quality_promote_enabled
 from zotero_summarizer.services.emoji_signals import HARD_VETO_EMOJIS, READ_EMOJIS
@@ -22,6 +23,7 @@ from zotero_summarizer.services.library._score_distribution import _entry_presti
 from zotero_summarizer.services.library._score_distribution import entry_prestige_evidence
 from zotero_summarizer.services.model.rank_blend import (
     GOAL_BLEND_WEIGHT,
+    blend_parts,
     blend_scores,
     order_within_bands,
     promote_band,
@@ -33,8 +35,9 @@ from zotero_summarizer.services.model.rank_blend import (
 # The automated "✅ triage-approved" tag is also excluded: ✅ is an engagement
 # emoji, but the triage system applies this tag without user action.
 _READ_TAGS: frozenset[str] = READ_EMOJIS | HARD_VETO_EMOJIS
-_TRIAGE_APPROVED_TOKEN = "triage-approved"
 _PREVIEW_CHARS = 260
+_TLDR_CHARS = 300
+_READ_DECISIONS = frozenset({"read", "skim", "skip"})
 _EMAIL_ONLY = re.compile(r"\S+@\S+\.\S+")
 
 
@@ -42,7 +45,7 @@ def _is_read(tags: list[str]) -> bool:
     return any(
         emoji in tag
         for tag in tags
-        if tag and _TRIAGE_APPROVED_TOKEN not in tag
+        if tag and TRIAGE_APPROVED_TAG_TOKEN not in tag
         for emoji in _READ_TAGS
     )
 
@@ -108,6 +111,15 @@ def _known_prestige(rec: dict[str, Any]) -> float | None:
     return float(val) if isinstance(val, (int, float)) else None
 
 
+def _blend_inputs(scored: list[dict[str, Any]]) -> tuple[list[float], list[float | None], list[float | None]]:
+    """The scored cohort as the blend's parallel lists (relevance, goal_sim, KNOWN prestige)."""
+    return (
+        [float(r["relevance_score"]) for r in scored],
+        [None if r.get("goal_sim") is None else float(r["goal_sim"]) for r in scored],
+        [_known_prestige(r) for r in scored],
+    )
+
+
 def _blended_sort(unread: list[dict[str, Any]]) -> None:
     """Sort the unread queue in place by the shared relevance × goal × prestige
     blend (``services/model/rank_blend.blend_scores`` — min-max per cohort,
@@ -118,11 +130,7 @@ def _blended_sort(unread: list[dict[str, Any]]) -> None:
     gate score, goal = ``goal_sim``, prestige = KNOWN evidence via
     ``_known_prestige`` (never a derived fallback), tie-break = ``date_added``."""
     scored = [r for r in unread if r["relevance_score"] is not None]
-    keys = blend_scores(
-        [float(r["relevance_score"]) for r in scored],
-        [None if r.get("goal_sim") is None else float(r["goal_sim"]) for r in scored],
-        [_known_prestige(r) for r in scored],
-    )
+    keys = blend_scores(*_blend_inputs(scored))
     base = sorted(zip(scored, keys), key=lambda pair: (pair[1], pair[0]["date_added"]), reverse=True)
     use_band = band_primary_enabled()
     order = order_within_bands(
@@ -137,14 +145,63 @@ def _blended_sort(unread: list[dict[str, Any]]) -> None:
     unread[:] = [base[i][0] for i in order] + unscored
 
 
-def sort_unread(unread: list[dict[str, Any]], *, model_ready: bool) -> None:
+def _group_rank(rec: dict[str, Any], lift_must: bool) -> int:
+    """0 = the owner's own Must read (``decided`` + ``user_priority``: a machine
+    label is not a decision), 1 = still to decide, 2 = otherwise decided."""
+    if not rec.get("decided"):
+        return 1
+    return 0 if lift_must and rec.get("user_priority") == "must_read" else 2
+
+
+def _quality_share(rec: dict[str, Any]) -> float | None:
+    """The review's share of passed checklist items (0..1), or None without an applicable review."""
+    met, applicable = rec.get("quality_met"), rec.get("quality_applicable")
+    if not isinstance(met, (int, float)) or not isinstance(applicable, (int, float)) or applicable <= 0:
+        return None
+    return min(1.0, max(0.0, met / applicable))
+
+
+def rank_explain(unread: list[dict[str, Any]]) -> dict[str, Any]:
+    """Attach the blend's parts so the client can re-order the queue (Read-next presets).
+
+    Call AFTER ``sort_unread`` (it fills the missing ``goal_sim``) and BEFORE
+    ``_dedup_by_content`` — the min-max cohort is exactly the one ``_blended_sort``
+    ranked. Every row gets ``rank_group`` (``_group_rank``); every scored row gets
+    ``rank_parts`` (``blend_parts`` terms + raw ``quality``, KNOWN signals only).
+    Returns the response fields ``rank_coverage`` ``{signal: {present, of}}``,
+    ``rank_fill`` (the term of an unknown row) and ``balanced_weights``; ``{}`` when
+    nothing is scored. Ranking itself is untouched."""
+    for rec in unread:
+        rec["rank_group"] = _group_rank(rec, True)
+    scored = [r for r in unread if r["relevance_score"] is not None]
+    if not scored:
+        return {}
+    parts, fill, weights = blend_parts(*_blend_inputs(scored))
+    qualities = []
+    for rec, row in zip(scored, parts):
+        share = _quality_share(rec)
+        if share is not None:
+            row["quality"] = round(share, 3)
+            qualities.append(row["quality"])
+        rec["rank_parts"] = row
+    if qualities:
+        fill["quality"] = round(median(qualities), 3)
+    coverage = {
+        signal: {"present": sum(1 for row in parts if signal in row), "of": len(scored)}
+        for signal in ("relevance", "goals", "prestige", "quality")
+    }
+    return {"rank_coverage": coverage, "rank_fill": fill, "balanced_weights": weights}
+
+
+def sort_unread(unread: list[dict[str, Any]], *, model_ready: bool, lift_must: bool = True) -> None:
     """Order the unread queue IN PLACE (the queue's normal, non-search order).
 
     Gate ready → relevance × goal × prestige blend (attaches ``goal_sim`` per row;
     each optional term folds into relevance when its signal is absent, so with no
     goals AND no known prestige this is gate-score-then-recency). Gate not ready →
     priority-tier then recency. Only ORDER changes; banding stays from the gate
-    score. See ``_blended_sort`` / ``rank_blend.GOAL_BLEND_WEIGHT``."""
+    score. See ``_blended_sort`` / ``rank_blend.GOAL_BLEND_WEIGHT``. ``lift_must``
+    puts the owner's own Must read first (off for a text search)."""
     if model_ready:
         # goal_sim is precomputed at rescore time and carried on each rec from the
         # score cache (_build_recs). Only items still missing it — legacy cache
@@ -170,11 +227,31 @@ def sort_unread(unread: list[dict[str, Any]], *, model_ready: bool) -> None:
             key=lambda c: (_PRIORITY_RANK.get(c["reading_priority"], 0), c["date_added"]),
             reverse=True,
         )
-    # Papers the owner already decided (own verdict) go LAST: Read next leads with
-    # what still needs a decision. Stable, so the blended order is kept within each
-    # group; they stay findable (verdict shown on the row), never hidden.
+    # One stable pass (blended order kept within each group, nothing hidden):
+    # the owner's own unread Must read lead as a group, then what still needs a
+    # decision, then the rest of the papers the owner already decided (own verdict).
     if any(r.get("decided") for r in unread):
-        unread.sort(key=lambda c: -1 if c.get("decided") else 0, reverse=True)
+        unread.sort(key=lambda c: _group_rank(c, lift_must))
+
+
+def _review_row_fields(review: dict[str, Any] | None) -> dict[str, Any]:
+    """Display-only row fields from the current projected review (``None`` → all null).
+
+    ``has_code``: true = a repo was found and is not known dead; false = ``code_link``
+    present but nothing found / dead repo; null = no review or no ``code_link`` key."""
+    digest = (review or {}).get("digest")
+    if not digest:
+        return {"review_digest": None, "read_decision": None, "estimated_read_minutes": None, "has_code": None}
+    decision = str(digest.get("read_decision") or "")
+    minutes = digest.get("estimated_read_minutes")
+    link = review.get("code_link")
+    has_code = None if not isinstance(link, dict) else bool(link.get("found")) and link.get("exists") is not False
+    return {
+        "review_digest": {"tldr": str(digest.get("tldr") or "")[:_TLDR_CHARS]},
+        "read_decision": decision if decision in _READ_DECISIONS else None,
+        "estimated_read_minutes": minutes if isinstance(minutes, int) and not isinstance(minutes, bool) else None,
+        "has_code": has_code,
+    }
 
 
 def _build_recs(
@@ -191,7 +268,7 @@ def _build_recs(
     "Handled" = engaged (emoji) OR explicitly rejected (``dont_read``); those drop
     out of the unread queue. A POSITIVE verdict is a reading intent — the paper
     stays in ``unread`` but is flagged ``decided`` (own verdict, ``own_verdicts``)
-    and sorts after the undecided papers (``sort_unread``). The
+    and is grouped by ``sort_unread`` (own Must read first, other decided last). The
     ``proposed_verdict`` and quality fields are display-only sidecars (never fed to
     the hide/pin logic)."""
     from zotero_summarizer.services.library.review_fleet.verdict_store import proposal_matches_review
@@ -265,6 +342,7 @@ def _build_recs(
             "quality_band": quality_band,
             "quality_met": qual.get("coverage_met"),
             "quality_applicable": qual.get("coverage_applicable"),
+            **_review_row_fields(reviews.get(it["item_key"])),
         }
         (read if (is_read or user_priority == "dont_read") else unread).append(rec)
     attach_nearest_kept(unread)
@@ -286,13 +364,18 @@ def _order_and_dedup(
     corpus is off / no match. Dedup runs AFTER the sort so the best-scored copy
     survives a top slot; ``read`` is de-duped too and any read copy whose paper
     already survives in ``unread`` is dropped (else a paper with one read + one
-    unread copy would show in BOTH lists under ``include_read``)."""
+    unread copy would show in BOTH lists under ``include_read``).
+
+    The third item is the search flags plus, for the plain (no-search) ranked queue,
+    ``"rank"``: the ``rank_explain`` response fields, computed on the pre-dedup cohort."""
     search_flags: dict[str, Any] = {}
     if semantic_requested:
         from zotero_summarizer.services.library import _search
         unread, search_flags = _search.order_unread_semantic(search, unread)
     if not search_flags.get("semantic"):
-        sort_unread(unread, model_ready=model_ready)
+        sort_unread(unread, model_ready=model_ready, lift_must=not (search or "").strip())
+        if model_ready and not (search or "").strip():
+            search_flags["rank"] = rank_explain(unread)
     unread = _dedup_by_content(unread)
     _unread_keys = {k for r in unread if (k := _content_key(r))}
     read = [r for r in _dedup_by_content(read) if _content_key(r) not in _unread_keys]
@@ -309,5 +392,6 @@ __all__ = [
     "_build_recs",
     "_is_read",
     "_order_and_dedup",
+    "rank_explain",
     "sort_unread",
 ]

@@ -41,6 +41,11 @@ class TelegramDoneRequest(BaseModel):
     done: bool
 
 
+class TelegramDiscussionsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    topic_id: int
+
+
 class TelegramProcessingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     token: str
@@ -104,7 +109,7 @@ def telegram_status():
 @router.get("/telegram/today")
 def telegram_today_digest():
     """Read-only: the latest 'Сегодня в каналах' posts, discussions and weekly trends."""
-    return telegram_today.read_today(settings())
+    return telegram_today.read_page(settings())
 
 
 @router.get("/telegram/thread/{source_id}")
@@ -124,6 +129,12 @@ def telegram_collect_consent(request: TelegramCollectConsentRequest):
 def run_telegram():
     """Start «Проверить каналы» in the background; while one runs, return its running status."""
     return telegram_job.start(settings())
+
+
+@router.post("/telegram/discussions", status_code=202)
+def load_telegram_discussions(request: TelegramDiscussionsRequest):
+    """Start «Load discussions» for one trend (needs the collect consent); same job, lock and status as the check."""
+    return telegram_job.start_discussions(settings(), request.topic_id)
 
 
 @router.get("/runs")

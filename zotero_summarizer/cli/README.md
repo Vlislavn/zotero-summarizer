@@ -1,8 +1,9 @@
 # cli — the `zotero-summarizer` command-line interface
 
-The `_telegram-child` has two purposes: `auth` (interactive terminal only) and `digest`
+The `_telegram-child` has three purposes: `auth` (interactive terminal only), `digest`
 (the Settings 'Collect' action: `collect_pages` + digest, persisted in-child as
-`telegram-today.json`). It retains the dedicated session/fuse/lease and a receipt
+`telegram-today.json`) and `comments` (Weekly «Load discussions»: reads the comments of the
+post ids in `--source-ids`, saved as conversation snapshots; no model). It retains the dedicated session/fuse/lease and a receipt
 verified before the parent proceeds (`integrations.telegram_child.run_child` spawns it; `cli/_telegram.py` holds the child body); failures expose bounded status codes, never raw
 SDK messages/account paths. The `conversations` purpose and its v2 bundle export were
 removed (retired; historical bundles stay readable in Weekly).
@@ -45,7 +46,8 @@ __init__.build_parser()
           ├─ register_goldenset_setup_tag_colors(gs_sub)  # _goldenset_setup_colors.py: setup-tag-colors
           └─ register_goldenset_feedback(gs_sub)  # _goldenset_feedback.py: analyze-feedback
    ├─ register_faithbench(subparsers)  # _faithbench.py: faithbench build/run/judge/report/interpretation
-   └─ register_research_feed(...)      # _research_feed.py: research-feed run/view/telegram-auth
+   ├─ register_research_feed(...)      # _research_feed.py: research-feed run/view/telegram-auth
+   └─ register_review_feedback(...)    # _review_feedback.py: review-feedback list/check
 main() = parse args → validate command budgets → selected Settings/.env → offline flags → dispatch
 ```
 
@@ -53,6 +55,7 @@ main() = parse args → validate command budgets → selected Settings/.env → 
 |---|---|
 | `__init__.py` | `build_parser()` + `main()` (the entry point `zotero-summarizer`) |
 | `__main__.py` | enables `python -m zotero_summarizer.cli` |
+| `_review_feedback.py` | `review-feedback list` (one line per saved evidence package: paper, parts and reasons, snapshot status, checks) and `review-feedback check KEY [--part P] [--set PART=confirmed\|rejected\|unclear --note …]` (each part's shown text, its reasons, and where its phrases and quotes occur in `source.txt`; `--set` writes `check.json`). Local files only under `Settings.review_feedback_dir`: no model, no network, no database; both mark a snapshot `pending` for over 10 minutes as `interrupted` (the app retries it on the next save) |
 | `_helpers.py` | shared CLI helpers: feed-id resolution, run-log writing, slugs |
 | `_app.py` | `serve` (uvicorn `api.app:create_app`, `factory=True`; leaves existing listeners intact and reports a bind error on an occupied port; the process-killing helper and `--no-kill` option are removed) / `mcp` / `migrate` / `smoke-test` / `prefetch-models` (download the ML models for offline use; `--check` reports cache status; includes the MiniCheck claim-checker only when `quality_review.shadow_claim_check` is on). `__init__.apply_offline_env()` projects the selected Settings environment before handler model imports; importing CLI or building its parser reads no default `.env` or model SDK. `ZS_OFFLINE`/`HF_HUB_OFFLINE` still select cache-only model loading. `verify-deep-review` runs the real digest + quality path headlessly against the live `deep_review` model on ONE already-built paper's cached `qa_text` (`--item-key`, default `4NIMLFMV`; `--with-goals` adds the heavier goal board) — prints per-phase timing + the digest JSON; the end-to-end "does a review actually produce a digest" check without Zotero or the server. It computes `sub_concurrency` via the SAME `_common.deep_review_sub_concurrency` helper the background job uses (and prints it in the tier line), so its wall-clock is a faithful production receipt — a remote provider's rubric/goal sub-calls run in parallel here exactly as they would in the app. `--provider`/`--model` override the deep_review stage for THIS run only (e.g. `--provider default --model qwen3.5:4b` to drive the pipeline against a local ollama model when the configured provider is unreachable/over-budget) |
 | `_mobile_serve.py` | Explicit `serve-mobile --origin HTTPS_TS_ORIGIN --owner-login EXACT_LOGIN`: owned private Unix by default. `--trusted-loopback-port PORT` consciously trusts local host processes and binds only 127.0.0.1:PORT (1024..65535), retaining owner/HTTPS admission. Never auto-falls back or configures Tailscale. Original signal/resource lifetime covers both transports. |

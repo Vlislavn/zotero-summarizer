@@ -1,38 +1,12 @@
 // Thin fetch wrappers for the /api/feeds/review/* endpoints.
 // Mirrors the Alpine code in zotero_summarizer/web/ui.html (review tab).
 
+import { fetchJson } from './client.js';
+
 const BASE = '/api/feeds/review';
 
 async function request(path, options = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options,
-  });
-  if (!res.ok) {
-    let parsedMessage = '';
-    let detail = '';
-    try {
-      const body = await res.json();
-      if (body && typeof body === 'object') {
-        parsedMessage = body.message || body.detail || '';
-        detail = JSON.stringify(body);
-      }
-    } catch {
-      try {
-        detail = await res.text();
-      } catch {
-        detail = '';
-      }
-    }
-    const message = parsedMessage
-      ? `HTTP ${res.status}: ${parsedMessage}`
-      : `HTTP ${res.status} ${res.statusText}${detail ? `: ${detail}` : ''}`;
-    const err = new Error(message);
-    err.status = res.status;
-    throw err;
-  }
-  if (res.status === 204) return null;
-  return res.json();
+  return fetchJson(`${BASE}${path}`, options);
 }
 
 /** GET /api/feeds/review?state=...&limit=...&sort=...

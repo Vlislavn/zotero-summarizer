@@ -351,6 +351,12 @@ def build_paper_read_for_pdf(
         )
         cached = deep_review.get_current_review(item_key) if item_key else None
         digest = cached["digest"] if cached and cached.get("digest") else None
+        # A saved review that is not current (outdated) leaves the page without digest: say so, don't pass silently.
+        stale = None if cached or not item_key else deep_review.get_usable_review(item_key)
+        review_outdated = bool(stale and (stale.get("review_freshness") or {}).get("status") == "outdated")
+        # A current review may still carry no digest (quality-only, or digest generation failed):
+        # the page would look complete without its brief, so say it out loud too.
+        review_without_digest = bool(cached) and not digest
         quality = cached.get("quality") if cached else None
         goal_summaries = cached.get("goal_summaries") if cached else None
         code_link = cached.get("code_link") if cached else None
@@ -358,6 +364,8 @@ def build_paper_read_for_pdf(
             directory, content, staging=Path(staging), digest=digest, quality=quality,
             goal_summaries=goal_summaries, code_link=code_link,
             model_read_decision=cached.get("model_read_decision") if cached else None,
+            review_outdated=review_outdated,
+            review_without_digest=review_without_digest,
         )
         content.update(
             {

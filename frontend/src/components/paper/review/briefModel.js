@@ -9,7 +9,7 @@
 export const isSupportedGoal = (goal) => goal?.retrieval_state === 'hit'
   && goal?.relevant === true && goal?.abstained !== true;
 
-export const BAND_GLOSS = {
+const BAND_GLOSS = {
   highlight: {
     lead: 'Strong checklist coverage.',
     body: 'Applicable evidence/reporting checks were met; this is not scientific certification.',
@@ -51,7 +51,7 @@ export const METHOD_CLAUSE =
 export const LEGEND = [
   { term: 'FLAG', gloss: 'serious concerns or missing checks' },
   { term: 'NEUTRAL', gloss: 'mixed results' },
-  { term: 'HIGHLIGHT', gloss: 'most applicable checks met' },
+  { term: 'HIGHLIGHT', gloss: 'most applicable checks met, no critical gap, no automatic warning' },
 ];
 
 // Plain-English labels for rubric keys (mirrors _paper_read_brief._RUBRIC_LABEL).
@@ -74,6 +74,27 @@ const RUBRIC_LABEL = {
   composition: 'Dataset contents (instances, labels, splits) described',
   collection: 'Data collection process described',
   known_biases: 'Known biases and limits of the data disclosed',
+  // Critical items of the other paper types (plain words; the checklist question stays in the full list).
+  no_leakage: 'Addresses train/test leakage',
+  calibration: 'Reports calibration, not only AUC',
+  reference_standard: 'Defines an appropriate reference standard (ground truth)',
+  accuracy_with_ci: 'Reports sensitivity/specificity with confidence intervals',
+  registration: 'Registered in advance (protocol or trial registry)',
+  randomization: 'Describes randomization and allocation concealment',
+  itt_analysis: 'Primary analysis is intention-to-treat',
+  contamination: 'Addresses overlap with pretraining/eval data',
+  search_strategy: 'Reports databases searched and the full search strategy',
+  rob_assessment: 'Assesses risk of bias of included studies',
+  synthesis_method: 'Describes an appropriate synthesis method',
+  aims: 'States concrete aims or questions',
+  search_described: 'Describes how the literature was searched',
+  evidence_primary: 'Backs a central premise with primary evidence',
+  assumptions: 'States the assumptions of each formal result',
+  proofs: 'Gives a proof or proof sketch for each claim',
+  intervention_outcome: 'Describes the intervention and its outcomes',
+  outcome_measured: 'Backs key outcomes with measured records',
+  comparison_baseline: 'Compares each claimed improvement to a before-state',
+  claims_match_evidence: 'Keeps conclusions within what was observed',
 };
 export const rubricLabel = (k) => RUBRIC_LABEL[k] || String(k || '').replace(/_/g, ' ');
 
@@ -110,7 +131,7 @@ export function dedupeFlags(flags) {
 
 // Paper-type → display label (mirrors _paper_type_checklists labels). The two
 // generic_* are the safe supertypes the detector falls back to (shown "type uncertain").
-export const PAPER_TYPE_LABEL = {
+const PAPER_TYPE_LABEL = {
   empirical_ml: 'Empirical ML', methods_system: 'Methods / systems',
   clinical_prediction: 'Clinical prediction model', diagnostic_accuracy: 'Diagnostic-accuracy / imaging',
   rct_ai: 'RCT of an AI intervention', dataset_benchmark: 'Dataset / benchmark',

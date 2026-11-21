@@ -1,7 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useSetupStatus } from '../../hooks/useSetupStatus.js';
 
-export const SETUP_DISMISSED_KEY = 'zs:setupDismissed';
+const SETUP_DISMISSED_KEY = 'zs:setupDismissed';
 
 export function isSetupDismissed() {
   try {

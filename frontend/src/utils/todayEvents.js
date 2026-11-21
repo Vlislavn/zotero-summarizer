@@ -9,7 +9,7 @@ let queue = [];
 let timer = null;
 let reviewContext = null; // { slateId, itemKey } while a paper opened from Today is on screen
 
-export function flushTodayEvents() {
+function flushTodayEvents() {
   clearTimeout(timer);
   timer = null;
   const bySlate = new Map();

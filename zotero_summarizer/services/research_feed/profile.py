@@ -25,12 +25,19 @@ def profile_path(data_dir: Path) -> Path:
     return data_dir / "research_feed" / "profile.json"
 
 
-def load_profile(data_dir: Path, *, persist_default: bool = True) -> ResearchProfile:
+def load_profile(data_dir: Path) -> ResearchProfile:
+    """Read the stored profile, or the default when none exists; never writes."""
     path = profile_path(data_dir)
     if path.exists():
         return ResearchProfile.model_validate(json.loads(path.read_text(encoding="utf-8")))
-    profile = ResearchProfile(themes=DEFAULT_THEMES, projects=DEFAULT_PROJECTS)
-    if persist_default:
+    return ResearchProfile(themes=DEFAULT_THEMES, projects=DEFAULT_PROJECTS)
+
+
+def ensure_profile(data_dir: Path) -> ResearchProfile:
+    """Load the profile, writing the default file first when it is missing."""
+    profile = load_profile(data_dir)
+    path = profile_path(data_dir)
+    if not path.exists():
         write_json_atomic(path, profile.model_dump(mode="json"))
     return profile
 
@@ -43,7 +50,7 @@ def save_telegram(data_dir: Path, selection) -> ResearchProfile:
     if path.is_symlink() or path.parent.is_symlink():
         raise ValueError("research profile cannot be a symlink")
     raw = (json.loads(path.read_text(encoding="utf-8")) if path.exists()
-           else load_profile(data_dir, persist_default=False).model_dump(mode="json"))
+           else load_profile(data_dir).model_dump(mode="json"))
     # Patch only this source's fields, retaining other intent and unknown extensions.
     raw.update(telegram_targets=[target.model_dump() for target in selection.sources],
                telegram_channels=[target.username for target in selection.sources if target.kind == "broadcast"],
@@ -54,4 +61,4 @@ def save_telegram(data_dir: Path, selection) -> ResearchProfile:
     return profile
 
 
-__all__ = ["DEFAULT_PROJECTS", "DEFAULT_THEMES", "load_profile", "profile_path", "save_telegram"]
+__all__ = ["DEFAULT_PROJECTS", "DEFAULT_THEMES", "ensure_profile", "load_profile", "profile_path", "save_telegram"]

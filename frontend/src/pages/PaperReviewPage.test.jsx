@@ -6,8 +6,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, Link, RouterProvider } from 'react-router-dom';
 import InlineAnnotate from '../components/library/InlineAnnotate.jsx';
+import usePaperReview from '../hooks/usePaperReview.js';
 import PaperReviewPage from './PaperReviewPage.jsx';
 import { cachedReviewDetail, pendingMutations, publishStatus } from '../offlineStore.js';
+function CompactDetail() { return <InlineAnnotate itemKey="P1" review={usePaperReview('P1')} />; }
 
 afterEach(async () => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); await publishStatus('', 'unchecked'); });
 
@@ -267,7 +269,7 @@ it.each(['page', 'compact'])('%s keeps verdict comments until an explicit edit i
   render(
     <QueryClientProvider client={client}>
       <RouterProvider router={createMemoryRouter([{ path: '/paper/:itemKey', element: surface === 'page'
-        ? <PaperReviewPage /> : <InlineAnnotate itemKey="P1" /> }], { initialEntries: ['/paper/P1'] })} />
+        ? <PaperReviewPage /> : <CompactDetail /> }], { initialEntries: ['/paper/P1'] })} />
     </QueryClientProvider>,
   );
 
@@ -438,4 +440,37 @@ it.each(['failed', 'abstained'])('captures a question without PDF/render through
     expect(screen.queryByText('Saved to Zotero.')).toBeNull();
     expect(unexpected).toEqual([]);
   } finally { client.clear(); router.dispose(); }
+});
+
+async function openPaperAndGoBack(initialEntries, startIndex) {
+  vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+  await publishStatus('', 'connected');
+  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('fetch', vi.fn(async (path) => new Response(JSON.stringify(
+    path === '/api/golden/review-detail?item_key=P1'
+      ? { item_key: 'P1', title: 'Back paper', tags: [], collections: [], has_pdf: false }
+      : path === '/api/zotero/collections' || path === '/api/zotero/tags?limit=300' ? { items: [] } : { status: 'idle' }))));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const router = createMemoryRouter([
+    { path: '/library', element: <p>library page</p> },
+    { path: '/paper/:itemKey', element: <PaperReviewPage /> },
+  ], { initialEntries, initialIndex: startIndex });
+  render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
+  await screen.findByRole('heading', { name: 'Back paper' });
+  fireEvent.click(screen.getByRole('link', { name: '← Back' }));
+  await screen.findByText('library page');
+  client.clear();
+  return router;
+}
+
+it('Back returns to the exact URL the review was opened from when the link carried state.from', async () => {
+  const from = '/library?open=P1&c=COLL&pr=must_read';
+  const router = await openPaperAndGoBack(
+    [from, { pathname: '/paper/P1', search: '?autoRun=false', state: { from } }], 1);
+  expect(`${router.state.location.pathname}${router.state.location.search}`).toBe(from);
+});
+
+it('Back goes to /library after a direct entry on /paper/KEY without state', async () => {
+  const router = await openPaperAndGoBack(['/elsewhere?x=1', '/paper/P1'], 1);
+  expect(`${router.state.location.pathname}${router.state.location.search}`).toBe('/library');
 });

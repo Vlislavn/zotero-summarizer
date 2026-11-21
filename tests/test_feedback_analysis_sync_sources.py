@@ -125,12 +125,12 @@ def test_actual_typed_sync_sqlite_append_retained_analysis(producer, conflict_re
     assert (target / "inputs/interaction-events.jsonl").read_bytes() == settings.interaction_log_path.read_bytes()
     result = retained_result(settings, target)
     observed = log_events(result)
-    assert [(row["source"], row["surface"], row["previous"], row["value"], row["prediction"])
+    assert [(row.get("source"), row.get("surface"), row.get("previous"), row.get("value"), row.get("prediction"))
             for row in observed] == [("offline_sync", "offline_sync", None, "could_read", "must_read"),
                                      (expected_source, "offline_sync", previous, "dont_read", "must_read"),
                                      ("offline_sync", "offline_sync", "dont_read", None, "must_read")]
     assert all(row["recorded_time"] == original["ts"] and row["event_gate_identity"] == ""
-               and row["inference_model_identity"] is None for row, original in zip(observed, raw))
+               and row.get("inference_model_identity") is None for row, original in zip(observed, raw))
     assert all(row["eligibility"] == "eligible" for row in observed)
     assert result["input_content_digest"] == manifest["content_digest"]
     assert [row["kind"] for row in observed] == ["label_transition"] * 3
@@ -164,7 +164,7 @@ def test_exact_source_event_pair_matrix(tmp_path, source, variant):
     result = retained_result(settings)
     observed = log_events(result)
     assert len(observed) == 1
-    assert observed[0]["source"] == source
+    assert observed[0].get("source") == source
     assert observed[0]["surface"] == raw["surface"]
     assert observed[0]["kind"] == expected
     assert result["coverage"]["sources"]["interaction_log"]["malformed"] == 0
@@ -209,9 +209,9 @@ def test_history_prediction_time_and_identity_unknowns_preserved(tmp_path, sourc
             event("G", source=source, model_priority="unknown")]
     log(settings, rows)
     observed = log_events(retained_result(settings))
-    assert observed[0]["previous"] is observed[0]["prediction"] is None
+    assert observed[0].get("previous") is observed[0].get("prediction") is None
     assert observed[0]["event_gate_identity"] == "event-time-gate"
-    assert all(row["inference_model_identity"] is None for row in observed)
+    assert all(row.get("inference_model_identity") is None for row in observed)
     assert [row["eligibility"] for row in observed] == [
         "eligible", "unknown_time", "unknown_time", "unknown_time", "after_cutoff",
         "ambiguous_identity", "eligible", "eligible",
@@ -221,7 +221,7 @@ def test_history_prediction_time_and_identity_unknowns_preserved(tmp_path, sourc
     ]
     assert observed[5]["identity_status"] == "ambiguous"
     assert observed[6]["kind"] == "nonpreference" and observed[6]["value"] == "urgent"
-    assert observed[7]["prediction"] is None
+    assert observed[7].get("prediction") is None
     assert observed[0]["kind"] == observed[7]["kind"] == "label_transition"
 
 

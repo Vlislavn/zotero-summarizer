@@ -20,11 +20,11 @@ from html import escape
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter, ZoteroWriteError
 from zotero_summarizer.services._common import settings
 from zotero_summarizer.services.search import session as session_store
 from zotero_summarizer.services.search._models import Candidate, ResearchSession
+from zotero_summarizer.services.zotero.collections import resolve_collection_name
 
 _TAG = "targeted-search"  # provenance: how the item entered the library
 
@@ -58,19 +58,6 @@ def _note_html(cand: Candidate, query: str) -> str:
             f"<p>Added from Targeted Search — query: {escape(query)}</p><p>{escape(summary)}</p>")
 
 
-def _resolve_collection_name(collection_key: str | None) -> str:
-    if not collection_key:
-        return "Inbox"
-    name = ZoteroReader(settings().zotero_data_dir).collection_name_for_key(collection_key)
-    if not name:
-        raise APIError(
-            error="invalid_collection",
-            message=f"no such collection: {collection_key}",
-            status_code=400,
-        )
-    return name
-
-
 def materialize_candidate(
     session_id: str, candidate_id: str, collection_key: str | None
 ) -> dict[str, Any]:
@@ -80,7 +67,7 @@ def materialize_candidate(
     retry can reuse the native writer's existing-key no-op, not create a new key."""
     from zotero_summarizer.services.triage.feeds import _generate_zotero_key
 
-    collection_name = _resolve_collection_name(collection_key)  # validate → fast 400, before the lock
+    collection_name = resolve_collection_name(collection_key, settings().zotero_data_dir)  # validate → fast 400, before the lock
     reused_existing = False
 
     def _do_write(cand: Candidate, sess: ResearchSession) -> str:

@@ -65,15 +65,24 @@ describe('orthogonal reviewed signals', () => {
       expect(html).toContain(text);
     }
     expect(html.split(digest.writing_reasons[0])).toHaveLength(2);
+    expect(html).toContain('Significance 4/5');
+    expect(html).not.toContain('Novelty');
     expect(html).toContain('Argument quality (Wachsmuth)');
     expect(html).toContain('2/4 applicable items met');
-    expect(html).not.toContain('Quality A');
+    expect(html).not.toContain('Rigor A');
     expect(html).toContain('>C</span>');
     expect(html).toContain('2 of 4 checks · Neutral');
     expect(html).not.toContain('Ablations isolate');
     expect(html).not.toContain('Validated on independent');
     expect(html).not.toContain('≥6 grounded');
     expect(JSON.stringify(deep)).toBe(original);
+  });
+
+  it('labels the idea by significance alone; the unchecked novelty score is not shown', () => {
+    const deep = { digest: { ...digest, novelty: 5, significance: 2 }, quality, model_digest: { ...digest, read_decision: 'read' } };
+    const html = renderToStaticMarkup(<PaperReview deep={deep} flat />);
+    expect(html).toContain('Idea: low');
+    expect(html).not.toContain('Novelty');
   });
 
   it.each(['flag', 'uncertain', 'highlight', 'neutral'])('uses only supplied applicable checks for %s', band => {
@@ -96,7 +105,7 @@ describe('orthogonal reviewed signals', () => {
     }} flat />);
     expect(html).toContain('REVIEW');
     expect(html).toContain('Writing: not assessed');
-    expect(html).not.toContain('Quality A');
+    expect(html).not.toContain('Rigor A');
     expect(html).not.toContain('>SKIP<');
   });
 
@@ -109,15 +118,15 @@ describe('orthogonal reviewed signals', () => {
     expect(html).toContain(digest.tldr);
     expect(html).not.toContain('Argument quality');
     expect(html).not.toContain('scope match');
-    expect(html).not.toContain('Quality A');
+    expect(html).not.toContain('Rigor A');
   });
 
   it.each([{ compact: true }, {}, { flat: true }])('keeps a failed new assessment ungraded in %j', props => {
     const deep = { digest: { ...digest, grade: '' }, model_digest: digest,
       quality: { quality_band: 'uncertain', basis: 'not_assessed', grade: '' } };
     const html = renderToStaticMarkup(<PaperReview deep={deep} {...props} />);
-    expect(html).not.toContain('title="Saved quality grade"');
-    expect(html).not.toContain('Quality A');
+    expect(html).not.toContain('title="Saved rigor grade"');
+    expect(html).not.toContain('Rigor A');
     expect(html).toContain('Evidence: Uncertain');
     expect(deep.model_digest.grade).toBe('A');
   });

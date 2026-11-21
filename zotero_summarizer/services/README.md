@@ -68,6 +68,7 @@ or incompatible required cached gate fails explicitly instead of training.
       └────────────────────────────> zotero/ (queue + apply writes)
    mobile PWA ←typed mutations/cursor→ sync/ ──> golden label history
    research_feed/ ──projects existing RSS + deep reviews──> weekly digest
+   conferences/ ──Crossref on an explicit click──> data/conferences/ (read by nothing else)
    card/ ──reuses library full-text + code cascade + OpenAlex──> Today card facts
 ```
 
@@ -83,9 +84,11 @@ observed model/terminal guard before OnPrem discards metadata and closes the
 transport on construction failure or callback completion. Ordinary clients keep
 their prior options; all setup local-LLM requests must first pass admission.
 
+`_common.to_text` and `_common.unique_non_empty_strings` re-export `integrations.llm.to_text` and `domain.unique_non_empty_strings` (one implementation each).
+
 Shared files: `_common` (helpers: settings/logging/sqlite-ro/now_iso_z/html_to_text/
 `atomic_write` (callback) + `write_json_atomic`
-(dict→JSON) for tmp+replace artifact/cache writes. JSON publication delegates to
+(dict→JSON; keyword-only `indent=None`, default output unchanged) for tmp+replace artifact/cache writes. JSON publication delegates to
 the callback writer: both use a unique sibling staging file per invocation and
 clean it up on failure. They do not serialize read–modify–write operations or
 promise power-loss durability (`fsync`);
@@ -142,7 +145,7 @@ reason instead of degrading silently; new subsystem = one checker + one row),
 `run_log` (run IDs combine a readable timestamp with a stdlib UUID, so same-second
 and concurrent commands cannot share report paths; latest-per-classifier reads
 append order, not lexical ID order),
-`interaction_log` (append-only **agentic interaction log** → `data/interaction-events.jsonl`:
+`interaction_log` (append-only **agentic interaction log** → `data/interaction-events.jsonl`; label events carry `post_read` when the change was made after the paper had a usable published review:
 one immutable JSON line per human reading decision — including explicit `label_transition`
 assignment/change/retraction events with separate prior-user/current-user/model values — plus
 the daemon's 7-day behavioural outcome; reuses `run_log`'s NDJSON appender,

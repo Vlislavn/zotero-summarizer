@@ -290,7 +290,7 @@ class EmbeddingCache(CorpusReadMixin, CorpusNearestMixin):
             value = json.loads(raw or "[]")
             if isinstance(value, list):
                 return [str(v) for v in value if str(v).strip()]
-        except Exception as _:
+        except (ValueError, TypeError):
             pass
         return []
 

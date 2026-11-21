@@ -12,7 +12,7 @@ import { conflictResolvedEvent, syncStatusEvent } from '../offlineStore.js';
 // (Occam's Razor). Returns the `verdict` prop object PaperDetailView expects plus
 // the tag/collection refetch handlers.
 export default function usePaperReview(itemKey, { onSaved, onVerdictAcknowledged, onQueueRefresh,
-  onVerdictStarted, onVerdictSettled } = {}) {
+  onVerdictStarted, onVerdictSettled, surface } = {}) {
   const queryClient = useQueryClient();
   const activeItem = useRef(itemKey);
   const callbacks = useRef({ onSaved, onQueueRefresh });
@@ -47,7 +47,7 @@ export default function usePaperReview(itemKey, { onSaved, onVerdictAcknowledged
     onMutate: variables => onVerdictStarted?.(variables.item_key, variables.user_priority),
     onSettled: (result, error, _variables, context) => onVerdictSettled?.(context, result, error),
     mutationFn: async ({ item_key, user_priority, comment }) => {
-      const result = await submitVerdict({ item_key, user_priority, comment });
+      const result = await submitVerdict({ item_key, user_priority, comment, surface });
       if (!result.saved_offline) onVerdictAcknowledged?.();
       // A feed-only paper has no Zotero item to tag (same as a skip decided on Today).
       if (user_priority !== 'dont_read' || result.saved_offline || item_key.startsWith('feed:')) return result;

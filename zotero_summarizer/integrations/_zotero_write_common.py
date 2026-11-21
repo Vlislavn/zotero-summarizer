@@ -5,6 +5,7 @@ import logging
 import random
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 LOGGER = logging.getLogger("zotero_summarizer.integrations.zotero_write")
@@ -25,6 +26,22 @@ def is_expected_sqlite_io(exc: sqlite3.Error) -> bool:
         sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_IOERR,
         sqlite3.SQLITE_FULL, sqlite3.SQLITE_READONLY, sqlite3.SQLITE_CANTOPEN,
     }
+
+
+def resolve_zotero_data_dir(
+    zotero_data_dir: str | Path | None, error: type[Exception],
+) -> tuple[Path, Path]:
+    """Resolve the Zotero data dir (default ``~/Zotero``) and its ``zotero.sqlite``.
+
+    Raises ``error`` (the caller's own exception type) when either is missing.
+    """
+    data_dir = Path(zotero_data_dir or (Path.home() / "Zotero")).expanduser().resolve()
+    db_path = data_dir / "zotero.sqlite"
+    if not data_dir.exists():
+        raise error(f"Zotero data directory not found: {data_dir}")
+    if not db_path.exists():
+        raise error(f"Zotero database not found: {db_path}")
+    return data_dir, db_path
 
 
 @dataclass(frozen=True)

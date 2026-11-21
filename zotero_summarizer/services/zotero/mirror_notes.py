@@ -7,6 +7,7 @@ import sqlite3
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
+from zotero_summarizer.integrations._zotero_write_common import is_expected_sqlite_io
 from zotero_summarizer.integrations._zotero_write_tags import _native_note_html, _owns_note
 from zotero_summarizer.integrations.zotero_read import ZoteroReadError
 from zotero_summarizer.integrations.zotero_write import ZoteroWriteError
@@ -28,13 +29,7 @@ def _optional_io(exc: BaseException) -> bool:
     if isinstance(exc, OSError):
         return True
     if isinstance(exc, sqlite3.Error):
-        code = getattr(exc, "sqlite_errorcode", None)
-        return code == sqlite3.SQLITE_CONSTRAINT_TRIGGER or (
-            code is not None and code & 255 in {
-                sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_IOERR,
-                sqlite3.SQLITE_FULL, sqlite3.SQLITE_READONLY, sqlite3.SQLITE_CANTOPEN,
-            }
-        )
+        return getattr(exc, "sqlite_errorcode", None) == sqlite3.SQLITE_CONSTRAINT_TRIGGER or is_expected_sqlite_io(exc)
     return False
 
 

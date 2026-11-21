@@ -15,7 +15,7 @@ AI agent ⇄ mcp/server.py (stdio)
 | `server.py` | MCP server entrypoint over stdio (`zotero-summarizer mcp`); ships a no-op `FastMCP` fallback stub when the `mcp` package is absent |
 | `api_client.py` | single-attempt httpx client; retryability metadata is advice to callers, not automatic retry/backoff |
 | `config.py` | base URL, timeouts, retryable status/error codes |
-| `helpers.py` · `parsers.py` | request shaping + response normalization |
+| `helpers.py` · `parsers.py` | request shaping + response normalization (tools de-duplicate lists with `domain.unique_non_empty_strings`) |
 | `tools/` | the actual MCP tools (see tools/README.md) |
 
 **Boundaries:** import only stdlib, `httpx`, `pydantic` (strict tool arguments), `models`/`contracts` (for shapes),

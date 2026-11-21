@@ -121,3 +121,13 @@ it('refuses a server detail when device storage cannot establish pending local f
   const { fetchReviewDetail } = await import('./goldenApi.js');
   await expect(fetchReviewDetail('P1')).rejects.toThrow('Storage denied');
 });
+
+it('sends the optional surface in the verdict body and omits it by default', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
+  const api = await import('./goldenApi.js');
+  await api.submitVerdict({ item_key: 'P1', user_priority: 'must_read', surface: 'library_sheet' });
+  await api.submitVerdict({ item_key: 'P1', user_priority: 'must_read' });
+  const bodies = fetch.mock.calls.map(([, init]) => JSON.parse(init.body));
+  expect(bodies[0]).toMatchObject({ surface: 'library_sheet' });
+  expect(bodies[1]).not.toHaveProperty('surface');
+});

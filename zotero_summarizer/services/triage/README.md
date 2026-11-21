@@ -4,7 +4,7 @@
 and unavailable rows, without ranking, inference, attribution or writes. It uses
 current verdict precedence, sibling materialization/pending state and bounded
 read-only review projection. Note-delivery snapshots expose revision/target/pending,
-not note bodies. Browser membership is not a daemon queue or write authorization.
+not note bodies; one `alias_resolver` per request serves all members (a per-member rescan of the feed history made 12 ids take ~1.8 s). Browser membership is not a daemon queue or write authorization.
 
 `today_exposure` is the owner-approved, local-only record of Today exposure in
 `Settings.today_exposure_log_dir` (`data/today-exposure/<local day>.jsonl`, `run_log` NDJSON,
@@ -37,7 +37,7 @@ review currentness (`deep_review.current_reviews`) and the filtered unhandled po
 are computed once and shared by the slate, `status` and the header count.
 
 Daily selection now ranks candidates without putting them into Zotero.
-`daily_actions` checks current full-text review eligibility before any Add
+`daily_actions` resolves its target collection with `services.zotero.collections.resolve_collection_name` (unknown key → 400 `invalid_collection`) and checks current full-text review eligibility before any Add
 label/pending state/write; mixed batches report blocked rows as
 `code=review_required` while eligible rows proceed. An explicit positive feed
 verdict follows the same gate. Pending Add is committed only while the
@@ -48,7 +48,8 @@ Turns raw RSS feed items into scored, ranked `processed_feed_items` rows that
 the Today tab consumes. The cheap `model/` gate fast-rejects; survivors get an
 LLM summary + composite score. Summarization and the legacy LLM backlog drain
 resolve clients through `services.llm.factory` with the existing runtime cache;
-the default ML-only drain never resolves a client.
+the default ML-only drain never resolves a client. `summarization.py` applies the corpus-affinity fast-reject through one
+`_corpus_fast_reject` gate shared by the abstract and full-text pipelines.
 
 ```
 Zotero feedItems ─feeds.run_daemon_tick→ gate(model) ─reject──> dropped

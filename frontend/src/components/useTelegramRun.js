@@ -12,7 +12,10 @@ export function useTelegramRun() {
   const running = Boolean(value?.running);
   const wasRunning = useRef(false);
   useEffect(() => {
-    if (wasRunning.current && !running) cache.invalidateQueries({ queryKey: ['telegram-today'] });
+    if (wasRunning.current && !running) {
+      cache.invalidateQueries({ queryKey: ['telegram-today'] });
+      cache.invalidateQueries({ queryKey: ['tg-thread'] });  // «Load discussions» may have stored new comments of an open thread
+    }
     wasRunning.current = running;
   }, [running, cache]);
   const start = useMutation({
@@ -20,5 +23,11 @@ export function useTelegramRun() {
     onSuccess: (next) => cache.setQueryData(['telegram-status'], next),
     onError: () => cache.invalidateQueries({ queryKey: ['telegram-status'] }),  // a consent saved before a failed start
   });
-  return { status, value, start, running, needsConsent: Boolean(value) && !value.consented && !running };
+  // «Load discussions» of one trend: same job slot and status as the check; needs the consent the check button grants.
+  const load = useMutation({
+    mutationFn: (topicId) => telegramFeedApi.discussions(topicId),
+    onSuccess: (next) => cache.setQueryData(['telegram-status'], next),
+    onError: () => cache.invalidateQueries({ queryKey: ['telegram-status'] }),
+  });
+  return { status, value, start, load, running, needsConsent: Boolean(value) && !value.consented && !running };
 }

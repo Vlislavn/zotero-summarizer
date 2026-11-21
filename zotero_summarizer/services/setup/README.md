@@ -202,7 +202,8 @@ CLI setup/doctor ─┘                    ├─ per-stage inference
 | `assets.py` | Shared prefetch targets and fresh-process cache-only load checks. |
 | `doctor_requests.py` / `doctor_dry_run.py` | Existing Doctor-file ownership persistence and real no-Zotero-write refine/repair/triage pipeline; no separate store or generic runner. |
 | `doctor.py` | Persisted web/CLI checklist with stable IDs, recovery actions, single-flight execution, interrupted-run recovery, redaction, and real inference gating. Recovery distinguishes absent/stopped Ollama; browser readiness checks the actual `patchright` runtime; the RSS probe is read-only so it cannot collide with daemon schema work. |
-| `doctor_environment.py` | Host/config/Zotero/database Doctor checks, saved-path/restart checks and the shared row contract; split from orchestration so both modules fit the code-size gate. |
+| `doctor_environment.py` | environment checks; the schema version is read through `storage.migrations.current_version` on the Doctor's own read-only connection |
+| `doctor_environment.py` | Host/config/Zotero/database Doctor checks, saved-path/restart checks and the shared row contract; split from orchestration so both modules fit the code-size gate. `psutil` is imported at module level (hard dependency). |
 | `calibration*.py` | Existing endpoint calibration and its single-flight job. |
 
 An empty `ZOTERO_DATA_DIR` is treated as unset, so path detection falls back to

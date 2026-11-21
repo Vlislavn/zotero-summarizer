@@ -17,7 +17,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, StringConstraints
@@ -63,6 +63,13 @@ class VerdictRequest(BaseModel):
     comment: str = Field(
         default="",
         description="Optional free-text rationale; empty string is allowed.",
+    )
+    surface: Literal[
+        "annotate_verdict", "library_sheet", "library_split", "library_key",
+        "library_bulk", "library_verdicts",
+    ] = Field(
+        default="annotate_verdict",
+        description="UI path that recorded the verdict; old clients omit it.",
     )
 
 
@@ -297,7 +304,7 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
     if original is None and feed_row is not None:
         original = (feed_row.get("reading_priority") or "").strip() or None
     proposal_json = await asyncio.to_thread(
-        proposal_snapshot.build_proposal, surface="annotate_verdict", row=feed_row,
+        proposal_snapshot.build_proposal, surface=req.surface, row=feed_row,
         item_key=req.item_key, priority=original,
     )
     row_id = label_verdicts.set_label_verdict(
@@ -305,7 +312,7 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
         item_key=req.item_key,
         original_derived_priority=original,
         user_priority=req.user_priority,
-        surface="annotate_verdict",
+        surface=req.surface,
         comment=req.comment,
         proposal_json=proposal_json,
     )

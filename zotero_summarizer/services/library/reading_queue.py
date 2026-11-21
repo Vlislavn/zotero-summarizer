@@ -329,8 +329,8 @@ def _verdict_priorities() -> dict[str, str]:
     """``{item_key: user_priority}`` for the user's manual verdicts (``label_verdicts``).
 
     Only ``dont_read`` is "handled" (drops out of Read next, like the Today
-    slate); a POSITIVE verdict is a reading intent, so the paper stays but sorts
-    after the undecided ones (``_ranking.sort_unread``) — findable, not hidden.
+    slate); a POSITIVE verdict is a reading intent, so the paper stays: the owner's own
+    Must read lead, other decided ones sort after the undecided (``_ranking.sort_unread``).
     UNCAPPED reader: a paged fetch un-hides handled papers once the table outgrows
     it (the 500-cap training-bug failure class).
     """
@@ -369,7 +369,9 @@ def build_reading_queue(
     filters only select which cached scores appear.
 
     Returns ``{status, items, total_unread, read_hidden, decided_count, model_ready,
-    error, computed_at, scores_stale}``."""
+    error, computed_at, scores_stale}`` — plus ``rank_coverage``/``rank_fill``/
+    ``balanced_weights`` (and ``rank_group``/``rank_parts`` on the rows) for a ranked,
+    search-free queue; see ``_ranking.rank_explain``."""
     # "Meaning" search ranks the WHOLE (collection/tag-scoped) library by hybrid
     # relevance, so the substring filter is bypassed; "Exact" keeps it.
     semantic_requested = bool(semantic and str(search or "").strip())
@@ -400,6 +402,17 @@ def build_reading_queue(
         unread, read, search=search, semantic_requested=semantic_requested,
         model_ready=model_ready,
     )
+    if semantic_requested and not search_flags.get("semantic"):
+        # Corpus off / no candidates: the UI promises "exact text matches", so
+        # answer with the reader's substring filter, not the whole queue.
+        exact = build_reading_queue(
+            include_read=include_read, limit=limit, refresh=refresh, collection=collection,
+            tag=tag, search=search, include_abstract=include_abstract,
+        )
+        return {**exact, "semantic_unavailable": True}
+    if semantic_requested and include_read:
+        from zotero_summarizer.services.library import _search
+        read = _search.match_read_semantic(search, read)
 
     # Compute ONLY on an explicit refresh (Rescore). A prior crash (last_error
     # set) is surfaced and not auto-retried — Rescore clears it.
@@ -424,7 +437,7 @@ def build_reading_queue(
         "items": items,
         "total_unread": len(unread),
         "read_hidden": len(read),
-        # Of ``total_unread``: papers with the owner's own verdict, sorted last.
+        # Of ``total_unread``: papers with the owner's own verdict (Must read first, the rest last).
         "decided_count": sum(1 for r in unread if r["decided"]),
         "model_ready": model_ready,
         "error": err if status == "error" else None,
@@ -435,6 +448,7 @@ def build_reading_queue(
         "reranked": bool(search_flags.get("reranked")),
         "reranker_loading": bool(search_flags.get("reranker_loading")),
         "semantic_unavailable": bool(semantic_requested and not search_flags.get("semantic")),
+        **search_flags.get("rank", {}),  # rank_coverage / rank_fill / balanced_weights (Read-next presets)
         # Distribution over the full unread queue (not just the shown slice), so
         # the histogram reflects everything the current filter selects. The
         # prestige floor (median of the library's KNOWN prestige) gates the

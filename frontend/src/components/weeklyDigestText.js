@@ -63,7 +63,7 @@ export function rationaleText(text) {
   return plainReason(value);
 }
 
-export const WORTH = { read: 'Worth reading', skim: 'Worth a skim', skip: 'Not worth reading', unknown: 'Not rated' };
+const WORTH = { read: 'Worth reading', skim: 'Worth a skim', skip: 'Not worth reading', unknown: 'Not rated' };
 export const worthText = (value) => WORTH[value] || 'Not rated';
 
 const BASIS = { full_text: 'Read in full text', abstract_only: 'Read from the abstract only', abstract: 'Read from the abstract only' };

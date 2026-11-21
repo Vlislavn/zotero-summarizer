@@ -36,13 +36,3 @@ export async function materialize(sessionId, candidateId, collectionKey) {
     body: JSON.stringify({ candidate_id: candidateId, collection_key: collectionKey || null }),
   });
 }
-
-/** GET /api/search — newest-first saved-session summaries for the sidebar. */
-export async function listSessions() {
-  return request('/api/search');
-}
-
-/** DELETE /api/search/{id}. */
-export async function deleteSession(sessionId) {
-  return request(`/api/search/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
-}

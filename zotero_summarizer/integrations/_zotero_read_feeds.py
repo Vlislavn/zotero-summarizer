@@ -4,7 +4,10 @@ from __future__ import annotations
 import sqlite3  # noqa: F401  (type hints)
 from typing import Any  # noqa: F401
 
-from zotero_summarizer.integrations._zotero_read_common import _arxiv_id_from_url_or_doi
+from zotero_summarizer.integrations._zotero_read_common import (
+    _arxiv_id_from_url_or_doi,
+    _field_value_sql,
+)
 
 
 class ZoteroFeedsMixin:
@@ -124,42 +127,12 @@ class ZoteroFeedsMixin:
                     fi.translatedTime,
                     i.dateAdded,
                     i.dateModified,
-                    (
-                        SELECT v.value
-                        FROM itemData id JOIN fields f ON f.fieldID=id.fieldID
-                        JOIN itemDataValues v ON v.valueID=id.valueID
-                        WHERE id.itemID=i.itemID AND f.fieldName='title' LIMIT 1
-                    ) AS title,
-                    (
-                        SELECT v.value
-                        FROM itemData id JOIN fields f ON f.fieldID=id.fieldID
-                        JOIN itemDataValues v ON v.valueID=id.valueID
-                        WHERE id.itemID=i.itemID AND f.fieldName='abstractNote' LIMIT 1
-                    ) AS abstract,
-                    (
-                        SELECT v.value
-                        FROM itemData id JOIN fields f ON f.fieldID=id.fieldID
-                        JOIN itemDataValues v ON v.valueID=id.valueID
-                        WHERE id.itemID=i.itemID AND f.fieldName='url' LIMIT 1
-                    ) AS url,
-                    (
-                        SELECT v.value
-                        FROM itemData id JOIN fields f ON f.fieldID=id.fieldID
-                        JOIN itemDataValues v ON v.valueID=id.valueID
-                        WHERE id.itemID=i.itemID AND f.fieldName='DOI' LIMIT 1
-                    ) AS doi,
-                    (
-                        SELECT v.value
-                        FROM itemData id JOIN fields f ON f.fieldID=id.fieldID
-                        JOIN itemDataValues v ON v.valueID=id.valueID
-                        WHERE id.itemID=i.itemID AND f.fieldName='date' LIMIT 1
-                    ) AS publication_date,
-                    (
-                        SELECT v.value
-                        FROM itemData id JOIN fields f ON f.fieldID=id.fieldID
-                        JOIN itemDataValues v ON v.valueID=id.valueID
-                        WHERE id.itemID=i.itemID AND f.fieldName='publicationTitle' LIMIT 1
-                    ) AS publication_title,
+                    {_field_value_sql('title')} AS title,
+                    {_field_value_sql('abstractNote')} AS abstract,
+                    {_field_value_sql('url')} AS url,
+                    {_field_value_sql('DOI')} AS doi,
+                    {_field_value_sql('date')} AS publication_date,
+                    {_field_value_sql('publicationTitle')} AS publication_title,
                     (
                         SELECT group_concat(
                             CASE WHEN c.fieldMode=1

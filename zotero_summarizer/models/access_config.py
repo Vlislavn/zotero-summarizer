@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, field_validator
 
-__all__ = ["UniversityAccessConfig"]
+__all__ = ["UniversityAccessConfig", "validate_choice"]
 
 
-def _choice(value: str, allowed: frozenset[str], field: str) -> str:
+def validate_choice(value: str, allowed: frozenset[str], field: str) -> str:
+    """Lower-case/strip ``value`` and require it to be in ``allowed`` (shared by models/config)."""
     normalized = (value or "").strip().lower()
     if normalized not in allowed:
         raise ValueError(f"{field} must be one of {sorted(allowed)}, got {value!r}")
@@ -29,7 +30,7 @@ class UniversityAccessConfig(BaseModel):
     @field_validator("cookie_browser")
     @classmethod
     def _validate_cookie_browser(cls, value: str) -> str:
-        return _choice(
+        return validate_choice(
             value,
             frozenset(
                 {
@@ -50,7 +51,7 @@ class UniversityAccessConfig(BaseModel):
     @field_validator("browser_channel")
     @classmethod
     def _validate_browser_channel(cls, value: str) -> str:
-        return _choice(
+        return validate_choice(
             value,
             frozenset(
                 {

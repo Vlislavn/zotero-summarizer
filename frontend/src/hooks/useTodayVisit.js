@@ -4,10 +4,10 @@ import { addToLibrary, fetchDailyMembers, fetchDailySlate, submitDailyVerdict, t
 import { readStorage } from '../utils/safeStorage.js';
 import {
   TODAY_MEMBERS_QUERY, TODAY_STORAGE_KEY, TODAY_VISIT_QUERY, VISIT_LIMIT,
-  actionReply, applyMemberFacts, createTodayVisit, memberNeedsCarry, memberPresentation, readTodayVisit, updateTodayVisit,
+  actionReply, applyMemberFacts, createTodayVisit, memberInFlight, memberNeedsCarry, memberParked, memberPresentation, readTodayVisit, updateTodayVisit,
 } from '../utils/todayVisit.js';
 
-export default function useTodayVisit(enabled) {
+export default function useTodayVisit(enabled, awaitingStatus = false) {
   const client = useQueryClient();
   const activeActions = useIsMutating({ mutationKey: ['today-action'] });
   const activeSelections = useIsMutating({ mutationKey: ['today-selection'] });
@@ -48,7 +48,7 @@ export default function useTodayVisit(enabled) {
     // every card to "Status not current" and disable it (#37/T16). Status refreshes
     // on mount, reconnect, explicit Refresh, and while a carried action resolves.
     refetchOnMount: 'always', refetchOnWindowFocus: false, refetchOnReconnect: 'always',
-    refetchInterval: visit?.members.some(memberNeedsCarry) ? 3000 : false,
+    refetchInterval: visit?.members.some(memberInFlight) ? 3000 : false,
     // Keep the last result across navigation (stale-while-revalidate): a return from the
     // paper page shows it at once while the mount refetch revalidates. An invalidated
     // entry (verdict/review finished elsewhere, explicit Refresh) is NOT trusted below.
@@ -60,8 +60,23 @@ export default function useTodayVisit(enabled) {
   }, [membersQuery.data, membersQuery.dataUpdatedAt, visit?.id, update]);
   const effectiveVisit = useMemo(() => membersQuery.data && visit && !visit.invalid
     ? applyMemberFacts(visit, membersQuery.data) : visit, [visit, membersQuery.data]);
+  // Retained data is trusted unless explicitly invalidated: our own revalidation (in-flight or failed
+  // refetch) must not blank and disable the slate. query-core flags `isInvalidated` on a failed
+  // background refetch too, so an error keeps the facts (shown as «Status unavailable», actions disabled).
+  const retained = Boolean(visit && !visit.invalid && visit.members.length
+    && membersQuery.data !== undefined && (!membersInvalidated || membersQuery.isError));
+  const paused = membersQuery.fetchStatus === 'paused';
+  // A rejected refetch keeps `data` (throwOnError:false), so it is excluded explicitly.
   const fresh = Boolean(visit && !visit.invalid && (!visit.members.length
-    || (membersQuery.isSuccess && (!membersQuery.isFetching || !membersInvalidated) && membersQuery.fetchStatus !== 'paused')));
+    || (retained && !paused && !membersQuery.isError)));
+  // Paused (browser offline) or failed refetch with trusted retained facts: show them, keep actions disabled.
+  const staleReason = retained && !fresh && (paused ? 'offline' : 'unavailable');
+  // The first status read of this page load is still in flight: the stored facts may be stale (decided
+  // elsewhere), so rendering the stored cards would flash them and then drop them. Offline ('paused') and
+  // failed ('idle') reads keep showing the stored cards with their Offline / unavailable line. The same holds
+  // while the setup status the read waits for is still loading (`awaitingStatus`).
+  const checking = Boolean(visit && !visit.invalid && visit.members.length
+    && membersQuery.data === undefined && (membersQuery.fetchStatus === 'fetching' || awaitingStatus));
 
   const selection = useMutation({
     mutationKey: ['today-selection'],
@@ -80,7 +95,8 @@ export default function useTodayVisit(enabled) {
     if (enabled && !visit && selection.isIdle) selection.mutate(null);
   }, [enabled, visit, selection]);
 
-  const refresh = useCallback(() => client.invalidateQueries({ queryKey: TODAY_MEMBERS_QUERY }), [client]);
+  // Revalidate without marking the cache untrusted (invalidate would set isInvalidated and blank the slate).
+  const refresh = useCallback(() => client.refetchQueries({ queryKey: TODAY_MEMBERS_QUERY, type: 'active' }), [client]);
   const actionMutation = useMutation({
     mutationKey: ['today-action'],
     mutationFn: request => request.kind === 'add'
@@ -112,7 +128,7 @@ export default function useTodayVisit(enabled) {
       ? { ...member, action: request } : member) }), effectiveVisit.id).updated) actionMutation.mutate(request);
   }, [fresh, actionMutation, activeActions, activeSelections, effectiveVisit, update]);
 
-  // Per-card decision (#37): one-tap must/should/could/skip + optional reason chips,
+  // Per-card decision (#37): one-tap must/should/could/Not interested + optional reason chips,
   // written through the Today verdict endpoint; undo retracts the row. The decision
   // persists in the DB (facts.user_priority, shown after the next members refresh)
   // and is reflected optimistically on the card by the mutation's pending state.
@@ -121,16 +137,24 @@ export default function useTodayVisit(enabled) {
     mutationFn: request => request.kind === 'undo'
       ? undoDailyVerdict(request.itemId)
       : submitDailyVerdict({ itemId: request.itemId, priority: request.priority, chips: request.chips }),
+    // The undone decision's carried review action no longer matches the server facts and would hold the card.
+    onSuccess: (_response, request) => {
+      if (request.kind === 'undo') update(current => ({ ...current, members: current.members.map(member =>
+        member.paper.item_id === request.itemId ? { ...member, action: null } : member) }));
+    },
     onSettled: refresh,
     retry: false,
   });
-  const decide = useCallback((itemId, priority, chips = []) => {
-    if (busyRef.current) return;
-    decisionMutation.mutate({ kind: 'decide', itemId, priority, chips });
+  // Both return whether the write started (a write already running refuses the next one).
+  const decide = useCallback((itemId, priority, chips = [], callbacks) => {
+    if (busyRef.current) return false;
+    decisionMutation.mutate({ kind: 'decide', itemId, priority, chips }, callbacks);
+    return true;
   }, [decisionMutation]);
-  const undoDecision = useCallback(itemId => {
-    if (busyRef.current) return;
-    decisionMutation.mutate({ kind: 'undo', itemId });
+  const undoDecision = useCallback((itemId, callbacks) => {
+    if (busyRef.current) return false;
+    decisionMutation.mutate({ kind: 'undo', itemId }, callbacks);
+    return true;
   }, [decisionMutation]);
 
   // Selection (checkbox ticks) lives in the retained visit so it survives a round
@@ -144,13 +168,15 @@ export default function useTodayVisit(enabled) {
     setSelected(next);
   }, [effectiveVisit, setSelected]);
 
-  const carryCount = effectiveVisit?.members.filter(memberNeedsCarry).length || 0;
+  const carryCount = effectiveVisit?.members.filter(memberNeedsCarry).length || 0; // slots held by retained cards
+  const inFlightCount = effectiveVisit?.members.filter(memberInFlight).length || 0;
+  const parkedCount = effectiveVisit?.members.filter(member => memberParked(member) && !memberInFlight(member)).length || 0;
   const busy = Boolean(activeActions || activeSelections);
   const busyRef = useRef(busy);
   busyRef.current = busy;
   return {
-    visit: effectiveVisit, fresh, busy, carryCount, persistenceFailed,
-    loading: !visit && selection.isPending, renewing: selection.isPending,
+    visit: effectiveVisit, fresh, checking, staleReason, busy, carryCount, inFlightCount, parkedCount, persistenceFailed,
+    loading: (!visit && selection.isPending) || checking, renewing: selection.isPending,
     selectionError: selection.error, statusError: membersQuery.error,
     actionError: actionMutation.error || decisionMutation.error,
     canRenew: enabled && !busy && carryCount < VISIT_LIMIT && (!visit || visit.invalid || fresh),

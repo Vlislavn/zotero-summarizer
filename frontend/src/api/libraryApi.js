@@ -2,32 +2,12 @@
 // /api/triage/run endpoints used by the Library and Annotate pages.
 
 import { allPapers, cacheResponse, cachedResponse, getMeta, transportUnavailable } from '../offlineStore.js';
+import { jsonInit, readResponse } from './client.js';
 import { offlineRequest } from './offlineTransport.js';
 
 async function request(path, options = {}, localFallback = false) {
-  const init = { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options };
+  const init = jsonInit(options);
   return localFallback ? offlineRequest(path, init, readResponse) : readResponse(await fetch(path, init));
-}
-
-async function readResponse(res) {
-  const text = await res.text();
-  let data = null;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = { _raw: text };
-    }
-  }
-  if (!res.ok) {
-    const message = (data && (data.message || data.detail))
-      || `HTTP ${res.status} ${res.statusText}`;
-    const err = new Error(message);
-    err.status = res.status;
-    err.body = data;
-    throw err;
-  }
-  return data;
 }
 
 export async function fetchRelatedPapers(itemKey, { signal } = {}) {
@@ -65,6 +45,11 @@ export async function assessRelatedPapers(itemKey, consentToken, retry = false) 
 /** GET /api/zotero/collections — collection tree. */
 export async function fetchCollections() {
   return request('/api/zotero/collections');
+}
+
+/** GET /api/zotero/status — `stats.unsynced_items` is absent when Zotero is unreadable. */
+export async function fetchZoteroStatus() {
+  return request('/api/zotero/status');
 }
 
 /** GET /api/zotero/tags?limit=300 — top tags by item_count. */
@@ -231,7 +216,7 @@ export async function runUniversityLogin() {
 
 /**
  * POST /api/library/reject-tag { item_key }
- * Queues a Pending ❌ tag for the item (Deep Review "Remove"). The dont_read
+ * Queues a Pending ❌ tag for the item (the dont_read "Not interested" path). The dont_read
  * verdict (drop + training) is a separate submitVerdict call.
  */
 export async function queueRejectTag(itemKey) {
@@ -345,6 +330,16 @@ export async function fetchSectionSummaries(itemKey) {
   return request(`/api/library/section-summaries/${encodeURIComponent(itemKey)}`, { method: 'POST' });
 }
 
+/** GET /api/library/method-card/{itemKey} — { state: 'building' | 'ready' | 'failed' | 'unavailable', reason, can_build, retry_in_seconds, card }. */
+export async function fetchMethodCard(itemKey) {
+  return request(`/api/library/method-card/${encodeURIComponent(itemKey)}`);
+}
+
+/** POST /api/library/method-card/{itemKey} — start the ONE background build per paper (idempotent); poll the GET. */
+export async function buildMethodCard(itemKey) {
+  return request(`/api/library/method-card/${encodeURIComponent(itemKey)}`, { method: 'POST' });
+}
+
 /** POST /api/library/render/{itemKey}/build { force, allow_arxiv_source, allow_acquire_missing }. */
 export async function buildPaperRender(
   itemKey,
@@ -415,4 +410,30 @@ export async function saveReviewQuestion(submission) {
   return request('/api/library/questions', {
     method: 'POST', body: JSON.stringify(submission), idempotent: true,
   });
+}
+
+/** GET /api/library/review-feedback → { item_key, feedback: [one row per review version] }. */
+export async function fetchReviewFeedback(itemKey) {
+  return request(`/api/library/review-feedback?${new URLSearchParams({ item_key: itemKey })}`);
+}
+
+const feedbackPart = (itemKey, field) => `/api/library/review-feedback/${encodeURIComponent(itemKey)}/parts/${field}`;
+
+/** PUT …/parts/{field} → { cleared: false, feedback: row, package }; 409 review_version_changed when the review was regenerated. */
+export async function saveReviewFeedbackPart(itemKey, field, reviewedAt, chips, note) {
+  return request(feedbackPart(itemKey, field), {
+    method: 'PUT', body: JSON.stringify({ reviewed_at: reviewedAt, chips, note }), idempotent: true, // an upsert
+  });
+}
+
+/** DELETE …/parts/{field} → { cleared: true, feedback: row | null }; withdrawing twice is fine. */
+export async function withdrawReviewFeedbackPart(itemKey, field, reviewedAt) {
+  return request(`${feedbackPart(itemKey, field)}?${new URLSearchParams({ reviewed_at: reviewedAt })}`, {
+    method: 'DELETE', idempotent: true,
+  });
+}
+
+/** GET …/check/{item_key} → { checks: { part: { status, note, checked_at } } } — what was concluded about each part. */
+export async function fetchReviewFeedbackChecks(itemKey) {
+  return request(`/api/library/review-feedback/check/${encodeURIComponent(itemKey)}`);
 }

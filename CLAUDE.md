@@ -33,7 +33,7 @@ implementation contract; read it before editing.
 4. **Touch a package's code → update its `README.md` in the same commit.**
 5. **All app state lives under `data/`** (gitignored). Paths come from
    `Settings` — never hardcode `project_root / "..."`. *Sanctioned exception:*
-   the paper-read presentation/audit (`_presentation.html` / `_audit.json`),
+   the paper-read presentation/audit (`paper_presentation.html` / `paper_audit.json`),
    `figures/`, and explicit-consent source are written next to the Zotero PDF;
    only their `paper_read.json` state lives under `data/paper_render/`. See
    `services/library/README.md`.

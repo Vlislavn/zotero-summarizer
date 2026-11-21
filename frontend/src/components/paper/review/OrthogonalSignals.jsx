@@ -17,8 +17,7 @@ const POLICY_REASONS = {
 };
 
 function ideaLabel(digest) {
-  const scores = [digest.novelty, digest.significance].filter(value => Number.isInteger(value) && value >= 1 && value <= 5);
-  const score = Math.max(0, ...scores);
+  const score = Number.isInteger(digest.significance) && digest.significance >= 1 && digest.significance <= 5 ? digest.significance : 0;
   return score >= 4 ? 'high' : score >= 3 ? 'moderate' : score > 0 ? 'low' : 'not assessed';
 }
 
@@ -70,7 +69,7 @@ export default function OrthogonalSignals({ deep, folded = false }) {
         {folded && <div className="mb-2 space-y-2">{notes}</div>}
         <dl className="space-y-2">
           <KeyVal label="Idea value">
-            <p>Model assessments: Novelty {scoreText(digest.novelty)} · Significance {scoreText(digest.significance)}.</p>
+            <p>Model assessment: Significance {scoreText(digest.significance)}.</p>
             <p>{goalLabel(deep.goal_summaries || [])} {digest.relevance || ''}</p>
           </KeyVal>
           <KeyVal label="Scientific quality">

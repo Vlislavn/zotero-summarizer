@@ -38,6 +38,12 @@ export function updateTodayVisit(client, transform, expectedId) {
   const next = transform(current);
   if (!next) return { updated: false };
   const serialized = JSON.stringify(next);
+  // A refetch that changed nothing must not write storage or publish a new object: every
+  // write re-renders the slate and wakes other tabs through the `storage` event (3 s polling
+  // while a carried action resolves would do that forever).
+  if (cached?.id === current?.id && serialized === JSON.stringify(current) && readStorage(TODAY_STORAGE_KEY) === serialized) {
+    return { updated: true, saved: true };
+  }
   const saved = writeStorage(TODAY_STORAGE_KEY, serialized) && readStorage(TODAY_STORAGE_KEY) === serialized;
   if (!saved && current && next.id !== current.id) return { updated: false, saved: false };
   client.setQueryData(TODAY_VISIT_QUERY, next);
@@ -89,6 +95,23 @@ export function matchesMember(paper, facts) {
     && facts.item_key === paper.item_key
     && (facts.stable_feed_key || '') === (paper.stable_feed_key || '');
 }
+
+// A parked Add: the decision is saved but the item is not in Zotero (the write was refused,
+// usually because Zotero was open). Nothing retries it; the owner applies it in Ops › Feed review.
+export const memberParked = member => member.facts?.zotero_sync_status === 'pending';
+
+// Only something that can still resolve by itself justifies polling: a parked Add cannot.
+export function memberInFlight(member) {
+  if (!memberParked(member)) return memberNeedsCarry(member);
+  return member.action?.phase === 'unconfirmed'
+    || Boolean(member.facts.note_delivery?.pending && member.facts.note_delivery.target_key);
+}
+
+// The owner has decided this paper (Today pill, paper page, or a bulk Add / Not interested). It stays in
+// the retained visit for identity and carry, but no longer renders as a card.
+export const memberDecided = member => Boolean(member.facts?.user_priority
+  || member.facts?.decision === 'user_rejected' || member.facts?.decision === 'user_approved'
+  || member.facts?.materialized_zotero_key || memberParked(member));
 
 export function memberNeedsCarry(member) {
   const facts = member.facts;
@@ -190,7 +213,16 @@ export function actionReply(action, response, id) {
     fulltext: response.fulltext || null };
 }
 
-export function memberPresentation(member, fresh) {
+const STALE_TEXT = {
+  offline: 'Offline: showing the last known status.',
+  unavailable: 'Status unavailable: showing the last known status.',
+};
+
+// `staleReason` (false | 'offline' | 'unavailable'; `true` means 'offline'): retained, non-invalidated
+// facts whose refetch is paused (browser offline) or failed. Content stays readable with one
+// explanatory line; `fresh` stays false so no action is enabled or queued.
+export function memberPresentation(member, fresh, staleReason = false) {
+  const reason = staleReason === true ? 'offline' : staleReason;
   const facts = member.facts;
   const action = member.action;
   const available = matchesMember(member.paper, facts);
@@ -203,9 +235,10 @@ export function memberPresentation(member, fresh) {
   let text = '';
   if (rejected) text = 'Decision saved: don’t read.';
   else if (materialized) text = 'Zotero item recorded.';
-  else if (pending) text = 'Decision saved; Zotero delivery pending.';
+  else if (pending) text = 'Decision saved. Not in Zotero yet: Zotero must be closed to add it.';
   else if (facts?.user_priority) text = `Decision saved: ${facts.user_priority.replaceAll('_', ' ')}.`;
   if (facts?.note_delivery?.pending && facts.note_delivery.target_key) text += ' Note delivery pending.';
+  const settledText = text; // anything appended below is a problem the owner must still see
   if (action?.failure) text += ` ${action.failure.error || 'Action failed.'}`;
   if (action?.phase === 'unconfirmed') text += ' Previous action reply unconfirmed; current facts are shown separately.';
   if (action?.error) text += ` ${action.error}`;
@@ -217,16 +250,25 @@ export function memberPresentation(member, fresh) {
     text += ` Optional full text unavailable: ${attachment.reason || attachment.status}.`;
   }
   if (action?.fulltext?.error) text += ` Batch reported optional full text unavailable: ${action.fulltext.error}`;
-  if (!fresh) text = facts
+  let showReason = false;
+  if (!fresh && !(reason && facts)) text = facts
     ? (text ? `Updating status. Last known: ${text}` : 'Updating status…')
     : 'Loading this paper…';
-  else if (!available) text = 'This member is unavailable or its identity changed. No replacement was selected.';
+  else {
+    if (!available) text = 'This member is unavailable or its identity changed. No replacement was selected.';
+    showReason = !fresh;
+  }
+  // Offline/unavailable is not a problem for the owner: compare before appending the reason line.
+  const problem = text !== settledText;
+  if (showReason) text = text ? `${text} ${STALE_TEXT[reason]}` : STALE_TEXT[reason];
   const handled = rejected || materialized || Boolean(facts?.user_priority)
     || ['selected', 'black_swan', 'user_approved', 'dedup_library', 'dedup_processed'].includes(facts?.decision);
   const canRetry = fresh && available && unresolved && ['add', 'trash'].includes(action?.kind)
     && (action.phase === 'replied' || materialized || (rejected && action.kind === 'trash'));
   return {
     text, unresolved, canRetry,
+    // A decided card leaves the slate (#206) unless something about it needs the owner's eye.
+    leaves: available && memberDecided(member) && !problem && (!canRetry || pending),
     selectable: fresh && available && !handled && !unresolved,
     // A review already seen stays ready while status refreshes (no flash after Add/verdict);
     // reviewKnown says whether "no review" is a fact, not a refresh in flight.

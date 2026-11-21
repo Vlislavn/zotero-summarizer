@@ -45,10 +45,10 @@ it('keeps the shared setup nudge and route compatible with AI or ML-only choices
 
 it.each([
   ['Add to library', { added: 1, pending_sync: 1 },
-    { decision: 'user_approved', zotero_sync_status: 'pending' }, /Decision saved; Zotero delivery pending/],
-  ['Trash', { trashed: 1, marked_read: 0, marked_read_error: 'locked' },
-    { decision: 'user_rejected', user_priority: 'dont_read' }, /Feed read marking failed: locked/],
-])('retained-card %s keeps a visible warning when Zotero side effects fail', async (button, response, outcome, warning) => {
+    { decision: 'user_approved', zotero_sync_status: 'pending' }, /1 paper waits for Zotero/, false],
+  ['Not interested (1 selected)', { trashed: 1, marked_read: 0, marked_read_error: 'locked' },
+    { decision: 'user_rejected', user_priority: 'dont_read' }, /Feed read marking failed: locked/, true],
+])('retained-card %s: a clean decision leaves the slate, a failed side effect keeps a visible warning', async (button, response, outcome, warning, staysVisible) => {
   const paper = { item_id: 5, item_key: 'P5', stable_feed_key: 'feed:P5', title: 'Retained paper' };
   let facts = memberFacts(paper, { review_ready: true });
   daily.fetchDailySlate.mockResolvedValue({ papers: [paper], awaiting_review_total: 1 });
@@ -66,10 +66,15 @@ it.each([
   fireEvent.click(screen.getByLabelText('Select Retained paper'));
   await waitFor(() => expect(screen.getByRole('button', { name: button }).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: button }));
-  const card = screen.getByRole('article');
-  const message = await within(card).findByText(warning);
-  expect(message.getAttribute('role')).toBe('status');
-  expect(within(card).getByText('Retained paper')).toBeTruthy();
+  if (staysVisible) {
+    const card = screen.getByRole('article');
+    const message = await within(card).findByText(warning);
+    expect(message.getAttribute('role')).toBe('status');
+    expect(within(card).getByText('Retained paper')).toBeTruthy();
+  } else {
+    await screen.findByText(warning);
+    await waitFor(() => expect(screen.queryByRole('article')).toBeNull());
+  }
   expect(screen.queryByText(/Spot-check/)).toBeNull();
   expect(daily.fetchDailySlate).toHaveBeenCalledTimes(1);
   if (button.startsWith('Add')) {
@@ -105,8 +110,9 @@ it('selects only the visible source-filtered slate for batch actions', async () 
   fireEvent.click(screen.getByRole('button', { name: 'Add to library' }));
 
   await waitFor(() => expect(daily.addToLibrary).toHaveBeenCalledWith([1], ''));
-  expect(await screen.findByText(/Decision saved; Zotero delivery pending/)).toBeTruthy();
-  // After the action the card is handled, selection clears and the bulk bar hides.
+  expect(await screen.findByText(/1 paper waits for Zotero/)).toBeTruthy();
+  // After the action the decided card leaves, selection clears and the bulk bar hides.
+  await waitFor(() => expect(screen.queryByLabelText('Select arXiv paper')).toBeNull());
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Add to library' })).toBeNull());
   expect(daily.fetchDailyMembers).toHaveBeenCalledWith([1, 2], expect.any(AbortSignal));
   expect(daily.fetchDailySlate).toHaveBeenCalledTimes(1);
@@ -192,7 +198,7 @@ it('keeps polling a failed initial status read and recovers without starting tri
   }
 });
 
-it('blocks unreviewed Add but keeps Trash available', async () => {
+it('blocks unreviewed Add but keeps Not interested available', async () => {
   const paper = { item_id: 3, item_key: 'P3', stable_feed_key: 'feed:P3', title: 'Not reviewed', review_ready: true };
   daily.fetchDailySlate.mockResolvedValue({ papers: [paper], awaiting_review_total: 1 });
   daily.fetchDailyMembers.mockResolvedValue({ members: [memberFacts(paper)] });
@@ -204,7 +210,7 @@ it('blocks unreviewed Add but keeps Trash available', async () => {
   fireEvent.click(screen.getByLabelText('Select all'));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Add to library' }).disabled).toBe(true));
   expect(screen.getByText(/skipped by Add/)).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'Trash' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Not interested (1 selected)' }));
   await waitFor(() => expect(daily.trashPapers.mock.calls[0][0]).toEqual([3]));
   expect(daily.addToLibrary).not.toHaveBeenCalled();
   client.clear();

@@ -7,6 +7,9 @@ fresh verdict WITHOUT chips clears any prior reasons (write semantics: a new
 decision owns its reasons). Undo retracts the row so the card returns to the
 undecided state.
 
+A positive pill also takes the paper-page Add path (``verdict_effects.add_feed_verdict_to_library``,
+#207): one Add attempt per decision, parked when Zotero is open. Undo never deletes a Zotero item.
+
 Split out of ``daily.py`` (at the module LOC cap) and mounted there with one
 ``include_router`` line. Positive priorities still pass the shipped
 ``require_review`` gate — the owner decided to keep it, so the UI offers
@@ -26,8 +29,9 @@ from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services.golden import label_verdicts, proposal_snapshot, verdict_effects
 from zotero_summarizer.services.triage import daily_actions
-from zotero_summarizer.storage import feeds as feeds_storage
+from zotero_summarizer.storage import feeds as feeds_storage, repositories
 from zotero_summarizer.storage.feed_identity import row_feed_keys
+from zotero_summarizer.storage.feeds_lookup import materialized_key_for
 
 router = APIRouter()
 
@@ -60,6 +64,12 @@ def _load_processed_row(pk: int) -> dict[str, Any] | None:
         return feeds_storage.get_processed_feed_item_by_pk(conn, pk)
     finally:
         conn.close()
+
+
+def _materialized_key(row: dict[str, Any]) -> str | None:
+    """The Zotero key the paper already lives under (this row or a sibling), read from this route's DB."""
+    with feeds_storage.open_triage_conn(_db_path()) as conn:
+        return materialized_key_for(conn, row)
 
 
 def _reasons_json(chips: list[str] | None, surface: str) -> str | None:
@@ -106,6 +116,20 @@ class DailyVerdictUndoRequest(BaseModel):
     item_id: int = Field(..., ge=1, description="processed_feed_items PK whose verdict to retract.")
 
 
+def _add_outcome(db_path, golden_key: str, priority: str, *, repeat: bool) -> dict[str, Any]:
+    """Run the Add for a NEW positive decision; a chips-only re-submit or a negative one attempts none."""
+    if priority == "dont_read":
+        return {"add_attempted": False, "add_status": "not_applicable", "added_to_library": False,
+                "add_error": None, "zotero_key": None}
+    if repeat:
+        return {"add_attempted": False, "add_status": "unchanged", "added_to_library": False,
+                "add_error": None, "zotero_key": None}
+    result = verdict_effects.add_feed_verdict_to_library(golden_key, priority, db_path)
+    return {"add_attempted": True, "add_status": result["add_status"],
+            "added_to_library": result["added_to_library"], "add_error": result["add_error"],
+            "zotero_key": result.get("_zotero_key")}
+
+
 async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
     """Write one reviewed-positive / immediate-negative Today card label (+ chips)."""
     if body.user_priority not in _VALID_DAILY_PRIORITIES:
@@ -128,6 +152,8 @@ async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
         await asyncio.to_thread(require_review, row)  # Owner-kept gate on Zotero writes.
 
     golden_key = row_feed_keys(row)[0]
+    previous = await asyncio.to_thread(repositories.get_label_verdict, _db_path(), golden_key)
+    repeat = previous is not None and previous["user_priority"] == body.user_priority
     from zotero_summarizer.services.library import review
     await asyncio.to_thread(
         review.append_to_golden, row, label=body.user_priority, note=body.comment,
@@ -154,7 +180,9 @@ async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
         model_priority=derived, comment=body.comment,
         human={"kind": "priority", "value": body.user_priority},
     )
-    return {"id": row_id, "item_key": golden_key, "reasons_saved": reasons_json is not None}
+    # After the label is committed (a failed Add never undoes the decision), same Add as the paper page.
+    add = await asyncio.to_thread(_add_outcome, _db_path(), golden_key, body.user_priority, repeat=repeat)
+    return {"id": row_id, "item_key": golden_key, "reasons_saved": reasons_json is not None, **add}
 
 
 async def undo_daily_verdict(body: DailyVerdictUndoRequest) -> dict[str, Any]:
@@ -163,11 +191,17 @@ async def undo_daily_verdict(body: DailyVerdictUndoRequest) -> dict[str, Any]:
     if row is None:
         raise APIError("not_found", f"no processed_feed_items row with id={body.item_id}", 404)
     golden_key = row_feed_keys(row)[0]
+    zotero_key = await asyncio.to_thread(_materialized_key, row)
     deleted = await asyncio.to_thread(
         label_verdicts.retract_label_verdict,
         _db_path(), item_key=golden_key, surface="today_card",
     )
-    return {"deleted": bool(deleted), "item_key": golden_key}
+    # The parked Zotero Add belongs to the withdrawn decision: leaving it would keep
+    # the card dead and let a later Apply write the item without a label.
+    released = await asyncio.to_thread(verdict_effects.release_pending_feed_add, _db_path(), golden_key)
+    # An Add that already reached Zotero is never reverted here: only the label is withdrawn.
+    return {"deleted": bool(deleted), "item_key": golden_key, "released_pending_add": released,
+            "item_stays_in_zotero": bool(zotero_key), "zotero_key": zotero_key}
 
 
 router.add_api_route("/api/daily/verdict", submit_daily_verdict, methods=["POST"])

@@ -119,6 +119,7 @@ def export_golden_dataset(
         "user_labels_synced": label_counts.synced,
         "user_labels_changed": label_counts.changed,
         "user_labels_removed": label_counts.removed,
+        "user_labels_differing": list(label_counts.differing),
         "csv_path": str(output_csv),
         "jsonl_path": str(output_jsonl),
     }

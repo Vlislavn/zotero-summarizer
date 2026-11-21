@@ -18,6 +18,7 @@ pytestmark = questions.pytestmark
 KEY = support.LIBRARY_KEY
 TITLE = "Synthetic library paper"
 MANUAL = "Offline manual body <preserve> & 😀"
+NOTE_SAVED = "Saved; it will be written to Zotero when the Mac is connected."
 
 
 def _ready(lab, record_property):
@@ -36,11 +37,19 @@ def _ready(lab, record_property):
       const cache = await caches.open('zs-app-shell-v1');
       return (await cache.keys()).some(row => row.url.includes('/assets/'));
     }""")
+    status = page.get_by_role("region", name="Offline sync")
+    status.get_by_role("button", name="Details", exact=True).click()
     with page.expect_response(lambda response: "/api/sync/pull?" in response.url) as pulled:
-        page.get_by_role("button", name="Sync now", exact=True).click()
+        status.get_by_role("button", name="Sync now", exact=True).click()
     assert pulled.value.status == 200
-    expect(page.get_by_text("Connected to the app", exact=False)).to_be_visible()
+    _connected(page)
     return page
+
+
+def _connected(page):
+    from patchright.sync_api import expect
+
+    expect(page.get_by_role("region", name="Offline sync").get_by_role("status")).to_contain_text("Connected ·")
 
 
 def _verdict(page, label, comment):
@@ -58,13 +67,30 @@ def _verdict(page, label, comment):
     expect(panel.get_by_text("Saved on this device — it will sync when the server is reachable", exact=True)).to_be_visible()
 
 
+def _pill(page, label, sent):
+    """Tap a verdict pill of the open Library paper; the device must queue exactly one more verdict."""
+    from patchright.sync_api import expect
+
+    pill = page.get_by_test_id("verdict-bar").get_by_role("button", name=label, exact=True)
+    expect(pill).to_be_enabled()  # a pill ignores taps while the open paper settles
+    pill.click()
+    support.wait_for(lambda: sum(row["field"] == "verdict" for row in support.indexeddb(page)["mutations"]) == sent)
+    expect(page.get_by_test_id("undo-toast")).to_contain_text(f"{label}: “{TITLE}”")
+
+
+def _open_row(page):
+    page.get_by_role("button").filter(has_text=TITLE).first.click()
+
+
 def _note(page):
     from patchright.sync_api import expect
 
     questions._notes_editor(page).fill(MANUAL)
-    page.get_by_role("button", name="Save", exact=True).click()
+    save = page.get_by_role("button", name="Save", exact=True)
+    save.evaluate("el => el.scrollIntoView({block: 'center'})")  # the sticky verdict bar must not cover it
+    save.click()
     expect(questions._notes_editor(page)).to_have_value(MANUAL)
-    expect(page.get_by_text("Saved on this device.", exact=True)).to_be_visible()
+    expect(page.get_by_text(NOTE_SAVED, exact=True)).to_be_visible()
     support.wait_for(lambda: any(row["field"] == "review_note" and row["value"] == MANUAL
                                 for row in support.indexeddb(page)["mutations"]))
 
@@ -82,7 +108,7 @@ def _settled(lab, page):
     from patchright.sync_api import expect
 
     support.wait_for(lambda: not support.indexeddb(page)["mutations"])
-    expect(page.get_by_text("Connected to the app", exact=False)).to_be_visible()
+    _connected(page)
     assert not lab.page_errors and not lab.blocked
     return support.db_rows(lab.database, "SELECT * FROM sync_mutations ORDER BY mutation_id")
 
@@ -110,29 +136,34 @@ def test_cold_offline_library_popup_ordered_verdict_note_restart_and_uuid_replay
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(lab.server.origin + "/library")
     expect(page.get_by_role("button").filter(has_text=TITLE).first).to_be_visible()
-    expect(page.get_by_text("Cached working set — verdicts and notes save on this device. Review, meaning search and Zotero export need the Mac.", exact=True)).to_be_visible()
+    expect(page.get_by_text("Mac not reachable — showing 1 paper saved on this device. Your verdicts and notes are kept here and sent later.", exact=False)).to_be_visible()  # after the «Warning:» word
     assert len(lab.server.receipts) == before_requests
-    page.get_by_role("button").filter(has_text=TITLE).first.click()
+    _open_row(page)
     expect(questions._notes_editor(page)).to_have_value("Initial manual note")
     notice = page.get_by_role('status').filter(has_text='Compact synced context —')
     expect(notice).to_be_visible()
     expect(notice).to_have_text(
         'Compact synced context — summary and abstract may be abbreviated. The full review needs the Mac.')
+    _pill(page, "Should read", 1)  # the only paper: the detail says «All caught up», the row stays in the list
+    page.get_by_role("button", name="Back to list", exact=True).click()
+    _open_row(page)
+    _pill(page, "Could read", 2)
+    _pill(page, "Not interested", 3)
+    page.get_by_text("Verdict comment", exact=True).click()
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.get_by_role("button", name="Delete", exact=True).click()
+    expect(page.get_by_test_id("library-detail")).to_have_count(0)  # a deleted verdict closes the detail
+    _open_row(page)
+    expect(page.get_by_test_id("verdict-bar").get_by_role("button", pressed=True)).to_have_count(0)
+    _note(page)
     lab.context.on("page", lambda tab: tab.on("pageerror", lambda error: lab.page_errors.append(str(error))))
-    with lab.context.expect_page() as opened:
-        page.get_by_role("button", name="Open full review ↗", exact=True).click()
-    review = opened.value
+    page.get_by_role("link", name="Open full review ↗", exact=True).click()  # the same tab, no new page
+    review = page
     expect(review.get_by_role("heading", name=TITLE, exact=True)).to_be_visible()
-    assert review.url == lab.server.origin + "/paper/" + quote(KEY)
+    assert review.url == lab.server.origin + "/paper/" + quote(KEY) + "?autoRun=false"
+    assert len(lab.context.pages) == 1
     assert len(lab.server.receipts) == before_requests
     assert support.main_world(review, "() => Boolean(navigator.serviceWorker.controller)") is True
-    _verdict(review, "Should read", "First explicit intent")
-    _verdict(review, "Could read", "Second explicit intent")
-    _verdict(review, "Remove ❌", "Third explicit intent")
-    review.once("dialog", lambda dialog: dialog.accept())
-    review.get_by_role("button", name="Delete", exact=True).click()
-    expect(review.get_by_role("button", name="Save verdict", exact=True)).to_be_visible()
-    _note(review)
     device = support.indexeddb(review)
     mutations = sorted(device["mutations"], key=lambda row: row["sequence"])
     verdicts = [row for row in mutations if row["field"] == "verdict"]
@@ -212,7 +243,7 @@ def test_real_sync_conflict_compares_both_sides_and_other_field_survives(
     lab.checkpoint(phase, page)
     page.get_by_role("button", name="Keep mine" if keep_mine else "Use server", exact=True).click()
     receipts = _settled(lab, page)
-    expect(page.get_by_text("Saved on this device.", exact=True)).to_be_visible()
+    expect(page.get_by_text(NOTE_SAVED, exact=True)).to_be_visible()
     expect(page.get_by_text("Saved on this device — waiting to sync.", exact=True)).to_have_count(0)
     expect(page.get_by_text("Changed elsewhere — compare before resolving", exact=True)).to_have_count(0)
     verdict = repositories.get_label_verdict(lab.database, KEY)

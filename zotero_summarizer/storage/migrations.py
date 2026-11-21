@@ -180,6 +180,30 @@ def _migration_rss_fetch_watermark(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE rss_feeds ADD COLUMN fetch_incomplete INTEGER NOT NULL DEFAULT 0")
 
 
+def _migration_review_feedback(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS review_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_key TEXT NOT NULL,
+            reviewed_at TEXT NOT NULL,
+            generation_sha256 TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            chips_json TEXT NOT NULL DEFAULT '[]',
+            note TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(item_key, reviewed_at)
+        )"""
+    )
+
+
+def _migration_review_feedback_parts(conn: sqlite3.Connection) -> None:
+    """Per-part feedback (#110): ``fields_json`` = ``{part: {chips, note, shown, at}}`` (or a
+    ``{withdrawn, at}`` tombstone); the older chips/note columns stay the whole-review part."""
+    if "fields_json" not in repositories.table_columns(conn, "review_feedback"):
+        conn.execute("ALTER TABLE review_feedback ADD COLUMN fields_json TEXT NOT NULL DEFAULT '{}'")
+
+
 # Append-only, version-ordered. To change the schema, add a new Migration with
 # the next version number — never edit a shipped one or add inline ALTERs.
 TRIAGE_MIGRATIONS: list[Migration] = [
@@ -201,6 +225,8 @@ TRIAGE_MIGRATIONS: list[Migration] = [
     Migration(16, "telegram_post_reasons", _migration_telegram_post_reasons),
     Migration(17, "rss_fetch_watermark", _migration_rss_fetch_watermark),
     Migration(18, "verdict_proposal_snapshot", _migration_verdict_proposal),
+    Migration(19, "review_feedback", _migration_review_feedback),
+    Migration(20, "review_feedback_parts", _migration_review_feedback_parts),
 ]
 CORPUS_MIGRATIONS: list[Migration] = [
     Migration(1, "baseline_embedding_cache", _migration_baseline_corpus),
@@ -221,6 +247,8 @@ CORPUS_MIGRATIONS: list[Migration] = [
     Migration(16, "telegram_post_reasons_alignment", _migration_baseline_corpus),
     Migration(17, "rss_fetch_watermark_alignment", _migration_baseline_corpus),
     Migration(18, "verdict_proposal_snapshot_alignment", _migration_baseline_corpus),
+    Migration(19, "review_feedback_alignment", _migration_baseline_corpus),
+    Migration(20, "review_feedback_parts_alignment", _migration_baseline_corpus),
 ]
 
 # Both namespaces advance in lockstep so one reported target stays meaningful;
@@ -247,7 +275,7 @@ def _ensure_migrations_table(conn: sqlite3.Connection) -> None:
     )
 
 
-def _current_version(conn: sqlite3.Connection, namespace: str) -> int:
+def current_version(conn: sqlite3.Connection, namespace: str) -> int:
     row = conn.execute(
         "SELECT version FROM schema_migrations WHERE namespace = ?",
         (namespace,),
@@ -279,12 +307,12 @@ def run_migrations(db_path: Path, namespace: str, migrations: list[Migration]) -
     try:
         _ensure_migrations_table(conn)
         conn.commit()
-        applied = _current_version(conn, namespace)
+        applied = current_version(conn, namespace)
         for migration in sorted(migrations, key=lambda m: m.version):
             if migration.version <= applied:
                 continue
             conn.execute("BEGIN IMMEDIATE")
-            applied = _current_version(conn, namespace)
+            applied = current_version(conn, namespace)
             if migration.version > applied:
                 migration.apply(conn)
                 _record_version(conn, namespace, migration.version)

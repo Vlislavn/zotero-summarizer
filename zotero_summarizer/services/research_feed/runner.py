@@ -17,7 +17,7 @@ from zotero_summarizer.services._common import now_iso_z, write_json_atomic
 from zotero_summarizer.services.library import _feed_assessment
 from zotero_summarizer.services.research_feed.cursor import NOT_CACHED, CandidateCursor
 from zotero_summarizer.services.research_feed.card import build_card
-from zotero_summarizer.services.research_feed.profile import load_profile
+from zotero_summarizer.services.research_feed.profile import ensure_profile
 from zotero_summarizer.services.research_feed.render import persist
 from zotero_summarizer.services.research_feed.source import (
     PLAIN_REASONS, CandidateReader, admit_history, load_candidates, native_admission, native_decision,
@@ -166,7 +166,7 @@ def _assess(
     Any, list[ResearchCandidate], dict[str, dict[str, Any]], list[tuple[Any, Any]],
     list[dict[str, str]], dict[str, dict[str, Any]],
 ]:
-    profile = load_profile(settings.data_dir)
+    profile = ensure_profile(settings.data_dir)
     candidates = load_candidates(
         settings.triage_db_path, start=start, end=end, limit=source_limit, venue=venue,
     )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import contextmanager
 from typing import Any, Protocol
@@ -19,6 +20,19 @@ def build_response_format(model: type) -> dict[str, Any]:
             "name": model.__name__, "schema": model.model_json_schema(), "strict": True,
         },
     }
+
+
+def to_text(value: Any) -> str:
+    """Coerce an LLM reply (str, or a dict carrying one text key) to text."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("output_text", "text", "result", "summary"):
+            candidate = value.get(key)
+            if isinstance(candidate, str):
+                return candidate
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
 
 
 class LLMClient(Protocol):
@@ -73,17 +87,6 @@ class InstrumentedLLMClient:
             yield
 
     @staticmethod
-    def _to_text(value: Any) -> str:
-        if isinstance(value, str):
-            return value
-        if isinstance(value, dict):
-            for key in ("output_text", "text", "result", "summary"):
-                candidate = value.get(key)
-                if isinstance(candidate, str):
-                    return candidate
-        return str(value)
-
-    @staticmethod
     def _estimate_tokens(text: str) -> int:
         return len(text) // 4
 
@@ -92,7 +95,7 @@ class InstrumentedLLMClient:
             "LLM %s input_tokens≈%d output_tokens≈%d",
             label,
             self._estimate_tokens(prompt),
-            self._estimate_tokens(self._to_text(result)),
+            self._estimate_tokens(to_text(result)),
         )
 
     def prompt(self, prompt: str, **kwargs: Any) -> Any:

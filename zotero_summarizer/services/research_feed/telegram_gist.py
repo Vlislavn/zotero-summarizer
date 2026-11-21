@@ -80,9 +80,9 @@ def important(comments, goals, probe) -> list[dict]:
 
 
 def thread_rows(messages: list[dict]) -> list[dict]:
-    """Stored comments for the page, in message order: stored id, parent id, full text."""
+    """Stored comments for the page, in message order: stored id, parent id, full text, stored permalink (None: private group / old snapshot)."""
     return [{"id": f"c{m['message_id']}", "reply_to": f"c{m['reply_to_id']}" if m.get("reply_to_id") else None,
-             "text": m["text"].strip()}
+             "text": m["text"].strip(), "permalink": m.get("permalink")}
             for m in sorted(messages, key=lambda m: m["message_id"]) if m["text"].strip() and not m.get("skip_reason")]
 
 

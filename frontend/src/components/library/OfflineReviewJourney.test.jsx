@@ -2,13 +2,13 @@
 import 'fake-indexeddb/auto';
 import '../../testSetup.js';
 import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { createMemoryRouter, Route, RouterProvider, Routes } from 'react-router-dom';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { submitVerdict } from '../../api/goldenApi.js';
 import { cacheReviewDetail, cachedResponse, pendingMutations, publishStatus, savePapers } from '../../offlineStore.js';
 import PaperReviewPage from '../../pages/PaperReviewPage.jsx';
-import ReadNextView from './ReadNextView.jsx';
+import ReadNextView from './ReadNextView.testkit.jsx';
 
 const clients = [];
 let browserOnline;
@@ -47,63 +47,81 @@ async function seed(key, hasPdf = false) {
   const paper = { item_key: key, title: `Cached paper ${key}`, has_pdf: hasPdf,
     reading_priority: 'should_read', revisions: { verdict: 7, review_note: 3 } };
   await savePapers([paper]);
-  await cacheReviewDetail(key, { ...paper, abstract: 'Cached abstract', user_note: 'Preserved manual note',
-    verdict: null, authors: [], tags: [], collections: [], questions: [] });
+  await cacheReviewDetail(key, detailOf(paper));
   return paper;
 }
+const detailOf = paper => ({ ...paper, abstract: 'Cached abstract', user_note: 'Preserved manual note',
+  verdict: null, authors: [], tags: [], collections: [], questions: [] });
+const json = (body, status = 200) => new Response(JSON.stringify(body), { status });
 const outbox = async key => (await pendingMutations()).filter(row => row.item_key === key);
 
-it.each([
-  ['row shortcut', true],
-  ['expanded compact CTA', false],
-])('opens cached context from the actual Library %s without preparing an artifact', async (entry, hasPdf) => {
-  const key = `OFFLINE:${entry}`;
-  const paper = await seed(key, hasPdf);
-  const library = queue(paper);
-  if (entry === 'expanded compact CTA') fireEvent.click(screen.getByText(paper.title));
-  const button = await screen.findByRole('button', { name: entry === 'row shortcut'
-    ? 'Open cached review' : 'Open full review ↗' });
+it('opens cached context in the same tab from the expanded compact "Open full review" link', async () => {
+  const key = 'OFFLINE:compact CTA';
+  const paper = await seed(key);
+  const router = createMemoryRouter([
+    { path: '/library', element: <ReadNextView items={[paper]} totalUnread={1} rawCount={1} readHidden={0}
+      loading={false} status="ready" modelReady computedAt="2026-10-01T00:00:00Z" collections={[]}
+      selected={new Set()} onSaved={vi.fn()} /> },
+    { path: '/paper/:itemKey', element: <PaperReviewPage /> },
+  ], { initialEntries: ['/library?c=COLL'] });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  clients.push(client);
+  render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
+  fireEvent.click(screen.getByText(paper.title));
+  fireEvent.click(await screen.findByRole('link', { name: 'Open full review ↗' }));
 
-  fireEvent.click(button);
-
-  const path = `/paper/${encodeURIComponent(key)}`;
-  expect(window.open).toHaveBeenCalledOnce();
-  expect(window.open).toHaveBeenCalledWith(path, '_blank', 'noopener');
-  expect(tab.document.write).not.toHaveBeenCalled();
-  expect(tab.close).not.toHaveBeenCalled();
+  expect(await screen.findByRole('heading', { name: paper.title })).toBeTruthy();
+  expect(`${router.state.location.pathname}${router.state.location.search}`)
+    .toBe(`/paper/${encodeURIComponent(key)}?autoRun=false`);
+  expect(window.open).not.toHaveBeenCalled();
   expect(fetch.mock.calls.some(([url]) => url.startsWith('/api/library/render/'))).toBe(false);
   expect(await outbox(key)).toEqual([]);
-  library.unmount();
-  mount(<Routes><Route path="/paper/:itemKey" element={<PaperReviewPage />} /></Routes>, path);
-  expect(await screen.findByRole('heading', { name: paper.title })).toBeTruthy();
   expect(screen.getByRole('textbox', { name: 'Manual notes' }).value).toBe('Preserved manual note');
-  expect((await cachedResponse(`review:${key}`)).abstract).toBe('Cached abstract');
+  fireEvent.click(screen.getByRole('link', { name: '← Back' }));
+  // Back lands on the exact Library URL it left, the paper still open over its list.
+  expect(await screen.findByRole('dialog', { name: paper.title })).toBeTruthy();
+  expect(`${router.state.location.pathname}${router.state.location.search}`)
+    .toBe(`/library?${new URLSearchParams({ c: 'COLL', open: key })}`);
 });
 
-it('uses cached-page navigation for a known Mac outage even while the browser is online', async () => {
+it('opens the cached page from the compact link for a known Mac outage even while the browser is online', async () => {
   browserOnline.mockReturnValue(true);
   onlineManager.setOnline(true);
   await publishStatus('Server unavailable', 'unavailable');
   const paper = await seed('KNOWN_MAC_OUTAGE');
   queue(paper);
-  fireEvent.click(screen.getByRole('button', { name: 'Open cached review' }));
-  expect(window.open).toHaveBeenCalledOnce();
-  expect(window.open).toHaveBeenCalledWith('/paper/KNOWN_MAC_OUTAGE', '_blank', 'noopener');
-  expect(fetch).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText(paper.title));
+  const link = await screen.findByRole('link', { name: 'Open full review ↗' });
+  expect(link.getAttribute('href')).toBe('/paper/KNOWN_MAC_OUTAGE?autoRun=false');
+  expect(window.open).not.toHaveBeenCalled();
+  expect(fetch.mock.calls.some(([url]) => url.startsWith('/api/library/render/'))).toBe(false);
 });
 
-it('confirms offline Remove after an earlier verdict as one ordered durable intent, not a retryable failure', async () => {
-  const key = 'OFFLINE_REMOVE_CONFIRM';
+// Not interested (dont_read) is set from the detail's «Verdict comment» editor:
+// the same path the full page uses, so the offline ordering and the tag-after-verdict
+// rules live in one place. A paper that already has a verdict opens its editor first.
+async function markNotInterested(paper) {
+  fireEvent.click(screen.getByText(paper.title));
+  await screen.findByRole('link', { name: 'Open full review ↗' });
+  const summary = screen.getByText('Verdict comment');
+  fireEvent.click(summary);
+  const editor = within(summary.closest('details'));
+  const edit = editor.queryByRole('button', { name: 'Edit' });
+  if (edit) fireEvent.click(edit);
+  fireEvent.click(await editor.findByRole('button', { name: 'Not interested' }));
+  fireEvent.click(editor.getByRole('button', { name: /^(Save verdict|Update)$/ }));
+}
+
+it('saves offline Not interested after an earlier verdict as one ordered durable intent, not a retryable failure', async () => {
+  const key = 'OFFLINE_NOT_INTERESTED';
   const paper = await seed(key);
   await submitVerdict({ item_key: key, user_priority: 'could_read', comment: 'Earlier intentional edit' });
   const previous = (await outbox(key))[0];
-  const onSaved = vi.fn();
-  queue({ ...paper, proposed_verdict: { proposed: 'dont_read', confidence: 0.85, flags: [] } }, onSaved);
+  queue(paper);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Confirm — Remove' }));
+  await markNotInterested(paper);
 
-  expect(await screen.findByText('Saved; it will be written to Zotero when the Mac is connected.')).toBeTruthy();
-  await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+  await waitFor(async () => expect((await outbox(key)).length).toBe(2));
   expect(screen.queryByText(/Couldn’t save/)).toBeNull();
   const rows = await outbox(key);
   expect(rows.map(row => [row.operation, row.value])).toEqual([['set', 'could_read'], ['set', 'dont_read']]);
@@ -115,49 +133,43 @@ it('confirms offline Remove after an earlier verdict as one ordered durable inte
     verdict: { user_priority: 'dont_read' }, user_note: 'Preserved manual note',
   });
   expect(fetch.mock.calls.some(([url]) => url === '/api/library/reject-tag')).toBe(false);
-  const confirmed = screen.getByRole('button', { name: 'Confirmed — Remove' });
-  expect(confirmed.disabled).toBe(true);
-  fireEvent.click(confirmed);
-  expect(await outbox(key)).toEqual(rows);
-  expect(onSaved).toHaveBeenCalledOnce();
 });
 
-it('reports an online tag failure as a warning after verdict success without offering a verdict retry', async () => {
+it('queues the reject tag once after an online Not interested verdict and never repeats the verdict when the tag fails', async () => {
   browserOnline.mockReturnValue(true);
   onlineManager.setOnline(true);
-  const key = 'ONLINE_REMOVE_TAG_FAILURE';
+  const key = 'ONLINE_NOT_INTERESTED_TAG_FAILURE';
   const paper = await seed(key);
-  fetch.mockImplementation(async url => url === '/api/golden/verdict'
-    ? new Response(JSON.stringify({ verdict: { user_priority: 'dont_read' } }))
-    : new Response(JSON.stringify({ detail: 'Synthetic tag unavailable' }), { status: 503 }));
+  fetch.mockImplementation(async url => {
+    if (url.startsWith('/api/golden/review-detail')) return json(detailOf(paper));
+    return url === '/api/golden/verdict'
+      ? json({ verdict: { user_priority: 'dont_read' } })
+      : json({ detail: 'Synthetic tag unavailable' }, 503);
+  });
   const onSaved = vi.fn();
-  queue({ ...paper, proposed_verdict: { proposed: 'dont_read', confidence: 0.85, flags: [] } }, onSaved);
+  queue(paper, onSaved);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Confirm — Remove' }));
+  await markNotInterested(paper);
 
-  expect(await screen.findByText(/Verdict saved, but reject tag was not queued: Synthetic tag unavailable/)).toBeTruthy();
   await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
-  expect(screen.queryByText(/Couldn’t save/)).toBeNull();
-  const confirmed = screen.getByRole('button', { name: 'Confirmed — Remove' });
-  expect(confirmed.disabled).toBe(true);
-  fireEvent.click(confirmed);
-  expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/golden/verdict', '/api/library/reject-tag']);
+  const writes = fetch.mock.calls.map(([url]) => url)
+    .filter(url => url === '/api/golden/verdict' || url === '/api/library/reject-tag');
+  expect(writes).toEqual(['/api/golden/verdict', '/api/library/reject-tag']);
   expect(await outbox(key)).toEqual([]);
 });
 
 it('keeps a primary verdict rejection retryable without claiming a device save or queuing the tag', async () => {
   const key = 'REMOVE_PRIMARY_REJECTED';
   const paper = await seed(key);
-  fetch.mockResolvedValue(new Response(JSON.stringify({ detail: 'Synthetic verdict rejected' }), { status: 403 }));
-  const onSaved = vi.fn();
-  queue({ ...paper, proposed_verdict: { proposed: 'dont_read', confidence: 0.85, flags: [] } }, onSaved);
+  fetch.mockImplementation(async url => url.startsWith('/api/golden/review-detail')
+    ? json(detailOf(paper)) : json({ detail: 'Synthetic verdict rejected' }, 403));
+  queue(paper);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Confirm — Remove' }));
+  await markNotInterested(paper);
 
-  expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Couldn’t save: HTTP 403'));
-  expect(screen.getByRole('button', { name: 'Confirm — Remove' }).disabled).toBe(false);
-  expect(screen.queryByText('Saved; it will be written to Zotero when the Mac is connected.')).toBeNull();
-  expect(onSaved).not.toHaveBeenCalled();
-  expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/golden/verdict']);
+  expect(await screen.findByText(/HTTP 403/)).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Save verdict' }).disabled).toBe(false);
+  expect(screen.queryByText(/Saved on this device/)).toBeNull();
+  expect(fetch.mock.calls.some(([url]) => url === '/api/library/reject-tag')).toBe(false);
   expect(await outbox(key)).toEqual([]);
 });

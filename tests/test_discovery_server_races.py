@@ -29,7 +29,7 @@ def test_concurrent_repeat_coalesces_and_get_does_not_interrupt_live_owner(journ
     kwargs = request(journey)
     journey.controls.provider_hook = lambda: (entered.set(), release.wait(5))
     with ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(discovery.find_new, "SEED0001", **kwargs)
+        first = pool.submit(discovery.start_discovery, "SEED0001", **kwargs)
         assert entered.wait(5)
         running = session.find_discovery(kwargs["context_fingerprint"])
         view = discovery.discovery_view(running)
@@ -37,7 +37,7 @@ def test_concurrent_repeat_coalesces_and_get_does_not_interrupt_live_owner(journ
         assert view["discovery"]["seed_comments"] is None
         assert view["discovery"]["recommended_ids"] == []
         assert view["discovery"]["assessment"]["items"] == []
-        second = pool.submit(discovery.find_new, "SEED0001", **kwargs)
+        second = pool.submit(discovery.start_discovery, "SEED0001", **kwargs)
         release.set()
         one, two = first.result(5), second.result(5)
     assert one.id == two.id
@@ -50,7 +50,7 @@ def test_provider_held_change_makes_zero_obsolete_private_calls(journey, change)
     kwargs = request(journey)
     journey.controls.provider_hook = lambda: (entered.set(), release.wait(5))
     with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(discovery.find_new, "SEED0001", **kwargs)
+        future = pool.submit(discovery.start_discovery, "SEED0001", **kwargs)
         assert entered.wait(5)
         if change == "note":
             repositories.upsert_review_note(journey.paths.triage_db_path, "SEED0001", "Changed private text")
@@ -81,7 +81,7 @@ def test_assessment_lock_rechecks_before_actual_client_resolution(journey, monke
     kwargs = request(journey)
     with ThreadPoolExecutor(max_workers=1) as pool:
         with session._lock_for("related-assessment"):
-            future = pool.submit(discovery.find_new, "SEED0001", **kwargs)
+            future = pool.submit(discovery.start_discovery, "SEED0001", **kwargs)
             assert waiting.wait(5)
             repositories.upsert_review_note(journey.paths.triage_db_path, "SEED0001", "Changed while waiting for lock")
         result = discovery.discovery_view(future.result(5))
@@ -123,7 +123,7 @@ def test_assessment_upgrade_hides_prior_pool_until_discovery_completes(journey):
     entered, release = Event(), Event()
     journey.controls.model_hook = lambda: (entered.set(), release.wait(5))
     with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(discovery.find_new, "SEED0001", **request(journey))
+        future = pool.submit(discovery.start_discovery, "SEED0001", **request(journey))
         assert entered.wait(5)
         try:
             running = journey.client.get(f"/api/search/{first['id']}").json()
@@ -179,7 +179,7 @@ def test_strict_corrupt_lookup_and_multiple_match_do_not_start_work(journey):
     for corrupt in ("{not-json", json.dumps({**json.loads(original), "discovery": {"version": 1}})):
         path.write_text(corrupt)
         with pytest.raises((ValueError, KeyError)):
-            discovery.find_new("SEED0001", **request(journey, private=False))
+            discovery.start_discovery("SEED0001", **request(journey, private=False))
     path.write_text(original)
     clone = session.load(result["id"])
     clone.id = f"discovery_{fp}_" + "b" * 12
@@ -206,7 +206,7 @@ def test_delete_during_provider_work_never_resurrects_or_assesses(journey):
     kwargs = request(journey)
     journey.controls.provider_hook = lambda: (entered.set(), release.wait(5))
     with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(discovery.find_new, "SEED0001", **kwargs)
+        future = pool.submit(discovery.start_discovery, "SEED0001", **kwargs)
         assert entered.wait(5)
         live = session.find_discovery(kwargs["context_fingerprint"])
         session.delete(live.id)
@@ -217,7 +217,7 @@ def test_delete_during_provider_work_never_resurrects_or_assesses(journey):
     assert not session._path(live.id).exists()
     assert journey.payloads == []
     journey.controls.provider_hook = None
-    replacement = discovery.find_new("SEED0001", **kwargs)
+    replacement = discovery.start_discovery("SEED0001", **kwargs)
     assert replacement.id != live.id
 
 
@@ -244,7 +244,7 @@ def test_explicit_review_cas_no_agentic_refinement_and_direct_run_fence(journey,
 def test_stale_review_and_new_add_409_before_effect_but_old_add_replay_preserved(journey, monkeypatch):
     result = begin(journey).json()
     monkeypatch.setattr(materialize, "ZoteroWriter", lambda *a: pytest.fail("native effect before stale rejection"))
-    monkeypatch.setattr(materialize, "_resolve_collection_name", lambda key: "Inbox")
+    monkeypatch.setattr(materialize, "resolve_collection_name", lambda key, data_dir: "Inbox")
     repositories.upsert_review_note(journey.paths.triage_db_path, "SEED0001", "Changed input")
     assert journey.client.post(f"/api/search/{result['id']}/review").status_code == 409
     new_add = journey.client.post(f"/api/search/{result['id']}/materialize", json={"candidate_id": "10.1/new"})

@@ -196,7 +196,7 @@ def preview(command: ConnectionSelection):
     with store.editing(wait=_WAIT):
         receipt, provider = _owned_receipt(command.operation_id, command.revision)
         after = _selected_config(provider, command)
-        profile = load_profile(settings().data_dir, persist_default=False)
+        profile = load_profile(settings().data_dir)
         before = state().app_state.config if state().app_state else None
         required = [stage for stage in crossed_stages(before, after) if stage not in command.targets]
         if not set(command.corrections) <= set(required) or any(c not in {'previous', 'default'} for c in command.corrections.values()):

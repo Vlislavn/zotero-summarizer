@@ -10,9 +10,9 @@ private report through a dedicated child process (manual `goldenset analyze-feed
 | file | responsibility |
 |---|---|
 | `__init__.py` | exports `freeze_inputs`, `verify_inputs`, `FreezeBudgets`, `BudgetExceeded`, `analyze_inputs`, `AnalysisBudgets`, `run_feedback_analysis`, `OperationBudgets` |
-| `inputs.py` | path/boundary admission, work/safety guard, file capture (`freeze_inputs`), replay verification (`verify_inputs`) |
+| `inputs.py` | path/boundary admission, work/safety guard, file capture (`freeze_inputs`), replay verification (`verify_inputs`); `coerce_budgets` is the one None/instance/known-field-dict coercion for both budget classes |
 | `sqlite_snapshot.py` | WAL-aware read-only online backup; schema/revision metadata read from the retained database only |
-| `provenance.py` | version-1 manifest wire validation and deterministic `content_digest` |
+| `provenance.py` | version-1 manifest wire validation and deterministic `content_digest`; `source_projection` is the per-source identity (status, sha256, byte size) that both the manifest digest and the schedule's source identity hash; digest checks use `domain.is_sha256_hex` |
 | `history.py` | bounded retained-source readers; ambiguity-safe current alias graph |
 | `analysis.py` | `analyze_inputs(destination, *, budgets=None)`: retained-only result (no publication/training/live mutation) |
 | `metrics.py` | separate unique-paper descriptive channels, Wilson intervals, eligibility metadata |
@@ -91,6 +91,11 @@ private report through a dedicated child process (manual `goldenset analyze-feed
 - `label_transition` recognizes `offline_sync` and `sync_conflict_resolution` beside `user`/`zotero`, for transitions
   only: either sync source on `human_feedback` stays `nonpreference`; outcomes stay outcomes; `machine_add` feedback
   stays provisional. Raw provenance is retained, not authenticated.
+- `label_transition` events carry `post_read` (a change/retraction after a usable published review); the interaction-log channel counts them as `post_read_label_changes`. A logged decision whose item key is in none of the retained snapshots or alias maps (test fixtures, papers gone from every snapshot; only judged when a feed-item snapshot is retained) is flagged `unknown_item` on the event, counted in `coverage.unknown_item_events` and listed as one `unknown_item` gap; its eligibility is unchanged.
+- Result size: `result.json` is capped at 64 MiB (`MAX_OUTPUT_BYTES`; consumers parse it whole in memory, ~6x its size).
+  To stay under it, event keys whose value is null are omitted (absent == null) and `coverage.content_multiplicity`
+  lists only groups seen more than once (absent group = count 1). Readers must use `.get`; older published runs with
+  explicit nulls stay valid. Live-size data (4,011 CSV rows, 49,920 events): 68.3 MB → 57.6 MB, growth ≈ 4 MB/week.
 - Mixed ordinal/binary log evidence: conflicting latest ordinal observations remain a conflict (never a binary
   substitute); binary class support is reported separately; a later unambiguous ordinal observation resolves it.
 - Report Markdown wraps recorded surfaces in code spans longer than any recorded backtick run (literal evidence text).

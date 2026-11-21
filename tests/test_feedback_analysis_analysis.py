@@ -109,7 +109,7 @@ def test_unrepresentable_utc_event_times_remain_located_unknowns(tmp_path, when)
 
     invalid = next(e for e in result["events"] if e["item_key"] == "overflow")
     assert invalid["recorded_time"] == when
-    assert invalid["time"] is None
+    assert invalid.get("time") is None
     assert invalid["time_basis"] == "invalid_time"
     assert invalid["eligibility"] == "unknown_time"
     assert invalid["locator"]["line"] == 1
@@ -153,7 +153,7 @@ def test_wire_identity_signature_and_no_model_identity_invention(tmp_path):
     assert len(result["input_content_digest"]) == 64
     assert result["ranking"]["reasons"] == ["immutable_exposed_ordered_slates_unavailable", "fully_timed_slate_judgments_unavailable"]
     observation = next(e for e in result["events"] if e["channel"] == "interaction_log")
-    assert observation["inference_model_identity"] is None
+    assert observation.get("inference_model_identity") is None
     assert observation["event_gate_identity"] == "current-event-gate"
     assert list(inspect.signature(analyze_inputs).parameters) == ["destination", "budgets"]
     assert AnalysisBudgets().max_records == 100000
@@ -196,7 +196,7 @@ def test_actual_app_naive_defaults_and_aware_log_are_distinct_channels(tmp_path)
     journal = [e for e in result["events"] if e["channel"] == "journal"]
     assert len(journal) == 1
     assert journal[0]["eligibility"] == "unknown_time"
-    assert journal[0]["prediction"] is None
+    assert journal[0].get("prediction") is None
     assert result["periods"]["all_time"]["interaction_log"]["agreement"]["false_negative_count"] == 1
     assert result["periods"]["all_time"]["journal"]["unique_papers"] == 0
 

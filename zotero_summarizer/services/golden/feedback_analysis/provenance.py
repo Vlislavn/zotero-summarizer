@@ -6,6 +6,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from zotero_summarizer.domain import is_sha256_hex
+
 RETAINED_PATHS = {
     "triage_db": "inputs/triage.sqlite",
     "golden_csv": "inputs/golden.csv",
@@ -69,12 +71,17 @@ def _timestamp(value) -> datetime:
     return parsed
 
 
+def source_projection(manifest: dict) -> dict:
+    """Per-source content identity (status, hash, size) shared by manifest and schedule digests."""
+    return {name: {key: source[key] for key in ("status", "sha256", "byte_size")}
+            for name, source in manifest["sources"].items()}
+
+
 def digest_manifest(manifest: dict) -> str:
     identity = {
         "schema_version": manifest["schema_version"], "cutoff": manifest["cutoff"],
         "provenance": manifest["provenance"],
-        "sources": {name: {key: source[key] for key in ("status", "sha256", "byte_size")}
-                    for name, source in manifest["sources"].items()},
+        "sources": source_projection(manifest),
     }
     return hashlib.sha256(canonical_bytes(identity)).hexdigest()
 
@@ -96,10 +103,6 @@ def source_record(name: str, locator: Path, *, start: str, end: str, size: int =
     return record
 
 
-def _is_hash(value) -> bool:
-    return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value)
-
-
 def _validate_source(name: str, source) -> None:
     keys = {"status", "path", "sha256", "byte_size", "source_locator", "capture", "caveat"}
     if name == "triage_db":
@@ -112,7 +115,7 @@ def _validate_source(name: str, source) -> None:
     if type(source["byte_size"]) is not int or source["byte_size"] < 0:
         raise ValueError(f"invalid captured size: {name}")
     if present:
-        if source["path"] != RETAINED_PATHS[name] or not _is_hash(source["sha256"]):
+        if source["path"] != RETAINED_PATHS[name] or not is_sha256_hex(source["sha256"]):
             raise ValueError(f"invalid retained path or full hash: {name}")
     elif (source["path"], source["sha256"], source["byte_size"]) != (None, None, 0):
         raise ValueError(f"missing source has retained content: {name}")
@@ -147,7 +150,7 @@ def validate_manifest(manifest) -> dict:
         raise ValueError("missing or unknown manifest sources")
     for name, source in sources.items():
         _validate_source(name, source)
-    if not _is_hash(manifest["content_digest"]) or digest_manifest(manifest) != manifest["content_digest"]:
+    if not is_sha256_hex(manifest["content_digest"]) or digest_manifest(manifest) != manifest["content_digest"]:
         raise ValueError("input content identity mismatch")
     return manifest
 

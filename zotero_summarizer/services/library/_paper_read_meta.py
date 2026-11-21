@@ -15,6 +15,8 @@ from typing import Any
 _GARBAGE_AUTHOR_RE = re.compile(r"(?i)\bAuthor\s*\d+|\\[a-zA-Z]")
 # Zotero storage folder names are 8-char uppercase alphanumeric keys — not a title.
 _ZOTERO_KEY_RE = re.compile(r"^[A-Z0-9]{8}$")
+# A bare ISO date as the first PDF line is a dateline, not a title.
+_DATE_ONLY_RE = re.compile(r"^\s*\d{4}-\d{2}-\d{2}\s*$")
 
 
 def _format_zotero_authors(raw: Any) -> str:
@@ -70,6 +72,7 @@ def apply_metadata_fallbacks(
         not content.get("title")
         or content.get("title") == pdf_stem
         or _ZOTERO_KEY_RE.match(str(content.get("title") or ""))
+        or _DATE_ONLY_RE.match(str(content.get("title") or ""))
     ):
         content["title"] = title
 

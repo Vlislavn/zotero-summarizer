@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.integrations.zotero_read import ZoteroReader
+from zotero_summarizer.integrations.zotero_read import ZoteroReader, ZoteroReadError
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.models import (
     ZoteroAttachFiguresRequest,
@@ -18,6 +19,9 @@ from zotero_summarizer.models import (
 from zotero_summarizer.services._common import settings, state
 from zotero_summarizer.services.corpus import refresh_corpus_items_by_keys
 from zotero_summarizer.services.zotero import direct_actions
+
+LOGGER = logging.getLogger(__name__)
+_unsynced_count_failed = False  # log a failing count once per process, not per poll
 
 
 def get_zotero_reader_or_raise() -> ZoteroReader:
@@ -71,6 +75,22 @@ def get_zotero_writer_or_raise() -> ZoteroWriter:
     return writer
 
 
+def _unsynced_items(reader: ZoteroReader) -> int | None:
+    """Papers Zotero has not uploaded yet (``None`` when unreadable: the UI then
+    shows no line). Separate from ``get_library_stats`` so a failure here never
+    changes ``available``/``error``."""
+    global _unsynced_count_failed
+    try:
+        count = reader.count_unsynced_items()
+    except ZoteroReadError as exc:
+        if not _unsynced_count_failed:
+            LOGGER.warning("Zotero unsynced-items count unavailable: %s", exc)
+        _unsynced_count_failed = True
+        return None
+    _unsynced_count_failed = False
+    return count
+
+
 def zotero_status_payload() -> ZoteroStatusResponse:
     app_state = state()
     reader: ZoteroReader | None = getattr(app_state, "zotero_reader", None)
@@ -86,6 +106,10 @@ def zotero_status_payload() -> ZoteroStatusResponse:
         except Exception as exc:
             available = False
             error_message = str(exc)
+        else:
+            unsynced = _unsynced_items(reader)
+            if unsynced is not None:
+                stats["unsynced_items"] = unsynced
 
     return ZoteroStatusResponse(
         available=available,

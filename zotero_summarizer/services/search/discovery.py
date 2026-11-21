@@ -334,7 +334,7 @@ def _run(sess, inputs, consent_token, *, retrieve):
     return sess
 
 
-def find_new(item_key: str, *, context_fingerprint: str, consent_token: str | None = None,
+def start_discovery(item_key: str, *, context_fingerprint: str, consent_token: str | None = None,
              retry: bool = False) -> ResearchSession:
     global _active_session
     with sessions._lock_for("discovery"):

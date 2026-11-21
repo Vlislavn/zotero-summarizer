@@ -9,7 +9,7 @@ import { Field } from '../form/Fields.jsx';
 // Map a validate-config field-error `loc` array onto the form key it touches.
 // The backend errors are keyed by GoalsConfig field name (research_goals,
 // triage_criteria, output_language); join messages for the same field.
-export function errorsForField(fieldErrors, configKey) {
+function errorsForField(fieldErrors, configKey) {
   if (!Array.isArray(fieldErrors)) return null;
   const msgs = fieldErrors
     .filter((e) => Array.isArray(e?.loc) && e.loc.includes(configKey))

@@ -33,17 +33,25 @@ export const postsText = (n = 0) => plural(n, 'post');
 export const channelsText = (n = 0) => plural(n, 'channel');
 export const commentsText = (n = 0) => plural(n, 'comment');
 
-export function clock(seconds) {
+function clock(seconds) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
 const STAGES = { channels: [1, 'Channels'], comments: [2, 'Comments'], summaries: [3, 'Summaries'] };
 export const stepOf = (progress) => (STAGES[progress?.stage] || [1])[0];
-export function progressText({ progress, elapsed_s: elapsed = 0 }) {
+export function progressText({ progress, elapsed_s: elapsed = 0, kind }) {
+  if (kind === 'discussions') return `${loadingText(progress)} · ${clock(elapsed)}`;
   const [step, name] = STAGES[progress?.stage] || [1, 'Starting'];
   const counts = progress?.total > 0 ? ` ${progress.done}/${progress.total}` : '…';
   return `Step ${step} of 3 · ${name}${counts} · ${clock(elapsed)}`;
 }
+
+// «Load discussions» (one trend's comments, on demand): button texts, the confirmation and what a press can answer.
+export const NO_REPLIES = 'No post in this trend had replies when last checked.';
+export const NEEDS_CONSENT = 'Press “Allow & check channels” first.';
+export const loadConfirm = (n) => `Read posts and comments of ${postsText(n)} through your Telegram account? Nothing is sent.`;
+export const loadingText = (progress) => (progress?.total > 0 ? `Loading ${progress.done} of ${progress.total} posts…` : 'Loading discussions…');
+const waitText = (retryAt) => `Telegram asked to wait until ${when(retryAt)}.`;
 
 export const AUTH_CODES = ['missing_session', 'session_unauthorized', 'revoked_session'];
 const FAILURES = {
@@ -66,10 +74,23 @@ export function failureText(code, retryAt) {
   return FAILURES[code] || null;
 }
 
+// What a refused or finished «Load discussions» press says beside its button: {code, text} or null.
+export function loadNote(value, topicId, error, now = Date.now()) {
+  const mine = value?.kind === 'discussions' && value.topic === topicId && !value.running;
+  const code = error?.body?.error || (mine && value.state === 'error' ? value.error : null);
+  const retryAt = error?.body?.details?.retry_at || value?.retry_at;
+  if (code === 'deferred') return { code, text: waitText(retryAt) };
+  if (code === 'telegram_no_replies') return { code, text: NO_REPLIES };
+  if (code === 'telegram_consent_required') return { code, text: NEEDS_CONSENT };
+  if (code) return { code, text: failureText(code, retryAt) || 'Could not load the discussions. Try again.' };
+  if (mine && value.state === 'reviewed' && retryAt && new Date(retryAt) > now) return { code: null, text: `${waitText(retryAt)} Some posts were not loaded.` };
+  return null;
+}
+
 export const partialText = (retryAt) => `Telegram limited the requests: some discussions were not loaded. Try again after ${when(retryAt)}.`;
 
 // The «i» disclosure: what is read, where summaries come from, what the markers mean.
-export const SCOPE_TEXT = 'Reads the posts and comments of your selected channels (the last 72 hours of discussions, not the whole history). Summaries are made by a local model on this Mac and are not fact-checked.';
+export const SCOPE_TEXT = 'Reads the posts of your selected channels from the last 2 weeks to find trends, and the comments of the most discussed posts of each check. Summaries are made by a local model on this Mac and are not fact-checked.';
 export const CONSENT_TEXT = 'First run: the app will read the posts and comments of your selected channels through your Telegram session — read-only, no joining or sending. Summaries are made by a local model on this Mac. You can revoke this in Telegram sources.';
 export const MARKER_LEGEND = [
   ['↗ more discussion', 'more posts on the topic than a week earlier'],

@@ -47,11 +47,6 @@ async def run_now() -> dict:
     return {"job": manual_run.status()}
 
 
-@router.get("/runs")
-async def list_runs() -> dict:
-    return {"items": summary.list_runs(get_settings())}
-
-
 @router.get("/latest")
 async def latest() -> dict:
     settings = get_settings()

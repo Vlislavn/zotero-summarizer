@@ -8,19 +8,19 @@ export const chipClass = (on) => `min-h-11 rounded-lg border px-3 text-[13px] di
   on ? 'border-forest-800 bg-forest-800 text-white' : 'border-sage-300 bg-white text-slate-700 hover:bg-slate-100'}`;
 
 // The ids are the backend's canonical negative set (api/routes/_daily_verdict.py); the Today
-// card's skip block uses the same ids/labels (unifying them is Todo #108).
+// card's Not-interested block uses the same ids/labels (unifying them is Todo #108).
 export const NEG_CHIPS = [
   ['not_relevant', 'Off topic'], ['low_quality', 'Weak quality'], ['no_code', 'No code'],
   ['unclear_value', 'Unclear value'], ['too_hard', 'Too hard'],
   ['boring', 'Boring / nothing new'], ['non_credible', 'Low-credibility group'],
 ];
 
-export const DECISIONS = [['must_read', 'must'], ['should_read', 'should'], ['could_read', 'could'], ['dont_read', 'skip']];
-export const DECISION_WORD = { must_read: 'must', should_read: 'should', could_read: 'could', dont_read: 'skip' };
+export const DECISIONS = [['must_read', 'must'], ['should_read', 'should'], ['could_read', 'could'], ['dont_read', 'Not interested']];
+export const DECISION_WORD = { must_read: 'must', should_read: 'should', could_read: 'could', dont_read: 'Not interested' };
 export const POS_CHIPS = [['has_takeaway', 'worth taking'], ['good_figures', 'good figures / methods']];
 
 // Graded tints for the verdict (#124): the stronger the verdict, the stronger the
-// Forest — must Forest solid → should Sage → could Mint → skip a hairline outline.
+// Forest — must Forest solid → should Sage → could Mint → Not interested a hairline outline.
 // Never near-black. DECISION_TINT is the resting look (also the recommendation pill);
 // DECISION_HOVER only for buttons.
 export const DECISION_TINT = {
@@ -31,7 +31,7 @@ export const DECISION_TINT = {
 };
 // Compact content-sized pill (#127): 40 px on phones, 32 px on desktop; the invisible
 // ::before grows the phone tap target to 44 px without growing the look.
-export const DECISION_BTN = 'relative inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border px-4 text-[13px] font-medium transition-colors before:absolute before:inset-x-0 before:-inset-y-0.5 disabled:opacity-40 sm:h-8 sm:before:inset-y-0';
+export const DECISION_BTN = 'relative inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border px-2 text-[13px] font-medium transition-colors before:absolute before:inset-x-0 before:-inset-y-0.5 disabled:opacity-40 sm:h-8 sm:before:inset-y-0';
 export const DECISION_HOVER = {
   must_read: 'hover:bg-forest-700',
   should_read: 'hover:bg-sage-300',

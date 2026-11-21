@@ -3,13 +3,13 @@ from __future__ import annotations
 from typing import Any, Literal
 from urllib.parse import quote
 
+from zotero_summarizer.domain import unique_non_empty_strings
 from zotero_summarizer.mcp.api_client import _api_request
 from zotero_summarizer.mcp.config import DEFAULT_TRIAGE_SECONDS_PER_ITEM, MAX_TRIAGE_ITEM_KEYS
 from zotero_summarizer.mcp.helpers import (
     _as_int,
     _error,
     _extract_data_or_error,
-    _normalize_unique_strings,
     _now_iso,
     _ok,
     _require_non_empty_text,
@@ -20,7 +20,7 @@ from zotero_summarizer.mcp.server import mcp
 @mcp.tool()
 async def start_triage(item_keys: list[str], queue_changes: bool = True) -> dict[str, Any]:
     """Start async triage job for one or more Zotero item keys."""
-    normalized_keys = _normalize_unique_strings(item_keys)
+    normalized_keys = unique_non_empty_strings(item_keys)
     if not normalized_keys:
         return _error("validation_error", "item_keys must contain at least one non-empty key")
     if len(normalized_keys) > MAX_TRIAGE_ITEM_KEYS:

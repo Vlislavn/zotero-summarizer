@@ -15,7 +15,7 @@ const SHELL = {
 };
 const DOT = { ok: ['bg-forest-800', 'check'], bad: ['bg-rose-500', 'x'] };
 
-export function FactIcon({ icon, state, label, dot = null, compact = false }) {
+function FactIcon({ icon, state, label, dot = null, compact = false }) {
   const box = compact ? 'h-6 w-6' : 'h-8 w-8 sm:h-7 sm:w-7';
   return (
     <span role="img" aria-label={label} title={label}

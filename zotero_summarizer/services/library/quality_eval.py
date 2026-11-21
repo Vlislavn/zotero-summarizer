@@ -25,6 +25,7 @@ from zotero_summarizer.services.faithbench._corpus import PaperChunkIndex
 from zotero_summarizer.services.library import _jev_checklist
 from zotero_summarizer.services.library import _paper_type_checklists as pc
 from zotero_summarizer.services.library import _quality_prompts as qp
+from zotero_summarizer.services.library._concern_dedupe import dedupe_concerns
 from zotero_summarizer.services.library._grounding import quote_is_grounded
 from zotero_summarizer.services.library._prompt_security import paper_block
 from zotero_summarizer.services.library._review_text import select_review_text
@@ -147,23 +148,6 @@ def _majority(values: list[str], default: str = "na") -> str:
     return Counter(vals).most_common(1)[0][0] if vals else default
 
 
-def _dedupe_near(items: list[str], *, jaccard: float = 0.6) -> list[str]:
-    """Merge NEAR-duplicate red-flag strings. The 3 self-consistency runs phrase the
-    same concern slightly differently ("does not address run-to-run determinism" vs
-    "does not report run-to-run determinism"), so an exact ``set()`` left both. Keep
-    the first; drop a later item whose content-token set overlaps an earlier kept item
-    by >= ``jaccard`` (token-Jaccard, deterministic, no model)."""
-    kept: list[str] = []
-    kept_tokens: list[set[str]] = []
-    for it in items:
-        toks = {w for w in re.findall(r"[a-z0-9]+", it.lower()) if len(w) > 2}
-        dup = any(kt and len(toks & kt) / len(toks | kt) >= jaccard for kt in kept_tokens)
-        if not dup:
-            kept.append(it)
-            kept_tokens.append(toks)
-    return kept
-
-
 def _aggregate_rubric(samples: list[qp.RubricLLMResponse], item_keys: list[str], body: str
                       ) -> tuple[dict[str, str], dict[str, str], list[str], set[str]]:
     """Per-item majority verdict + grounded evidence; reject incomplete model output."""
@@ -194,7 +178,7 @@ def _aggregate_rubric(samples: list[qp.RubricLLMResponse], item_keys: list[str],
                 grounded_yes.add(key)
         elif quotes:
             evidence[key] = quotes[0]
-    concerns = sorted({c.strip() for s in samples for c in (s.concerns or []) if c and c.strip()})[:5]
+    concerns = dedupe_concerns(sorted({c.strip() for s in samples for c in (s.concerns or []) if c and c.strip()}))[:5]
     return rubric, evidence, concerns, grounded_yes
 
 
@@ -366,7 +350,7 @@ def evaluate_quality(
 
     return QualityEval(
         quality_band=band, grade=coverage.grade, rubric=rubric, evidence=evidence,
-        red_flags=_dedupe_near(red_flags + concerns), overstatements=overstatements,
+        red_flags=dedupe_concerns(red_flags + concerns), overstatements=overstatements,
         claim_grounding_rate=0.0,  # filled by the faithbench aspect track (Phase 5)
         claim_support_probs=claim_support,  # shadow A/B only; does not affect the band
         confidence=confidence, passes_agreed=per_sample.count(coverage.band), passes_total=len(per_sample),

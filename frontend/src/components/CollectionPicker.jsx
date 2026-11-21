@@ -1,22 +1,14 @@
-import { useEffect, useState } from 'react';
 import { fetchCollections } from '../api/libraryApi.js';
-import { flattenCollections, collectionOptionLabel } from '../pages/pendingHelpers.js';
+import { collectionOptionLabel } from '../pages/pendingHelpers.js';
+import useCollections from '../hooks/useCollections.js';
 
 // Shared Zotero collection <select> (value = collection key). Used by Today's
 // add-to-library batch bar and Targeted Search's per-result "Add to library".
 // Empty value = the server default ("Inbox"). Fetches the tree once on mount and
 // reuses pendingHelpers' flatten + label so the option list matches the Pending page.
 export default function CollectionPicker({ value, onChange, disabled = false, className = '' }) {
-  const [flat, setFlat] = useState([]);
-  useEffect(() => {
-    let alive = true;
-    fetchCollections()
-      .then((data) => { if (alive) setFlat(flattenCollections(data.items)); })
-      // Degrade to Inbox-only if the tree can't load — the picker still adds to the
-      // default. Logged, not swallowed.
-      .catch((err) => console.error('CollectionPicker: failed to load collections', err));
-    return () => { alive = false; };
-  }, []);
+  // Degrades to Inbox-only if the tree can't load — the picker still adds to the default.
+  const flat = useCollections(fetchCollections);
   return (
     <select
       value={value}

@@ -6,6 +6,7 @@ import re
 import sqlite3
 from typing import Any
 
+from zotero_summarizer.integrations._zotero_author_split import split_author_entry, split_name
 from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
     LOGGER,
     WriteColumns,
@@ -186,6 +187,7 @@ class ZoteroItemWriteMixin:
             entries = [str(a).strip() for a in authors if str(a).strip()]
         else:
             return
+        entries = self._expand_crammed_entries(entries)
         if not entries:
             return
 
@@ -209,7 +211,7 @@ class ZoteroItemWriteMixin:
             return
 
         for order_index, entry in enumerate(entries):
-            first, last, field_mode = self._split_author_name(entry)
+            first, last, field_mode = split_name(entry)
             existing = conn.execute(
                 """
                 SELECT creatorID FROM creators
@@ -232,25 +234,15 @@ class ZoteroItemWriteMixin:
             )
 
     @staticmethod
-    def _split_author_name(name: str) -> tuple[str, str, int]:
-        """Split an author string into (firstName, lastName, fieldMode).
-
-        Zotero's fieldMode=1 means single-name entry (lastName-only, used for
-        institutions, single-name authors). Otherwise fieldMode=0 with split.
-        """
-        text = name.strip()
-        if not text:
-            return ("", "", 1)
-        # "Last, First" form
-        if "," in text:
-            last, _, first = text.partition(",")
-            return (first.strip(), last.strip(), 0)
-        # "First Last" form — split on last whitespace
-        parts = text.rsplit(None, 1)
-        if len(parts) == 2:
-            return (parts[0].strip(), parts[1].strip(), 0)
-        # Single token — treat as institution/single-name
-        return ("", text, 1)
+    def _expand_crammed_entries(entries: list[str]) -> list[str]:
+        """One author per entry: a whole author list in one string is split (see ``_zotero_author_split``)."""
+        names: list[str] = []
+        for entry in entries:
+            result = split_author_entry(entry)
+            if result.lossy:
+                LOGGER.warning("Author entry of %d chars split as %s; affiliation text dropped or clipped", len(entry), result.kind)
+            names.extend(result.names)
+        return names
 
     def _add_matched_collections(
         self,

@@ -45,11 +45,16 @@ _RATE_LIMITER = RateLimiter(3)
 # signal (workshops accept most submissions).
 _TIER_PATTERNS = (
     ("oral", re.compile(r"\boral\b", re.I)),
-    ("spotlight", re.compile(r"\b(spotlight|notable)\b", re.I)),
+    ("spotlight", re.compile(r"\b(spotlight\w*|notable)\b", re.I)),
     ("poster", re.compile(r"\bposter\b", re.I)),
 )
 _WORKSHOP = re.compile(r"\bworkshop\b", re.I)
-_ACCEPT = re.compile(r"\b(oral|spotlight|notable|poster|accept|camera|proceedings)\b", re.I)
+# "regular" = ICML 2026 main-track label; "spotlightposter" = ICML 2025 (tier: spotlight).
+# COLM publishes accepted papers with a bare "COLM [year]" venue (no tier word).
+_ACCEPT = re.compile(
+    r"\b(oral|spotlight\w*|notable|poster|accept|camera|proceedings|regular)\b|^\s*COLM(\s+20\d{2})?\s*$",
+    re.I,
+)
 _REJECT = re.compile(r"\b(reject|withdraw|desk|submitted\s+to)\b", re.I)
 _YEAR = re.compile(r"\b(20\d{2})\b")
 _RATING_LEAD_INT = re.compile(r"-?\d+")
@@ -172,7 +177,7 @@ class OpenReviewClient:
         return resp.json()
 
     def search(self, query: str, *, limit: int, outcome: dict | None = None) -> list[dict]:
-        payload = self._get("/notes/search", {"query": query, "limit": max(1, min(limit, 100))}, outcome=outcome)
+        payload = self._get("/notes/search", {"term": query, "limit": max(1, min(limit, 100))}, outcome=outcome)
         return (payload or {}).get("notes") or []
 
     def forum_reviews(self, forum_id: str) -> tuple[float | None, int]:
