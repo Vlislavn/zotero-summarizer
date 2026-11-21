@@ -2,11 +2,11 @@
 // /api/triage/run endpoints used by the Library and Annotate pages.
 
 import { allPapers, cacheResponse, cachedResponse, getMeta, transportUnavailable } from '../offlineStore.js';
-import { readResponse } from './client.js';
+import { jsonInit, readResponse } from './client.js';
 import { offlineRequest } from './offlineTransport.js';
 
 async function request(path, options = {}, localFallback = false) {
-  const init = { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options };
+  const init = jsonInit(options);
   return localFallback ? offlineRequest(path, init, readResponse) : readResponse(await fetch(path, init));
 }
 
