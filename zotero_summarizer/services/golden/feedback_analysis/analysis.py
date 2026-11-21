@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 import time
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, fields
@@ -15,7 +14,7 @@ from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK, feedback_verdic
 
 from .history import Families, aware_time, content_group, gap, load_history, strict_json, time_fields
 from zotero_summarizer.storage.feed_identity import row_feed_keys
-from .inputs import BudgetExceeded, verify_inputs
+from .inputs import BudgetExceeded, coerce_budgets, verify_inputs
 from .metrics import chronological, periods
 from .provenance import canonical_bytes
 
@@ -69,15 +68,7 @@ class AnalysisBudgets:
 
 
 def _budgets(value):
-    wall = float(os.environ.get(WALL_CAP_ENV, DEFAULT_WALL_CAP_SECONDS))
-    default = AnalysisBudgets(wall_cap_seconds=wall)
-    if value is None:
-        return default
-    if isinstance(value, AnalysisBudgets):
-        return value
-    if type(value) is not dict or value.keys() - {f.name for f in fields(AnalysisBudgets)}:
-        raise ValueError("budgets must be AnalysisBudgets or a known-field dict")
-    return AnalysisBudgets(**({"wall_cap_seconds": default.wall_cap_seconds} | value))
+    return coerce_budgets(value, AnalysisBudgets, WALL_CAP_ENV)
 
 
 class _Guard:

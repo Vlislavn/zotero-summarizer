@@ -39,7 +39,7 @@ run_screen ─save→ ResearchSession(status=screened)                          
 | `pipeline.py` | `SearchDeps`/`default_deps`, `run_screen`, `run_review`, `_annotate_library_coverage` |
 | `materialize.py` | the only Search→Zotero write: `materialize_candidate` |
 | `discovery.py` | saved-seed discovery: public retrieval + optional consent-bound assessment; the entry point is `start_discovery` (formerly `find_new`; the route path is unchanged) |
-| `session.py` | one JSON per session under `Settings.search_dir`: `save`, `save_merge`, `update`, `claim`, `materialize_once`, `find_discovery`, `list_sessions`, `delete`/`is_deleted` |
+| `session.py` | one JSON per session under `Settings.search_dir`: `save`, `save_merge`, `update`, `claim`, `materialize_once`, `find_discovery`, `list_sessions`, `delete`/`is_deleted` (`find_discovery` checks digests with `domain.is_sha256_hex`) |
 
 ## Ranking and review invariants
 

@@ -10,9 +10,9 @@ private report through a dedicated child process (manual `goldenset analyze-feed
 | file | responsibility |
 |---|---|
 | `__init__.py` | exports `freeze_inputs`, `verify_inputs`, `FreezeBudgets`, `BudgetExceeded`, `analyze_inputs`, `AnalysisBudgets`, `run_feedback_analysis`, `OperationBudgets` |
-| `inputs.py` | path/boundary admission, work/safety guard, file capture (`freeze_inputs`), replay verification (`verify_inputs`) |
+| `inputs.py` | path/boundary admission, work/safety guard, file capture (`freeze_inputs`), replay verification (`verify_inputs`); `coerce_budgets` is the one None/instance/known-field-dict coercion for both budget classes |
 | `sqlite_snapshot.py` | WAL-aware read-only online backup; schema/revision metadata read from the retained database only |
-| `provenance.py` | version-1 manifest wire validation and deterministic `content_digest` |
+| `provenance.py` | version-1 manifest wire validation and deterministic `content_digest`; `source_projection` is the per-source identity (status, sha256, byte size) that both the manifest digest and the schedule's source identity hash; digest checks use `domain.is_sha256_hex` |
 | `history.py` | bounded retained-source readers; ambiguity-safe current alias graph |
 | `analysis.py` | `analyze_inputs(destination, *, budgets=None)`: retained-only result (no publication/training/live mutation) |
 | `metrics.py` | separate unique-paper descriptive channels, Wilson intervals, eligibility metadata |
