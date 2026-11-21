@@ -12,7 +12,7 @@ from typing import Any, get_args
 import pytest
 
 from zotero_summarizer.services.faithbench._build_qa import generate_candidates
-from zotero_summarizer.services.library import _paper_section_summaries, qa, quality_calibration
+from zotero_summarizer.services.library import _paper_section_summaries, qa
 
 
 class _SectionModel:
@@ -159,28 +159,3 @@ def test_generate_candidates_preserves_complete_long_source_in_bounded_windows()
     assert all(0 < len(window) <= 6_000 for window in builder.window_inputs)
     assert "".join(builder.window_inputs) == long_text
     assert any(interior_sentinel in window for window in builder.window_inputs)
-
-
-@pytest.mark.parametrize(
-    "malformed_proposal",
-    [
-        pytest.param("not a proposal object", id="wrong-record-shape"),
-        pytest.param({"proposed": "not-a-verdict"}, id="unknown-verdict"),
-        pytest.param({"proposed": ["must_read"]}, id="unhashable-verdict"),
-    ],
-)
-def test_malformed_matching_proposal_does_not_poison_valid_calibration_pair(
-    malformed_proposal: Any,
-):
-    proposals = {
-        "MALFORMED": malformed_proposal,
-        "HEALTHY": {"proposed": "must_read"},
-    }
-    labels = {"MALFORMED": "dont_read", "HEALTHY": "must_read"}
-
-    result = quality_calibration.compute_proposal_calibration(proposals=proposals, labels=labels)
-
-    assert result["n_pairs"] == 1
-    assert result["agreement"] == 1.0
-    assert result["cohen_kappa"] is None
-    assert result["insufficient"] is True

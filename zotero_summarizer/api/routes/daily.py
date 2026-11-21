@@ -26,7 +26,6 @@ from zotero_summarizer.api.routes._daily_verdict import router as verdict_router
 from zotero_summarizer.runtime import request_memo
 from zotero_summarizer.services.triage import daily_actions, daily_select, today_exposure, today_preparation
 from zotero_summarizer.services._common import settings as get_settings
-from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.storage import repositories
 
 
@@ -161,93 +160,6 @@ async def get_daily(K: int = 5, lookback_hours: int = 168) -> dict[str, Any]:
         )
     payload["showing"] = len(payload["papers"])
     return payload
-
-
-# Funnel stages shown on Today: friendly label + the decision states that feed
-# the count + a deep-link to the existing page that already browses that pool.
-# Tesler's Law — the system carries the "what does this mean" explanation in
-# the hint so the user never decodes raw decision strings.
-_PIPELINE_STAGES: tuple[dict[str, Any], ...] = (
-    {
-        "key": "filtered",
-        "label": "Filtered",
-        "decisions": [
-            feeds_storage.DECISION_GATE_REJECTED,
-            feeds_storage.DECISION_REJECTED_LOW_SCORE,
-            feeds_storage.DECISION_REJECTED_DEDUP_LIBRARY,
-            feeds_storage.DECISION_REJECTED_DEDUP_PROCESSED,
-            feeds_storage.DECISION_REJECTED_DAILY_CUTOFF,
-            feeds_storage.DECISION_REJECTED_ELBOW,
-        ],
-        "hint": "Auto-filtered by the model. Marked read in Zotero, NOT added "
-                "to your library. Spot-check them to catch a wrong reject.",
-        "link": "/review?state=gate_rejected",
-    },
-    {
-        "key": "awaiting",
-        "label": "Awaiting you",
-        "decisions": [],  # computed via the handled-aware count, not a raw sum
-        "hint": "Scored and waiting for your Add/Trash decision — this is your "
-                "cull queue.",
-        "link": "/review?state=awaiting_review",
-    },
-    {
-        "key": "added",
-        "label": "Added",
-        "decisions": [
-            feeds_storage.DECISION_SELECTED,
-            feeds_storage.DECISION_BLACK_SWAN,
-            feeds_storage.DECISION_USER_APPROVED,
-        ],
-        "hint": "Kept into your Zotero 'Inbox' collection — they sit unread "
-                "there by design until you read them.",
-        "link": None,
-    },
-    {
-        "key": "trashed",
-        "label": "Trashed",
-        "decisions": [feeds_storage.DECISION_USER_REJECTED],
-        "hint": "You rejected these — recorded as a strong negative signal and "
-                "marked read in Zotero.",
-        "link": None,
-    },
-)
-
-
-def _pipeline_payload(lookback_hours: int) -> dict[str, Any]:
-    import sqlite3
-
-    conn = sqlite3.connect(str(_db_path()))
-    conn.row_factory = sqlite3.Row
-    try:
-        by_decision = feeds_storage.count_all_by_decision(conn)
-    finally:
-        conn.close()
-
-    awaiting = daily_select.count_awaiting_unhandled(
-        _db_path(), lookback_hours=lookback_hours
-    )
-    total_in = sum(by_decision.values())
-
-    stages: list[dict[str, Any]] = [
-        {"key": "in", "label": "Came in", "count": total_in, "link": None,
-         "hint": "Feed papers the app has triaged so far. Items not yet "
-                 "triaged still show as unread in your Zotero feeds."},
-    ]
-    for stage in _PIPELINE_STAGES:
-        count = (
-            awaiting
-            if stage["key"] == "awaiting"
-            else sum(by_decision.get(d, 0) for d in stage["decisions"])
-        )
-        stages.append({
-            "key": stage["key"],
-            "label": stage["label"],
-            "count": count,
-            "hint": stage["hint"],
-            "link": stage["link"],
-        })
-    return {"stages": stages, "by_decision": by_decision}
 
 
 async def submit_role_verdict(item_key: str, body: RoleVerdictRequest) -> dict[str, Any]:

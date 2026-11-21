@@ -369,18 +369,6 @@ def update_scores(
     return int(cursor.rowcount or 0) > 0
 
 
-def count_all_by_decision(conn: sqlite3.Connection) -> dict[str, int]:
-    """Full per-decision histogram across every processed feed item.
-
-    Backs the Today pipeline-funnel overview (came in / filtered / awaiting /
-    added / trashed). Spans all runs, grouped by decision.
-    """
-    rows = conn.execute(
-        "SELECT decision, COUNT(*) AS n FROM processed_feed_items GROUP BY decision"
-    ).fetchall()
-    return {str(r["decision"]): int(r["n"]) for r in rows}
-
-
 def record_materialization(
     conn: sqlite3.Connection,
     *,

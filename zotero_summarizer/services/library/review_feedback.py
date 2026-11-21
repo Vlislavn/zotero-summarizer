@@ -108,13 +108,6 @@ def delete_part(item_key: str, field: str, reviewed_at: str | None) -> dict[str,
     return {"cleared": True, "feedback": row, **({"package": _publish(item_key, row, review)} if changed else {})}
 
 
-def save(item_key: str, chips: list[str], note: str) -> dict[str, Any]:
-    """Whole-review feedback for the current version; no chips and no note withdraws it."""
-    if chips or note.strip():
-        return put_part(item_key, WHOLE, None, chips, note)
-    return delete_part(item_key, WHOLE, None)
-
-
 def list_feedback(item_key: str) -> list[dict[str, Any]]:
     with closing(repositories._connect_to(settings().triage_db_path)) as conn:
         return store.list_for_paper(conn, item_key)

@@ -108,12 +108,12 @@ def test_row_is_deleted_only_when_chips_note_and_parts_are_all_empty(review):
     service.delete_part(KEY, "quality", AT)
     (row,) = _rows()
     assert json.loads(row["fields_json"])["quality"]["withdrawn"] is True  # tombstone: feedback.json still shows it
-    service.save(KEY, [], "")  # nothing left to withdraw: no change
+    service.delete_part(KEY, "whole", None)  # nothing left to withdraw: no change
     assert len(_rows()) == 1
     with closing(repositories._connect_to(settings().triage_db_path)) as conn, conn:
         conn.execute("UPDATE review_feedback SET fields_json = '[]'")  # first-draft default reads as empty
     service.put_part(KEY, "whole", AT, ["good_as_is"], "")
-    service.save(KEY, [], "")
+    service.delete_part(KEY, "whole", None)
     assert _rows() == []
 
 
