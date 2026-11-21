@@ -1,7 +1,6 @@
 """"Today" tab endpoints.
 
 - ``GET  /api/daily``                — assemble the daily slate
-- ``GET  /api/daily/pipeline``       — funnel overview (in/filtered/awaiting/added/trashed)
 - ``POST /api/daily/triage-backlog`` — drain the un-triaged backlog (remote model)
 - ``GET  /api/daily/triage-status``  — poll the backlog drain
 - ``POST /api/daily/rescore-slate``  — re-score the current slate in place (gate upgrade)
@@ -251,19 +250,6 @@ def _pipeline_payload(lookback_hours: int) -> dict[str, Any]:
     return {"stages": stages, "by_decision": by_decision}
 
 
-async def get_pipeline(lookback_hours: int = 168) -> dict[str, Any]:
-    """Funnel overview for Today: came in / filtered / awaiting / added / trashed."""
-    if not (24 <= lookback_hours <= 720):
-        raise APIError(
-            error="validation_error",
-            message=(
-                f"lookback_hours must be between 24 and 720 inclusive; got {lookback_hours}"
-            ),
-            status_code=422,
-        )
-    return await asyncio.to_thread(_pipeline_payload, lookback_hours)
-
-
 async def submit_role_verdict(item_key: str, body: RoleVerdictRequest) -> dict[str, Any]:
     """Record one user verdict on whether a slot was worth their attention.
 
@@ -403,7 +389,6 @@ async def trash_papers(body: BatchItemsRequest) -> dict[str, Any]:
 
 
 router.add_api_route("/api/daily", get_daily, methods=["GET"])
-router.add_api_route("/api/daily/pipeline", get_pipeline, methods=["GET"])
 router.add_api_route(
     "/api/daily/role-verdict", submit_role_verdict_body, methods=["POST"],
 )

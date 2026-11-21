@@ -65,7 +65,3 @@ def update(conn: sqlite3.Connection, item_key: str, version: tuple[str, str, str
 
 def list_for_paper(conn: sqlite3.Connection, item_key: str) -> list[dict[str, object]]:
     return _rows(conn, "WHERE item_key = ?", (item_key,))
-
-
-def all_rows(conn: sqlite3.Connection) -> list[dict[str, object]]:
-    return _rows(conn, "", ())

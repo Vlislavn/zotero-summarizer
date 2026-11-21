@@ -120,17 +120,6 @@ def list_feedback(item_key: str) -> list[dict[str, Any]]:
         return store.list_for_paper(conn, item_key)
 
 
-def export() -> list[dict[str, Any]]:
-    """Every feedback row, all papers and review versions, with where its package is and its snapshot status."""
-    with closing(repositories._connect_to(settings().triage_db_path)) as conn:
-        rows = store.all_rows(conn)
-    for row in rows:
-        pkg = bundle.package_dir(str(row["item_key"]), str(row["reviewed_at"]), str(row["generation_sha256"]))
-        row["package"] = ({"path": _relative(pkg), "snapshot": str(snapshot.read(pkg).get("status") or "")}
-                          if pkg.is_dir() else None)
-    return rows
-
-
 def checks(item_key: str) -> dict[str, Any]:
     """What was concluded about the current review's parts (``check.json``); empty when unchecked or invalid."""
     review = _current_review(item_key, WHOLE, None)
