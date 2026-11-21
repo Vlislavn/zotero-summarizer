@@ -306,7 +306,7 @@ and priority-only readers retain their narrower projections.
 and materialized library keys: `alias_resolver(conn)` loads the identity graph once
 (one scan of `processed_feed_items`, ~28k rows on real data) and returns a
 `key -> sorted family` closure; `resolve_item_key_aliases` is the one-key form, and
-question saves/reads use `question_sync.save_committed`/`list_for_paper` (the standard `_connect_to` opener, busy_timeout 10 s); bulk callers (`snapshots`, `question_sync.snapshots`, `library_context.read_context`)
+question saves/reads use `question_sync.save_committed`/`list_for_paper` (the standard `_connect_to` opener, busy_timeout 10 s); bulk callers (`snapshots`, `question_sync.snapshots`, `library_context.read_context`, `daily_members.read_members` via `review_note_projection.snapshot(conn, key, resolve)`)
 share one resolver instead of re-running a recursive scan per key (`current(conn, key, aliases)` takes the pre-resolved family; without it each library key rescanned the feed history and a related-saved read took minutes). Online reads/writes and offline canonical values,
 conflict revisions and snapshots share the latest note revision, including deletion
 tombstones. Pre-sync notes use timestamp order at revision zero. Writes update the

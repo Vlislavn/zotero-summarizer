@@ -4,7 +4,7 @@
 and unavailable rows, without ranking, inference, attribution or writes. It uses
 current verdict precedence, sibling materialization/pending state and bounded
 read-only review projection. Note-delivery snapshots expose revision/target/pending,
-not note bodies. Browser membership is not a daemon queue or write authorization.
+not note bodies; one `alias_resolver` per request serves all members (a per-member rescan of the feed history made 12 ids take ~1.8 s). Browser membership is not a daemon queue or write authorization.
 
 `today_exposure` is the owner-approved, local-only record of Today exposure in
 `Settings.today_exposure_log_dir` (`data/today-exposure/<local day>.jsonl`, `run_log` NDJSON,

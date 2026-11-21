@@ -60,8 +60,17 @@ export default function useTodayVisit(enabled) {
   }, [membersQuery.data, membersQuery.dataUpdatedAt, visit?.id, update]);
   const effectiveVisit = useMemo(() => membersQuery.data && visit && !visit.invalid
     ? applyMemberFacts(visit, membersQuery.data) : visit, [visit, membersQuery.data]);
+  // Retained data is trusted unless explicitly invalidated: our own revalidation (in-flight or failed
+  // refetch) must not blank and disable the slate. query-core flags `isInvalidated` on a failed
+  // background refetch too, so an error keeps the facts (shown as «Status unavailable», actions disabled).
+  const retained = Boolean(visit && !visit.invalid && visit.members.length
+    && membersQuery.data !== undefined && (!membersInvalidated || membersQuery.isError));
+  const paused = membersQuery.fetchStatus === 'paused';
+  // A rejected refetch keeps `data` (throwOnError:false), so it is excluded explicitly.
   const fresh = Boolean(visit && !visit.invalid && (!visit.members.length
-    || (membersQuery.isSuccess && (!membersQuery.isFetching || !membersInvalidated) && membersQuery.fetchStatus !== 'paused')));
+    || (retained && !paused && !membersQuery.isError)));
+  // Paused (browser offline) or failed refetch with trusted retained facts: show them, keep actions disabled.
+  const staleReason = retained && !fresh && (paused ? 'offline' : 'unavailable');
 
   const selection = useMutation({
     mutationKey: ['today-selection'],
@@ -80,7 +89,8 @@ export default function useTodayVisit(enabled) {
     if (enabled && !visit && selection.isIdle) selection.mutate(null);
   }, [enabled, visit, selection]);
 
-  const refresh = useCallback(() => client.invalidateQueries({ queryKey: TODAY_MEMBERS_QUERY }), [client]);
+  // Revalidate without marking the cache untrusted (invalidate would set isInvalidated and blank the slate).
+  const refresh = useCallback(() => client.refetchQueries({ queryKey: TODAY_MEMBERS_QUERY, type: 'active' }), [client]);
   const actionMutation = useMutation({
     mutationKey: ['today-action'],
     mutationFn: request => request.kind === 'add'
@@ -159,7 +169,7 @@ export default function useTodayVisit(enabled) {
   const busyRef = useRef(busy);
   busyRef.current = busy;
   return {
-    visit: effectiveVisit, fresh, busy, carryCount, inFlightCount, parkedCount, persistenceFailed,
+    visit: effectiveVisit, fresh, staleReason, busy, carryCount, inFlightCount, parkedCount, persistenceFailed,
     loading: !visit && selection.isPending, renewing: selection.isPending,
     selectionError: selection.error, statusError: membersQuery.error,
     actionError: actionMutation.error || decisionMutation.error,

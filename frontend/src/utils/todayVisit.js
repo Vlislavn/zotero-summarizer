@@ -38,6 +38,12 @@ export function updateTodayVisit(client, transform, expectedId) {
   const next = transform(current);
   if (!next) return { updated: false };
   const serialized = JSON.stringify(next);
+  // A refetch that changed nothing must not write storage or publish a new object: every
+  // write re-renders the slate and wakes other tabs through the `storage` event (3 s polling
+  // while a carried action resolves would do that forever).
+  if (cached?.id === current?.id && serialized === JSON.stringify(current) && readStorage(TODAY_STORAGE_KEY) === serialized) {
+    return { updated: true, saved: true };
+  }
   const saved = writeStorage(TODAY_STORAGE_KEY, serialized) && readStorage(TODAY_STORAGE_KEY) === serialized;
   if (!saved && current && next.id !== current.id) return { updated: false, saved: false };
   client.setQueryData(TODAY_VISIT_QUERY, next);
@@ -207,7 +213,16 @@ export function actionReply(action, response, id) {
     fulltext: response.fulltext || null };
 }
 
-export function memberPresentation(member, fresh) {
+const STALE_TEXT = {
+  offline: 'Offline: showing the last known status.',
+  unavailable: 'Status unavailable: showing the last known status.',
+};
+
+// `staleReason` (false | 'offline' | 'unavailable'; `true` means 'offline'): retained, non-invalidated
+// facts whose refetch is paused (browser offline) or failed. Content stays readable with one
+// explanatory line; `fresh` stays false so no action is enabled or queued.
+export function memberPresentation(member, fresh, staleReason = false) {
+  const reason = staleReason === true ? 'offline' : staleReason;
   const facts = member.facts;
   const action = member.action;
   const available = matchesMember(member.paper, facts);
@@ -235,11 +250,17 @@ export function memberPresentation(member, fresh) {
     text += ` Optional full text unavailable: ${attachment.reason || attachment.status}.`;
   }
   if (action?.fulltext?.error) text += ` Batch reported optional full text unavailable: ${action.fulltext.error}`;
-  if (!fresh) text = facts
+  let showReason = false;
+  if (!fresh && !(reason && facts)) text = facts
     ? (text ? `Updating status. Last known: ${text}` : 'Updating status…')
     : 'Loading this paper…';
-  else if (!available) text = 'This member is unavailable or its identity changed. No replacement was selected.';
+  else {
+    if (!available) text = 'This member is unavailable or its identity changed. No replacement was selected.';
+    showReason = !fresh;
+  }
+  // Offline/unavailable is not a problem for the owner: compare before appending the reason line.
   const problem = text !== settledText;
+  if (showReason) text = text ? `${text} ${STALE_TEXT[reason]}` : STALE_TEXT[reason];
   const handled = rejected || materialized || Boolean(facts?.user_priority)
     || ['selected', 'black_swan', 'user_approved', 'dedup_library', 'dedup_processed'].includes(facts?.decision);
   const canRetry = fresh && available && unresolved && ['add', 'trash'].includes(action?.kind)

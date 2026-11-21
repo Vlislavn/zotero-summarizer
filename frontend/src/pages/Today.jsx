@@ -40,8 +40,8 @@ export default function Today() {
 
   const flow = useTodayDecisionToast({ decide: view.decide, undo: view.undoDecision, busy: view.busy });
   const allMembers = useMemo(() => (view.visit?.members || []).map(member => ({
-    ...member, display: memberPresentation(member, view.fresh),
-  })), [view.visit, view.fresh]);
+    ...member, display: memberPresentation(member, view.fresh, view.staleReason),
+  })), [view.visit, view.fresh, view.staleReason]);
   // Decided cards leave the slate (#206): they stay in the retained visit (identity, carry, the
   // «wait for Zotero» banner) but only undecided cards, and decided ones with a problem, render.
   const members = useMemo(() => allMembers.filter(member =>

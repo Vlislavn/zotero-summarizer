@@ -24,9 +24,12 @@ def _body(conn, keys):
     return "\n\n".join(parts)
 
 
-def snapshot(conn, item_key) -> dict:
-    """Read alias-family revision/body/target and signature-bound pending state."""
-    keys = review_notes.resolve_item_key_aliases(conn, item_key)
+def snapshot(conn, item_key, resolve=None) -> dict:
+    """Read alias-family revision/body/target and signature-bound pending state.
+
+    Bulk readers pass one ``review_notes.alias_resolver(conn)`` instead of rebuilding the graph per key.
+    """
+    keys = resolve(item_key) if resolve else review_notes.resolve_item_key_aliases(conn, item_key)
     placeholders = ",".join("?" for _ in keys)
     revision = int(conn.execute(
         "SELECT COALESCE(MAX(revision), 0) FROM sync_changes "

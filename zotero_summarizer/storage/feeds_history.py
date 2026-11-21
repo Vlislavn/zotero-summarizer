@@ -20,8 +20,7 @@ from zotero_summarizer.storage.feeds_constants import (
     OUTCOME_MOVED_COLLECTION, OUTCOME_TRASHED, OUTCOME_UNKNOWN, OUTCOME_WEIGHT,
     relevance_from_signal_weight,
 )
-from zotero_summarizer.storage.feed_identity import row_feed_keys
-from zotero_summarizer.storage.feeds_lookup import get_processed_feed_item_by_id
+from zotero_summarizer.storage.feed_identity import legacy_feed_key, row_feed_keys
 from zotero_summarizer.storage.feeds_schema import open_triage_conn
 
 
@@ -29,22 +28,42 @@ class MaterializationSuperseded(ValueError):
     """The feed row was rejected or its positive verdict changed before write."""
 
 
+def _sibling_legacy_keys(conn: sqlite3.Connection, stable: str) -> list[str]:
+    """``feed:<id>`` keys of this paper's rows that ``get_processed_feed_item_by_id`` resolves
+    back to ``stable`` — the same decision as calling it per id, in three batched queries."""
+    ids = [int(r["feed_item_id"]) for r in conn.execute(
+        "SELECT DISTINCT feed_item_id FROM processed_feed_items WHERE stable_feed_key = ?", (stable,))]
+    if any(i <= 0 for i in ids):
+        raise ValueError("feed_item_id must be positive")
+    legacy = {legacy_feed_key(i): i for i in ids}
+    marks = ",".join("?" for _ in legacy)
+    aliased = {r["old_key"]: r["stable_feed_key"] for r in conn.execute(
+        f"SELECT old_key, stable_feed_key FROM feed_key_aliases WHERE old_key IN ({marks})", list(legacy))}
+    ambiguous = {r["old_key"] for r in conn.execute(
+        f"SELECT old_key FROM feed_key_alias_ambiguities WHERE old_key IN ({marks})", list(legacy))}
+    accepted = [k for k in legacy if aliased.get(k) == stable]
+    unresolved = [k for k in legacy if k not in aliased and k not in ambiguous]
+    if unresolved:
+        newest: dict[int, Any] = {}
+        # The library-id prefix lets SQLite use the (feed_library_id, feed_item_id) unique index
+        # instead of scanning every row; ``id`` keeps the old rowid-order tie-break.
+        for r in conn.execute(
+            "SELECT feed_item_id, stable_feed_key FROM processed_feed_items WHERE feed_library_id IN "
+            "(SELECT DISTINCT feed_library_id FROM processed_feed_items) AND feed_item_id IN "
+            f"({','.join('?' for _ in unresolved)}) ORDER BY created_at DESC, id",
+            [legacy[k] for k in unresolved],
+        ):
+            newest.setdefault(int(r["feed_item_id"]), r["stable_feed_key"])
+        accepted += [k for k in unresolved if newest.get(legacy[k]) == stable]
+    return accepted
+
+
 def current_feed_verdict(conn: sqlite3.Connection, row: dict[str, Any]) -> dict[str, Any] | None:
     """Newest stable verdict; consult a legacy key only when its alias names this paper."""
     keys = row_feed_keys(row)[:1]
     stable = row.get("stable_feed_key")
     if stable:
-        siblings = conn.execute(
-            "SELECT DISTINCT feed_item_id FROM processed_feed_items WHERE stable_feed_key = ?",
-            (stable,),
-        ).fetchall()
-        for sibling in siblings:
-            feed_id = int(sibling["feed_item_id"])
-            resolved = get_processed_feed_item_by_id(conn, feed_id)
-            if resolved is not None and resolved.get("stable_feed_key") == stable:
-                legacy = f"feed:{feed_id}"
-                if legacy not in keys:
-                    keys.append(legacy)
+        keys.extend(k for k in _sibling_legacy_keys(conn, stable) if k not in keys)
     placeholders = ",".join("?" for _ in keys)
     has_revisions = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_changes'"
