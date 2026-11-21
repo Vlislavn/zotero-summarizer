@@ -37,7 +37,7 @@ review currentness (`deep_review.current_reviews`) and the filtered unhandled po
 are computed once and shared by the slate, `status` and the header count.
 
 Daily selection now ranks candidates without putting them into Zotero.
-`daily_actions` checks current full-text review eligibility before any Add
+`daily_actions` resolves its target collection with `services.zotero.collections.resolve_collection_name` (unknown key → 400 `invalid_collection`) and checks current full-text review eligibility before any Add
 label/pending state/write; mixed batches report blocked rows as
 `code=review_required` while eligible rows proceed. An explicit positive feed
 verdict follows the same gate. Pending Add is committed only while the

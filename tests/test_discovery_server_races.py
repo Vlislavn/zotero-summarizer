@@ -244,7 +244,7 @@ def test_explicit_review_cas_no_agentic_refinement_and_direct_run_fence(journey,
 def test_stale_review_and_new_add_409_before_effect_but_old_add_replay_preserved(journey, monkeypatch):
     result = begin(journey).json()
     monkeypatch.setattr(materialize, "ZoteroWriter", lambda *a: pytest.fail("native effect before stale rejection"))
-    monkeypatch.setattr(materialize, "_resolve_collection_name", lambda key: "Inbox")
+    monkeypatch.setattr(materialize, "resolve_collection_name", lambda key, data_dir: "Inbox")
     repositories.upsert_review_note(journey.paths.triage_db_path, "SEED0001", "Changed input")
     assert journey.client.post(f"/api/search/{result['id']}/review").status_code == 409
     new_add = journey.client.post(f"/api/search/{result['id']}/materialize", json={"candidate_id": "10.1/new"})

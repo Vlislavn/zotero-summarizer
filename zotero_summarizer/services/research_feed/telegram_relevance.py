@@ -76,7 +76,7 @@ class GateResult:
     route: str  # "cosine" | "probe"
 
 
-def _unit_rows(vectors: np.ndarray) -> np.ndarray:
+def unit_rows(vectors: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(vectors, axis=1, keepdims=True)
     return vectors / np.where(norms == 0.0, 1.0, norms)
 
@@ -131,8 +131,8 @@ def gate(posts: list[TelegramPost], goals: list[str], *, scorer, min_keep: int,
     cosine_posts = [p for p in posts if not (probe is not None and _is_mostly_non_latin(p.text))]
     cosine_index = {id(p): i for i, p in enumerate(cosine_posts)}
     if cosine_posts:
-        goal_vectors = _unit_rows(np.asarray(scorer(goals), dtype=np.float32))
-        post_vectors = _unit_rows(np.asarray(scorer([p.text for p in cosine_posts]), dtype=np.float32))
+        goal_vectors = unit_rows(np.asarray(scorer(goals), dtype=np.float32))
+        post_vectors = unit_rows(np.asarray(scorer([p.text for p in cosine_posts]), dtype=np.float32))
         sims = post_vectors @ goal_vectors.T
     for post in posts:
         if id(post) in cosine_index:

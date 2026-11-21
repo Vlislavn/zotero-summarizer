@@ -57,7 +57,7 @@ outside review identity; its id is stamped on every `today_exposure` line (schem
 test needs a new arm name and log schema. Until then compare via the exposure log's ranker id.
 `selection_evidence.rank.basis` is `goal_cos` for this ranker.
 `selection_evidence.rank.goal` (both rankers, when `goal_sims` exists) is the goal text with the
-highest cosine (`_goal_match.row_goal_text`, candidate key `goal_text`): display only for the card's
+highest cosine (`_goal_match.best_goal_text` over `parse_goal_sims`, the one `aux_context.goal_sims` parser that `row_goal_sim` also uses; candidate key `goal_text`): display only for the card's
 “Close to your goal “…”” line, never a ranking input; absent when the signal is unavailable.
 
 **Exploration (`_exploration`, analyzed policy only).** Up to `ZS_TODAY_EXPLORATION_SLOTS`

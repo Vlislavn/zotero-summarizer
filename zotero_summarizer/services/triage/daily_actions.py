@@ -22,6 +22,7 @@ from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.storage.feed_identity import LEGACY_FEED_PREFIX, row_feed_keys
 from zotero_summarizer.storage import rss as rss_storage
 from zotero_summarizer.storage.feeds_lookup import materialized_key_for
+from zotero_summarizer.services.zotero.collections import resolve_collection_name
 
 # Provisional positive label for "add to library": the user signalled the
 # paper is worth reading, but hasn't read it yet. Stage-2 annotation overrides
@@ -133,22 +134,6 @@ def _open_optional_writer() -> tuple[Any | None, Exception | None]:
         return None, exc
 
 
-def _resolve_collection_name(collection_key: str | None) -> str:
-    """Picker key → user-library collection name (default "Inbox" when unset). An
-    unknown/foreign key is a 400 — a raw key must never reach the name-based writer,
-    which would auto-create a junk collection named after it."""
-    if not collection_key:
-        return "Inbox"
-    name = ZoteroReader(get_settings().zotero_data_dir).collection_name_for_key(collection_key)
-    if not name:
-        raise APIError(
-            error="invalid_collection",
-            message=f"no such collection: {collection_key}",
-            status_code=400,
-        )
-    return name
-
-
 def _mark_app_rss_rows_read(rows: list[dict[str, Any]]) -> int:
     item_ids = [int(row.get("feed_item_id") or 0) for row in rows]
     conn = sqlite3.connect(str(_db_path()))
@@ -213,7 +198,7 @@ def add_to_library(item_ids: list[int], target_collection_key: str | None = None
     resolved (and validated) to a collection name — an unknown key is a 400, never a
     silent junk-collection auto-create."""
     rows = _load_rows(item_ids)
-    collection_name = _resolve_collection_name(target_collection_key)
+    collection_name = resolve_collection_name(target_collection_key, get_settings().zotero_data_dir)
     writer, writer_error = _open_optional_writer()
     used_keys: set[str] = set()
     added = 0

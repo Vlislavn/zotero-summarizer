@@ -3,7 +3,7 @@
 The fork-A pipeline is `telegram_collect.collect_pages`: per channel it fetches
 incremental `min_id` posts and commits them, then (when a reply client, embedding
 `scorer` and owner `goals` are supplied) runs the post-commit digest in
-`telegram_digest.run`. `telegram_relevance` holds the pure helpers — `dedup`
+`telegram_digest.run`. `telegram_relevance` holds the pure helpers — `unit_rows` (L2 row normaliser, also used by `telegram_trends`), `dedup`
 collapses exact forwards (`fwd_from`) and near-duplicate normalised text keeping
 the earliest; `gate` scores posts against the goals (SPECTER2 via `specter2_scorer`
 for Latin text; non-Latin posts use the injected `keyword_probe`, because SPECTER2 cosine on

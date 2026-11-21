@@ -27,7 +27,7 @@ from typing import Any
 from zotero_summarizer.services._common import LOGGER
 from zotero_summarizer.services.model.rank_blend import blend_scores
 from zotero_summarizer.services.model.rank_blend_quality import quality_first_key, unified_quality
-from zotero_summarizer.services.triage.daily_select._goal_match import row_goal_text
+from zotero_summarizer.services.triage.daily_select._goal_match import best_goal_text, parse_goal_sims
 from zotero_summarizer.services.triage.daily_select._selection_evidence import (
     rank_observations,
     source_observations,
@@ -123,14 +123,8 @@ def row_goal_sim(payload: dict[str, Any]) -> float | None:
     field is clamped to ``ge=0`` and embeds a full-text seed, so it is a
     different (incomparable) number than the title+abstract cosine used here.
     """
-    aux = _aux_dict(payload)
-    sims = aux.get("goal_sims")
-    if sims is None:
-        return None
-    if not isinstance(sims, dict):
-        raise ValueError("payload.aux_context.goal_sims must be a JSON object or null")
-    vals = [float(v) for v in sims.values() if v is not None]
-    return max(vals) if vals else None
+    sims = parse_goal_sims(_aux_dict(payload))
+    return max(sims.values()) if sims else None
 
 
 def row_prestige(row: dict[str, Any], payload: dict[str, Any]) -> float:
@@ -330,7 +324,7 @@ def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
         # DISPLAY, but the blend must only ever see real evidence (its last-resort
         # composite/5 fallback would be circular as a ranking input).
         "goal_sim": row_goal_sim(payload),
-        "goal_text": row_goal_text(payload),  # argmax goal of goal_sim; display only
+        "goal_text": best_goal_text(parse_goal_sims(_aux_dict(payload))),  # argmax goal of goal_sim; display only
         "citation_percentile": row_citation_percentile(payload),
         # Quality-first blend inputs (services/model/rank_blend_quality): the LLM
         # 1-5 goal_alignment dim (topicality), rigor+evidence dims (abstract-only
