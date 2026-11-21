@@ -130,3 +130,30 @@ export function Bullets({ items }) {
     </ul>
   );
 }
+
+// A neutral, clickable location pointer for a located finding: "§ Methods · p.4"
+// jumps to that section in the Paper map (one-code-one-meaning — the location is
+// slate, the problem/match keeps its own tone). Only rendered on the story page,
+// where the overlay supplies the section + the SectionMap renders the target.
+export function SectionAnchor({ section }) {
+  if (!section) return null;
+  // `approx` = the section-level fallback (no exact/fuzzy span grounded it). Render
+  // it conservatively (≈ prefix, muted) so an uncertain location never reads as an
+  // asserted one — the brittle-localization warning from the research.
+  const approx = section.match === 'approx';
+  const pg = section.page ? ` · p.${section.page}` : '';
+  const label = `${approx ? '≈ ' : ''}§ ${section.title}${pg}`;
+  return (
+    <a
+      href={`#secmap-${section.id}`}
+      title={`${approx ? 'approximate location — ' : ''}${section.title}${pg} — jump to the paper map`}
+      className={`inline-flex max-w-[12rem] items-center rounded px-1.5 py-0.5 align-middle text-[10px] font-medium sm:max-w-[18rem] ${
+        approx
+          ? 'bg-slate-50 text-slate-400 hover:bg-slate-100'
+          : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
+      }`}
+    >
+      <span className="truncate">{label}</span>
+    </a>
+  );
+}
