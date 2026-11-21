@@ -6,3 +6,10 @@ project:
   test_roots: [tests]
   vulture_whitelist: [scripts/vulture_whitelist.py]
 exclude: ["data/**", ".venv/**", "frontend/node_modules/**", "frontend/dist/**"]
+
+# Deliberate cycle (reviewed 2026-11-21): storage/repositories.py re-exports the _repo_* modules at the
+# bottom while each _repo_* imports its connection helpers back from it, and many tests monkeypatch
+# repositories.DB_PATH. Breaking it means redesigning that seam for no behavioural gain. The key is the
+# sorted member list: when a member is added or removed the cycle shows up again (revisit then).
+allowed_cycles:
+  - "zotero_summarizer.storage._repo_feedback <-> zotero_summarizer.storage._repo_jobs <-> zotero_summarizer.storage._repo_labels <-> zotero_summarizer.storage._repo_pending <-> zotero_summarizer.storage._repo_results <-> zotero_summarizer.storage._repo_sync <-> zotero_summarizer.storage._repo_verdicts <-> zotero_summarizer.storage.corpus <-> zotero_summarizer.storage.feeds <-> zotero_summarizer.storage.feeds_history <-> zotero_summarizer.storage.label_mirrors <-> zotero_summarizer.storage.migrations <-> zotero_summarizer.storage.pending_actions <-> zotero_summarizer.storage.question_sync <-> zotero_summarizer.storage.repositories <-> zotero_summarizer.storage.review_note_projection <-> zotero_summarizer.storage.review_note_projection_schema <-> zotero_summarizer.storage.review_notes <-> zotero_summarizer.storage.review_questions <-> zotero_summarizer.storage.rows"
