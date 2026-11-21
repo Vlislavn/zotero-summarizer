@@ -32,9 +32,11 @@ export default function Today() {
   const location = useLocation();
   const [params] = useSearchParams();
   const task = params.get('task');
-  const { status } = useSetupStatus();
+  const { status, isPending: statusPending, fetchStatus: statusFetch } = useSetupStatus();
   const enabled = Boolean(status) && !task;
-  const view = useTodayVisit(enabled);
+  // Only the first status attempt of the page load counts (isPending is false after an error, so the 5 s retry
+  // never re-enters the skeleton); an offline browser shows the stored cards at once.
+  const view = useTodayVisit(enabled, statusPending && statusFetch === 'fetching' && navigator.onLine !== false);
   const { selectedIds, setSelected } = view;
   const [addCollectionKey, setAddCollectionKey] = useState('');
   const [feedFilter, setFeedFilter] = useState('');

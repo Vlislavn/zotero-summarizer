@@ -10,8 +10,8 @@ export default function useTodaySlate(view, flow) {
   })), [view.visit, view.fresh, view.staleReason]);
   // Decided cards leave the slate (#206): they stay in the retained visit (identity, carry, the
   // «wait for Zotero» banner) but only undecided cards, and decided ones with a problem, render.
-  const members = useMemo(() => allMembers.filter(member =>
-    !member.display.leaves && !flow.left.has(member.paper.item_id)), [allMembers, flow.left]);
+  const members = useMemo(() => view.checking ? [] : allMembers.filter(member =>
+    !member.display.leaves && !flow.left.has(member.paper.item_id)), [allMembers, flow.left, view.checking]);
   const listRef = useRef(null);
   const decideCard = useCallback((paper, priority) => {
     // The focused button goes away with its card: keep keyboard and screen-reader position in the list.
@@ -19,6 +19,6 @@ export default function useTodaySlate(view, flow) {
   }, [flow]);
   const feedNames = useMemo(() => sortedFeedNames(members), [members]);
   const hasVisit = view.visit && !view.visit.invalid;
-  const caughtUp = hasVisit && allMembers.length > 0 && members.length === 0;
+  const caughtUp = hasVisit && !view.checking && allMembers.length > 0 && members.length === 0;
   return { allMembers, members, listRef, decideCard, feedNames, hasVisit, caughtUp };
 }

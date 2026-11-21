@@ -7,7 +7,7 @@ import {
   actionReply, applyMemberFacts, createTodayVisit, memberInFlight, memberNeedsCarry, memberParked, memberPresentation, readTodayVisit, updateTodayVisit,
 } from '../utils/todayVisit.js';
 
-export default function useTodayVisit(enabled) {
+export default function useTodayVisit(enabled, awaitingStatus = false) {
   const client = useQueryClient();
   const activeActions = useIsMutating({ mutationKey: ['today-action'] });
   const activeSelections = useIsMutating({ mutationKey: ['today-selection'] });
@@ -71,6 +71,12 @@ export default function useTodayVisit(enabled) {
     || (retained && !paused && !membersQuery.isError)));
   // Paused (browser offline) or failed refetch with trusted retained facts: show them, keep actions disabled.
   const staleReason = retained && !fresh && (paused ? 'offline' : 'unavailable');
+  // The first status read of this page load is still in flight: the stored facts may be stale (decided
+  // elsewhere), so rendering the stored cards would flash them and then drop them. Offline ('paused') and
+  // failed ('idle') reads keep showing the stored cards with their Offline / unavailable line. The same holds
+  // while the setup status the read waits for is still loading (`awaitingStatus`).
+  const checking = Boolean(visit && !visit.invalid && visit.members.length
+    && membersQuery.data === undefined && (membersQuery.fetchStatus === 'fetching' || awaitingStatus));
 
   const selection = useMutation({
     mutationKey: ['today-selection'],
@@ -169,8 +175,8 @@ export default function useTodayVisit(enabled) {
   const busyRef = useRef(busy);
   busyRef.current = busy;
   return {
-    visit: effectiveVisit, fresh, staleReason, busy, carryCount, inFlightCount, parkedCount, persistenceFailed,
-    loading: !visit && selection.isPending, renewing: selection.isPending,
+    visit: effectiveVisit, fresh, checking, staleReason, busy, carryCount, inFlightCount, parkedCount, persistenceFailed,
+    loading: (!visit && selection.isPending) || checking, renewing: selection.isPending,
     selectionError: selection.error, statusError: membersQuery.error,
     actionError: actionMutation.error || decisionMutation.error,
     canRenew: enabled && !busy && carryCount < VISIT_LIMIT && (!visit || visit.invalid || fresh),
