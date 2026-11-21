@@ -3,7 +3,7 @@
 
 // The canonical reading-priority vocabulary (one code = one meaning, Law of
 // Similarity): must=emerald/positive, should=sky, could=amber/caution,
-// dont=rose — matching PriorityBadge (ui/Badge.jsx) and the score histogram.
+// dont=rose — matching the score histogram.
 // (must_read used to read amber here, contradicting emerald everywhere else.)
 export function priorityClass(priority) {
   switch (priority) {
