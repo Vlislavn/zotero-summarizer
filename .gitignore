@@ -5,6 +5,7 @@ env/
 # Keep per-machine skills/config private; delegation follows the global canon.
 .agents/
 .pi/npm/
+.pi/settings.json
 .codex/
 __pycache__/
 *.pyc
