@@ -3,6 +3,7 @@
 // Designed to be called from React Query's `queryFn` / `mutationFn`.
 
 import { cacheReviewDetail, cachedReviewDetail, queueMutation, transportUnavailable } from '../offlineStore.js';
+import { fetchJson, jsonInit, readJsonOrThrow } from './client.js';
 import { offlineRequest } from './offlineTransport.js';
 
 function requestSync() {
@@ -12,38 +13,8 @@ function requestSync() {
 const BASE = '/api/golden';
 
 async function request(path, options = {}, localFallback = false) {
-  const init = { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options };
-  return localFallback ? offlineRequest(`${BASE}${path}`, init, readResponse)
-    : readResponse(await fetch(`${BASE}${path}`, init));
-}
-
-async function readResponse(res) {
-  if (!res.ok) {
-    let detail = '';
-    let parsedMessage = '';
-    try {
-      const body = await res.json();
-      if (body && typeof body === 'object') {
-        parsedMessage = body.message || body.detail || '';
-        detail = JSON.stringify(body);
-      }
-    } catch {
-      try {
-        detail = await res.text();
-      } catch {
-        detail = '';
-      }
-    }
-    const message = parsedMessage
-      ? `HTTP ${res.status}: ${parsedMessage}`
-      : `HTTP ${res.status} ${res.statusText}${detail ? `: ${detail}` : ''}`;
-    const err = new Error(message);
-    err.status = res.status;
-    err.body = detail;
-    throw err;
-  }
-  if (res.status === 204) return null;
-  return res.json();
+  const url = `${BASE}${path}`;
+  return localFallback ? offlineRequest(url, jsonInit(options), readJsonOrThrow) : fetchJson(url, options);
 }
 
 /**

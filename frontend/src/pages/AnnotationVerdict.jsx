@@ -13,6 +13,7 @@ import {
   fetchBorderSuggestions,
 } from '../api/goldenApi.js';
 import { fetchCollections, fetchTags } from '../api/libraryApi.js';
+import { flattenCollections } from './pendingHelpers.js';
 import { humanizeError } from '../utils/humanizeError.js';
 import { pretty } from '../utils/priorityLabels.js';
 import { UNDO_WINDOW_MS, decide } from '../utils/verdictUndo.js';
@@ -41,17 +42,6 @@ import {
   TriageProgress,
   sortBorderByUncertainty,
 } from './AnnotationVerdict_helpers.jsx';
-
-// Flatten the Zotero collection tree into indented <option>s for a compact
-// <select> (annotate's left column is narrow — a dropdown beats Library's tree).
-function flattenCollections(nodes, depth = 0) {
-  const flat = [];
-  for (const node of nodes || []) {
-    flat.push({ key: node.key, name: `${' '.repeat(depth * 2)}${node.name}`, item_count: node.item_count || 0 });
-    if (node.children?.length) flat.push(...flattenCollections(node.children, depth + 1));
-  }
-  return flat;
-}
 
 // Tightly-composed metadata strip for the sticky top zone. Stays ~60-90px.
 function DetailTopStrip({ detail }) {
@@ -605,7 +595,7 @@ export default function AnnotationVerdict() {
               >
                 <option value="">All collections</option>
                 {flatCollections.map((c) => (
-                  <option key={c.key} value={c.key}>{c.name} ({c.item_count})</option>
+                  <option key={c.key} value={c.key}>{'\u00A0'.repeat(c.depth * 2)}{c.name} ({c.item_count})</option>
                 ))}
               </select>
               <select

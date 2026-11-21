@@ -3,7 +3,7 @@ import 'fake-indexeddb/auto';
 import '../../testSetup.js';
 import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { createMemoryRouter, Route, RouterProvider, Routes } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { submitVerdict } from '../../api/goldenApi.js';
 import { cacheReviewDetail, cachedResponse, pendingMutations, publishStatus, savePapers } from '../../offlineStore.js';

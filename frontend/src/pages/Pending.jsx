@@ -8,7 +8,6 @@ import {
 } from '../api/pendingApi.js';
 import {
   STATUS_TABS,
-  flattenCollections,
   buildDraft,
   buildPayloadFromDraft,
   approvalPreviews,
@@ -21,6 +20,7 @@ import { notifyPendingChanged } from '../hooks/usePendingCount.js';
 import { useKeyboardNav } from '../hooks/useKeyboardNav.js';
 import { useOptimisticAction } from '../hooks/useOptimisticAction.js';
 import { useFocusOnChange } from '../hooks/useFocusOnChange.js';
+import useCollections from '../hooks/useCollections.js';
 
 // Pending Changes page — port of the `activeTab === 'pending'` block from
 // zotero_summarizer/web/ui.html. Provides functional parity:
@@ -50,28 +50,14 @@ export default function Pending() {
   const loadVersion = useRef(0);
   const [message, setMessage] = useState('');
   const [isError, setIsError] = useState(false);
-  const [flatCollections, setFlatCollections] = useState([]);
+  // Non-fatal on failure — only affects the collection-edit dropdown.
+  const flatCollections = useCollections(fetchCollections);
   // Index of the keyboard-active change-group within `groupedPending`.
   const [activeIdx, setActiveIdx] = useState(0);
   // Client-side title filter — find one paper's queued change without scrolling a
   // long list. Applied at the source so grouping, select-all and keyboard nav all
   // operate on the same visible set.
   const [titleFilter, setTitleFilter] = useState('');
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await fetchCollections();
-        if (!cancelled) setFlatCollections(flattenCollections(data?.items || []));
-      } catch {
-        // Non-fatal — only affects the collection-edit dropdown.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const load = useCallback(async (currentStatus = status) => {
     const version = ++loadVersion.current;

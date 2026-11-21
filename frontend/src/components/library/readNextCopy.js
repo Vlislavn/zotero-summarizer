@@ -62,7 +62,7 @@ export const GROUP_LINE = {
 // Rigor wording (quality-letter-memo.md, rule D for A): a flag always shows; an A is
 // only plain when the review also found no critical gap (band highlight), else
 // «checklist only». The letter never reorders the list. `tone` picks the ink.
-export function rigorLabel(row) {
+function rigorLabel(row) {
   const grade = String(row.quality_grade || '').toUpperCase();
   const band = String(row.quality_band || '').toLowerCase();
   if (band === 'flag') return { text: `Rigor${grade ? ` ${grade}` : ''} · flagged`, tone: 'flag' };
@@ -74,14 +74,14 @@ export function rigorLabel(row) {
 }
 
 // The review's reading-depth advice; only read / skim are worth a word on the row.
-export function readLabel(row) {
+function readLabel(row) {
   const word = { read: 'Read', skim: 'Skim' }[row.read_decision];
   if (!word) return null;
   const min = Number(row.estimated_read_minutes);
   return Number.isFinite(min) && min > 0 ? `${word} ${Math.round(min)} min` : word;
 }
 
-export const hasReview = (row) => Boolean(
+const hasReview = (row) => Boolean(
   row.quality_grade || row.quality_band || row.review_digest?.tldr || row.read_decision,
 );
 

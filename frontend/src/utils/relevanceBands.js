@@ -6,9 +6,9 @@
 // ranking is only reshuffled when the user picks an EXPLICIT sort (`sortQueue`,
 // Zotero-column semantics); the default 'best' sort is the identity.
 
-export const BAND_MUST = 4.5;
-export const BAND_SHOULD = 3.5;
-export const BAND_COULD = 2.0;
+const BAND_MUST = 4.5;
+const BAND_SHOULD = 3.5;
+const BAND_COULD = 2.0;
 
 export const BANDS = ['must_read', 'should_read', 'could_read', 'dont_read'];
 
@@ -17,15 +17,6 @@ export const BAND_LABEL = {
   should_read: 'should',
   could_read: 'could',
   dont_read: 'Not interested',
-};
-
-// One palette, shared in spirit with the Annotate priority chips, so a band
-// looks the same everywhere.
-export const BAND_ACTIVE_CLS = {
-  must_read: 'bg-emerald-600 text-white border-emerald-600',
-  should_read: 'bg-sky-600 text-white border-sky-600',
-  could_read: 'bg-amber-600 text-white border-amber-600',
-  dont_read: 'bg-rose-600 text-white border-rose-600',
 };
 
 export function scoreToBand(score) {
@@ -92,7 +83,7 @@ export function isFilterActive(f) {
 // `prestige_evidence` (not the citation-only `prestige_known`) is what lets an
 // uncited preprint by a high-h-index author count as high prestige; a row with NO
 // signal at all (prestige_evidence false) is never high — unlabelled, not penalised.
-export function isHighPrestige(it, floor = null) {
+function isHighPrestige(it, floor = null) {
   const ev = it?.prestige_evidence === true && typeof it.prestige_score === 'number';
   if (!ev) return false;
   return floor == null ? it.prestige_score >= 3 : it.prestige_score >= floor;

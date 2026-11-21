@@ -89,7 +89,7 @@ export function authorsView(authors = {}) {
 }
 
 // Why the AI TL;DR is not shown → one plain English line (no “card” jargon).
-export const AI_REASON_MESSAGE = {
+const AI_REASON_MESSAGE = {
   ai_disabled: 'AI is off in settings.',
   offline: 'Offline: AI TL;DR unavailable.',
   generation_failed: 'Could not make the AI TL;DR.',

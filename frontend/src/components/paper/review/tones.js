@@ -56,13 +56,7 @@ export const qualityBasis = (q) => (q
   ? [gradeBasis(q.coverage_met, q.coverage_applicable), q.type_uncertain ? 'type uncertain' : ''].filter(Boolean).join(' · ')
   : '');
 
-// read / skim / skip digest recommendation.
-const DECISION_TONE = { read: 'emerald', skim: 'amber', skip: 'slate' };
-export const decisionTone = (d) => DECISION_TONE[String(d || '').toLowerCase()] || 'slate';
-
 // Reference-free rigor band (mirrors services/library quality_eval bands).
-const BAND_TONE = { flag: 'rose', highlight: 'emerald', uncertain: 'amber', neutral: 'slate' };
-export const bandTone = (b) => BAND_TONE[String(b || '').toLowerCase()] || 'slate';
 export const BAND_LABEL = {
   flag: 'Flag', highlight: 'Highlight', neutral: 'Neutral', uncertain: 'Uncertain',
 };

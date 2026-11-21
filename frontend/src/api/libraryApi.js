@@ -2,32 +2,12 @@
 // /api/triage/run endpoints used by the Library and Annotate pages.
 
 import { allPapers, cacheResponse, cachedResponse, getMeta, transportUnavailable } from '../offlineStore.js';
+import { readResponse } from './client.js';
 import { offlineRequest } from './offlineTransport.js';
 
 async function request(path, options = {}, localFallback = false) {
   const init = { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options };
   return localFallback ? offlineRequest(path, init, readResponse) : readResponse(await fetch(path, init));
-}
-
-async function readResponse(res) {
-  const text = await res.text();
-  let data = null;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = { _raw: text };
-    }
-  }
-  if (!res.ok) {
-    const message = (data && (data.message || data.detail))
-      || `HTTP ${res.status} ${res.statusText}`;
-    const err = new Error(message);
-    err.status = res.status;
-    err.body = data;
-    throw err;
-  }
-  return data;
 }
 
 export async function fetchRelatedPapers(itemKey, { signal } = {}) {

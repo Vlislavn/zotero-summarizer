@@ -17,7 +17,7 @@ import { CHIP_TONE as TONE_CLS } from '../paper/review/tones.js';
 // Chip — one tone vocabulary app-wide (Law of Similarity), not a drifting copy.
 
 // Operational check pill.
-export function StatusPill({ status }) {
+function StatusPill({ status }) {
   const ok = status === 'operational';
   return (
     <span
@@ -42,7 +42,7 @@ const PRIORITY_TONE = {
   dont_read: 'rose',
 };
 
-export function PriorityBadge({ priority, className = '' }) {
+function PriorityBadge({ priority, className = '' }) {
   const tone = PRIORITY_TONE[priority] || 'slate';
   return (
     <span

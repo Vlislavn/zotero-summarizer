@@ -21,7 +21,7 @@ function Abstract({ id, year, rowId }) {
   </details>;
 }
 
-export function PaperRow({ row, id, year, titleOnly }) {
+function PaperRow({ row, id, year, titleOnly }) {
   const late = row.level === 'late-breaking';
   return <li className="min-w-0 border-b border-slate-200 py-2">
     <div className="flex flex-wrap items-baseline gap-x-2">

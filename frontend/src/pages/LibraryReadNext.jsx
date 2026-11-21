@@ -28,6 +28,7 @@ import { syncNow } from '../syncClient.js';
 import { Section } from '../components/paper/review/primitives.jsx';
 import { DEFAULT_SORT, buildPredicate, goalHighKeys, sortQueue } from '../utils/relevanceBands.js';
 import { isMachineTag } from '../utils/tags.js';
+import { flattenCollections } from './pendingHelpers.js';
 import { fulltextMessage } from './todayHelpers.js';
 import { readStorage, writeStorage } from '../utils/safeStorage.js';
 import {
@@ -51,20 +52,6 @@ const QUEUE_LIMIT = 5000;
 // A verdict patches its row in place (no queue re-read, H07); one re-read reconciles when the detail
 // closes, the window regains focus or 30 s pass without a verdict.
 const RECONCILE_IDLE_MS = 30000;
-
-function flattenCollections(nodes, depth = 0, parent = '') {
-  const flat = [];
-  for (const node of nodes || []) {
-    flat.push({
-      key: node.key, name: node.name, item_count: node.item_count || 0, depth,
-      parent, hasChildren: Boolean(node.children?.length),
-    });
-    if (node.children?.length) {
-      flat.push(...flattenCollections(node.children, depth + 1, node.name));
-    }
-  }
-  return flat;
-}
 
 // arXiv subject tags ("Computer Science - Artificial Intelligence") drown the
 // tags the owner wrote — list them after the rest (order otherwise unchanged).

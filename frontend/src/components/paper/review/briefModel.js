@@ -9,7 +9,7 @@
 export const isSupportedGoal = (goal) => goal?.retrieval_state === 'hit'
   && goal?.relevant === true && goal?.abstained !== true;
 
-export const BAND_GLOSS = {
+const BAND_GLOSS = {
   highlight: {
     lead: 'Strong checklist coverage.',
     body: 'Applicable evidence/reporting checks were met; this is not scientific certification.',
@@ -131,7 +131,7 @@ export function dedupeFlags(flags) {
 
 // Paper-type → display label (mirrors _paper_type_checklists labels). The two
 // generic_* are the safe supertypes the detector falls back to (shown "type uncertain").
-export const PAPER_TYPE_LABEL = {
+const PAPER_TYPE_LABEL = {
   empirical_ml: 'Empirical ML', methods_system: 'Methods / systems',
   clinical_prediction: 'Clinical prediction model', diagnostic_accuracy: 'Diagnostic-accuracy / imaging',
   rct_ai: 'RCT of an AI intervention', dataset_benchmark: 'Dataset / benchmark',

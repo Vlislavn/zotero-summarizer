@@ -11,40 +11,13 @@
 // are silently dropped (pydantic v2 default), so we must mirror the existing
 // shape rather than inventing new keys.
 
+import { fetchJson } from './client.js';
+
 const CONFIG_BASE = '/api/config';
 const ADMIN_BASE = '/api/admin';
 
 export async function request(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options,
-  });
-  if (!res.ok) {
-    let detail = '';
-    let parsedMessage = '';
-    try {
-      const body = await res.json();
-      if (body && typeof body === 'object') {
-        parsedMessage = body.message || body.detail || '';
-        detail = JSON.stringify(body);
-      }
-    } catch {
-      try {
-        detail = await res.text();
-      } catch {
-        detail = '';
-      }
-    }
-    const message = parsedMessage
-      ? `HTTP ${res.status}: ${parsedMessage}`
-      : `HTTP ${res.status} ${res.statusText}${detail ? `: ${detail}` : ''}`;
-    const err = new Error(message);
-    err.status = res.status;
-    err.body = detail;
-    throw err;
-  }
-  if (res.status === 204) return null;
-  return res.json();
+  return fetchJson(path, options);
 }
 
 function savedSnapshot(config) {
@@ -109,20 +82,6 @@ export async function retrain({ classifier_name = 'logreg', n_folds = 5 } = {}) 
 export async function getJob(jobId) {
   if (!jobId) throw new Error('getJob: jobId is required');
   return request(`${ADMIN_BASE}/jobs/${encodeURIComponent(jobId)}`);
-}
-
-/**
- * POST /api/admin/llm-check
- * On-demand operational probe of the saved LLM routing config. Probes each of
- * the 3 pipeline stages (feed / backlog / deep_review) with a tiny prompt and
- * reports per-stage pass/fail. A failing stage does NOT fail the request — it
- * comes back with status "fail" and a `detail` string. Resolves to
- *   { status: 'ok'|'degraded',
- *     stages: [ { stage, provider, type, model,
- *                 status: 'operational'|'fail', detail } ] }.
- */
-export async function checkLlm() {
-  return request(`${ADMIN_BASE}/llm-check`, { method: 'POST' });
 }
 
 /**

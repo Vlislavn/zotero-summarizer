@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchReviewFeedback, fetchReviewFeedbackChecks, withdrawReviewFeedbackPart } from '../../../api/libraryApi.js';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchReviewFeedback, fetchReviewFeedbackChecks } from '../../../api/libraryApi.js';
 import FeedbackPanel from './FeedbackPanel.jsx';
 import ReviewFeedback from './ReviewFeedback.jsx';
+import useWithdrawFeedbackPart from './useWithdrawFeedbackPart.js';
 import { PART_LABELS, WHOLE, entriesOf } from './reviewFeedbackFields.js';
 
 const queryKey = (itemKey) => ['review-feedback', itemKey];
@@ -91,10 +92,7 @@ export default function FeedbackMode({ itemKey, reviewedAt, onActiveChange, chil
     cache.invalidateQueries({ queryKey: ['review-feedback-checks', itemKey] });
     setReceipt(text);
   };
-  const withdraw = useMutation({
-    mutationFn: (field) => withdrawReviewFeedbackPart(itemKey, field, reviewedAt),
-    onSuccess: (data, field) => store(data, `Withdrawn · ${PART_LABELS[field]}`),
-  });
+  const withdraw = useWithdrawFeedbackPart(itemKey, reviewedAt, store);
   const preview = active && active !== WHOLE
     ? (content.current?.querySelector(`[data-feedback-field="${active}"]`)?.textContent || '').replace(/\s+/g, ' ').trim() : '';
   const place = active ? placeBeside(wrap.current?.querySelector(`[data-feedback-target="${active}"]`)) : null;

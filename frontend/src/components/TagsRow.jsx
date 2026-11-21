@@ -5,7 +5,7 @@
 //     (so the editor can "change tag" = remove + add). Omit for read-only rows.
 //   removingKey?: string — the rawTag currently being removed (disables its ×).
 
-export const ENGAGEMENT_EMOJIS = new Set([
+const ENGAGEMENT_EMOJIS = new Set([
   '🧠', '✅', '🗝', '👍', '💡', '👀', '🧪', '🧮',
   '❓', '🧱', '⚡', '👎', '❌', '🥱',
 ]);

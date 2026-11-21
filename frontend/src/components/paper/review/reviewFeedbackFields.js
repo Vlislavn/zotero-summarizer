@@ -2,7 +2,7 @@
 // PARTS, plus `whole`); labels are the page's own words where it has them. A part of the page carries
 // `data-feedback-field="<id>"` (spread `feedbackField(id)`); FeedbackMode finds them by that attribute.
 export const WHOLE = 'whole';
-export const FEEDBACK_PARTS = [
+const FEEDBACK_PARTS = [
   ['verdict', 'Verdict'], ['top_sentence', 'Top sentence'], ['quality', 'Rigor'], ['red_flags', 'Red flags'],
   ['metrics', 'Metrics'], ['strength_weakness', 'Strength / Weakness'], ['reading_plan', 'Reading plan'],
   ['findings', 'Findings and applicability'], ['assessment', 'Assessment'], ['relevance', 'Relevance'],
@@ -10,7 +10,7 @@ export const FEEDBACK_PARTS = [
 ];
 export const PART_LABELS = { ...Object.fromEntries(FEEDBACK_PARTS), [WHOLE]: 'Whole review' };
 
-export const feedbackField = (id) => ({ 'data-feedback-field': id });
+const feedbackField = (id) => ({ 'data-feedback-field': id });
 
 // Reasons are the backend's (services/library/review_feedback.py CHIPS); good_as_is leads, the rest are problems.
 export const REVIEW_FEEDBACK_CHIPS = [

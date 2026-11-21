@@ -7,7 +7,7 @@ export function deriveConfigured(status) {
   return Boolean(status?.configured ?? status?.ready);
 }
 
-export function deriveSubsystemIssues(status) {
+function deriveSubsystemIssues(status) {
   return (status?.subsystems || []).filter((s) => s && s.ready === false);
 }
 

@@ -1,7 +1,7 @@
 // One page-title style for Library / Search / Weekly (L-20) and one short line on
 // what each page is FOR (L-05), kept together so the four "what should I read"
 // surfaces stay distinguishable in one place. Titles keep the route names.
-export const PAGE_PURPOSE = {
+const PAGE_PURPOSE = {
   today: 'New items from your feeds — decide what enters your library.',
   library: 'Papers already in Zotero — pick what to read next, or label what you have read.',
   search: 'Find new papers on a topic from open sources (not your library).',

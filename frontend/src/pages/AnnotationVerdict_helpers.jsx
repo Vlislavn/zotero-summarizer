@@ -33,7 +33,7 @@ export const FLAG_FILTERS = [
 
 // key -> human label for the flag chips (mirrors FLAG_FILTERS), used to render the
 // ACTIVE flag chip without leaking the raw wire code. Unknown keys fall through.
-export const FLAG_FILTER_LABELS = Object.fromEntries(
+const FLAG_FILTER_LABELS = Object.fromEntries(
   FLAG_FILTERS.filter((f) => f.key).map((f) => [f.key, f.label]),
 );
 export const prettyFlag = (key) => FLAG_FILTER_LABELS[key] || key;
@@ -154,58 +154,6 @@ export function GroundTruthOneLiner({ detail }) {
         </>
       )}
       . Used as ground truth for retraining.
-    </div>
-  );
-}
-
-// Above the filter chips: one-line summary of the labels the model trains on.
-// Renders only when `summary` is loaded (the parent passes null otherwise).
-// `total_rows` counts every training label (mostly auto-derived); `yours` is
-// the subset carrying a saved verdict — broken down into how many changed the
-// model's guess vs. confirmed it. The old copy mislabelled the total as
-// "effective labels" and used "overridden/GT" jargon a cold reader can't parse.
-export function EffectiveLabelsStrip({ summary }) {
-  if (!summary) return null;
-  const total = summary.total_rows ?? 0;
-  const changed = summary.user_overrode_derivation ?? 0;
-  const confirmed = summary.user_confirmed_derivation ?? 0;
-  const yours = summary.user_verdicts ?? changed + confirmed;
-  const autoDerived = Math.max(total - yours, 0);
-  const coverage = total > 0 ? Math.round((yours / total) * 100) : 0;
-  // Provisional "Add to library" verdicts are counted SEPARATELY from yours
-  // (June 2026: they used to inflate user_verdicts). `outcome_corrected` is the
-  // subset already superseded by the observed 7-day shelf outcome.
-  const provisional = summary.machine_provisional ?? 0;
-  const corrected = summary.outcome_corrected ?? 0;
-  return (
-    <div
-      className="mb-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-[12px] text-slate-700"
-      role="status"
-      aria-label="Training-label summary"
-      title={
-        `${total.toLocaleString()} labels train the model. `
-        + `${yours.toLocaleString()} (${coverage}%) carry your explicit verdict `
-        + `(${changed} changed the model's guess, ${confirmed} confirmed it); `
-        + `the other ${autoDerived.toLocaleString()} are auto-derived.`
-        + (provisional || corrected
-          ? ` Plus ${(provisional + corrected).toLocaleString()} provisional "Add to library" labels`
-            + ` — not deliberate verdicts: ${corrected} already corrected by what you actually`
-            + ' did with the paper in Zotero (kept/trashed within 7 days), the rest pending.'
-          : '')
-      }
-    >
-      <span className="font-semibold text-slate-900">{total.toLocaleString()}</span>{' '}
-      training labels ·{' '}
-      <span className="text-emerald-800 font-semibold">{yours.toLocaleString()}</span>{' '}
-      yours <span className="text-emerald-800 font-semibold">({coverage}%)</span>{' '}
-      <span className="text-slate-500">
-        ({changed} changed · {confirmed} confirmed)
-      </span>
-      {(provisional > 0 || corrected > 0) && (
-        <span className="text-slate-500">
-          {' '}· {provisional + corrected} adds{corrected > 0 ? ` (${corrected} outcome-corrected)` : ''}
-        </span>
-      )}
     </div>
   );
 }

@@ -12,6 +12,77 @@ import { fetchTransport } from './offlineTransport.js';
 const BUSY_RETRY_DELAYS_MS = [500, 1500];
 
 /**
+ * Throw the Error for a non-2xx `res` (for the per-module fetch wrappers that do not use `request`):
+ * message `HTTP <status>: <message|detail>` from a JSON object body, else
+ * `HTTP <status> <statusText>[: <body text>]`; `err.status`; `err.body` = the body as text (JSON re-stringified).
+ *
+ * @param {Response} res
+ * @returns {Promise<never>}
+ */
+export async function throwHttpError(res) {
+  let detail = '';
+  let parsedMessage = '';
+  try {
+    const body = await res.json();
+    if (body && typeof body === 'object') {
+      parsedMessage = body.message || body.detail || '';
+      detail = JSON.stringify(body);
+    }
+  } catch {
+    try {
+      detail = await res.text();
+    } catch {
+      detail = '';
+    }
+  }
+  const message = parsedMessage
+    ? `HTTP ${res.status}: ${parsedMessage}`
+    : `HTTP ${res.status} ${res.statusText}${detail ? `: ${detail}` : ''}`;
+  const err = /** @type {ApiError} */ (new Error(message));
+  err.status = res.status;
+  err.body = detail;
+  throw err;
+}
+
+/**
+ * Unwrap a fetched `res` for the per-module wrappers: non-2xx throws via {@link throwHttpError};
+ * 204 → null; else `res.json()`.
+ *
+ * @param {Response} res
+ * @returns {Promise<any>}
+ */
+export async function readJsonOrThrow(res) {
+  if (!res.ok) await throwHttpError(res);
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+/**
+ * The fetch init for a JSON call: default `Content-Type` merged with `options.headers`,
+ * then `...options` (so a caller-supplied `options.headers` replaces the merged headers).
+ *
+ * @param {RequestInit} [options]
+ * @returns {RequestInit}
+ */
+export function jsonInit(options = {}) {
+  return {
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...options,
+  };
+}
+
+/**
+ * Plain `fetch` of a full `url` with {@link jsonInit}, unwrapped by {@link readJsonOrThrow}.
+ *
+ * @param {string} url
+ * @param {RequestInit} [options]
+ * @returns {Promise<any>}
+ */
+export async function fetchJson(url, options = {}) {
+  return readJsonOrThrow(await fetch(url, jsonInit(options)));
+}
+
+/**
  * Issue a JSON request and unwrap the response.
  * Throws an {@link ApiError} (Error with `status` + parsed `body`) on non-2xx.
  * A 503 `database_busy` is retried quietly (≤2 more tries, backoff) for GETs and for calls
@@ -37,10 +108,17 @@ export async function request(path, options = {}) {
 }
 
 async function requestOnce(path, options) {
-  const res = await fetchTransport(path, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options,
-  });
+  return readResponse(await fetchTransport(path, jsonInit(options)));
+}
+
+/**
+ * Unwrap a fetched `res`: body read once as text, parsed as JSON (else `{ _raw: text }`; empty → null).
+ * Non-2xx throws an {@link ApiError}; a failed body read throws an Error with `cause` + `responseReceived`.
+ *
+ * @param {Response} res
+ * @returns {Promise<any>}
+ */
+export async function readResponse(res) {
   let text;
   try {
     text = await res.text();

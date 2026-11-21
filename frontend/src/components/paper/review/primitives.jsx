@@ -130,14 +130,3 @@ export function Bullets({ items }) {
     </ul>
   );
 }
-
-// A single inline statistic (label over value), borderless — for the rigor /
-// relevance spine. Several sit in a row separated by a hairline, not boxes.
-export function Stat({ label, value, hint }) {
-  return (
-    <div title={hint} className="min-w-0">
-      <div className="text-[11px] uppercase tracking-[0.06em] font-medium text-slate-500">{label}</div>
-      <div className="mt-0.5 text-sm font-medium text-slate-800 truncate">{value}</div>
-    </div>
-  );
-}

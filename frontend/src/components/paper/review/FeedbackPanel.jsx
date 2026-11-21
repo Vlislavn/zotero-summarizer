@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { saveReviewFeedbackPart, withdrawReviewFeedbackPart } from '../../../api/libraryApi.js';
+import { saveReviewFeedbackPart } from '../../../api/libraryApi.js';
 import { chipClass } from '../../decisionVocab.js';
 import { PART_LABELS, REVIEW_FEEDBACK_CHIPS, receiptOf } from './reviewFeedbackFields.js';
+import useWithdrawFeedbackPart from './useWithdrawFeedbackPart.js';
 
 const clip = (text, max) => (text.length > max ? `${text.slice(0, max)}…` : text);
 
@@ -18,10 +19,7 @@ export default function FeedbackPanel({ itemKey, reviewedAt, field, entry, previ
     mutationFn: () => saveReviewFeedbackPart(itemKey, field, reviewedAt, chips, note.trim()),
     onSuccess: (data) => onSaved(data, `Saved · ${receiptOf(field, data.feedback.fields?.[field] || data.feedback)}`),
   });
-  const withdraw = useMutation({
-    mutationFn: () => withdrawReviewFeedbackPart(itemKey, field, reviewedAt),
-    onSuccess: (data) => onSaved(data, `Withdrawn · ${PART_LABELS[field]}`),
-  });
+  const withdraw = useWithdrawFeedbackPart(itemKey, reviewedAt, onSaved);
   const toggle = (id) => setChips((now) => {
     // «Good as is» and a problem exclude each other.
     const rest = now.filter((chip) => chip !== id && (id === 'good_as_is') === (chip === 'good_as_is'));
@@ -53,7 +51,7 @@ export default function FeedbackPanel({ itemKey, reviewedAt, field, entry, previ
     </label>
     {error && <p role="alert" className="text-xs text-rose-700">Could not save: {error.message}</p>}
     <div className="flex flex-wrap items-center justify-end gap-2">
-      {entry && <button type="button" onClick={() => withdraw.mutate()} disabled={busy}
+      {entry && <button type="button" onClick={() => withdraw.mutate(field)} disabled={busy}
         className="mr-auto min-h-11 px-2 text-[13px] text-rose-700 underline underline-offset-2 disabled:opacity-50">Withdraw</button>}
       <button type="button" onClick={() => save.mutate()} disabled={busy || !(chips.length || note.trim())}
         className="min-h-11 rounded-lg bg-forest-800 px-5 text-[14px] font-medium text-white disabled:opacity-40">

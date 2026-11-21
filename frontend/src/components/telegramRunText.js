@@ -33,7 +33,7 @@ export const postsText = (n = 0) => plural(n, 'post');
 export const channelsText = (n = 0) => plural(n, 'channel');
 export const commentsText = (n = 0) => plural(n, 'comment');
 
-export function clock(seconds) {
+function clock(seconds) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
@@ -51,7 +51,7 @@ export const NO_REPLIES = 'No post in this trend had replies when last checked.'
 export const NEEDS_CONSENT = 'Press “Allow & check channels” first.';
 export const loadConfirm = (n) => `Read posts and comments of ${postsText(n)} through your Telegram account? Nothing is sent.`;
 export const loadingText = (progress) => (progress?.total > 0 ? `Loading ${progress.done} of ${progress.total} posts…` : 'Loading discussions…');
-export const waitText = (retryAt) => `Telegram asked to wait until ${when(retryAt)}.`;
+const waitText = (retryAt) => `Telegram asked to wait until ${when(retryAt)}.`;
 
 export const AUTH_CODES = ['missing_session', 'session_unauthorized', 'revoked_session'];
 const FAILURES = {
