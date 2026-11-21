@@ -74,6 +74,8 @@ timeout/transport/malformed observations retain manual-ID recovery without claim
 login or model operation. In-flight non-Telegram
 clients may keep their prior credentials. Auth receipts distinguish stored from
 unknown, never infer rollback from cancellation or failed transport.
+`connections.py` / `connection_credentials.py` read the research profile with `research_feed.profile.load_profile(data_dir)`,
+which only reads (no `persist_default`); `ensure_profile` seeds the default file.
 
 `ProviderConfig.auth_mode=none` returns None **before** keyring/env lookup. Installed
 OpenAI requests use SDK request-local auth omission plus owned no-proxy,

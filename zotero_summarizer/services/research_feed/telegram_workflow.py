@@ -19,7 +19,7 @@ STALE_SECONDS = 900  # the child is killed after wall+reserve (<=~620 s); a 'col
 
 
 def sources(settings):
-    profile = profiles.load_profile(settings.data_dir, persist_default=False)
+    profile = profiles.load_profile(settings.data_dir)
     config = read_config(settings.config_path, settings.calibration_path)
     local_names, providers = [], []
     for provider in config.llm_routing.providers:
@@ -129,7 +129,7 @@ def begin(settings, *, run_collect=None):
     dedicated Telegram child. The offline harness injects a fake collector. ``execute`` never
     raises: it records ``reviewed`` or ``error`` in operation.json. The caller holds ``_exclusive``.
     """
-    profile = profiles.load_profile(settings.data_dir, persist_default=False)
+    profile = profiles.load_profile(settings.data_dir)
     if not telegram_selection.targets(profile):
         raise APIError("telegram_sources_required", "Save at least one Telegram source", status_code=409)
     config = read_config(settings.config_path, settings.calibration_path)

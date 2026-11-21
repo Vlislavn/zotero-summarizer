@@ -161,7 +161,7 @@ rss_items → source/dedupe → prior triage → budget → existing deep_review
 | file | responsibility |
 |---|---|
 | `telegram_reasons.py` · `telegram_history.py` · `telegram_processing.py` | Per-post feedback (negative chips, liked chips, note) on the post row; per-run digest archive + done state; local-by-default Telegram model resolution with token-bound remote consent (Todo #112). |
-| `profile.py` | Versioned user-editable profile and controlled topic taxonomy under `data/research_feed/profile.json`. |
+| `profile.py` | Versioned user-editable profile and controlled topic taxonomy under `data/research_feed/profile.json`. `load_profile` is a pure read (returns the default when the file is missing, never writes); `ensure_profile` is the explicit seeding call (writes the default only when missing; the run entry `runner._assess` uses it). |
 | `source.py` | Bounded RSS adapter/dedupe, history identity/text and native-state admission primitives, final one-home provenance. |
 | `cursor.py` | Source/profile/config/model/schema-bound successful abstract-stage cache; no derived-card/report replay. |
 | `ranking.py` | Continuous current-cohort relevance/goal/prestige ordering through the existing blend, before budgets. |

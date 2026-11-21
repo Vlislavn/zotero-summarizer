@@ -168,7 +168,7 @@ def settings_limits(settings: Settings):
     from zotero_summarizer.services.research_feed import profile as profiles
 
     try:
-        return profiles.load_profile(settings.data_dir, persist_default=False).telegram_limits
+        return profiles.load_profile(settings.data_dir).telegram_limits
     except Exception:
         from zotero_summarizer.models.research_feed import TelegramLimits
         return TelegramLimits()

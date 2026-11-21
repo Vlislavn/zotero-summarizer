@@ -9,19 +9,8 @@ from zotero_summarizer.integrations._zotero_read_common import (
     _ANNOTATION_TYPE_NAMES,
     _NON_BIBLIOGRAPHIC_TYPES_SQL,
     _USER_LIBRARY_ID_SELECT,
+    _field_value_sql,
 )
-
-
-def _field_value_sql(field_name: str) -> str:
-    """Correlated subquery for one Zotero ``itemData`` field's value on the current
-    item (``i.itemID``), '' when absent. ``field_name`` is a hardcoded field constant
-    (never user input), so inlining the literal is injection-safe."""
-    return (
-        "COALESCE((SELECT v.value FROM itemData id "
-        "JOIN fields f ON f.fieldID = id.fieldID "
-        "JOIN itemDataValues v ON v.valueID = id.valueID "
-        f"WHERE id.itemID = i.itemID AND f.fieldName = '{field_name}' LIMIT 1), '')"
-    )
 
 
 class ZoteroItemsMixin:

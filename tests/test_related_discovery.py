@@ -57,7 +57,7 @@ def test_concurrent_clicks_share_one_screen(journey):
 
     def click():
         barrier.wait()
-        return discovery.find_new('SEED0001', context_fingerprint=metadata['context_fingerprint']).id
+        return discovery.start_discovery('SEED0001', context_fingerprint=metadata['context_fingerprint']).id
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda _: click(), range(2)))

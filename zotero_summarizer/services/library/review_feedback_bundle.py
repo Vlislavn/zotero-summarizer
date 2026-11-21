@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import LOGGER, atomic_write, now_iso_z, settings
+from zotero_summarizer.services._common import LOGGER, now_iso_z, settings, write_json_atomic
 
 WHOLE = "whole"
 SHOWN_MAX = 2000
@@ -118,8 +118,7 @@ def package_dir(item_key: str, reviewed_at: str, generation_sha256: str) -> Path
 
 def dump_json(path: Path, payload: Any) -> None:
     """Atomic, human-readable JSON (the package is read without the app)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write(path, lambda tmp: tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8"))
+    write_json_atomic(path, payload, indent=1)
 
 
 def load_json(path: Path) -> Any:

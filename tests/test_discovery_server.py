@@ -193,7 +193,7 @@ def test_selected_or_stored_materialized_key_is_not_saved_admission_but_may_sear
     assert metadata["admission"] == {"state": "not_saved", "basis": None}
     # Not saved: no saved authority, but public-metadata discovery is still allowed (feed-only papers).
     assert metadata["context_fingerprint"] and metadata["reason"] is None
-    assert discovery.find_new(STABLE, context_fingerprint=metadata["context_fingerprint"]).status == "discovery_ready"
+    assert discovery.start_discovery(STABLE, context_fingerprint=metadata["context_fingerprint"]).status == "discovery_ready"
 
 
 def test_latest_row_before_filter_and_membership_beyond_5000(journey):

@@ -28,7 +28,7 @@ def collect_once_cli(settings: Settings, *, session_factory=None, client_factory
     """
     if purpose not in {"collect", "auth", "digest", "comments"}:
         raise ValueError("invalid Telegram process purpose")
-    profile = None if purpose in {"auth", "comments"} else load_profile(settings.data_dir, persist_default=False)
+    profile = None if purpose in {"auth", "comments"} else load_profile(settings.data_dir)
     if purpose in {"digest", "comments"}:
         from zotero_summarizer.services.research_feed import telegram_progress
 

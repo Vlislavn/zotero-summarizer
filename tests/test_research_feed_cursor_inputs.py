@@ -32,7 +32,7 @@ def _abstract_cache(settings, monkeypatch):
         reading_priority='should_read'))
     monkeypatch.setattr(summarization, 'run_abstract_dry', generate)
     candidate = source.load_candidates(settings.triage_db_path, start=START, end=END, limit=1, venue='')[0]
-    profile = runner.load_profile(settings.data_dir)
+    profile = runner.ensure_profile(settings.data_dir)
     checkpoint = cursor.CandidateCursor(settings)
     row = checkpoint.row(candidate, profile)
     return checkpoint, candidate, profile, row, generate

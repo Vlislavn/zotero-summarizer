@@ -16,7 +16,7 @@ def credential_impact(name, selected=None):
     else:
         return {'providers': [], 'consumers': []}
     provider = next((p for p in config.llm_routing.providers if p.api_key_env == name and p.auth_mode != 'none'), None)
-    return dependencies(config, load_profile(current.data_dir, persist_default=False), provider) if provider else {'providers': [], 'consumers': []}
+    return dependencies(config, load_profile(current.data_dir), provider) if provider else {'providers': [], 'consumers': []}
 
 
 def replace(command):

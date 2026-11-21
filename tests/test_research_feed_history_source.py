@@ -160,7 +160,7 @@ def test_missing_history_preserves_source_without_heuristic_cached_only_rescue(t
     with sqlite3.connect(settings.triage_db_path) as conn:
         conn.execute("DELETE FROM processed_feed_items WHERE stable_feed_key=?", (key,))
     candidate = source.load_candidates(settings.triage_db_path, start=START, end=END, limit=1, venue="")[0]
-    profile = runner.load_profile(settings.data_dir)
+    profile = runner.ensure_profile(settings.data_dir)
     assert runner.triage_candidate(candidate, None, profile).include is False
     def forbidden(*args, **kwargs):
         pytest.fail("Missing qualified abstract cache cannot start clients or review work")

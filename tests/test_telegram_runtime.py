@@ -239,11 +239,11 @@ def test_real_collector_commit_and_one_disconnect_with_future(tmp_path):
 
 def test_missing_profile_readonly_and_existing_default_preserved(tmp_path):
     settings = Settings.load(project_root=tmp_path, env_path=tmp_path / "absent.env")
-    value = profile.load_profile(settings.data_dir, persist_default=False)
+    value = profile.load_profile(settings.data_dir)
     assert value.telegram_channels == [] and not settings.data_dir.exists()
     assert runtime.collect_once_cli(settings)["status"] == "no_channels"  # Guaranteed unarmed.
     assert not settings.data_dir.exists()
-    assert profile.load_profile(settings.data_dir) == value
+    assert profile.ensure_profile(settings.data_dir) == value
     assert profile.profile_path(settings.data_dir).is_file()
 
 

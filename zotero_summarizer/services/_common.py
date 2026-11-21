@@ -425,11 +425,11 @@ def read_json_or_empty(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+def write_json_atomic(path: Path, payload: dict[str, Any], *, indent: int | None = None) -> None:
     """Publish complete JSON via ``atomic_write``, creating parent directories.
     The caller owns the envelope (e.g. ``{"updated_at": now_iso_z(), ...}``)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write(path, lambda tmp: tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8"))
+    atomic_write(path, lambda tmp: tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=indent), encoding="utf-8"))
 
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")

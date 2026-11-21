@@ -13,7 +13,7 @@ import re
 from statistics import median
 from typing import Any
 
-from zotero_summarizer.domain import score_to_priority
+from zotero_summarizer.domain import TRIAGE_APPROVED_TAG_TOKEN, score_to_priority
 from zotero_summarizer.services._common import band_primary_enabled
 from zotero_summarizer.services._common import quality_promote_enabled
 from zotero_summarizer.services.emoji_signals import HARD_VETO_EMOJIS, READ_EMOJIS
@@ -35,7 +35,6 @@ from zotero_summarizer.services.model.rank_blend import (
 # The automated "✅ triage-approved" tag is also excluded: ✅ is an engagement
 # emoji, but the triage system applies this tag without user action.
 _READ_TAGS: frozenset[str] = READ_EMOJIS | HARD_VETO_EMOJIS
-_TRIAGE_APPROVED_TOKEN = "triage-approved"
 _PREVIEW_CHARS = 260
 _TLDR_CHARS = 300
 _READ_DECISIONS = frozenset({"read", "skim", "skip"})
@@ -46,7 +45,7 @@ def _is_read(tags: list[str]) -> bool:
     return any(
         emoji in tag
         for tag in tags
-        if tag and _TRIAGE_APPROVED_TOKEN not in tag
+        if tag and TRIAGE_APPROVED_TAG_TOKEN not in tag
         for emoji in _READ_TAGS
     )
 

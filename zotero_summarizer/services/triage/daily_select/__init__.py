@@ -56,15 +56,10 @@ from zotero_summarizer.services.triage.daily_select._querying import (
 )
 from zotero_summarizer.storage.feeds_lookup import fetch_trashed_guids
 from zotero_summarizer.storage.feed_identity import row_feed_keys
+from zotero_summarizer.storage.feeds_constants import DECISION_AWAITING_REVIEW, DECISION_TRIAGED_PENDING
 from zotero_summarizer.storage.interleave import record_interleave_slate
 
 LOGGER = logging.getLogger(__name__)
-
-# Decision strings — duplicated here so this package has no dependency on
-# storage.feeds (the storage subagent owns that file). Kept in lock-step
-# with storage/feeds.py's DECISION_* constants.
-_DECISION_AWAITING_REVIEW = "awaiting_review"
-_DECISION_TRIAGED_PENDING = "triaged_pending"
 
 # "Blocking" states for the content-dedup guard: a paper the user already
 # decided on (added/trashed) or that the daemon already filtered as a library /
@@ -189,7 +184,7 @@ def _unhandled_pool(conn) -> list[dict]:
         outcomes=tuple(_TRASH_OUTCOMES),
     )
 
-    primary_decisions = [_DECISION_AWAITING_REVIEW, _DECISION_TRIAGED_PENDING]
+    primary_decisions = [DECISION_AWAITING_REVIEW, DECISION_TRIAGED_PENDING]
     # ponytail: read the primary backlog in memory; page only if its size warrants it.
     rows = fetch_rows_by_decisions(conn, decisions=primary_decisions)
     rows = _drop_trashed_guids(rows, trashed_guids=trashed_guids)

@@ -86,7 +86,7 @@ their prior options; all setup local-LLM requests must first pass admission.
 
 Shared files: `_common` (helpers: settings/logging/sqlite-ro/now_iso_z/html_to_text/
 `atomic_write` (callback) + `write_json_atomic`
-(dict→JSON) for tmp+replace artifact/cache writes. JSON publication delegates to
+(dict→JSON; keyword-only `indent=None`, default output unchanged) for tmp+replace artifact/cache writes. JSON publication delegates to
 the callback writer: both use a unique sibling staging file per invocation and
 clean it up on failure. They do not serialize read–modify–write operations or
 promise power-loss durability (`fsync`);

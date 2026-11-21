@@ -147,7 +147,7 @@ async def get_discovery(item_key: str) -> dict[str, Any]:
 
 
 async def find_new_relevant(item_key: str, req: DiscoveryRequest) -> dict[str, Any]:
-    sess = await asyncio.to_thread(discovery.find_new, item_key, **req.model_dump())
+    sess = await asyncio.to_thread(discovery.start_discovery, item_key, **req.model_dump())
     return await asyncio.to_thread(discovery.discovery_view, sess)
 
 

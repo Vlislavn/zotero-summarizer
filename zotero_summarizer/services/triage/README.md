@@ -48,7 +48,8 @@ Turns raw RSS feed items into scored, ranked `processed_feed_items` rows that
 the Today tab consumes. The cheap `model/` gate fast-rejects; survivors get an
 LLM summary + composite score. Summarization and the legacy LLM backlog drain
 resolve clients through `services.llm.factory` with the existing runtime cache;
-the default ML-only drain never resolves a client.
+the default ML-only drain never resolves a client. `summarization.py` applies the corpus-affinity fast-reject through one
+`_corpus_fast_reject` gate shared by the abstract and full-text pipelines.
 
 ```
 Zotero feedItems ─feeds.run_daemon_tick→ gate(model) ─reject──> dropped
