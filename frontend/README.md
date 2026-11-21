@@ -15,6 +15,10 @@ make check   # lint, Python + frontend tests, build into a disposable dir, smoke
 cd frontend && npm run lint | test | build
 ```
 
+- `npm run lint` also warns (never errors; a worklist, not a gate) on `complexity` (>15),
+  `max-lines-per-function` (>88, blanks/comments skipped), `max-params` (>6), `max-depth` (>5),
+  `no-eval` and `no-throw-literal`, mirroring the Python gates. Tests are exempt from these rules.
+
 - Vite proxies `/api` to `http://localhost:8000` (override: `VITE_API_TARGET`) with
   `changeOrigin: false`, so the browser Host/Origin reaches the backend's local-admission
   check. Never expose Vite as a remote proxy.

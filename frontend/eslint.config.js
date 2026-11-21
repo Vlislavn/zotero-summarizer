@@ -26,6 +26,19 @@ export default [
     },
   },
   {
+    // Complexity/size parity with the Python gates: a worklist, never a gate (warn only).
+    files: ['**/*.{js,jsx}'],
+    ignores: ['**/*.test.{js,jsx}', 'src/testSetup.js', '**/__tests__/**'],
+    rules: {
+      complexity: ['warn', 15],
+      'max-params': ['warn', 6],
+      'max-depth': ['warn', 5],
+      'max-lines-per-function': ['warn', { max: 88, skipBlankLines: true, skipComments: true }],
+      'no-eval': 'warn',
+      'no-throw-literal': 'warn',
+    },
+  },
+  {
     files: ['**/*.test.{js,jsx}'],
     languageOptions: { globals: { ...globals.node } },
   },
