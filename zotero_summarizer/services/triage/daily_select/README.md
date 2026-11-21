@@ -137,7 +137,7 @@ the matching root-cause dedup at ingest (`feeds.dedup_against_processed`).
 
 **Trash → never show again (GUID guard).** Content dedup only helps papers that
 carry a DOI/arXiv, and a trashed paper re-arrives under a *fresh* `feed_item_id`
-(so `_drop_handled` misses it). `_drop_trashed_guids` drops any row whose stable
+(so `_drop_handled` misses it). `drop_trashed_guids` (also used by `library/review_summary`) drops any row whose stable
 GUID matches a paper the user explicitly threw away — `user_rejected` (trashed
 from Today) or a `trashed`/`deleted_all` `final_outcome` (trashed inside Zotero)
 — the one identifier that survives re-ingestion, so an id-less thrown-away paper

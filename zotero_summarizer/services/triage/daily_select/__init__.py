@@ -117,7 +117,7 @@ def _drop_handled(
     return out
 
 
-def _drop_trashed_guids(rows: list[dict], *, trashed_guids: set[str]) -> list[dict]:
+def drop_trashed_guids(rows: list[dict], *, trashed_guids: set[str]) -> list[dict]:
     """Drop rows whose stable GUID matches a paper the user explicitly trashed.
 
     The durable "trash → never show again" guard: it catches a re-arrival of a
@@ -187,7 +187,7 @@ def _unhandled_pool(conn) -> list[dict]:
     primary_decisions = [DECISION_AWAITING_REVIEW, DECISION_TRIAGED_PENDING]
     # ponytail: read the primary backlog in memory; page only if its size warrants it.
     rows = fetch_rows_by_decisions(conn, decisions=primary_decisions)
-    rows = _drop_trashed_guids(rows, trashed_guids=trashed_guids)
+    rows = drop_trashed_guids(rows, trashed_guids=trashed_guids)
     rows = _drop_handled(
         rows, handled_guids=handled_guids, handled_label_keys=handled_label_keys,
     )

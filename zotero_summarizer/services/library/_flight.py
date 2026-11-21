@@ -4,9 +4,10 @@ library background caches.
 ``border_cache`` and ``reading_queue`` each run at most one background compute at a
 time and expose ``is_running``/``last_error``/``try_start``/``finish`` over that slot.
 The latch holds that state so the two modules don't reimplement it (each keeps its own
-``FlightLatch`` instance — separate state, shared mechanism). ``run_in_background``
-and ``resolve_prewarm_k`` are the launch primitives the two prewarm modules share
-(deep-review prewarm + review-fleet prewarm), each passing its own env-var name.
+``FlightLatch`` instance — separate state, shared mechanism). ``run_in_background``,
+``resolve_prewarm_k`` and ``schedule_prewarm`` are the launch primitives the two
+prewarm modules share (deep-review prewarm + review-fleet prewarm), each passing
+its own env-var name.
 """
 from __future__ import annotations
 
@@ -68,3 +69,16 @@ def resolve_prewarm_k(config: Any, *, env_var: str) -> int:
             raise ValueError(f"{env_var}={raw!r} must be >= 0")
         return value
     return int(getattr(config.quality_review, "prewarm_on_startup_k", 0))
+
+
+def schedule_prewarm(
+    config: Any, *, env_var: str, worker: Callable[[int], None], name: str | None = None,
+) -> bool:
+    """Spawn ``worker(k)`` on a daemon thread when the startup prewarm is enabled;
+    return whether it was scheduled. Disabled when the resolved top-N is 0 or
+    ``quality_review`` is off. ``name`` (optional) names the thread."""
+    k = resolve_prewarm_k(config, env_var=env_var)
+    if k <= 0 or not config.quality_review.enabled:
+        return False
+    run_in_background(lambda: worker(k), **({"name": name} if name else {}))
+    return True

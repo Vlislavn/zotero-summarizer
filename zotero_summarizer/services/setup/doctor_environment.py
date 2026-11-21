@@ -152,14 +152,12 @@ def _zotero(settings: Settings) -> dict[str, Any]:
 
 
 def _schema_version(path: Path, namespace: str) -> int:
+    from zotero_summarizer.storage.migrations import current_version
+
     if not path.exists():
         return 0
     with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
-        row = conn.execute(
-            "SELECT version FROM schema_migrations WHERE namespace = ?",
-            (namespace,),
-        ).fetchone()
-    return int(row[0]) if row else 0
+        return current_version(conn, namespace)
 
 
 def _database(settings: Settings) -> dict[str, Any]:

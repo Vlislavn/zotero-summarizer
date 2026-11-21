@@ -275,7 +275,7 @@ def _ensure_migrations_table(conn: sqlite3.Connection) -> None:
     )
 
 
-def _current_version(conn: sqlite3.Connection, namespace: str) -> int:
+def current_version(conn: sqlite3.Connection, namespace: str) -> int:
     row = conn.execute(
         "SELECT version FROM schema_migrations WHERE namespace = ?",
         (namespace,),
@@ -307,12 +307,12 @@ def run_migrations(db_path: Path, namespace: str, migrations: list[Migration]) -
     try:
         _ensure_migrations_table(conn)
         conn.commit()
-        applied = _current_version(conn, namespace)
+        applied = current_version(conn, namespace)
         for migration in sorted(migrations, key=lambda m: m.version):
             if migration.version <= applied:
                 continue
             conn.execute("BEGIN IMMEDIATE")
-            applied = _current_version(conn, namespace)
+            applied = current_version(conn, namespace)
             if migration.version > applied:
                 migration.apply(conn)
                 _record_version(conn, namespace, migration.version)
