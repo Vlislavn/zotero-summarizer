@@ -15,6 +15,7 @@ from zotero_summarizer.integrations._zotero_read_common import (  # noqa: F401  
     _NON_BIBLIOGRAPHIC_TYPES_SQL,
     _USER_LIBRARY_ID_SELECT,
 )
+from zotero_summarizer.integrations._zotero_write_common import resolve_zotero_data_dir
 from zotero_summarizer.integrations._zotero_read_copy import DEFAULT_REFRESH_INTERVAL_SECONDS, ReadCopy
 from zotero_summarizer.integrations._zotero_read_feeds import ZoteroFeedsMixin
 from zotero_summarizer.integrations._zotero_read_items import ZoteroItemsMixin
@@ -44,18 +45,11 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
         *,
         refresh_interval_seconds: float = DEFAULT_REFRESH_INTERVAL_SECONDS,
     ) -> None:
-        data_dir = Path(zotero_data_dir or (Path.home() / "Zotero")).expanduser().resolve()
-        db_path = data_dir / "zotero.sqlite"
-        storage_dir = data_dir / "storage"
-
-        if not data_dir.exists():
-            raise ZoteroReadError(f"Zotero data directory not found: {data_dir}")
-        if not db_path.exists():
-            raise ZoteroReadError(f"Zotero database not found: {db_path}")
+        data_dir, db_path = resolve_zotero_data_dir(zotero_data_dir, ZoteroReadError)
 
         self.data_dir = data_dir
         self.db_path = db_path
-        self.storage_dir = storage_dir
+        self.storage_dir = data_dir / "storage"
         self._copy = ReadCopy(
             db_path,
             Path(copy_path) if copy_path is not None else get_context().settings.zotero_read_copy_path,

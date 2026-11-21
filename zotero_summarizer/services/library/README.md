@@ -86,7 +86,7 @@ code_link, verification_audit, review_identity, review_contract_version, …}`.
 | `_paper_pdf.py` | the PDF this Mac already holds for a paper (three offline rungs, then optional acquire) and the allowed-roots path guard |
 | `review.py` / `review_summary.py` / `review_materialize.py` / `review_eligibility.py` / `review_detail.py` | feed-review transitions / summary + golden append / approved row → Zotero / Add gate / detail payload |
 | `quality_gate.py` / `quality_calibration.py` / `border_cache.py` | configured triage auto-hide / proposal-vs-label agreement / border-pick cache |
-| `related.py` / `_related_context.py` / `_related_assessment.py` | saved-paper links, private context, consented assessment |
+| `related.py` / `_related_context.py` / `_related_assessment.py` | saved-paper links, private context (expected SQLite IO errors are classified by `integrations._zotero_write_common.is_expected_sqlite_io`, so a full disk reads as `failed`), consented assessment |
 | `_feed_assessment.py` | same-response project proposals bound to the accepted review |
 | `interpretation.py` / `_interpretation_*.py` | opt-in A/B/C interpretation experiment (driven by `faithbench`) |
 | `review_fleet/` | background proposals; see its README |
