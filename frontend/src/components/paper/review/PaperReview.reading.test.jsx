@@ -25,12 +25,12 @@ it('preserves a legacy assessment when an empty digest object is cached', () => 
 it('orders the full reading flow and keeps every material caveat in its section fold', () => {
   const { container } = render(<PaperReview deep={deep} flat />);
   const headings = [...container.querySelectorAll('h2')].map(el => el.textContent);
-  expect(headings).toEqual(['Findings and applicability', 'Assessment', 'Caveats and coverage', 'Methods and limitations', 'Reference']);
+  expect(headings).toEqual(['How it works', 'Findings and applicability', 'Assessment', 'Caveats and coverage', 'Reference']);
   for (const text of ['Flag four.', 'Overstatement.', 'Synthetic method.', 'Synthetic limitation.', 'Validated on independent / held-out data']) {
     const node = [...container.querySelectorAll('*')].find(el => el.textContent === text);
     expect(node, text).toBeTruthy();
     expect(foldOf(node), text).toBe(text.startsWith('Synthetic method') || text.startsWith('Synthetic limitation')
-      ? 'Methods and limitations' : 'Caveats and coverage');
+      ? 'How it works' : 'Caveats and coverage');
   }
   for (const text of ['Synthetic rationale.', 'Synthetic finding.', 'Synthetic weakness.', 'Synthetic contribution.']) {
     expect(container.textContent.split(text).length - 1).toBe(1);

@@ -4,12 +4,12 @@ import { buildMethodCard, fetchMethodCard } from '../../../api/libraryApi.js';
 import Button from '../../ui/Button.jsx';
 import Spinner from '../../ui/Spinner.jsx';
 
-// "How it works": the paper's mechanism, what it was compared against, what the authors claim is new
+// The steps of the "How it works" fold (the fold, in PaperReview, supplies the heading and the digest's
+// Methods/Limitations below): the paper's mechanism, what it was compared against, what the authors claim is new
 // and how to repeat it — each row tied to a sentence that exists in the paper (opened by its §).
 // Built on request (POST) and polled (GET) while the one background job runs; collapsed to the short
 // level, "Expand" opens all four blocks. Nothing here scores or ranks.
 const WHY_NOT = {
-  not_grounded: 'The model\u2019s core idea could not be tied to a sentence in the paper, so nothing is shown rather than a guess.',
   model_error: 'The model call failed.',
   source_changed: 'The PDF changed since the review was made.',
   no_text: 'No readable text was found in the PDF.',
@@ -110,6 +110,9 @@ export function MethodCardView({ data, onBuild, building = false, buildError = '
     );
   } else if (data.state === 'building' || building) {
     body = <p role="status" aria-live="polite" className="flex items-center gap-2 text-slate-600"><Spinner size="sm" color="slate" /> Building the card — reading the whole paper once. You can keep reading.</p>;
+  } else if (data.state === 'failed' && data.reason === 'not_grounded') {
+    // Not an error: the digest's Methods text sits right below in the same fold.
+    body = <p className="text-slate-600">Step-by-step view unavailable for this paper.</p>;
   } else if (data.state === 'failed') {
     body = <p className="text-amber-800" role="alert">Could not build the card. {WHY_NOT[data.reason] || ''}</p>;
   } else if (UNAVAILABLE[data.reason]) {
@@ -118,8 +121,7 @@ export function MethodCardView({ data, onBuild, building = false, buildError = '
     body = <p className="text-slate-600">What the method does, what it was compared against and how to repeat it — every row tied to a sentence in the paper.</p>;
   }
   return (
-    <section aria-labelledby="how-it-works-h" className="border-t border-slate-200/70 py-3 first:border-t-0">
-      <h2 id="how-it-works-h" className="mb-2 font-display text-[19px] font-light leading-snug text-forest-800">How it works</h2>
+    <div className="mb-4">
       {body}
       {buildError && <p className="mt-2 text-amber-800" role="alert">{buildError}</p>}
       {canBuild && (
@@ -127,7 +129,7 @@ export function MethodCardView({ data, onBuild, building = false, buildError = '
           {wait > 0 ? `Try again in ${wait} s` : data.state === 'failed' ? 'Try again' : 'Build card'}
         </Button>
       )}
-    </section>
+    </div>
   );
 }
 

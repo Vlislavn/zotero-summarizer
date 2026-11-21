@@ -35,8 +35,8 @@ function visualOf(lead) {
 export function metricView(text) {
   const raw = String(text || '').trim();
   const leads = [...raw.matchAll(LEAD)];
-  // A measured value (percent, decimal, or after "=") outranks a bare count such as "≥90:".
-  const pick = leads.find((m) => /[%.]/.test(m[0]) || /=\s*$/.test(raw.slice(0, m.index))) || leads[0];
+  // A measured value (percent, decimal, or after "=" / ":") outranks a bare count such as "≥90:" or the 1 of "System 1 vs …: 86 vs 80".
+  const pick = leads.find((m) => /[%.]/.test(m[0]) || /[=:]\s*$/.test(raw.slice(0, m.index))) || leads[0];
   if (!pick) return { before: raw, lead: '', after: '', visual: null };
   const lead = pick[0];
   const before = raw.slice(0, pick.index);

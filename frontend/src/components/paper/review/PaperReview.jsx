@@ -184,7 +184,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
   const recommendation = (
     <Recommendation verdict={verdict} digest={digest} deep={deep} grade={grade} band={band} redFlags={redFlags}
       digestDecision={digestDecision} hasReadingDecision={hasReadingDecision} isNonPaper={isNonPaper}
-      flat={flat} strength={grounded('key_strength')} weakness={grounded('key_weakness')} />
+      flat={flat} strength={grounded('key_strength')} weakness={grounded('key_weakness')} summary={grounded('executive_summary')} />
   );
 
   // Reading-size type applies to the review itself; the `facts` slot between the
@@ -221,14 +221,20 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
       <div className={reading}>
       <div className={flat ? '' : 'mt-2 divide-y divide-slate-200/60'}>
         {flat ? <>
-          {methodCard}
+          <Fold label="How it works" defaultOpen summary={clip(digest?.methods || digest?.limitations, 110)} feedbackField="methods_limits">
+            {methodCard}
+            <div className="mb-4"><StudyFlow parameters={digest?.parameters} /></div>
+            <dl className="space-y-3">
+              <DigestRow field="methods" label="Methods" lost={lost} onRegenerate={onRegenerate}>{digest?.methods}</DigestRow>
+              <DigestRow field="limitations" label="Limitations" lost={lost} onRegenerate={onRegenerate}>{digest?.limitations}</DigestRow></dl>
+            {!digest?.methods && !digest?.limitations && !lost.some(f => f === 'methods' || f === 'limitations') && <p>Methods and limitations not recorded in this saved review.</p>}
+          </Fold>
           <Fold label="Findings and applicability" defaultOpen feedbackField="findings">
             {findings.length > 0 ? <Bullets items={findings} /> : <p>Key findings not recorded in this saved review.</p>}
           </Fold>
           {digest && (
             <Fold label="Assessment" defaultOpen feedbackField="assessment">
               <div className="space-y-5">
-                <StudyFlow parameters={digest.parameters} />
                 <ImpactGrid cells={[['Impact', grounded('impact')], ['Industry', grounded('industry_impact')],
                   ['Academia', grounded('academy_impact')], ['Unknowns', grounded('unknown_unknowns')]]} />
                 <DigestRows digest={{ ...digest, parameters: null }} lost={lost} onRegenerate={onRegenerate}
@@ -251,15 +257,8 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
               <GoalBoard goals={goals} goalLoc={goalLoc} foldReasons />
             </Fold>
           )}
-          <Fold label="Methods and limitations" summary={clip(digest?.methods || digest?.limitations, 110)} feedbackField="methods_limits">
-            <dl className="space-y-3">
-              <DigestRow field="methods" label="Methods" lost={lost} onRegenerate={onRegenerate}>{digest?.methods}</DigestRow>
-              <DigestRow field="limitations" label="Limitations" lost={lost} onRegenerate={onRegenerate}>{digest?.limitations}</DigestRow></dl>
-            {!digest?.methods && !digest?.limitations && !lost.some(f => f === 'methods' || f === 'limitations') && <p>Methods and limitations not recorded in this saved review.</p>}
-          </Fold>
-          <Fold label="Reference" summary="Summary, full checklist and how it was judged">
+          <Fold label="Reference" summary="Full checklist and how it was judged">
             <div className="space-y-4">
-              <dl><DigestRow field="executive_summary" label="Summary" lost={lost} onRegenerate={onRegenerate}>{digest?.executive_summary}</DigestRow></dl>
               {quality && !isNonPaper && <ChecklistBasis quality={quality} />}
               {quality && !isNonPaper && <QualityDetails quality={quality} band={band} hideMaterial />}
               <p className="!text-[13px] text-slate-500">Saved source basis — quality: {quality?.basis || 'not recorded'}; digest: {digest?.basis || 'not recorded'}. Reviewed extent not recorded.</p>

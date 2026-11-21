@@ -33,5 +33,10 @@ section,check_state:"not_run",checks:[]}`, `reuse[{input,operation,output,quote,
 `caveat{text,quote,section}`, `short_text`, `timing{seconds,prompt_tokens,completion_tokens,chars}`, `model`,
 `generated_at`. `section` is `§ Title`, `p.N` or `""` (quote not located in a section).
 
+**Where it shows:** inside the review page's one «How it works» fold (`PaperReview.jsx`), above the digest's Methods/Limitations;
+`MethodCard.jsx` draws no heading of its own. `failed`/`not_grounded` is not an error to the reader: the card says only
+«Step-by-step view unavailable for this paper.» (the digest's Methods text is right below) and keeps «Try again»; the other failure
+reasons keep their message.
+
 Tests: `tests/test_method_card.py` (every shown quote is in the paper; a build leaves `deep_reviews.json` and
 `review_revision` untouched; one job per key; 300 s retry window).
