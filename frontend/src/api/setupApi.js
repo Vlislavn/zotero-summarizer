@@ -38,13 +38,6 @@ export async function fetchAiPresets() {
   return request(`${SETUP_BASE}/ai-presets`);
 }
 
-export async function saveAiCredential(name, apiKey, revision) {
-  return request(`${SETUP_BASE}/ai-credential`, {
-    method: 'PUT',
-    body: JSON.stringify({ name, api_key: apiKey, ...(revision ? { revision } : {}) }),
-  });
-}
-
 export async function fetchDoctorStatus({ signal } = {}) {
   return request(`${SETUP_BASE}/doctor`, { signal });
 }

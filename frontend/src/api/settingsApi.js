@@ -97,24 +97,6 @@ export async function fetchLlmReachability() {
 }
 
 /**
- * POST /api/admin/llm-models
- * Lists the models a provider serves, for the Settings model-picker. Body is one
- * provider profile ({ name, type, base_url, api_key_env, ... }) taken from the
- * in-progress edit (no "save first" needed). Resolves to
- *   { provider, type, models: string[] }.
- * Throws on a missing API key (400) or an unreachable/erroring endpoint.
- */
-export async function listModels(provider) {
-  if (!provider || typeof provider !== 'object') {
-    throw new Error('listModels: provider must be an object');
-  }
-  return request(`${ADMIN_BASE}/llm-models`, {
-    method: 'POST',
-    body: JSON.stringify(provider),
-  });
-}
-
-/**
  * POST /api/setup/calibrate
  * "Calibrate to my setup" — kicks off the Tier-1 env probe + Tier-2 text-budget sweep on
  * the resolved deep-review endpoint (persists data/calibration.json, applied on the next
