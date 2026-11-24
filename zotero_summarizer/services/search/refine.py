@@ -20,7 +20,8 @@ import logging
 import os
 from typing import Any
 
-from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services._common import to_text
+from zotero_summarizer.services.llm.json_response import extract_json_blob
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.search import session as session_store
 from zotero_summarizer.services.search._models import Candidate, ResearchSession, SearchIntent

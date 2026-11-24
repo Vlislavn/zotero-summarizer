@@ -27,7 +27,8 @@ from time import perf_counter
 from typing import Any, Callable
 from uuid import uuid4
 
-from zotero_summarizer.services._common import atomic_write, extract_json_blob, now_iso_z, to_text, write_json_atomic
+from zotero_summarizer.services._common import atomic_write, now_iso_z, to_text, write_json_atomic
+from zotero_summarizer.services.llm.json_response import extract_json_blob
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.faithbench import _build_claims
 from zotero_summarizer.services.faithbench._constants import RETRIEVAL_TOP_K

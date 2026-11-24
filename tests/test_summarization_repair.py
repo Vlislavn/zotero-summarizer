@@ -5,7 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from zotero_summarizer.models import GoalsConfig, RefinedSummary, SummarizeRequest
-from zotero_summarizer.services._common import extract_json_blob
+from zotero_summarizer.services.llm.json_response import extract_json_blob
 from zotero_summarizer.services.triage.summarization import _refine_with_retry
 
 

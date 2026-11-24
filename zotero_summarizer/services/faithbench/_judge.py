@@ -21,7 +21,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Callable
 
-from zotero_summarizer.services._common import extract_json_blob, now_iso_z, to_text
+from zotero_summarizer.services._common import now_iso_z, to_text
+from zotero_summarizer.services.llm.json_response import extract_json_blob
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.faithbench._constants import (
     CLAIM_JUDGE_TOP_K,
@@ -216,10 +217,7 @@ def _judge_json(judge_llm: Any, prompt: str) -> dict[str, Any]:
         return extract_json_blob(raw)
     except ValueError:
         retry = to_text(
-            judge_llm.prompt(
-                "Extract the single JSON object from the following text and return "
-                "ONLY it:\n\n" + raw
-            )
+            judge_llm.prompt("Extract the single JSON object from the following text and return ONLY it:\n\n" + raw)
         )
         return extract_json_blob(retry)
 

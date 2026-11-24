@@ -17,7 +17,8 @@ from zotero_summarizer.models.digest_generation import (
     PaperDigestGeneration, FeedDigestGeneration, _ASSESSMENT_FIELDS, _GENERATION_FIELDS,
 )
 from zotero_summarizer.integrations.llm import build_response_format
-from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services._common import to_text
+from zotero_summarizer.services.llm.json_response import extract_json_blob
 from zotero_summarizer.services.library._digest_verification import DigestSourceRejected, DigestVerifierUnavailable
 from zotero_summarizer.services.library import _digest_audit
 from zotero_summarizer.services.library._prompt_security import paper_block, untrusted_input

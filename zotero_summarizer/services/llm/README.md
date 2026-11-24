@@ -147,6 +147,8 @@ Viewing, registration, listing, impact and selection saving never invoke a probe
 - `concurrency.py` holds the LLM fan-out widths (`effective_llm_concurrency`, `deep_review_fleet_concurrency`,
   `deep_review_sub_concurrency`): local provider → serial, remote → its caps; shared by the daemon,
   deep-review job and `verify-deep-review` CLI.
+- `json_response.py` parses JSON objects out of LLM output (`extract_json_blob`: plain, fenced or
+  prose-wrapped; raises `ValueError`) and stored `response_json` cells (`safe_parse_response_json`: bad → `{}` + warning).
 - `thinking.py` translates effort to Anthropic budgets, OpenAI
   `reasoning_effort`, or qwen/vLLM `enable_thinking`. Explicit `off` sends
   `reasoning_effort: none` in the plain OpenAI dialect; omitting it would preserve

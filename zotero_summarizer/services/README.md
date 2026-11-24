@@ -86,6 +86,8 @@ their prior options; all setup local-LLM requests must first pass admission.
 
 `_common.to_text` and `_common.unique_non_empty_strings` re-export `integrations.llm.to_text` and `domain.unique_non_empty_strings` (one implementation each).
 
+LLM-output JSON parsing (`extract_json_blob`, `safe_parse_response_json`) lives in `llm/json_response.py`.
+
 Shared files: `_common` (helpers: settings/logging/sqlite-ro/now_iso_z/html_to_text/
 `atomic_write` (callback) + `write_json_atomic`
 (dict→JSON; keyword-only `indent=None`, default output unchanged) for tmp+replace artifact/cache writes. JSON publication delegates to

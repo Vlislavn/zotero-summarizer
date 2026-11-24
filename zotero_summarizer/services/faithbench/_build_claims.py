@@ -13,7 +13,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services._common import to_text
+from zotero_summarizer.services.llm.json_response import extract_json_blob
 from zotero_summarizer.services._common import atomic_write
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.faithbench._corpus import sha256_text

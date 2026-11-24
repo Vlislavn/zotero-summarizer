@@ -7,7 +7,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, StrictInt
 
 from zotero_summarizer.models import PaperDigest
-from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services._common import to_text
+from zotero_summarizer.services.llm.json_response import extract_json_blob
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.library._grounding import quote_is_grounded
 

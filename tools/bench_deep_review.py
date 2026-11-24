@@ -109,10 +109,10 @@ Return STRICT JSON only, no prose, no code fences:
 
 
 def _judge_pair(judge_llm: Any, *, paper: str, digest_a: str, digest_b: str, judge_chars: int) -> dict[str, Any]:
-    from zotero_summarizer.services._common import extract_json_blob, to_text
+    from zotero_summarizer.services._common import to_text
+    from zotero_summarizer.services.llm.json_response import extract_json_blob
     prompt = _JUDGE_PROMPT.format(paper=paper[:judge_chars], digest_a=digest_a, digest_b=digest_b)
-    raw = to_text(judge_llm.prompt(prompt))
-    return extract_json_blob(raw)
+    return extract_json_blob(to_text(judge_llm.prompt(prompt)))
 
 
 def _digest_for_judge(d: dict[str, Any]) -> str:

@@ -31,15 +31,8 @@ from zotero_summarizer.services.library._prompt_security import untrusted_input
 from zotero_summarizer.services.triage._method_admission import _admit_method_artifacts, _validate_pdf_authority
 from zotero_summarizer.services.triage._method_context import original_uri_context
 from zotero_summarizer.services.llm.concurrency import deep_review_sub_concurrency
-from zotero_summarizer.services._common import (
-    LOGGER,
-    build_log_prefix,
-    extract_json_blob,
-    log_context,
-    settings,
-    state,
-    to_text,
-)
+from zotero_summarizer.services._common import LOGGER, build_log_prefix, log_context, settings, state, to_text
+from zotero_summarizer.services.llm.json_response import extract_json_blob
 
 
 def _extract_pdf_source(pdf_path: str) -> PdfSource:

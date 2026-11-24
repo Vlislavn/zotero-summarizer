@@ -203,3 +203,5 @@ run_screen ─save→ ResearchSession(status=screened)                          
   competing retrieval/ranking loop.
 
 Paper fan-out width comes from `services/llm/concurrency.deep_review_fleet_concurrency`.
+
+`intent` and `refine` parse LLM JSON with `services/llm/json_response.extract_json_blob`.

@@ -270,7 +270,7 @@ scans balanced outer objects/arrays in narrative text using the standard JSON
 parser and the supplied model contract. Nested examples are not candidates.
 Exactly one schema-valid decoded root is required; identical decoded repeats
 are allowed, differing valid roots are ambiguous and use the same single repair
-attempt (invalid repair propagates). The shared `extract_json_blob` and decoded
+attempt (invalid repair propagates). The shared `llm/json_response.extract_json_blob` and decoded
 output capture/telemetry are unchanged. Candidate spans do not overlap: scanning
 and decoding work is bounded by input characters, without suffix retries or regex.
 
