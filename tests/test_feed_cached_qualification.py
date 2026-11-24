@@ -12,7 +12,7 @@ from zotero_summarizer import cli
 from zotero_summarizer.runtime import AppContext, get_context, set_context
 from zotero_summarizer.services.llm import factory
 from zotero_summarizer.services import lifecycle
-from zotero_summarizer.services._common import read_config
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services.library import _review_cache, _review_identity
 from zotero_summarizer.services.research_feed.profile import load_profile
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config

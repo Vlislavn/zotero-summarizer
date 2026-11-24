@@ -212,7 +212,7 @@ def test_config_round_trips_provider_type_enum_through_yaml(tmp_path):
     which raises RepresenterError on enum objects left by mode="python"; the
     persisted payload must be JSON-mode so the enum becomes its string value."""
     from zotero_summarizer.models import GoalsConfig
-    from zotero_summarizer.services._common import read_config, write_config_atomic
+    from zotero_summarizer.services.config_io import read_config, write_config_atomic
 
     payload = _minimal_goals()
     payload["llm_routing"] = {
@@ -238,7 +238,7 @@ def test_config_round_trips_temperature_and_thinking_effort(tmp_path):
     """A provider's temperature + thinking_effort must survive PUT /api/config's
     dump → yaml → reload cycle so the Settings knobs actually persist."""
     from zotero_summarizer.models import GoalsConfig
-    from zotero_summarizer.services._common import read_config, write_config_atomic
+    from zotero_summarizer.services.config_io import read_config, write_config_atomic
 
     payload = _minimal_goals()
     payload["llm_routing"] = {

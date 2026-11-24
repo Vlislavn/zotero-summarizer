@@ -208,7 +208,7 @@ def _client(provider_name: str, base_url: str, model: str):
     (the remote provider, from goals.yaml ``llm_routing.deep_review``) — measures the real grader."""
     if provider_name == "remote":
         from zotero_summarizer.models.providers import resolve_stage
-        from zotero_summarizer.services._common import read_config
+        from zotero_summarizer.services.config_io import read_config
         from zotero_summarizer.services.llm.factory import build_client_for_stage
         from zotero_summarizer.settings import Settings
         routing = read_config(Settings.load().config_path).llm_routing

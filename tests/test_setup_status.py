@@ -16,8 +16,8 @@ import yaml
 
 from zotero_summarizer.models import AppState
 from zotero_summarizer.runtime import AppContext, RuntimeState, set_context
-from zotero_summarizer.services._common import read_config
-from zotero_summarizer.services._common import write_user_config
+from zotero_summarizer.services.config_io import read_config
+from zotero_summarizer.services.config_io import write_user_config
 from zotero_summarizer.services.setup import doctor, status as status_mod
 from zotero_summarizer.services.setup import get_setup_status
 from zotero_summarizer.settings import Settings

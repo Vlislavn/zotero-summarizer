@@ -34,7 +34,7 @@ def test_calibration_refuses_operational_source_before_model_work(tmp_path):
 
 
 def test_calibration_uses_strategy_audit_and_separate_production_verifier(tmp_path, monkeypatch):
-    from zotero_summarizer.services import _common
+    from zotero_summarizer.services import config_io
     from zotero_summarizer.services.library import _map_reduce
     from zotero_summarizer.services.llm import factory
     from zotero_summarizer.settings import Settings
@@ -47,7 +47,7 @@ def test_calibration_uses_strategy_audit_and_separate_production_verifier(tmp_pa
     config.llm_enabled = True
     provider = ProviderConfig(name='remote', base_url='https://example.invalid/v1', api_key_env='UNUSED', thinking_effort='high')
     config.llm_routing = LLMRoutingConfig(providers=[provider], default={'provider': 'remote', 'model': 'synthetic'})
-    monkeypatch.setattr(_common, 'read_config', lambda *_a: config)
+    monkeypatch.setattr(config_io, 'read_config', lambda *_a: config)
     clients = []
 
     def build(_provider, _model, **options):

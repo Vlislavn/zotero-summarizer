@@ -3,7 +3,7 @@ import pytest
 
 from tests.test_setup_load_ownership16 import boundary, routing  # noqa: F401
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services import _common
+from zotero_summarizer.services import config_io
 from zotero_summarizer.services.llm import factory
 from zotero_summarizer.services.setup import doctor, load_attempt as la
 
@@ -14,9 +14,9 @@ def test_doctor_hold_with_unsupported_feed_remains_not_ready_without_inference(m
     boundary.start(boundary.ticket(original))
     routes = routing()
     routes.providers[0].capabilities = frozenset()
-    config = _common.read_config(boundary.settings.config_path, boundary.settings.calibration_path)
+    config = config_io.read_config(boundary.settings.config_path, boundary.settings.calibration_path)
     config.llm_routing, config.llm_enabled = routes, True
-    _common.write_user_config(boundary.settings.config_path, config)
+    config_io.write_user_config(boundary.settings.config_path, config)
     monkeypatch.setattr(factory, "resolve_api_key", lambda _: pytest.fail("Unsupported capability resolved a credential"))
     with pytest.raises(APIError) as error:
         factory.build_client_for_provider(routes.providers[0], "synthetic", verification=True)

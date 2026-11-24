@@ -268,3 +268,5 @@ uses the actual pinned loader. Snapshot presence remains a cheap inventory
 check, while Doctor's fresh-process offline load verifies loadability.
 
 Calibration takes the per-paper LLM call width from `services/llm/concurrency.deep_review_sub_concurrency`.
+
+Setup/doctor/calibration load and write goals.yaml through `services/config_io` (`read_config`, `write_user_config`).

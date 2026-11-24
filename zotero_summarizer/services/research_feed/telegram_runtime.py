@@ -63,7 +63,7 @@ def collect_once_cli(settings: Settings, *, session_factory=None, client_factory
 
             return await telegram_discussions.collect(settings, sdk, source_ids, admit=admit, now=clock)
         if purpose == "digest":
-            from zotero_summarizer.services._common import read_config
+            from zotero_summarizer.services.config_io import read_config
             from zotero_summarizer.services.research_feed import telegram_live, telegram_today
 
             config = read_config(settings.config_path, settings.calibration_path)

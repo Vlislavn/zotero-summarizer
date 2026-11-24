@@ -75,7 +75,7 @@ def _step_provider(settings: Settings) -> None:
         ProviderConfig,
         ProviderType,
     )
-    from zotero_summarizer.services._common import read_config, write_user_config
+    from zotero_summarizer.services.config_io import read_config, write_user_config
     from zotero_summarizer.services.llm import operational_check
 
     print("\n== LLM provider (configuration; optional real inference) ==")
@@ -123,7 +123,7 @@ def _step_provider(settings: Settings) -> None:
 
 
 def _step_goals(settings: Settings) -> None:
-    from zotero_summarizer.services._common import read_config, write_user_config
+    from zotero_summarizer.services.config_io import read_config, write_user_config
     from zotero_summarizer.services.setup.validate import has_personal_goals
 
     print("\n== Research goals ==")
@@ -196,7 +196,7 @@ def _setup(args: argparse.Namespace) -> int:
     if args.mode == "hosted":
         _step_provider(settings)
     elif args.mode == "no-llm":
-        from zotero_summarizer.services._common import read_config, write_user_config
+        from zotero_summarizer.services.config_io import read_config, write_user_config
 
         config = read_config(settings.config_path, settings.calibration_path)
         write_user_config(
@@ -257,7 +257,7 @@ def _calibrate(args: argparse.Namespace) -> int:
     )
 
     if args.tier3:
-        from zotero_summarizer.services._common import read_config
+        from zotero_summarizer.services.config_io import read_config
         from zotero_summarizer.services.golden.csv_store import load_golden_rows
         from zotero_summarizer.services.golden.hybrid_gt import apply_hybrid
         from zotero_summarizer.services.model.eval_baseline import run_baseline

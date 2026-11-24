@@ -353,3 +353,5 @@ publication projection. Direct publisher
 leaf-directory checks remain separate; none is filesystem-race containment.
 Live account/network
 acceptance is separate from the synthetic contracts.
+
+Research-feed runners load goals.yaml through `services/config_io.read_config`.

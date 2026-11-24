@@ -191,7 +191,7 @@ def qualify(entry, context):
 
 def cached_reader(settings):
     """Invocation-local config only: no lifecycle, provider or native reader setup."""
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
 
     config = None
     def load(key):

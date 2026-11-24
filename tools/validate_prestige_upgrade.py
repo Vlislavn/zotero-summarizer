@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from zotero_summarizer.domain import apply_prestige_floor, score_to_priority
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
-from zotero_summarizer.services._common import read_config
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services.library import reading_queue as rq
 from zotero_summarizer.services.model import classifier_persistence
 from zotero_summarizer.settings import Settings

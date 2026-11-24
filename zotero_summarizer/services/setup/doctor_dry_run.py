@@ -3,7 +3,7 @@ from typing import Any
 
 from zotero_summarizer.models import SummarizeRequest
 from zotero_summarizer.models.providers import resolve_stage
-from zotero_summarizer.services._common import read_config
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services.setup.doctor_environment import _row
 from zotero_summarizer.services.setup.load_admission import refused_local_load
 from zotero_summarizer.settings import Settings

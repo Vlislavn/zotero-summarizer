@@ -11,7 +11,7 @@ import pytest
 
 from tests.test_application_browser_live import application_browser  # noqa: F401
 from tests.test_research_feed import _review
-from zotero_summarizer.services._common import read_config
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services.library import _review_cache, _review_identity
 from zotero_summarizer.storage import feeds
 from zotero_summarizer.storage.feed_identity import stable_feed_key_from_parts

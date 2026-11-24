@@ -5,7 +5,8 @@ Shared so the daemon, the deep-review job and the ``verify-deep-review`` CLI nev
 from __future__ import annotations
 
 from zotero_summarizer.models.providers import ProviderConfig
-from zotero_summarizer.services._common import read_config, settings
+from zotero_summarizer.services._common import settings
+from zotero_summarizer.services.config_io import read_config
 
 
 def effective_llm_concurrency(provider: ProviderConfig | None, item_count: int) -> int:

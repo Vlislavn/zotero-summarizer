@@ -77,7 +77,7 @@ def _goldenset_train_classifier(args: argparse.Namespace) -> int:
     """
     from zotero_summarizer.services.model import classifier_persistence
     from zotero_summarizer.services import run_log
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
 
     settings = Settings.load(project_root=args.project_root)
     config = read_config(settings.config_path)
@@ -147,7 +147,7 @@ def _goldenset_train_classifier(args: argparse.Namespace) -> int:
 def _goldenset_eval_baseline(args: argparse.Namespace) -> int:
     """Phase 1.16 Step 0 — baseline + learning-curve measurement."""
     from zotero_summarizer.services.model import eval_baseline
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
     from zotero_summarizer.services.golden.hybrid_gt import apply_hybrid
 
     settings = Settings.load(project_root=args.project_root)
@@ -202,7 +202,7 @@ def _goldenset_eval_baseline(args: argparse.Namespace) -> int:
 
 def _goldenset_tune(args: argparse.Namespace) -> int:
     """Sprint-3c — Optuna hyperparameter sweep over the LightGBM regressor."""
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
     from zotero_summarizer.services.golden.csv_store import load_golden_rows
     from zotero_summarizer.services.golden.hybrid_gt import apply_hybrid
     from zotero_summarizer.services.model.tune import tune_lightgbm
@@ -238,7 +238,7 @@ def _goldenset_suggest_labels(args: argparse.Namespace) -> int:
 
     See :mod:`services.active_learning` for the ranking criterion.
     """
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
     from zotero_summarizer.services.model.active_learning import (
         format_suggestions_markdown,
         load_rows,

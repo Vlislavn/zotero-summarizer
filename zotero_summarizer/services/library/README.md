@@ -196,3 +196,5 @@ Two knobs in `goals.yaml` `quality_review` (env `ZS_QUALITY_REVIEW_FLEET_PAPERS`
 Fan-out widths come from `services/llm/concurrency.py` (`deep_review_fleet_concurrency`, `deep_review_sub_concurrency`); `_ranking` reads `services/model/quality_flags` (`band_primary_enabled`, `quality_promote_enabled`).
 
 Review/interpretation/digest-verification parse LLM JSON with `services/llm/json_response.extract_json_blob`.
+
+Library services load goals.yaml through `services/config_io.read_config`.

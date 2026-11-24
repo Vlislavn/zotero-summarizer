@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from zotero_summarizer.models.providers import LLMRoutingConfig
-from zotero_summarizer.services._common import write_user_config
+from zotero_summarizer.services.config_io import write_user_config
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 from zotero_summarizer.services.setup.profiles import (
     LOCAL_PROFILE_VERSION,

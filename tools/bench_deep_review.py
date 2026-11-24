@@ -49,7 +49,7 @@ from typing import Any
 
 # --- repo imports (run via `uv run python tools/...`) -----------------------
 from zotero_summarizer.models.providers import ProviderConfig, ProviderType
-from zotero_summarizer.services._common import read_config
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services.faithbench._constants import (
     DEFAULT_JUDGE_API_KEY_ENV,
     DEFAULT_JUDGE_BASE_URL_ENV,

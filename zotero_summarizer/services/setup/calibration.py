@@ -134,7 +134,7 @@ def run_full_calibration(
     ``progress`` (optional) receives ``{phase, completed, total}`` dicts for a live UI."""
     from zotero_summarizer.models import PaperDigest
     from zotero_summarizer.models.providers import resolve_stage
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
     from zotero_summarizer.services.llm.concurrency import deep_review_sub_concurrency
     from zotero_summarizer.services.library import _map_reduce, quality_review
     from zotero_summarizer.services.llm.factory import build_client_for_provider

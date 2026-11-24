@@ -19,7 +19,7 @@ def test_readonly_cli_captures_actual_strategy_and_keeps_source_unchanged(tmp_pa
     from test_source_admission import DENIAL
     from zotero_summarizer.api.errors import APIError
     from zotero_summarizer.cli import _app
-    from zotero_summarizer.services import _common
+    from zotero_summarizer.services import config_io
     from zotero_summarizer.services.library import quality_eval
     from zotero_summarizer.services.llm import factory
     from zotero_summarizer.services.setup.bootstrap import _default_goals_config
@@ -39,7 +39,7 @@ def test_readonly_cli_captures_actual_strategy_and_keeps_source_unchanged(tmp_pa
     config = _default_goals_config()
     config.quality_review.chunk_strategy = 'rank'
     monkeypatch.setattr(_app.Settings, 'load', lambda **kwargs: SimpleNamespace(data_dir=tmp_path, config_path=tmp_path / 'config'))
-    monkeypatch.setattr(_common, 'read_config', lambda path: config)
+    monkeypatch.setattr(config_io, 'read_config', lambda path: config)
     monkeypatch.setattr(factory, 'build_client_for_stage', lambda *a, **k: Client())
     monkeypatch.setattr(factory, 'build_client_for_provider', lambda *a, **k: Client())
     monkeypatch.setattr(quality_eval, 'evaluate_quality', lambda **kwargs: SimpleNamespace(quality_band='Fair', grade='C'))

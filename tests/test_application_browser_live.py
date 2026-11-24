@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from zotero_summarizer.api.app import create_app
 from zotero_summarizer.services import lifecycle
-from zotero_summarizer.services._common import read_config, write_user_config
+from zotero_summarizer.services.config_io import read_config, write_user_config
 from zotero_summarizer.services.setup import bootstrap, detect
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.storage import feeds, repositories

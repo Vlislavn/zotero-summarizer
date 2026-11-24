@@ -106,7 +106,7 @@ def _compute_border_into_cache(golden_sha: str, top_k: int) -> None:
     """
     from zotero_summarizer.services.model import active_learning
     from zotero_summarizer.services.library import border_cache
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
 
     try:
         settings = get_settings()

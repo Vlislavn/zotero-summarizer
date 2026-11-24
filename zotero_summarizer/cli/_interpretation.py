@@ -50,7 +50,7 @@ def command(args):
         if args.run:
             from zotero_summarizer.models import AppState
             from zotero_summarizer.runtime import RuntimeState
-            from zotero_summarizer.services._common import read_config
+            from zotero_summarizer.services.config_io import read_config
             from zotero_summarizer.services.llm import factory
 
             config = read_config(settings.config_path)

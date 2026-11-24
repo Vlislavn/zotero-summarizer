@@ -17,7 +17,7 @@ from zotero_summarizer.services.research_feed import cursor, render, runner
 def _abstract_cache(settings, monkeypatch):
     from types import SimpleNamespace
     from zotero_summarizer.runtime import get_context
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
     from zotero_summarizer.services.research_feed import source
     from zotero_summarizer.services.setup.bootstrap import _default_goals_config
     from zotero_summarizer.services.triage import summarization

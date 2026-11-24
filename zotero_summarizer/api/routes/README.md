@@ -272,3 +272,5 @@ storage query. `GET /api/triage/jobs?active_only=true` returns persisted running
 and cancelling jobs without limiting the lookup to newest terminal jobs.
 
 `review_feedback.py` (review feedback): `PUT /api/library/review-feedback/{item_key}/parts/{field}` (body `{reviewed_at, chips≤8, note≤1000}`; `field` = one of 12 review parts or `whole`; the server computes `shown`) and `DELETE …/parts/{field}?reviewed_at=` (idempotent `{cleared: true}`) — 404 `review_not_found`, 409 `review_version_changed`, 422 `unknown_field` / `review_feedback_chip_unknown` / `review_feedback_empty`; `GET …?item_key=…` lists the rows per review version; `GET …/check/{item_key}` reads `check.json`. Logic: `services/library/review_feedback.py`, table `review_feedback`.
+
+Routes load/save goals.yaml through `services/config_io` (`read_config`, `write_user_config`).

@@ -248,3 +248,5 @@ command is the sole terminal step. The `research-feed run` command is RSS-only. 
 tests are not live-account acceptance.
 
 `serve`/`verify-deep-review` take the per-paper LLM call width from `services/llm/concurrency.deep_review_sub_concurrency` (no longer `services/_common`).
+
+CLI commands load/save goals.yaml through `services/config_io` (`read_config`, `write_user_config`).

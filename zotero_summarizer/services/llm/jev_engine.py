@@ -42,7 +42,7 @@ def noul_fn(config: Any) -> Callable[[dict, dict], dict[str, float] | None] | No
 
 def noul_for(settings: Any) -> Callable[[dict, dict], dict[str, float] | None] | None:
     """``noul_fn`` of the saved configuration; None (no disagreement block) when there is no readable goals file."""
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
 
     try:
         return noul_fn(read_config(settings.config_path, settings.calibration_path))

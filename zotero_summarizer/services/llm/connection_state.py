@@ -6,7 +6,8 @@ from uuid import UUID
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models import AppState, GoalsConfig
-from zotero_summarizer.services._common import settings, state, read_config, write_json_atomic, write_user_config
+from zotero_summarizer.services._common import settings, state, write_json_atomic
+from zotero_summarizer.services.config_io import read_config, write_user_config
 from zotero_summarizer.storage.configuration_lock import configuration_lock, file_revision
 
 

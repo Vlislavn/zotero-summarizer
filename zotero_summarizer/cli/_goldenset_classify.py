@@ -24,7 +24,7 @@ def _goldenset_classify(args: argparse.Namespace) -> int:
     from zotero_summarizer.services.model import classifier
     from zotero_summarizer.services.golden import hybrid_gt
     from zotero_summarizer.services import run_log
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
 
     settings = Settings.load(project_root=args.project_root)
     input_csv = Path(args.input or settings.golden_csv_path)
@@ -112,7 +112,7 @@ def _setup_classify_llm(args: argparse.Namespace, settings: Settings):
     import os
 
     from zotero_summarizer.services._adapters import build_llm
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
     from zotero_summarizer.services.golden.hybrid_gt import apply_hybrid
 
     config = read_config(settings.config_path)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from zotero_summarizer.cli import _setup
-from zotero_summarizer.services._common import read_config
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services.setup.bootstrap import bootstrap_phase0
 from zotero_summarizer.settings import Settings
 
@@ -31,7 +31,7 @@ def test_cli_doctor_saved_custom_provider_needs_approval_but_declared_none_is_ad
     from zotero_summarizer.api.errors import APIError
     from zotero_summarizer.integrations import llm_models
     from zotero_summarizer.models.providers import LLMRoutingConfig, ProviderConfig
-    from zotero_summarizer.services._common import write_user_config
+    from zotero_summarizer.services.config_io import write_user_config
     from zotero_summarizer.services.llm import model_list
 
     settings = Settings.load(project_root=tmp_path)

@@ -13,7 +13,7 @@ import yaml
 from pydantic import ValidationError
 
 from zotero_summarizer.models.config import USER_OWNED_KEYS
-from zotero_summarizer.services._common import read_config, write_user_config
+from zotero_summarizer.services.config_io import read_config, write_user_config
 from zotero_summarizer.services.config_overrides import (
     REGISTRY,
     apply_env_overrides,
@@ -55,7 +55,7 @@ def test_round_trip_preserves_effective_config(tmp_path: Path, monkeypatch) -> N
     # read_config auto-derives num_ctx for LOCAL providers (a load-time safety enrichment,
     # like env/calibration application) so ollama doesn't truncate long prompts. Mirror it
     # on the expected side so the round-trip still asserts intent-only persistence.
-    from zotero_summarizer.services._common import _derive_local_num_ctx
+    from zotero_summarizer.services.config_io import _derive_local_num_ctx
     assert reloaded.model_dump(mode="json") == _derive_local_num_ctx(cfg).model_dump(mode="json")
 
 
@@ -120,7 +120,7 @@ def test_derive_num_ctx_fits_deep_review_prompt() -> None:
     """num_ctx must fit the largest deep-review prompt: text budget (chars/4) + output
     tokens + headroom. ollama's own ~2–4k default silently truncates a 60k-char prompt;
     the derived value must clear it with room for the response + thinking."""
-    from zotero_summarizer.services._common import derive_num_ctx
+    from zotero_summarizer.services.config_io import derive_num_ctx
 
     # 60k chars / 4 = 15k prompt tokens + 4096 output * 1.25 headroom ≈ 23872
     n = derive_num_ctx(max_text_chars=60_000, max_tokens=4096)

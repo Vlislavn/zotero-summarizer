@@ -14,7 +14,8 @@ from zotero_summarizer.runtime import RuntimeState
 from zotero_summarizer.services import corpus
 from zotero_summarizer.services.triage import triage_jobs
 from zotero_summarizer.services._adapters import build_pdf_extractor
-from zotero_summarizer.services._common import LOGGER, read_config, settings, setup_logging, state
+from zotero_summarizer.services._common import LOGGER, settings, setup_logging, state
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.settings import Settings, automatic_gate_updates_enabled
 from zotero_summarizer.storage import repositories as triage_db
 from zotero_summarizer.storage.corpus import EmbeddingCache

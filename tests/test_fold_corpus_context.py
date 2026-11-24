@@ -126,12 +126,13 @@ def test_every_fit_uses_only_its_training_corpus(tmp_path, monkeypatch, route):
     else:
         from tools import eval_temporal_objective
         from zotero_summarizer.services import _common
+        from zotero_summarizer.services import config_io
         from zotero_summarizer.storage import repositories
 
         with repositories.with_db_path(settings.triage_db_path):
             repositories.init_db()
         monkeypatch.setattr(_common, "settings", lambda: settings)
-        monkeypatch.setattr(_common, "read_config", lambda path: None)
+        monkeypatch.setattr(config_io, "read_config", lambda path: None)
         monkeypatch.setattr(eval_temporal_objective, "_fit_ranker", lambda X, y, val, sw: (
             fit("ranker", X, y, val, sample_weight=sw)[1]
         ))

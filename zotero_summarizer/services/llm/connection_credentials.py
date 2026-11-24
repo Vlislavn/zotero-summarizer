@@ -1,6 +1,7 @@
 """Shared authorization replacement is a separate effect, never registration rollback."""
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import settings, state, read_config, write_json_atomic, read_json_or_empty
+from zotero_summarizer.services._common import settings, state, write_json_atomic, read_json_or_empty
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services.llm import connection_state as store
 from zotero_summarizer.services.llm.connection_impact import dependencies
 from zotero_summarizer.services.research_feed.profile import load_profile

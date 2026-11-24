@@ -98,7 +98,7 @@ promise power-loss durability (`fsync`);
 counterpart: missing state file → `{}`, an EXISTING-but-corrupt file raises),
 `is_app_rss_source` (the one definition of "row came from the app-RSS reader"),
 NaN-rejecting `clamp`; `emoji_signals`
-bins via `domain` so label derivation == prediction; `read_config` applies the
+bins via `domain` so label derivation == prediction; `config_io.read_config` (goals.yaml load/save lives in `config_io.py`, not `_common`) applies the
 strict-offline override after env config, disabling prestige, OpenReview, and
 full-text refinement. `settings.offline_requested` is the one toggle used by
 RSS, uncached PDF, library acquisition, and Search network boundaries; the LLM-concurrency gates (`services/llm/concurrency.py`)
@@ -158,12 +158,13 @@ Emitted by the shared `golden.label_verdicts` command used by every deliberate l
 the legacy verdict feedback paths, and the outcome daemon — `results` also calls it. The JSONL
 append still follows the current-label commit, not a transactional outbox; failure
 does not roll back that prior durable decision),
-`config` (GET/PUT `/api/config`; PUT persists via `_common.write_user_config` — only
+`config` (GET/PUT `/api/config`; PUT persists via `config_io.write_user_config` — only
 the `USER_OWNED_KEYS` (intent + LLM connection + university access), so `goals.yaml`
 stays intent-only; re-applies `ZS_*` env before the hot-swap; invalidates stage
 clients; does not validate provider availability; an edit to `research_goals` schedules a
 background Today-slate rescore so persisted per-item `goal_sims` — the slate's
 rank-blend input — don't go stale against the new goals),
+`config_io` (goals.yaml `read_config`/`write_user_config`/`write_config_atomic`/`derive_num_ctx`, import-light so low-level services can use it; `read_config` layers `config_overrides`),
 `config_overrides` (the auto-derived `ZS_*` env override registry for every
 system-owned knob — `apply_env_overrides` re-validates, `render_overrides_doc`
 generates `docs/overrides.md`; precedence: code default < `goals.yaml` < `ZS_*` env;

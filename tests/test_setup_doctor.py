@@ -167,13 +167,13 @@ def test_uncaught_offline_socket_attempt_keeps_actionable_doctor_evidence(tmp_pa
 
 
 def test_strict_offline_requires_a_network_attempt_free_cache_load(tmp_path, monkeypatch):
-    from zotero_summarizer.services import _common
-    from zotero_summarizer.services._common import write_user_config
+    from zotero_summarizer.services import config_io
+    from zotero_summarizer.services.config_io import write_user_config
     from zotero_summarizer.services.setup import assets
     from zotero_summarizer.services.setup.profiles import apply_local_profile
 
     settings = _settings(tmp_path)
-    config = apply_local_profile(_common.read_config(settings.config_path), "light")
+    config = apply_local_profile(config_io.read_config(settings.config_path), "light")
     write_user_config(settings.config_path, config)
     monkeypatch.setenv("ZS_OFFLINE", "1")
     monkeypatch.setattr(
@@ -197,7 +197,7 @@ def test_strict_offline_requires_a_network_attempt_free_cache_load(tmp_path, mon
 
 
 def test_ml_only_doctor_skips_ai_checks_by_choice(tmp_path):
-    from zotero_summarizer.services._common import read_config, write_user_config
+    from zotero_summarizer.services.config_io import read_config, write_user_config
 
     settings = _settings(tmp_path)
     config = read_config(settings.config_path)

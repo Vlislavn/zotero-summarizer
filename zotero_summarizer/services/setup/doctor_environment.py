@@ -13,7 +13,7 @@ from typing import Any
 import psutil
 
 from zotero_summarizer.models.providers import STAGES, resolve_stage
-from zotero_summarizer.services._common import read_config
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.settings import Settings
 
 

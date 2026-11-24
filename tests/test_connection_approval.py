@@ -5,7 +5,8 @@ from tests.test_connection_task import connection_home, register
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.integrations import llm_models
 from zotero_summarizer.services.llm import connections as task, model_list, factory, operational_check
-from zotero_summarizer.services._common import write_json_atomic, write_user_config
+from zotero_summarizer.services._common import write_json_atomic
+from zotero_summarizer.services.config_io import write_user_config
 
 
 def forbid_lookup(monkeypatch):

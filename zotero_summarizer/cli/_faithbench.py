@@ -225,7 +225,7 @@ def _faithbench_run(args: argparse.Namespace) -> int:
     from dataclasses import replace
     from zotero_summarizer.models.providers import resolve_stage
     from zotero_summarizer.services import run_log
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
     from zotero_summarizer.services.faithbench import RunInputs, run_benchmark
     from zotero_summarizer.services.faithbench import _dataset
     from zotero_summarizer.services.faithbench._runner import generation_identity, write_or_check_manifest
@@ -310,7 +310,7 @@ def _faithbench_run(args: argparse.Namespace) -> int:
 
 
 def _faithbench_judge(args: argparse.Namespace) -> int:
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
     from zotero_summarizer.services.faithbench import RunInputs, judge_run
     from zotero_summarizer.services.faithbench import _dataset
     from zotero_summarizer.services.faithbench._runner import _load_manifest

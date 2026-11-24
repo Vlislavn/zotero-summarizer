@@ -89,6 +89,7 @@ def test_cli_refuses_endpoint_change_before_constructing_clients(tmp_path, monke
     from zotero_summarizer.cli import main, _faithbench
     from zotero_summarizer.models.providers import resolve_stage
     from zotero_summarizer.services import _common
+    from zotero_summarizer.services import config_io
     from zotero_summarizer.services.llm import factory
     from zotero_summarizer.services.setup import bootstrap
     from zotero_summarizer.settings import Settings
@@ -96,7 +97,7 @@ def test_cli_refuses_endpoint_change_before_constructing_clients(tmp_path, monke
     settings = Settings.load(project_root=tmp_path)
     bootstrap.bootstrap_phase0(settings)
     monkeypatch.setattr(_common, "settings", lambda: settings)
-    config = _common.read_config(settings.config_path)
+    config = config_io.read_config(settings.config_path)
     resolved = resolve_stage(config.llm_routing, "deep_review")
     meta, items, papers_dir = _benchmark(settings.faithbench_dir)
     paths = RunPaths(settings.faithbench_dir / "runs" / "identity")
@@ -107,7 +108,7 @@ def test_cli_refuses_endpoint_change_before_constructing_clients(tmp_path, monke
     before = {path: path.read_bytes() for path in paths.run_dir.iterdir()}
     changed = config.model_copy(deep=True)
     changed.llm_routing.provider_by_name(resolved.provider.name).base_url = "https://changed.test/v1"
-    monkeypatch.setattr(_common, "read_config", lambda _: changed)
+    monkeypatch.setattr(config_io, "read_config", lambda _: changed)
     build, remote = Mock(), Mock()
     monkeypatch.setattr(factory, "build_client_for_stage", build)
     monkeypatch.setattr(_faithbench, "_remote_llm", remote)

@@ -8,7 +8,7 @@ import pytest
 from zotero_summarizer import cli
 from zotero_summarizer.runtime import AppContext, set_context
 from zotero_summarizer.services import lifecycle, readiness
-from zotero_summarizer.services._common import write_user_config
+from zotero_summarizer.services.config_io import write_user_config
 from zotero_summarizer.services.library import _flight, _review_cache, _review_identity, deep_review
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 from zotero_summarizer.storage import repositories

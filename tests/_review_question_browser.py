@@ -20,7 +20,7 @@ from zotero_summarizer.api import app as api_app
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.runtime import get_context
 from zotero_summarizer.services import lifecycle
-from zotero_summarizer.services._common import read_config, write_user_config
+from zotero_summarizer.services.config_io import read_config, write_user_config
 from zotero_summarizer.services.library import paper_render
 from zotero_summarizer.services.setup import bootstrap
 from zotero_summarizer.settings import Settings

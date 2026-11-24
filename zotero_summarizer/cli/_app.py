@@ -115,7 +115,7 @@ def _verify_deep_review(args: argparse.Namespace) -> int:
 
     settings = Settings.load(project_root=args.project_root)
     from zotero_summarizer.models.providers import resolve_stage
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
     from zotero_summarizer.services.llm.concurrency import deep_review_sub_concurrency
     from zotero_summarizer.services.library import _map_reduce, _paper_goal_summaries, quality_eval
     from zotero_summarizer.services.library._deep_review_progress import ReviewReporter
