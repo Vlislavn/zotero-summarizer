@@ -16,7 +16,6 @@ from zotero_summarizer.domain import unique_non_empty_strings  # noqa: F401  (re
 from zotero_summarizer.integrations.llm import to_text  # noqa: F401  (re-exported for services)
 from zotero_summarizer.models import GoalsConfig, SummarizeRequest
 from zotero_summarizer.models.config import USER_KNOBS, USER_OWNED_KEYS
-from zotero_summarizer.models.providers import ProviderConfig
 from zotero_summarizer.runtime import get_context
 from zotero_summarizer.services.config_overrides import apply_calibration, apply_env_overrides
 from zotero_summarizer.settings import Settings
@@ -31,124 +30,6 @@ def settings() -> Settings:
 
 def state() -> Any:
     return get_context().state
-
-
-def _quality_toggle_enabled(env_var: str, attr: str) -> bool:
-    env = os.environ.get(env_var)
-    if env is not None:
-        return env.strip().lower() in ("1", "true", "yes", "on")
-    app_state = getattr(state(), "app_state", None)
-    config = getattr(app_state, "config", None) if app_state is not None else None
-    qr = getattr(config, "quality_review", None) if config is not None else None
-    return bool(getattr(qr, attr, False))
-
-
-def band_primary_enabled() -> bool:
-    """Order-time deep-review QUALITY mode, shared by BOTH rank consumers (the
-    Library queue ``_ranking`` and the Today slate allocator): grade-only (default
-    — the shipped, measured behaviour) vs band-primary (highlight ↑ / flag ↓;
-    neutral & uncertain → exactly 0.0), a Phase-2-MEASURED arm. Config
-    ``quality_review.quality_band_primary``, overridden by ``ZS_QUALITY_BAND_PRIMARY``.
-    Optional-feature boundary: no config / no state → the grade-only default."""
-    return _quality_toggle_enabled("ZS_QUALITY_BAND_PRIMARY", "quality_band_primary")
-
-
-def rank_quality_first_enabled() -> bool:
-    """Quality-FIRST Today slate ordering (``services/model/rank_blend_quality``):
-    quality LEADS the key, topicality soft-gates — replacing the default
-    relevance×goal×prestige blend so a high-quality off-topic paper out-ranks a
-    low-quality on-topic one (the user's directive). Config
-    ``quality_review.rank_quality_first``, overridden by ``ZS_RANK_QUALITY_FIRST``.
-    OFF by default (pending the Track-C frontier eval). Optional-feature boundary:
-    no config / no state → OFF."""
-    return _quality_toggle_enabled("ZS_RANK_QUALITY_FIRST", "rank_quality_first")
-
-
-def rank_interleave_enabled() -> bool:
-    """P3 ONLINE interleave (ADR-A9 / GAP-G11): the Today slate builds BOTH
-    ranking arms (A0 control blend + A2 quality-first), team-draft-merges them
-    into the one slate the user sees (``services/model/team_draft``) and logs
-    per-item arm attribution (``storage/interleave``) so the user's normal
-    verdicts decide the flip via SPRT (``tools/eval_interleave.py``). Blind: the
-    UI never shows the arm. Takes PRECEDENCE over ``rank_quality_first`` (the
-    interleave already contains both arms). Config
-    ``quality_review.rank_interleave``, overridden by ``ZS_RANK_INTERLEAVE``.
-    OFF by default. Optional-feature boundary: no config / no state → OFF."""
-    return _quality_toggle_enabled("ZS_RANK_INTERLEAVE", "rank_interleave")
-
-
-def quality_promote_enabled() -> bool:
-    """Quality → must_read band promotion toggle (the inverse of the auto_quality
-    hide gate). The gate's compressed regressor never reaches the must_read band on
-    its own; promotion lifts a high-quality + on-goal + gate-confirmed paper to
-    must_read. ON by default (``tools/eval_quality_promote.py`` measured 0 flooding +
-    1.00 must/should precision on firewalled user verdicts). Config
-    ``quality_review.quality_promote``, overridden by ``ZS_QUALITY_PROMOTE=0``.
-    Optional-feature boundary: no config / no state → OFF (safe when uninitialised)."""
-    return _quality_toggle_enabled("ZS_QUALITY_PROMOTE", "quality_promote")
-
-
-def effective_llm_concurrency(provider: ProviderConfig | None, item_count: int) -> int:
-    """Worker count for a per-item LLM fan-out, conditional on the provider.
-
-    A **local** provider (loopback ``base_url``) runs **serial** (1) so one big
-    on-device model isn't asked to serve concurrent inference and thrash host
-    RAM. A **remote** provider uses the configured ``TRIAGE_JOB_CONCURRENCY`` cap,
-    never more than the work on hand. ``provider=None`` falls to the remote
-    branch — the safe default never silently serialises a real remote run.
-    """
-    n = max(1, int(item_count))
-    if provider is not None and provider.is_local:
-        return 1
-    return max(1, min(settings().triage_job_concurrency, n))
-
-
-def _quality_knob(name: str) -> int:
-    """``quality_review.<name>`` from the config (0 = unset → provider cap)."""
-    try:
-        return int(getattr(read_config(settings().config_path, settings().calibration_path).quality_review, name, 0) or 0)
-    except FileNotFoundError:  # no goals.yaml yet → provider caps
-        return 0
-
-
-def deep_review_fleet_concurrency(provider: ProviderConfig | None, item_count: int) -> int:
-    """Worker count for the MULTI-paper deep-review fan-out (the N "Read next" picks the
-    fleet / prewarm review at once).
-
-    A **local** provider stays **serial** (1) — one on-device model can't serve
-    concurrent inference without thrashing host RAM. A **remote** provider fans out to
-    the work on hand, capped by its own ``max_sub_concurrency`` (the per-provider remote
-    concurrency budget) when set, else **all N at once** (an API has no host-RAM
-    constraint). Deliberately NOT the global ``TRIAGE_JOB_CONCURRENCY`` — that knob
-    serialises LOCAL triage for RAM safety, so it must never throttle a genuinely remote,
-    RAM-free batch (the bug: with ``TRIAGE_JOB_CONCURRENCY=1`` a 5-pick remote batch ran
-    serially). ``provider=None`` falls to the remote branch (never silently serialises a
-    real remote run). Peak concurrent calls is this × ``deep_review_sub_concurrency``: that
-    many calls in flight PER REVIEW, enforced in ``_review_attempt`` however the branches
-    and inner pools fan out; both are bounded by ``max_sub_concurrency`` when capped."""
-    n = max(1, int(item_count))
-    if provider is not None and provider.is_local:
-        return 1
-    cap = _quality_knob("fleet_papers") or (getattr(provider, "max_sub_concurrency", None) if provider else None)
-    return min(n, cap) if cap else n
-
-
-def deep_review_sub_concurrency(provider: ProviderConfig | None) -> int:
-    """Number of LLM SUB-calls (self-consistency rubric samples / per-goal
-    summaries) to run in parallel WITHIN one paper's deep review.
-
-    A **local** provider stays serial (1) — one big on-device model can't absorb
-    concurrent inference without thrashing host RAM. A **remote** provider uses its
-    own ``max_sub_concurrency`` cap, falling back to ``TRIAGE_JOB_CONCURRENCY`` when
-    unset. ``provider=None`` falls to the remote branch (never silently serialises a
-    real remote run). Shared by the background job and the ``verify-deep-review`` CLI
-    so the two never drift."""
-    if provider is not None and provider.is_local:
-        return 1
-    configured = _quality_knob("calls_per_paper") or (getattr(provider, "max_sub_concurrency", None) if provider else None)
-    if configured is not None:
-        return max(1, int(configured))
-    return max(1, settings().triage_job_concurrency)
 
 
 def setup_logging() -> None:

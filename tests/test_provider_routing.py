@@ -129,7 +129,7 @@ def test_lean_deep_review_defaults_false_and_is_independent_of_is_local():
 
 
 def test_effective_llm_concurrency_local_vs_remote(monkeypatch):
-    import zotero_summarizer.services._common as common
+    import zotero_summarizer.services.llm.concurrency as common
     monkeypatch.setattr(common, "settings", lambda: types.SimpleNamespace(triage_job_concurrency=4))
     local = ProviderConfig(name="mlx", base_url="http://127.0.0.1:8080/v1", api_key_env="K")
     remote = ProviderConfig(name="k", base_url="https://remote.example/v1", api_key_env="K")

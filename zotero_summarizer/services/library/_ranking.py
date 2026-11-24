@@ -14,8 +14,7 @@ from statistics import median
 from typing import Any
 
 from zotero_summarizer.domain import TRIAGE_APPROVED_TAG_TOKEN, score_to_priority
-from zotero_summarizer.services._common import band_primary_enabled
-from zotero_summarizer.services._common import quality_promote_enabled
+from zotero_summarizer.services.model.quality_flags import band_primary_enabled, quality_promote_enabled
 from zotero_summarizer.services.emoji_signals import HARD_VETO_EMOJIS, READ_EMOJIS
 from zotero_summarizer.services.library._row_nearest import attach_nearest_kept, corpus_cache
 from zotero_summarizer.services.library._row_why import concrete_why

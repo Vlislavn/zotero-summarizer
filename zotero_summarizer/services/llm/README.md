@@ -144,6 +144,9 @@ Viewing, registration, listing, impact and selection saving never invoke a probe
   No unsupported parameter is injected and generator configuration is unchanged.
   Declared `structured_output` applies schema constraints to every Pydantic call
   through the shared adapter, including CLI calls and verifier/correction passes.
+- `concurrency.py` holds the LLM fan-out widths (`effective_llm_concurrency`, `deep_review_fleet_concurrency`,
+  `deep_review_sub_concurrency`): local provider → serial, remote → its caps; shared by the daemon,
+  deep-review job and `verify-deep-review` CLI.
 - `thinking.py` translates effort to Anthropic budgets, OpenAI
   `reasoning_effort`, or qwen/vLLM `enable_thinking`. Explicit `off` sends
   `reasoning_effort: none` in the plain OpenAI dialect; omitting it would preserve

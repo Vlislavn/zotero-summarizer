@@ -35,7 +35,7 @@ from zotero_summarizer.domain import (
     normalize_doi,
 )
 from zotero_summarizer.runtime import memoized
-from zotero_summarizer.services._common import rank_interleave_enabled, rank_quality_first_enabled
+from zotero_summarizer.services.model.quality_flags import rank_interleave_enabled, rank_quality_first_enabled
 from zotero_summarizer.services.model.team_draft import team_draft_merge
 from zotero_summarizer.services.triage.daily_select._allocation import allocate, _passes_model_floor
 from zotero_summarizer.services.triage.daily_select._analyzed import build_analyzed_slate, exploration_context

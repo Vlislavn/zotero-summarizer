@@ -30,7 +30,7 @@ from zotero_summarizer.models.config import USER_OWNED_KEYS
 _SKIP_SECTIONS: frozenset[str] = frozenset({"prompts"})
 
 # Back-compat names for knobs that already shipped a documented ``ZS_*`` var; the
-# existing dynamic readers (services/_common.band_primary_enabled,
+# existing dynamic readers (services/model/quality_flags.band_primary_enabled,
 # services/library/deep_review_prewarm) keep working — env wins either way.
 _ENV_ALIASES: dict[str, str] = {
     "quality_review.quality_band_primary": "ZS_QUALITY_BAND_PRIMARY",

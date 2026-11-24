@@ -83,7 +83,7 @@ swallowed unlogged again. `triage_backlog.status()` exposes `gate_reject_rate` /
 `gate_onward` so the Today banner can show "filtered X% by the ML gate". Concurrency for the
 remaining LLM work (legacy drain / live daemon) is provider-aware: **1 for a
 local model**, the configured `TRIAGE_JOB_CONCURRENCY` for a remote one
-(`services._common.effective_llm_concurrency`).
+(`services.llm.concurrency.effective_llm_concurrency`).
 
 **Acquire-before-score rescue (`recover_abstractless_rescues`, `feeds/_rescue`).**
 Prestige-journal RSS (Nature/Science/Cell/NEJM/Annals) ships only a boilerplate
@@ -238,7 +238,7 @@ A source goes to the model whole up to the feed provider's window (`_paper_body.
 Long full-text inputs reuse the library's source-safe mapper and the existing
 `quality_review.map_chunk_chars` setting instead of two unbounded halves. Maps
 run through `_map_reduce.map_chunks` (the deep-review map step) with the feed stage's
-`_common.deep_review_sub_concurrency` — parallel on a remote provider, serial on a local
+`services.llm.concurrency.deep_review_sub_concurrency` — parallel on a remote provider, serial on a local
 one — and a cancellation check before each chunk (a stop skips chunks not yet started; calls
 in flight finish first). Only explicit output truncation is
 subdivided down to the existing minimum work size. Empty or exhausted segments

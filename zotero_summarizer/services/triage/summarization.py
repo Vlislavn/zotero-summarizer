@@ -30,10 +30,10 @@ from zotero_summarizer.services.triage._json_output import parse_typed_output
 from zotero_summarizer.services.library._prompt_security import untrusted_input
 from zotero_summarizer.services.triage._method_admission import _admit_method_artifacts, _validate_pdf_authority
 from zotero_summarizer.services.triage._method_context import original_uri_context
+from zotero_summarizer.services.llm.concurrency import deep_review_sub_concurrency
 from zotero_summarizer.services._common import (
     LOGGER,
     build_log_prefix,
-    deep_review_sub_concurrency,
     extract_json_blob,
     log_context,
     settings,

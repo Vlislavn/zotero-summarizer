@@ -24,7 +24,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from zotero_summarizer.models import GoalsConfig
-from zotero_summarizer.services._common import deep_review_fleet_concurrency, settings, state
+from zotero_summarizer.services._common import settings, state
+from zotero_summarizer.services.llm.concurrency import deep_review_fleet_concurrency
 from zotero_summarizer.services.llm import factory
 from zotero_summarizer.services.search import session as session_store
 from zotero_summarizer.services.search import require_online

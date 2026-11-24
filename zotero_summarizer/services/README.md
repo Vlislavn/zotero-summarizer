@@ -99,7 +99,7 @@ NaN-rejecting `clamp`; `emoji_signals`
 bins via `domain` so label derivation == prediction; `read_config` applies the
 strict-offline override after env config, disabling prestige, OpenReview, and
 full-text refinement. `settings.offline_requested` is the one toggle used by
-RSS, uncached PDF, library acquisition, and Search network boundaries; the LLM-concurrency gates
+RSS, uncached PDF, library acquisition, and Search network boundaries; the LLM-concurrency gates (`services/llm/concurrency.py`)
 `effective_llm_concurrency` (triage per-item fan-out, remote→`TRIAGE_JOB_CONCURRENCY`),
 `deep_review_fleet_concurrency` (papers reviewed at once: `quality_review.fleet_papers`, else
 remote→`max_sub_concurrency`, else all N — NOT the triage knob, so a remote batch isn't throttled

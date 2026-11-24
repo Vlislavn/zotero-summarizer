@@ -104,3 +104,5 @@ The existing daemon training-ledger producer is retained with its original synth
 Retain original RSS partition consumption of the producer-owned private prefilter outcome, not generated tags.
 
 The existing question/native source stack carries the original post-commit materialization/verdict/recovery mirror callers. No new delivery controller or source-derived action is designed here.
+
+`_triage` sizes its pool with `services/llm/concurrency.effective_llm_concurrency`; `_tick` reads `services/model/quality_flags.rank_quality_first_enabled`.

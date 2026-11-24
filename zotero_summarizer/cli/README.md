@@ -246,3 +246,5 @@ runs only from **Weekly → Telegram** in the UI, and the one-time `telegram-aut
 command is the sole terminal step. The `research-feed run` command is RSS-only. See
 [Telegram news](../../docs/features.md#telegram-news). Source and synthetic lifecycle
 tests are not live-account acceptance.
+
+`serve`/`verify-deep-review` take the per-paper LLM call width from `services/llm/concurrency.deep_review_sub_concurrency` (no longer `services/_common`).

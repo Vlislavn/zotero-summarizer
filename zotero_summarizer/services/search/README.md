@@ -201,3 +201,5 @@ run_screen ─save→ ResearchSession(status=screened)                          
 - No dedicated bioRxiv/medRxiv leaf (OpenAlex, Europe PMC and Crossref index them).
 - Reuse provider leaves, identifier dedup, session serialization and `QueryPlan.display()`; add no
   competing retrieval/ranking loop.
+
+Paper fan-out width comes from `services/llm/concurrency.deep_review_fleet_concurrency`.

@@ -266,3 +266,5 @@ classifier loader. The cheap cache report checks that revision, not merely any
 bytes under the repository; an old snapshot cannot satisfy a new pin. Prefetch
 uses the actual pinned loader. Snapshot presence remains a cheap inventory
 check, while Doctor's fresh-process offline load verifies loadability.
+
+Calibration takes the per-paper LLM call width from `services/llm/concurrency.deep_review_sub_concurrency`.
