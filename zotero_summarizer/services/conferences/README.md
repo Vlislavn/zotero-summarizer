@@ -3,7 +3,7 @@
 Owner-defined conferences whose abstracts live **only** under `Settings.conferences_dir`
 (`data/conferences/`). Nothing here scores, embeds, clusters or calls a model; no other
 domain (triage, Today, ranking, Library, Search, corpus) reads or receives these records
-(REQ-S36). Layering: imports `api.errors`, `settings` and `services._common` only.
+(REQ-S36). Layering: imports `api.errors`, `settings`, `services._common` and `services._io` only.
 
 | File | Responsibility |
 |---|---|
@@ -69,3 +69,5 @@ conferences:
 
 A new conference of a known type is a block in the config. A new type is a recipe in
 `catalogue.py` (a new source kind also a downloader beside `crossref_supplement.py`); OpenReview is not built yet.
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.

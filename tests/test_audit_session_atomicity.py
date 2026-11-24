@@ -8,7 +8,7 @@ from threading import Barrier
 
 import pytest
 
-from zotero_summarizer.services._common import write_json_atomic
+from zotero_summarizer.services._io import write_json_atomic
 from zotero_summarizer.services.golden import relabel_audit as audit
 
 

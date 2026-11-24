@@ -15,7 +15,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from zotero_summarizer.services._common import write_json_atomic
+from zotero_summarizer.services._io import write_json_atomic
 from zotero_summarizer.services.golden.relabel_audit._constants import (
     AGE_BUCKET_NAMES,
     AuditCandidate,

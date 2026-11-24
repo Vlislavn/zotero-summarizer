@@ -27,3 +27,5 @@ UTF-8; its schema is unchanged. Publication is atomic, not a transaction spannin
 read–modify–write: concurrent updates can still overwrite an earlier snapshot.
 Add serialization if concurrent audit mutation must be supported; this does not
 promise power-loss durability (`fsync`).
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.

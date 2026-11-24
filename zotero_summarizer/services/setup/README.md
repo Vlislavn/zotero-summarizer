@@ -270,3 +270,5 @@ check, while Doctor's fresh-process offline load verifies loadability.
 Calibration takes the per-paper LLM call width from `services/llm/concurrency.deep_review_sub_concurrency`.
 
 Setup/doctor/calibration load and write goals.yaml through `services/config_io` (`read_config`, `write_user_config`).
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.

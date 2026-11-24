@@ -25,7 +25,8 @@ from typing import Any, Callable
 
 from zotero_summarizer.models import GoalsConfig
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import LOGGER, now_iso_z, read_json_or_empty, to_text, write_json_atomic
+from zotero_summarizer.services._common import LOGGER, to_text
+from zotero_summarizer.services._io import now_iso_z, read_json_or_empty, write_json_atomic
 
 # Throughput (approx tokens/sec) below which the endpoint is "lean" — a slow local
 # model uses the cheaper text/consistency caps so a deep review stays usable. A fast

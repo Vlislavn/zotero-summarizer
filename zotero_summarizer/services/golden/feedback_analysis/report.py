@@ -7,7 +7,7 @@ import re
 import stat
 from pathlib import Path
 
-from zotero_summarizer.services._common import atomic_write
+from zotero_summarizer.services._io import atomic_write
 
 from .provenance import strict_json
 from .inputs import BudgetExceeded, _no_symlinks, _regular_open

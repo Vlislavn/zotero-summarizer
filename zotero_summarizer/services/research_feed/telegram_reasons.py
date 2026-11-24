@@ -11,7 +11,7 @@ from contextlib import closing
 import json
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services._io import now_iso_z
 from zotero_summarizer.storage import repositories
 from zotero_summarizer.storage import research_feed_telegram as store
 

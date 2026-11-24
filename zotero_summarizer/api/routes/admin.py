@@ -30,7 +30,8 @@ from pydantic import BaseModel, Field
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services.golden import goldenset
 from zotero_summarizer.services.model.model_card import model_card
-from zotero_summarizer.services._common import now_iso, settings as get_settings
+from zotero_summarizer.services._common import settings as get_settings
+from zotero_summarizer.services._io import now_iso
 from zotero_summarizer.services.config_io import read_config
 
 

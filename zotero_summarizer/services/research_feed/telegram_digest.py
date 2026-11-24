@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from zotero_summarizer.models.research_feed import TelegramTransportError
 from zotero_summarizer.models.telegram_discussion import (
     TelegramCollectionStopped, TelegramConversation, TelegramTarget)
-from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services._io import now_iso_z
 from zotero_summarizer.services.research_feed import telegram_gist as gist
 from zotero_summarizer.services.research_feed import telegram_nli
 from zotero_summarizer.services.research_feed import telegram_progress as progress

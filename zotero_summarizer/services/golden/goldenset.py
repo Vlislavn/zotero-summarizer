@@ -24,7 +24,7 @@ from pydantic import TypeAdapter
 
 from zotero_summarizer.domain import LABEL_TAG_PREFIX
 from zotero_summarizer.services import emoji_signals
-from zotero_summarizer.services._common import atomic_write, connect_sqlite_ro
+from zotero_summarizer.services._io import atomic_write, connect_sqlite_ro
 from zotero_summarizer.services.golden import user_labels
 from zotero_summarizer.services.golden.csv_store import edit_csv
 from zotero_summarizer.storage.feeds import _parse_pub_year

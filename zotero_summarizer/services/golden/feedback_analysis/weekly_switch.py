@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 
-from zotero_summarizer.services._common import atomic_write
+from zotero_summarizer.services._io import atomic_write
 
 __all__ = ["is_enabled", "set_enabled"]
 

@@ -9,7 +9,7 @@ import uuid
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models.research_feed import TelegramSourceSettings
-from zotero_summarizer.services._common import now_iso_z, write_json_atomic
+from zotero_summarizer.services._io import now_iso_z, write_json_atomic
 from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services._adapters import require_loopback_endpoint
 from zotero_summarizer.services.research_feed import profile as profiles, telegram_processing, telegram_progress, telegram_selection

@@ -13,7 +13,8 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import now_iso_z, settings, state
+from zotero_summarizer.services._common import settings, state
+from zotero_summarizer.services._io import now_iso_z
 from zotero_summarizer.services.conferences import store
 from zotero_summarizer.services.conferences.catalogue import (
     LATE_BREAKING, RECIPES, UNKNOWN, Recipe, classify, shown_title)

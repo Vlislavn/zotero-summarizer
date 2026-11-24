@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import LOGGER, atomic_write, now_iso_z
+from zotero_summarizer.services._common import LOGGER
+from zotero_summarizer.services._io import atomic_write, now_iso_z
 from zotero_summarizer.services.library import _paper_body, _paper_pdf
 from zotero_summarizer.services.library.review_feedback_bundle import dump_json, load_json, locked
 

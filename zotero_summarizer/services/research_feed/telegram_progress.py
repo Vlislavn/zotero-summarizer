@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 
-from zotero_summarizer.services._common import write_json_atomic
+from zotero_summarizer.services._io import write_json_atomic
 from zotero_summarizer.services.research_feed.telegram_selection import output_dir as _output_dir
 
 LOG = logging.getLogger(__name__)

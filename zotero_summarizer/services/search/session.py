@@ -18,7 +18,8 @@ from pathlib import Path
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.domain import is_sha256_hex
-from zotero_summarizer.services._common import now_iso_z, settings
+from zotero_summarizer.services._common import settings
+from zotero_summarizer.services._io import now_iso_z
 from zotero_summarizer.services.search._models import (
     Candidate,
     QueryPlan,

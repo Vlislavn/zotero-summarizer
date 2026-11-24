@@ -40,3 +40,5 @@ reasons keep their message.
 
 Tests: `tests/test_method_card.py` (every shown quote is in the paper; a build leaves `deep_reviews.json` and
 `review_revision` untouched; one job per key; 300 s retry window).
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.

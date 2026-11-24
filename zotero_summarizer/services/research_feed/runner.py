@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from zotero_summarizer.models import ResearchCandidate, ResearchFeedTriage
 from zotero_summarizer.models.research_feed import parse_run_budgets
-from zotero_summarizer.services._common import now_iso_z, write_json_atomic
+from zotero_summarizer.services._io import now_iso_z, write_json_atomic
 from zotero_summarizer.services.library import _feed_assessment
 from zotero_summarizer.services.research_feed.cursor import NOT_CACHED, CandidateCursor
 from zotero_summarizer.services.research_feed.card import build_card

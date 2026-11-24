@@ -252,7 +252,7 @@ def _live_labels(zotero_db_path: Path, keys: set[str]) -> dict[str, list[str]]:
     """``{item_key: label_tags}`` for keys that are PRESENT + live in Zotero
     (libraryID=1, not trashed). Keys absent from the result are missing /
     unreadable / trashed — callers must NOT retract those."""
-    from zotero_summarizer.services._common import connect_sqlite_ro
+    from zotero_summarizer.services._io import connect_sqlite_ro
 
     out: dict[str, list[str]] = {}
     if not keys:

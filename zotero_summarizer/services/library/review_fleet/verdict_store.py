@@ -23,7 +23,8 @@ from typing import Any
 from pydantic import ValidationError
 
 from zotero_summarizer.models.triage import ProposedVerdict
-from zotero_summarizer.services._common import LOGGER, now_iso_z, settings, write_json_atomic
+from zotero_summarizer.services._common import LOGGER, settings
+from zotero_summarizer.services._io import now_iso_z, write_json_atomic
 from zotero_summarizer.services.library._review_cache import _quarantine_corrupt_cache
 
 _CACHE_FILENAME = "proposed_verdicts.json"

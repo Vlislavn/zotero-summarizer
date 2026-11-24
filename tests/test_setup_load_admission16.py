@@ -279,7 +279,7 @@ def test_doctor_inference_unknown_and_modes_not_ready(tmp_path, monkeypatch):
 
 
 def test_persisted_mode_readout_cannot_outlive_its_failed_dry_run(tmp_path):
-    from zotero_summarizer.services._common import write_json_atomic
+    from zotero_summarizer.services._io import write_json_atomic
 
     settings = Settings.load(project_root=tmp_path)
     bootstrap_phase0(settings)
@@ -372,7 +372,7 @@ def test_policy_revision_invalidates_old_ready_not_volatile_memory(tmp_path, mon
                         lambda provider, model: known_observation(resolved, 1))
     assert doctor._config_signature(configuration) == signature
     rows = [doctor._row(key, "ready", "synthetic") for key in doctor._CHECKS]
-    from zotero_summarizer.services._common import write_json_atomic
+    from zotero_summarizer.services._io import write_json_atomic
     write_json_atomic(configuration.data_dir / "setup_doctor.json", {
         "status": "ready", "ready": True, "checks": rows,
         "verification_revision": doctor.ADMISSION_REVISION, "config_signature": signature})

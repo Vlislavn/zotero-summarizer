@@ -198,3 +198,5 @@ Fan-out widths come from `services/llm/concurrency.py` (`deep_review_fleet_concu
 Review/interpretation/digest-verification parse LLM JSON with `services/llm/json_response.extract_json_blob`.
 
 Library services load goals.yaml through `services/config_io.read_config`.
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.

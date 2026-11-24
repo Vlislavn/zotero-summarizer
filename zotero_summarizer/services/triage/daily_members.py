@@ -5,7 +5,8 @@ from contextlib import closing
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import connect_sqlite_ro, settings
+from zotero_summarizer.services._common import settings
+from zotero_summarizer.services._io import connect_sqlite_ro
 from zotero_summarizer.services.library._review_cache import usable_reviews_for_keys
 from zotero_summarizer.services.triage.daily_select._candidate import _row_item_key
 from zotero_summarizer.services.triage.daily_select._recommendation import recommendation, review_entry

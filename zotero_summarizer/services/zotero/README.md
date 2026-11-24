@@ -122,3 +122,5 @@ preserves the independently accepted review but leaves the worker in error;
 confirmation/source/target/backup and uncertain-delivery gates are unchanged.
 
 Pending Reject commits generated audit and ordinary status changes together after validating the entire selection; a stale row or direct/mirror history refuses all selected changes.
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.

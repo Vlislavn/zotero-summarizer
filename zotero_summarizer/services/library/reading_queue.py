@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from zotero_summarizer.services._common import now_iso_z, write_json_atomic
+from zotero_summarizer.services._io import now_iso_z, write_json_atomic
 
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.library import _flight

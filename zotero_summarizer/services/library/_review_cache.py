@@ -17,7 +17,8 @@ from uuid import uuid4
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.runtime import memoized, request_memo
-from zotero_summarizer.services._common import LOGGER, now_iso_z, settings, write_json_atomic
+from zotero_summarizer.services._common import LOGGER, settings
+from zotero_summarizer.services._io import now_iso_z, write_json_atomic
 
 _CACHE_FILENAME = "deep_reviews.json"
 _CACHE_LOCK = threading.RLock()   # guards cache reads, quarantine, and read-merge-write

@@ -149,3 +149,5 @@ and final-label manual-override detection retain their existing semantics.
 
 [Feedback analysis](feedback_analysis/README.md) owns retained input capture,
 descriptive reports, the manual command and opt-in weekly scheduling/recovery.
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.

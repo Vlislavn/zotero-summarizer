@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services._io import now_iso_z
 from zotero_summarizer.services.library.review_feedback_bundle import FIELDS, dump_json, load_json
 
 STATUSES = ("confirmed", "rejected", "unclear")

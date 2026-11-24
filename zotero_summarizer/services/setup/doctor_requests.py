@@ -5,7 +5,7 @@ from zotero_summarizer.storage.configuration_lock import configuration_lock
 
 from zotero_summarizer.integrations.llm_requests import _summarize_requests
 from zotero_summarizer.models.providers import STAGES, resolve_stage
-from zotero_summarizer.services._common import read_json_or_empty, write_json_atomic
+from zotero_summarizer.services._io import read_json_or_empty, write_json_atomic
 from zotero_summarizer.services.config_io import read_config
 
 OWNERSHIP_REVISION = "request-inventory-v1"

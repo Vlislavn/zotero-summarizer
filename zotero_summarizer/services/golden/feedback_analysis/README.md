@@ -66,7 +66,7 @@ private report through a dedicated child process (manual `goldenset analyze-feed
   precedence; a malformed env value raises even when overridden); verification uses the same env cap. SQLite progress,
   backup callbacks and file-chunk boundaries check it; blocking filesystem calls cannot be interrupted in-process.
 - New directories/files request POSIX 0700/0600; source permissions never change. Manifest replacement reuses
-  `services._common.atomic_write` (no fsync, no power-loss durability).
+  `services._io.atomic_write` (no fsync, no power-loss durability).
 
 ## Analysis (`analyze_inputs`)
 

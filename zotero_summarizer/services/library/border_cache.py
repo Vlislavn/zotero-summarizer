@@ -21,7 +21,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services._io import now_iso_z
 from zotero_summarizer.services.library import _flight
 
 

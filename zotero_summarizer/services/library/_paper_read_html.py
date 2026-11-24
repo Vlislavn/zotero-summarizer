@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services._io import now_iso_z
 
 _FIGURE_NAME_RE = re.compile(r"^fig\d+_[A-Za-z0-9_.-]+\.(png|jpe?g)$")
 _REVIEW_OUTDATED_FINDING = "review_outdated: the saved review is outdated (model or prompts changed), so this page has no brief or digest"

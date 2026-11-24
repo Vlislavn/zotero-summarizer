@@ -184,7 +184,7 @@ def test_optional_permission_errors_propagate_not_missing(tmp_path, monkeypatch,
 
 
 def test_manifest_publication_failure_preserves_sources_and_sibling_bundle(tmp_path, monkeypatch):
-    from zotero_summarizer.services import _common
+    from zotero_summarizer.services import _io
     settings = make_settings(tmp_path)
     create_current_db(settings)
     previous = freeze(settings, "previous")
@@ -194,7 +194,7 @@ def test_manifest_publication_failure_preserves_sources_and_sibling_bundle(tmp_p
         raise OSError("synthetic publication failure")
 
     with monkeypatch.context() as scoped:
-        scoped.setattr(_common, "atomic_write", fail_atomic)
+        scoped.setattr(_io, "atomic_write", fail_atomic)
         with pytest.raises(OSError, match="synthetic publication failure"):
             freeze(settings)
     assert file_receipt(settings.triage_db_path) == before

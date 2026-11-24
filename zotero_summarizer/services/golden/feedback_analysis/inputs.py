@@ -263,7 +263,7 @@ def freeze_inputs(settings: Settings, destination: Path, *, cutoff: datetime, pr
         payload = canonical_bytes(manifest)
         if len(payload) > MAX_MANIFEST_BYTES:
             raise BudgetExceeded("frozen-input manifest byte budget exhausted")
-        from zotero_summarizer.services._common import atomic_write
+        from zotero_summarizer.services._io import atomic_write
 
         def write_manifest(path):
             guard.check()

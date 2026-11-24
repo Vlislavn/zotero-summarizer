@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from zotero_summarizer.services._common import now_iso_z, write_json_atomic
+from zotero_summarizer.services._io import now_iso_z, write_json_atomic
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.research_feed import telegram_ranking as ranking
 from zotero_summarizer.services.research_feed import telegram_relevance as relevance

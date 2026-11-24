@@ -240,3 +240,5 @@ the Settings Test (a failed Cloud test says the key was rejected or the service 
 the key is never returned or logged; Local sends no key. No target → callers use the language-model path.
 
 Provider/connection services load and write goals.yaml through `services/config_io` (`read_config`, `write_user_config`, `write_config_atomic`).
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.

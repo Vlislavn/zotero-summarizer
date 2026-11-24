@@ -250,3 +250,5 @@ tests are not live-account acceptance.
 `serve`/`verify-deep-review` take the per-paper LLM call width from `services/llm/concurrency.deep_review_sub_concurrency` (no longer `services/_common`).
 
 CLI commands load/save goals.yaml through `services/config_io` (`read_config`, `write_user_config`).
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.

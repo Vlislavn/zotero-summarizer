@@ -14,7 +14,8 @@ import hashlib
 import json
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import to_text, write_json_atomic
+from zotero_summarizer.services._common import to_text
+from zotero_summarizer.services._io import write_json_atomic
 from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services.research_feed import profile as profiles, telegram_review
 from zotero_summarizer.services.research_feed.telegram_selection import output_dir as _output_dir

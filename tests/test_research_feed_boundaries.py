@@ -79,7 +79,7 @@ def test_real_weekly_run_uses_profile_defaults_or_exact_override(tmp_path, monke
     _seed(settings, "paper-bb", "Agent evaluation B")
     profile = load_profile(settings.data_dir)
     profile.card_budget = 2
-    from zotero_summarizer.services._common import write_json_atomic
+    from zotero_summarizer.services._io import write_json_atomic
     write_json_atomic(settings.data_dir / "research_feed" / "profile.json", profile.model_dump())
     ensure = Mock(return_value={})
     monkeypatch.setattr(runner, "_ensure_reviews", ensure)

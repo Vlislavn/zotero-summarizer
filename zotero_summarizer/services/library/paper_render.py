@@ -15,7 +15,8 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import now_iso_z, settings, state
+from zotero_summarizer.services._common import settings, state
+from zotero_summarizer.services._io import now_iso_z
 from zotero_summarizer.services.library import (
     _paper_read_brief,
     _paper_docling,

@@ -13,7 +13,7 @@ from datetime import datetime
 import logging
 import time
 
-from zotero_summarizer.services._common import now_iso_z, write_json_atomic
+from zotero_summarizer.services._io import now_iso_z, write_json_atomic
 from zotero_summarizer.services.research_feed.telegram_collect import collect_pages
 from zotero_summarizer.services.research_feed import telegram_history
 from zotero_summarizer.services.research_feed.telegram_selection import output_dir as _output_dir

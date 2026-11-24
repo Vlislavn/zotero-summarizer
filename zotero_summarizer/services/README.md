@@ -59,7 +59,7 @@ or incompatible required cached gate fails explicitly instead of training.
 
 ```
               ┌─────────── shared/infra (top level) ───────────┐
-              │ _common _adapters lifecycle run_log             │
+              │ _common _io _adapters lifecycle run_log         │
               │ interaction_log config health results            │
               │ corpus emoji_signals                             │
               └────────────────────────────────────────────────┘
@@ -88,7 +88,8 @@ their prior options; all setup local-LLM requests must first pass admission.
 
 LLM-output JSON parsing (`extract_json_blob`, `safe_parse_response_json`) lives in `llm/json_response.py`.
 
-Shared files: `_common` (helpers: settings/logging/sqlite-ro/now_iso_z/html_to_text/
+Shared files: `_common` (settings/state accessors, logging, `html_to_text`, `clamp`, `is_app_rss_source`);
+`_io` (leaf: sqlite-ro/now_iso/now_iso_z and
 `atomic_write` (callback) + `write_json_atomic`
 (dict→JSON; keyword-only `indent=None`, default output unchanged) for tmp+replace artifact/cache writes. JSON publication delegates to
 the callback writer: both use a unique sibling staging file per invocation and
@@ -96,8 +97,8 @@ clean it up on failure. They do not serialize read–modify–write operations o
 promise power-loss durability (`fsync`);
 `read_json_or_empty` (their read
 counterpart: missing state file → `{}`, an EXISTING-but-corrupt file raises),
-`is_app_rss_source` (the one definition of "row came from the app-RSS reader"),
-NaN-rejecting `clamp`; `emoji_signals`
+`is_app_rss_source` (the one definition of "row came from the app-RSS reader", in `_common`),
+NaN-rejecting `clamp` (in `_common`); `emoji_signals`
 bins via `domain` so label derivation == prediction; `config_io.read_config` (goals.yaml load/save lives in `config_io.py`, not `_common`) applies the
 strict-offline override after env config, disabling prestige, OpenReview, and
 full-text refinement. `settings.offline_requested` is the one toggle used by

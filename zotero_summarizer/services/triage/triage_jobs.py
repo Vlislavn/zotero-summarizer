@@ -16,9 +16,13 @@ from zotero_summarizer.services.triage._plain_error import plain_error
 from zotero_summarizer.services.triage._execution import JobStopped, check_cancelled, run_blocking
 from zotero_summarizer.services.llm.concurrency import effective_llm_concurrency
 from zotero_summarizer.services._common import (
-    LOGGER, build_log_prefix, now_iso, settings, state,
+    LOGGER,
+    build_log_prefix,
+    settings,
+    state,
     unique_non_empty_strings,
 )
+from zotero_summarizer.services._io import now_iso
 from zotero_summarizer.services.zotero.zotero import get_zotero_reader_or_raise
 from zotero_summarizer.storage import repositories as triage_db
 

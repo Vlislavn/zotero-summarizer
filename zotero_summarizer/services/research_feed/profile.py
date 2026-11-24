@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from zotero_summarizer.models import ResearchProfile
-from zotero_summarizer.services._common import write_json_atomic
+from zotero_summarizer.services._io import write_json_atomic
 
 
 DEFAULT_THEMES = [

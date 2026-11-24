@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import LOGGER, now_iso_z, settings, state
+from zotero_summarizer.services._common import LOGGER, settings, state
+from zotero_summarizer.services._io import now_iso_z
 from zotero_summarizer.services.library import _review_cache, deep_review, review_feedback_bundle as bundle
 from zotero_summarizer.services.library import review_feedback_check as check, review_feedback_snapshot as snapshot
 from zotero_summarizer.storage import repositories, review_feedback as store

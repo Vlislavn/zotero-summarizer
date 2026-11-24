@@ -26,7 +26,7 @@ from dotenv import dotenv_values
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models.setup import UpdatePathsResponse, UpdatePathsValidation
-from zotero_summarizer.services._common import atomic_write
+from zotero_summarizer.services._io import atomic_write
 
 
 # The ONLY keys this writer may set. Frozen — never widen to cover secrets.

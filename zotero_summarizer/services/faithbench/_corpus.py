@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from zotero_summarizer.services._common import atomic_write
+from zotero_summarizer.services._io import atomic_write
 from zotero_summarizer.services.faithbench._constants import (
     CHUNK_CHARS,
     CHUNK_OVERLAP,

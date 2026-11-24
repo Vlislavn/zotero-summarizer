@@ -11,7 +11,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from zotero_summarizer.services._common import atomic_write, settings, write_json_atomic
+from zotero_summarizer.services._common import settings
+from zotero_summarizer.services._io import atomic_write, write_json_atomic
 
 
 def _path(conf_id: str, year: int, suffix: str = ".json") -> Path:

@@ -166,3 +166,5 @@ by default; `--run` requires `--capture-local` consent; existing-run scoring/exp
   graded by keywords.
 
 Build/judge/runner modules parse LLM JSON with `services/llm/json_response.extract_json_blob`.
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.

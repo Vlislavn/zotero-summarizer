@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.domain import normalize_arxiv_id, normalize_doi
-from zotero_summarizer.services._common import connect_sqlite_ro
+from zotero_summarizer.services._io import connect_sqlite_ro
 
 
 def open_ro(db_path: Path) -> sqlite3.Connection:

@@ -26,7 +26,7 @@ def _receipt(settings, purpose: str, result: dict) -> dict:
 
 
 def _write_receipt(path: Path, value: dict) -> None:
-    from zotero_summarizer.services._common import write_json_atomic
+    from zotero_summarizer.services._io import write_json_atomic
 
     try:
         write_json_atomic(path, value)

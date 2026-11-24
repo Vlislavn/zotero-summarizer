@@ -13,7 +13,7 @@ from zipfile import ZipFile
 
 import joblib
 
-from zotero_summarizer.services._common import atomic_write
+from zotero_summarizer.services._io import atomic_write
 
 
 def model_path(model_dir: Path, classifier_name: str) -> Path:

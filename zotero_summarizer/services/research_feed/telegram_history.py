@@ -14,7 +14,7 @@ import re
 import threading
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import now_iso_z, write_json_atomic
+from zotero_summarizer.services._io import now_iso_z, write_json_atomic
 from zotero_summarizer.services.research_feed import telegram_reasons
 from zotero_summarizer.services.research_feed.telegram_selection import output_dir
 

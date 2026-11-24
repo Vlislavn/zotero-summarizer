@@ -94,7 +94,7 @@ def test_export_and_appends_preserve_all_namespaced_labels(tmp_path):
 
 
 def test_failed_publication_preserves_original_and_releases_lock(tmp_path, monkeypatch):
-    from zotero_summarizer.services import _common
+    from zotero_summarizer.services import _io
 
     path = tmp_path / "golden.csv"
     _write_csv([_sample("SEED")], path)
@@ -104,7 +104,7 @@ def test_failed_publication_preserves_original_and_releases_lock(tmp_path, monke
         raise OSError("publication failed")
 
     with monkeypatch.context() as scoped:
-        scoped.setattr(_common.os, "replace", fail_replace)
+        scoped.setattr(_io.os, "replace", fail_replace)
         with pytest.raises(OSError, match="publication failed"):
             _write_golden_sample(_sample("feed:1"), path)
     assert path.read_bytes() == before

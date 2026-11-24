@@ -205,3 +205,5 @@ run_screen ─save→ ResearchSession(status=screened)                          
 Paper fan-out width comes from `services/llm/concurrency.deep_review_fleet_concurrency`.
 
 `intent` and `refine` parse LLM JSON with `services/llm/json_response.extract_json_blob`.
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.

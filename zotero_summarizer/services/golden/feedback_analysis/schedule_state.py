@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from zotero_summarizer.domain import is_sha256_hex
-from zotero_summarizer.services._common import atomic_write
+from zotero_summarizer.services._io import atomic_write
 
 from .history import aware_time
 from .inputs import _no_symlinks, verify_inputs

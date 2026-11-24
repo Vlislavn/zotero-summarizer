@@ -85,3 +85,5 @@ check or an eight-character Zotero-key grammar; the reader resolves actual recor
 **Boundaries:** imports `deep_review`/`reading_queue` (sibling library modules),
 `_flight` (shared single-flight latch), `models.triage` (`ProposedVerdict`), and
 `settings` (the project-local model-dir path) — standard `services/` rules.
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.
