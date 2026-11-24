@@ -12,6 +12,7 @@ from typing import Any, Callable, Sequence, TypeVar
 
 from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
     LOGGER,
+    ZOTERO_KEY_ALPHABET,
     WriteColumns,
     ZoteroWriteError,
     is_expected_sqlite_io,
@@ -44,7 +45,7 @@ class ZoteroWriter(
 ):
     """Write adapter that applies reviewed tag/note changes to Zotero SQLite."""
 
-    _KEY_ALPHABET = "23456789ABCDEFGHIJKLMNPQRSTUVWXYZ"
+    _KEY_ALPHABET = ZOTERO_KEY_ALPHABET
 
     def __init__(self, zotero_data_dir: str | Path | None = None) -> None:
         data_dir, db_path = resolve_zotero_data_dir(zotero_data_dir, ZoteroWriteError)

@@ -10,6 +10,9 @@ from typing import Callable
 
 LOGGER = logging.getLogger("zotero_summarizer.integrations.zotero_write")
 
+# 8-char Zotero key alphabet (the one source of truth, also used by `services`).
+ZOTERO_KEY_ALPHABET = "23456789ABCDEFGHIJKLMNPQRSTUVWXYZ"
+
 
 class ZoteroWriteError(RuntimeError):
     """Write failure; only explicitly classified environmental IO is optional."""

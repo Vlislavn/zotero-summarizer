@@ -7,9 +7,12 @@ JSON file next to ``operation.json``. ``report`` is a no-op until the child call
 from __future__ import annotations
 
 import json
+import logging
 
 from zotero_summarizer.services._common import write_json_atomic
 from zotero_summarizer.services.research_feed.telegram_selection import output_dir as _output_dir
+
+LOG = logging.getLogger(__name__)
 
 STAGES = ("channels", "comments", "summaries")
 _path = None
@@ -25,8 +28,8 @@ def report(stage: str, done: int = 0, total: int = 0) -> None:
         return
     try:
         write_json_atomic(_path, {"stage": stage, "done": done, "total": total})
-    except Exception:
-        pass
+    except Exception as exc:  # best-effort: a progress write must not fail the run
+        LOG.warning("telegram progress write failed (%s): %s", stage, exc)
 
 
 def read(settings) -> dict | None:

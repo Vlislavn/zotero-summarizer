@@ -71,7 +71,7 @@ cross-process lock. `telegram_job.start` is the **«Check channels»** backgroun
 running status (never a second run; another action holding the lock → `409 telegram_busy`).
 `GET /telegram/status` adds `running`, `consented`, `started_at`, `elapsed_s`, `retry_at` (account
 flood-wait still ahead) and `progress` (`stage` channels→comments→summaries with `done/total`,
-written by the child through `telegram_progress`, a no-op outside the digest child). `operation.json`
+written by the child through `telegram_progress`, a no-op outside the digest child; a failed write is logged as a warning and never fails the run). `operation.json`
 keeps the server `pid`; a `collecting` state whose pid is dead or older than 10 min reads as
 `error: interrupted` (server restart mid-run never sticks). Errors are codes the UI renders in
 English: `missing_session|session_unauthorized|revoked_session` (the only case that shows the

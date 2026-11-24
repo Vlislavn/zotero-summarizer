@@ -151,6 +151,8 @@ async def get_daily(K: int = 5, lookback_hours: int = 168) -> dict[str, Any]:
             policy="analyzed",
         )
         payload = _slate_to_payload(slate)
+        # Intentional write (owner-approved Today exposure log): every GET is one visit, logged with a
+        # fresh slate_id that the browser adopts; the exploration day limit reads this log back.
         payload["slate_id"] = await asyncio.to_thread(today_exposure.record_slate, payload, k=K)
         payload["unreviewed"] = await asyncio.to_thread(_shelf_payload, payload["unreviewed"])
         payload["preparation"] = await asyncio.to_thread(today_preparation.status, _db_path())

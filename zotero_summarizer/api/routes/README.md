@@ -12,7 +12,7 @@ and action endpoints retain their shared contracts.
 `POST /api/daily/events` (`_daily_events`) appends browser Today events (shown, dwell,
 review/link opens) through `services/triage/today_exposure`; the request model is the
 whole validation (enums, ids, ≤50 events, bounded durations). `GET /api/daily` also
-returns the logged `slate_id`; saving a review note logs its length, not its text.
+returns the logged `slate_id` (each GET is one logged visit, by design); saving a review note logs its length, not its text.
 
 `POST /api/daily/verdict` and `POST /api/daily/verdict/undo` (`_daily_verdict`) record /
 retract ONE card's decision (must/should/could/dont_read) plus optional canonical reason
