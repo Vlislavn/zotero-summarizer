@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from zotero_summarizer.models import SummarizeRequest, SummarizeResponse
-from zotero_summarizer.services._common import effective_llm_concurrency
+from zotero_summarizer.services.llm.concurrency import effective_llm_concurrency
 from zotero_summarizer.services.model import prestige as prestige_service
 from zotero_summarizer.services.model import scoring as scoring_service
 from zotero_summarizer.services.model import surprise as surprise_service

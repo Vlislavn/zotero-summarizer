@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 
+from zotero_summarizer.integrations._zotero_write_common import ZOTERO_KEY_ALPHABET
 from zotero_summarizer.integrations.app_rss import AppRssReader
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.models import SummarizeResponse
@@ -22,9 +23,6 @@ from zotero_summarizer.services._common import state as get_state
 from zotero_summarizer.storage import feeds as feeds_storage
 
 LOGGER = logging.getLogger("zotero_summarizer.services.triage.feeds")
-
-# 8-char Zotero key alphabet — must match ZoteroWriter._KEY_ALPHABET.
-_ZOTERO_KEY_ALPHABET = "23456789ABCDEFGHIJKLMNPQRSTUVWXYZ"
 
 _DEFAULT_BLACK_SWAN_TAG = "🦢 black-swan"
 
@@ -72,7 +70,7 @@ class DaemonTickReport:
 
 def _generate_zotero_key(seen: set[str]) -> str:
     for _ in range(64):
-        candidate = "".join(random.choice(_ZOTERO_KEY_ALPHABET) for _ in range(8))
+        candidate = "".join(random.choice(ZOTERO_KEY_ALPHABET) for _ in range(8))
         if candidate not in seen:
             seen.add(candidate)
             return candidate

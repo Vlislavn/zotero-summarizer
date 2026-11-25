@@ -1,16 +1,23 @@
-"""Which configured research goal a candidate matched best (display only).
+"""``aux_context.goal_sims`` (``{goal text: cosine}``): the one parser, and which goal matched best.
 
-``aux_context.goal_sims`` is ``{goal text: cosine}``; ``row_goal_sim`` keeps the
-max value, this keeps its key so the Today card can say WHICH goal. It never
-feeds ranking. ``None`` = no goal signal (same contract as ``goal_sim``).
+``row_goal_sim`` keeps the max value; ``best_goal_text`` keeps its key so the Today card can
+say WHICH goal (display only, never feeds ranking). ``None`` = no goal signal.
 """
 from __future__ import annotations
 
 from typing import Any
 
 
-def row_goal_text(payload: dict[str, Any]) -> str | None:
-    """Goal text with the highest cosine in ``aux_context.goal_sims`` (``None`` if none)."""
-    sims = (payload.get("aux_context") or {}).get("goal_sims")
-    scored = {str(g): float(v) for g, v in (sims or {}).items() if v is not None}
-    return max(scored, key=scored.__getitem__) if scored else None
+def parse_goal_sims(aux: dict[str, Any]) -> dict[Any, float]:
+    """``aux["goal_sims"]`` as ``{goal: cosine}`` without null values (``{}`` if absent/null)."""
+    sims = aux.get("goal_sims")
+    if sims is None:
+        return {}
+    if not isinstance(sims, dict):
+        raise ValueError("payload.aux_context.goal_sims must be a JSON object or null")
+    return {goal: float(v) for goal, v in sims.items() if v is not None}
+
+
+def best_goal_text(sims: dict[Any, float]) -> str | None:
+    """Goal text with the highest cosine (``None`` if none)."""
+    return str(max(sims, key=sims.__getitem__)) if sims else None

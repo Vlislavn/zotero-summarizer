@@ -37,8 +37,8 @@ LAYER_RULES: list[tuple[str, tuple[str, ...]]] = [
 RUNTIME_FORBIDDEN = ("zotero_summarizer.services", "zotero_summarizer.api")
 
 SHARED_SERVICE_MODULES = {
-    "_common", "_adapters", "lifecycle", "run_log", "interaction_log",
-    "config", "config_overrides", "health", "readiness", "results", "corpus",
+    "_common", "_io", "_adapters", "lifecycle", "run_log", "interaction_log",
+    "config", "config_io", "config_overrides", "health", "readiness", "results", "corpus",
     "emoji_signals", "__init__",
 }
 SERVICE_DOMAINS = ("model", "golden", "triage", "library", "zotero")

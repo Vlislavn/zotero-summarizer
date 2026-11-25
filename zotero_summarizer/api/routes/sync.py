@@ -68,7 +68,6 @@ def _db_path():
 
 @router.get("/pull")
 def pull(protocol: int = Query(ge=1, le=1), since: int = Query(default=0, ge=0)):
-    assert protocol == 1
     return service.pull(_db_path(), since)
 
 

@@ -26,7 +26,7 @@ export { StatusBanner } from '../components/library/shared.jsx';
 // tag_changes (add/remove tag inputs), add/remove_from_collection (a collection
 // <select>), and add_note (title + HTML body). Drafts are lazily seeded from
 // the change payload so controlled inputs always have a value.
-export function ChangeEditor({ change, drafts, setDrafts, flatCollections, saving, onSave, busy }) {
+function ChangeEditor({ change, drafts, setDrafts, flatCollections, saving, onSave, busy }) {
   if (change.generated_preview) return null;
   const getField = (field) => {
     const existing = drafts[change.id];

@@ -12,7 +12,6 @@ from zotero_summarizer.services.triage.feeds._common import (  # noqa: F401
     DaemonTickReport,
     TriagedCandidate,
     _DEFAULT_BLACK_SWAN_TAG,
-    _ZOTERO_KEY_ALPHABET,
     _dim_value,
     _generate_zotero_key,
     _infer_item_type,

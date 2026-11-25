@@ -11,7 +11,7 @@ vi.mock('../api/goldenApi.js', () => ({
   fetchBorderSuggestions: vi.fn(), submitVerdict: vi.fn(), deleteVerdict: vi.fn(),
 }));
 vi.mock('../api/libraryApi.js', () => ({
-  fetchCollections: async () => ({ items: [] }), fetchTags: async () => ({ items: [] }),
+  fetchCollections: async () => ({ items: [] }), fetchTags: async () => ({ items: [] }), queueRejectTag: vi.fn(),
 }));
 vi.mock('../components/paper/PaperDetailView/index.jsx', () => ({ default: () => null }));
 
@@ -67,14 +67,23 @@ it('blocks 1–4 for an uncached selection, keeps j/k and preserves its rational
   await act(async () => { finish(b); });
   await screen.findByRole('heading', { name: b.title });
 
+  // Overwriting a verdict never asks: it saves at once, shows the Undo toast, and `z` restores the prior one.
   press('1');
-  expect(confirm).toHaveBeenCalledOnce();
-  expect(submitVerdict).not.toHaveBeenCalled();
-  confirm.mockReturnValue(true);
+  await waitFor(() => expect(submitVerdict).toHaveBeenLastCalledWith({
+    item_key: b.item_key, user_priority: 'must_read', comment: 'Keep this saved rationale', surface: 'library_verdicts',
+  }));
+  expect(confirm).not.toHaveBeenCalled();
+  expect((await screen.findByTestId('undo-toast')).textContent).toContain('Must read: “Delayed Beta”');
+  press('z');
+  await waitFor(() => expect(submitVerdict).toHaveBeenLastCalledWith({
+    item_key: b.item_key, user_priority: 'should_read', comment: 'Keep this saved rationale', surface: 'library_verdicts',
+  }));
+  expect(screen.queryByTestId('undo-toast')).toBeNull();
   press('3');
-  await waitFor(() => expect(submitVerdict.mock.calls.map(([payload]) => payload)).toEqual([{
-    item_key: b.item_key, user_priority: 'could_read', comment: 'Keep this saved rationale',
-  }]));
+  await waitFor(() => expect(submitVerdict).toHaveBeenLastCalledWith({
+    item_key: b.item_key, user_priority: 'could_read', comment: 'Keep this saved rationale', surface: 'library_verdicts',
+  }));
+  expect(confirm).not.toHaveBeenCalled();
 });
 
 it.each([false, true])('blocks keys after failed selected-detail reads with retained data=%s', async retained => {
@@ -121,7 +130,7 @@ it.each([null, b.verdict])('keeps loaded new/same-priority shortcuts available: 
   await screen.findByRole('heading', { name: b.title });
   press('2');
   await waitFor(() => expect(submitVerdict.mock.calls.map(([payload]) => payload)).toEqual([{
-    item_key: b.item_key, user_priority: 'should_read', comment: verdict?.comment ?? '',
+    item_key: b.item_key, user_priority: 'should_read', comment: verdict?.comment ?? '', surface: 'library_verdicts',
   }]));
   expect(confirm).not.toHaveBeenCalled();
 });

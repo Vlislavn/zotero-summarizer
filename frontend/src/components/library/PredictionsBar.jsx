@@ -1,12 +1,10 @@
-// The "Deep-review top picks" bar (Phase 2): one action that deep-reviews EVERY
-// undecided top pick (high-relevance band) and proposes a verdict for each, so
-// the human never clicks "Run deeper review" per paper. It loops the review fleet
-// down the queue in the background — Confirm/Override cards + quality chips stream
-// onto the rows as each paper settles — and a Stop ends the loop. Anchored at the
-// top of the Review-queue region, directly above the rows it produces (cause next
-// to effect). It always reports exactly one honest state (Doherty: never goes
-// quiet; Tesler: names the cause and the next action), sharing ProposedVerdictCard's
-// indigo left-rule vocabulary so the bar and the cards it spawns read as one system.
+// The "Deep-review top picks" content of the Library jobs panel's «Top-pick reviews» section: one
+// action that deep-reviews EVERY undecided top pick (high-relevance band) and proposes a verdict for
+// each, so the human never clicks "Run deeper review" per paper. It loops the review fleet down the
+// queue in the background — a «Review suggests» label + quality chips stream onto the rows as each
+// paper settles — and a Stop ends the loop. The panel hides the section when there is nothing to do.
+// It always reports exactly one honest state (Doherty: never goes quiet; Tesler: names the cause and
+// the next action) in the indigo left-rule vocabulary of the suggestion label on the rows.
 
 // Indigo to match ProposedVerdictCard; the state line colour shifts by severity.
 // Branch order is load-bearing: a real terminal status (error / done_empty / ready)
@@ -51,12 +49,12 @@ function stateLine(fleetStatus, proposedCount, coolCount, autoActive, stopping) 
   }
   if (status === 'ready') {
     const tail = skipped > 0 ? ` (${skipped} had no full text.)` : '';
-    return { tone: 'text-slate-600', text: `Reviewed and proposed ${proposed} verdict${proposed === 1 ? '' : 's'} — Confirm or Override on the rows below.${tail}` };
+    return { tone: 'text-slate-600', text: `Reviewed and proposed ${proposed} verdict${proposed === 1 ? '' : 's'} — each is marked “Review suggests” on its row.${tail}` };
   }
   // idle / never run — describe what the button will do (and note any proposals a
   // startup prewarm already left on the rows, so the cards aren't a surprise).
   if (coolCount === 0 && proposedCount > 0) {
-    return { tone: 'text-slate-600', text: 'All top picks reviewed — Confirm or Override on the rows below.' };
+    return { tone: 'text-slate-600', text: 'All top picks reviewed — each is marked “Review suggests” on its row.' };
   }
   if (coolCount > 0) {
     // State, not instructions — the "what it does" explanation lives in the
@@ -74,13 +72,11 @@ export default function PredictionsBar({ fleetStatus, onRun, onStop, autoActive 
   // refresh the publisher session, then run again. Only items that carry a URL.
   const loginItems = (fleetStatus?.needs_login_items || []).filter((it) => it && it.url);
   return (
-    // Quiet by default: no tinted box, no filled button — this gates a small,
-    // occasional action (often 1 paper), so it must NOT out-shout the ranked list
-    // it sits above (Von Restorff: the one warm accent on this page is the amber
-    // "Rescore — model updated", not this). A thin indigo rule keeps the tie to
-    // the Confirm/Override cards it spawns.
+    // Quiet by default: no tinted box, no filled button — this gates a small, occasional action
+    // (often 1 paper). A thin indigo rule keeps the tie to the suggestion labels it spawns.
     <div className="border-l-2 border-indigo-200 pl-3 py-1">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      {/* Nothing to run (N = 0, idle): no button — the state line below says why. */}
+      {(stopping || autoActive || coolCount > 0) && <div className="flex items-center justify-between gap-3 flex-wrap">
         {stopping ? (
           <button
             type="button"
@@ -105,12 +101,12 @@ export default function PredictionsBar({ fleetStatus, onRun, onStop, autoActive 
             onClick={onRun}
             disabled={coolCount === 0}
             className="px-3 py-1 rounded-lg border border-indigo-300 bg-white text-indigo-700 text-[13px] font-semibold hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Top picks = papers the model rates must/should read that you have not decided yet. Deep-review each and propose a verdict. Suggestions only — nothing is written until you Confirm. Results stream in; click Stop to end early."
+            title="Top picks = papers the model rates must/should read that you have not decided yet. Deep-review each and propose a verdict. Suggestions only — nothing is written until you set a verdict yourself. Results stream in; click Stop to end early."
           >
-            {coolCount > 0 ? `Deep-review top picks (${coolCount})` : 'All reviewed'}
+            {`Deep-review top picks (${coolCount})`}
           </button>
         )}
-      </div>
+      </div>}
       {/* Live region (matches the app's StatusBanner pattern): the auto-review
           streams progress for minutes — announce each state change to screen
           readers, who otherwise get no feedback during the long-running op. */}

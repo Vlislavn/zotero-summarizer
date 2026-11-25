@@ -157,7 +157,7 @@ def payload_hash(audit: dict) -> str:
 def reading_policy_inputs_hash(entry: dict) -> str:
     from zotero_summarizer.services.library.review_fleet.propose import project_review
 
-    view = project_review(entry)
+    view = project_review(entry, present=False)  # the audit binds the policy inputs, not display clean-up
     inputs = {key: view.get(key) for key in (
         'model_digest', 'quality', 'goal_summaries', 'model_read_decision')}
     if inputs['model_digest'] is not None:

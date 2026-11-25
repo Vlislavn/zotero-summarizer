@@ -41,6 +41,13 @@ def collect(settings, profile, config) -> None:
     run_child(settings, "digest")
 
 
+def load_discussions(settings, source_ids) -> None:
+    """«Load discussions»: run the owned child that reads the comments of ``source_ids``. No model, no model check."""
+    from zotero_summarizer.integrations.telegram_child import run_child
+
+    run_child(settings, "comments", source_ids)
+
+
 def digest_seam(settings, sdk, profile, config, *, clock):
     """Build the live collect_pages digest seam from an authorized SDK client.
 
@@ -68,4 +75,4 @@ def digest_seam(settings, sdk, profile, config, *, clock):
     }
 
 
-__all__ = ["collect", "digest_seam"]
+__all__ = ["collect", "load_discussions", "digest_seam"]

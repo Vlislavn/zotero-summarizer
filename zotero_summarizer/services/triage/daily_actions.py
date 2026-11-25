@@ -10,7 +10,6 @@ from typing import Any
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.domain import VERDICT_SOURCE_MACHINE_ADD, VERDICT_SOURCE_USER
-from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services.golden import label_verdicts, proposal_snapshot
@@ -22,6 +21,7 @@ from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.storage.feed_identity import LEGACY_FEED_PREFIX, row_feed_keys
 from zotero_summarizer.storage import rss as rss_storage
 from zotero_summarizer.storage.feeds_lookup import materialized_key_for
+from zotero_summarizer.services.zotero.collections import resolve_collection_name
 
 # Provisional positive label for "add to library": the user signalled the
 # paper is worth reading, but hasn't read it yet. Stage-2 annotation overrides
@@ -133,22 +133,6 @@ def _open_optional_writer() -> tuple[Any | None, Exception | None]:
         return None, exc
 
 
-def _resolve_collection_name(collection_key: str | None) -> str:
-    """Picker key → user-library collection name (default "Inbox" when unset). An
-    unknown/foreign key is a 400 — a raw key must never reach the name-based writer,
-    which would auto-create a junk collection named after it."""
-    if not collection_key:
-        return "Inbox"
-    name = ZoteroReader(get_settings().zotero_data_dir).collection_name_for_key(collection_key)
-    if not name:
-        raise APIError(
-            error="invalid_collection",
-            message=f"no such collection: {collection_key}",
-            status_code=400,
-        )
-    return name
-
-
 def _mark_app_rss_rows_read(rows: list[dict[str, Any]]) -> int:
     item_ids = [int(row.get("feed_item_id") or 0) for row in rows]
     conn = sqlite3.connect(str(_db_path()))
@@ -213,7 +197,7 @@ def add_to_library(item_ids: list[int], target_collection_key: str | None = None
     resolved (and validated) to a collection name — an unknown key is a 400, never a
     silent junk-collection auto-create."""
     rows = _load_rows(item_ids)
-    collection_name = _resolve_collection_name(target_collection_key)
+    collection_name = resolve_collection_name(target_collection_key, get_settings().zotero_data_dir)
     writer, writer_error = _open_optional_writer()
     used_keys: set[str] = set()
     added = 0
@@ -417,24 +401,7 @@ def _carry_renders_best_effort(pairs: list[tuple[str, str]]) -> None:
 
 def _attach_fulltext_best_effort(materialized: list[tuple[str, str]]) -> dict[str, Any]:
     """Attach cached-review or newly acquired OA PDFs. Never fails the Add."""
-    if not materialized:
-        return {"attached": 0}
-    try:
-        reader = ZoteroReader(get_settings().zotero_data_dir)
-        urls = reader.get_field_values("url")
-        dois = reader.get_field_values("DOI")
-        items = [
-            {
-                "item_key": key, "has_pdf": False, "url": urls.get(key, ""),
-                "doi": dois.get(key, ""),
-                "cached_acquisition": (deep_review.get_cached_review(key) or {}).get("acquired_pdf"),
-            }
-            for _stable_key, key in materialized
-        ]
-        return fulltext.fetch_fulltext_for_items(items)
-    except Exception as exc:  # noqa: BLE001 — best-effort; the add already succeeded
-        LOGGER.exception("add_to_library: full-text fetch failed (non-fatal)")
-        return {"attached": 0, "error": f"{type(exc).__name__}: {exc}"}
+    return fulltext.attach_best_effort([key for _stable_key, key in materialized])
 
 
 def trash(item_ids: list[int]) -> dict[str, Any]:

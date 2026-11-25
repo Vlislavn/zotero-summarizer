@@ -10,7 +10,7 @@ export default function ReadingPlan({ digest, decision }) {
 
   const row = 'grid grid-cols-1 gap-x-3 gap-y-0.5 sm:grid-cols-[8rem_minmax(0,1fr)]';
   return (
-    <div role="region" aria-label="Reading plan" className="mt-3 min-w-0 space-y-2.5 break-words border-t border-slate-200/70 pt-3 [&_dt]:text-slate-600 [&_li]:!text-[15px] [&_p]:!text-[15px]">
+    <div role="region" aria-label="Reading plan" data-feedback-field="reading_plan" className="mt-3 min-w-0 space-y-2.5 break-words border-t border-slate-200/70 pt-3 [&_dt]:text-slate-600 [&_li]:!text-[15px] [&_p]:!text-[15px]">
       {opensOriginal && <div className={row}>
         <div className={`${LABEL} pt-1`}>Read first</div>
         {targets.length ? <ol aria-label="Read parts" className="list-decimal space-y-0.5 pl-5 marker:text-slate-400">

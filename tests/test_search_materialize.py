@@ -113,6 +113,7 @@ def test_materialize_reuses_coverage_hit(monkeypatch, tmp_path):
 def test_materialize_rejects_unknown_collection_key(monkeypatch, tmp_path):
     from zotero_summarizer.api.errors import APIError
     from zotero_summarizer.services.search import materialize, session
+    from zotero_summarizer.services.zotero import collections
 
     class _Reader:
         def __init__(self, *args, **kwargs):
@@ -122,7 +123,7 @@ def test_materialize_rejects_unknown_collection_key(monkeypatch, tmp_path):
             return None
 
     _store(monkeypatch, tmp_path)
-    monkeypatch.setattr(materialize, "ZoteroReader", _Reader)
+    monkeypatch.setattr(collections, "ZoteroReader", _Reader)
     monkeypatch.setattr(
         materialize,
         "ZoteroWriter",

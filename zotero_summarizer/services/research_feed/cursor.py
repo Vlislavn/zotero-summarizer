@@ -6,7 +6,9 @@ from pathlib import Path
 
 from zotero_summarizer.models import SummarizeRequest, SummarizeResponse
 from zotero_summarizer.models.providers import resolve_stage
-from zotero_summarizer.services._common import now_iso_z, read_config, state, write_json_atomic
+from zotero_summarizer.services._common import state
+from zotero_summarizer.services._io import now_iso_z, write_json_atomic
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services.library._feed_assessment import fingerprint
 from zotero_summarizer.services.llm import factory
 

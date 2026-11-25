@@ -7,13 +7,13 @@ from unittest.mock import Mock
 import pytest
 
 from zotero_summarizer.services.triage.feeds import _outcomes as service
-from zotero_summarizer.storage import feeds, repositories as db
+from zotero_summarizer.storage import db_core, feeds, repositories as db
 
 
 @pytest.fixture
 def store(tmp_path, monkeypatch):
     path = tmp_path / "triage.db"
-    monkeypatch.setattr(db, "DB_PATH", path)
+    monkeypatch.setattr(db_core, "DB_PATH", path)
     db.init_db()
     monkeypatch.setattr(service, "_triage_conn", lambda: feeds.open_triage_conn(path))
     log = Mock()
@@ -125,7 +125,7 @@ def test_concurrent_snapshots_resolve_once(store):
 
 def test_feedback_uses_outcome_connection_not_global_repository_path(store, tmp_path, monkeypatch):
     other = tmp_path / "other.db"
-    monkeypatch.setattr(db, "DB_PATH", other)
+    monkeypatch.setattr(db_core, "DB_PATH", other)
     db.init_db()
     reader = Mock()
     reader.get_item_membership.return_value = {"exists": False}

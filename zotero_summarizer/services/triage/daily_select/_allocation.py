@@ -15,7 +15,7 @@ from copy import deepcopy
 from typing import Any
 
 from zotero_summarizer.domain import PRIORITY_COULD_READ_THRESHOLD, score_to_priority
-from zotero_summarizer.services._common import band_primary_enabled
+from zotero_summarizer.services.model.quality_flags import band_primary_enabled
 from zotero_summarizer.services.triage.daily_select._dataclasses import SlatePaper
 from zotero_summarizer.services.triage.daily_select._selection_evidence import picker_observations
 from zotero_summarizer.services.model.rank_blend import order_within_bands, quality_bonus

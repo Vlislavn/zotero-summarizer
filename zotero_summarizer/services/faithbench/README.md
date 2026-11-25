@@ -164,3 +164,7 @@ by default; `--run` requires `--capture-local` consent; existing-run scoring/exp
   Reports count actual whole-card QA exposures (zero exposure never recommends a card pilot); a report with no
   non-null human score stays inconclusive, and assigned errors alone never produce a reject. Scientific prose is never
   graded by keywords.
+
+Build/judge/runner modules parse LLM JSON with `services/llm/json_response.extract_json_blob`.
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.

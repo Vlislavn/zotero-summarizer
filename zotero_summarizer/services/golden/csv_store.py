@@ -34,7 +34,7 @@ def edit_csv(
     unchanged; a no-op does not rewrite it. The lock sidecar survives process
     exit, but SQLite releases its lock automatically.
     """
-    from zotero_summarizer.services._common import atomic_write
+    from zotero_summarizer.services._io import atomic_write
 
     path = path.resolve()
     with closing(sqlite3.connect(path.with_name(path.name + ".lock.sqlite"), timeout=10)) as lock:

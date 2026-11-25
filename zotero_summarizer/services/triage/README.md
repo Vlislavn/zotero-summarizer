@@ -4,7 +4,7 @@
 and unavailable rows, without ranking, inference, attribution or writes. It uses
 current verdict precedence, sibling materialization/pending state and bounded
 read-only review projection. Note-delivery snapshots expose revision/target/pending,
-not note bodies. Browser membership is not a daemon queue or write authorization.
+not note bodies; one `alias_resolver` per request serves all members (a per-member rescan of the feed history made 12 ids take ~1.8 s). Browser membership is not a daemon queue or write authorization.
 
 `today_exposure` is the owner-approved, local-only record of Today exposure in
 `Settings.today_exposure_log_dir` (`data/today-exposure/<local day>.jsonl`, `run_log` NDJSON,
@@ -37,7 +37,7 @@ review currentness (`deep_review.current_reviews`) and the filtered unhandled po
 are computed once and shared by the slate, `status` and the header count.
 
 Daily selection now ranks candidates without putting them into Zotero.
-`daily_actions` checks current full-text review eligibility before any Add
+`daily_actions` resolves its target collection with `services.zotero.collections.resolve_collection_name` (unknown key → 400 `invalid_collection`) and checks current full-text review eligibility before any Add
 label/pending state/write; mixed batches report blocked rows as
 `code=review_required` while eligible rows proceed. An explicit positive feed
 verdict follows the same gate. Pending Add is committed only while the
@@ -48,7 +48,8 @@ Turns raw RSS feed items into scored, ranked `processed_feed_items` rows that
 the Today tab consumes. The cheap `model/` gate fast-rejects; survivors get an
 LLM summary + composite score. Summarization and the legacy LLM backlog drain
 resolve clients through `services.llm.factory` with the existing runtime cache;
-the default ML-only drain never resolves a client.
+the default ML-only drain never resolves a client. `summarization.py` applies the corpus-affinity fast-reject through one
+`_corpus_fast_reject` gate shared by the abstract and full-text pipelines.
 
 ```
 Zotero feedItems ─feeds.run_daemon_tick→ gate(model) ─reject──> dropped
@@ -82,7 +83,7 @@ swallowed unlogged again. `triage_backlog.status()` exposes `gate_reject_rate` /
 `gate_onward` so the Today banner can show "filtered X% by the ML gate". Concurrency for the
 remaining LLM work (legacy drain / live daemon) is provider-aware: **1 for a
 local model**, the configured `TRIAGE_JOB_CONCURRENCY` for a remote one
-(`services._common.effective_llm_concurrency`).
+(`services.llm.concurrency.effective_llm_concurrency`).
 
 **Acquire-before-score rescue (`recover_abstractless_rescues`, `feeds/_rescue`).**
 Prestige-journal RSS (Nature/Science/Cell/NEJM/Annals) ships only a boilerplate
@@ -108,13 +109,13 @@ final, as before. Skipped in `gate_only` mode (no LLM).
 | `feeds/_common.py` | constants, the tick-report dataclass, low-level helpers (leaf) |
 | `feeds/_triage.py` · `feeds/_gate.py` | abstract triage + concurrent scoring + prestige · classifier gate + audit + retrain. Review payloads carry `summary_schema_version=1`, so delayed materialization after restart reconstructs the full note and rejects future contracts. |
 | `feeds/_daily.py` · `feeds/_tick.py` | daily plateau selection + refine · one daemon tick (orchestration). After triage the tick starts Today preparation (`_auto_prepare_today` → `today_preparation`, gated by `quality_review.auto_on_tick_k` = papers per run, 0 = off; no Zotero write). A third step `_auto_render_slate` (gated by `quality_review.render_on_tick_k`, default 3) then builds the paper brief (presentation HTML/audit JSON/figures, no Markdown sidecar) for the TOP-K feed papers — only keys ALREADY reviewed and still current — via `paper_render.start_build`. So a top feed paper opens with the same brief as a library item (`/paper/:stable_feed_key`). On "Add to library", `daily_actions._carry_renders_best_effort` rebuilds the render under the new Zotero key |
-| `feeds/_tick_phases.py` · `feeds/_rescue.py` | the discrete tick phases · capped acquire-before-score policies and shared fetch/re-score primitive |
+| `feeds/_tick_phases.py` · `feeds/_rescue.py` | discrete tick phases, with read-ID collection separate from each source’s mark-and-record path · capped acquire-before-score policies and shared fetch/re-score primitive |
 | `feeds/_outcomes.py` · `feeds/_loop.py` | outcome detection → feedback · the long-running asyncio loop. `_outcomes` also appends an `outcome_resolved` event to the agentic interaction log (`services.interaction_log.log_behavioural_outcome`) — the daemon-resolved 7-day engaged/moved/trashed signal, joined to the at-triage verdict by `feed_item_id`; this is the second event producer (daemon thread, shared UTC stamp) |
 | `summarization.py` | LLM summarize/refine pipeline, including optional exact-URL `method_and_code`; `run_abstract_dry` reuses its real prompt/scoring path for Doctor but omits corpus context and writes |
 | `_method_admission.py` · `_method_context.py` | exact complete original-source URI admission and local rejection receipts · bounded, escaped whole original URI windows for long-source generation; neither classifies scientific support or contribution relevance |
 | `prompts.py` | security-directed code defaults; HackerNoon gets the practitioner rubric through the same triage contract; legacy refinement cannot recommend deep/full reading from absent/short full text; `DEFAULT_MAP_PROMPT` serves map-reduce deep review |
 | `select.py` | plateau/elbow cutoff for daily materialization |
-| `daily_actions.py` | Today keep/trash → Zotero + training labels. "Add" files into the user-chosen collection (`add_to_library(item_ids, target_collection_key=None)` resolves the picker's key → name via `ZoteroReader.collection_name_for_key`, an unknown key → 400; default None → "Inbox") and writes a PROVISIONAL verdict (`label_verdicts.source='machine_add'`, tier `feed_interest`) — captured as interest but UNCHECKED, so `golden/hybrid_gt` caps its effective training label at weak `could_read` (not the `should_read` shown for display intent) until you verify it or the 7-day materialization outcome resolves; trash stays a deliberate `user` verdict and flows through `golden.label_verdicts`, which preserves its prior→new transition and prevents a later machine-add retry from overwriting it. After a usable cached review, an explicit positive verdict (must/should/could) on a feed paper materializes it into the Inbox — `materialize_feed_verdict(item_key, user_priority, create_if_missing=True)` reuses the same `_materialize_one`/`_mark_pending` core as `add_to_library` but writes NO training label (the verdict is already saved), instead stamping `user_priority` as the new item's ground-truth `label:<priority>` tag in the same write so it reaches Zotero even while Zotero stays open (the standalone `zotero_set_label_tag` refuses to). With `create_if_missing=False`, it resolves an already-materialized target for a negative verdict/comment without creating a rejected paper; `dont_read` never adds. On "Add", an IN-PLACE Today review (cached under `stable_feed_key`) is copied onto the new library `item_key` (`deep_review.copy_review`) so the deep review persists into the library. Both keep (`today_keep`) and trash (`today_trash`) also append a `human_feedback` event to the agentic interaction log via `_record_label` (`services.interaction_log.log_feed_decision`) — the gate's pre-mutation derived priority + the human's keep/trash. The daemon gate retrain (`feeds/_gate`) threads `triage_db_path` into `load_or_train`, so it applies this overlay too (not just `/admin/retrain`). **Trash marks the feed items read best-effort**: the `dont_read` labels are the source of truth and are committed per-row, so a Zotero-DB-lock on `mark_feed_items_read` reports `marked_read: 0` + `marked_read_error` instead of 500-ing the whole batch after the labels already saved (matches the per-row best-effort contract) |
+| `daily_actions.py` | Today keep/trash → Zotero + training labels. "Add" files into the user-chosen collection (`add_to_library(item_ids, target_collection_key=None)` resolves the picker's key → name via `ZoteroReader.collection_name_for_key`, an unknown key → 400; default None → "Inbox") and writes a PROVISIONAL verdict (`label_verdicts.source='machine_add'`, tier `feed_interest`) — captured as interest but UNCHECKED, so `golden/hybrid_gt` caps its effective training label at weak `could_read` (not the `should_read` shown for display intent) until you verify it or the 7-day materialization outcome resolves; trash stays a deliberate `user` verdict and flows through `golden.label_verdicts`, which preserves its prior→new transition and prevents a later machine-add retry from overwriting it. After a usable cached review, an explicit positive verdict (must/should/could) on a feed paper materializes it into the Inbox — `materialize_feed_verdict(item_key, user_priority, create_if_missing=True)` reuses the same `_materialize_one`/`_mark_pending` core as `add_to_library` but writes NO training label (the verdict is already saved), instead stamping `user_priority` as the new item's ground-truth `label:<priority>` tag in the same write so it reaches Zotero even while Zotero stays open (the standalone `zotero_set_label_tag` refuses to). With `create_if_missing=False`, it resolves an already-materialized target for a negative verdict/comment without creating a rejected paper; `dont_read` never adds. On "Add", an IN-PLACE Today review (cached under `stable_feed_key`) is copied onto the new library `item_key` (`deep_review.copy_review`) so the deep review persists into the library. Both keep (`today_keep`) and trash (`today_trash`) also append a `human_feedback` event to the agentic interaction log via `_record_label` (`services.interaction_log.log_feed_decision`) — the gate's pre-mutation derived priority + the human's keep/trash. The daemon gate retrain (`feeds/_gate`) threads `triage_db_path` into `load_or_train`, so it applies this overlay too (not just `/admin/retrain`). **Trash marks the feed items read best-effort**: the `dont_read` labels are the source of truth and are committed per-row, so a Zotero-DB-lock on `mark_feed_items_read` reports `marked_read: 0` + `marked_read_error` instead of 500-ing the whole batch after the labels already saved (matches the per-row best-effort contract) After the Add commits, the open-access PDF is attached through `library.fulltext.attach_best_effort` (shared with Search Add; never fails the Add). |
 | `triage_jobs.py` | owns on-demand triage workers and their item task groups; cancellation is `cancelling` until blocking work drains, then `cancelled`; job snapshots and cancellation/start writes serialize under the existing start lock |
 | `_plain_error.py` | plain text for a failed job item / drain run: timeouts → «The model did not answer in time; try again.», sqlite busy → «The database was busy; run again.», otherwise the exception's own text |
 | `_execution.py` | context-preserving blocking calls that retain thread ownership on timeout/task cancellation, plus cooperative pipeline stop checks; a deadline stops subsequent work and drains the current call before releasing the slot |
@@ -237,7 +238,7 @@ A source goes to the model whole up to the feed provider's window (`_paper_body.
 Long full-text inputs reuse the library's source-safe mapper and the existing
 `quality_review.map_chunk_chars` setting instead of two unbounded halves. Maps
 run through `_map_reduce.map_chunks` (the deep-review map step) with the feed stage's
-`_common.deep_review_sub_concurrency` — parallel on a remote provider, serial on a local
+`services.llm.concurrency.deep_review_sub_concurrency` — parallel on a remote provider, serial on a local
 one — and a cancellation check before each chunk (a stop skips chunks not yet started; calls
 in flight finish first). Only explicit output truncation is
 subdivided down to the existing minimum work size. Empty or exhausted segments
@@ -269,7 +270,7 @@ scans balanced outer objects/arrays in narrative text using the standard JSON
 parser and the supplied model contract. Nested examples are not candidates.
 Exactly one schema-valid decoded root is required; identical decoded repeats
 are allowed, differing valid roots are ambiguous and use the same single repair
-attempt (invalid repair propagates). The shared `extract_json_blob` and decoded
+attempt (invalid repair propagates). The shared `llm/json_response.extract_json_blob` and decoded
 output capture/telemetry are unchanged. Candidate spans do not overlap: scanning
 and decoding work is bounded by input characters, without suffix retries or regex.
 
@@ -333,3 +334,5 @@ The existing daemon training-ledger producer is retained with its original synth
 The original private corpus-prefilter provenance marker is retained with the optional practitioner diagnostic; the marker is not an LLM/public JSON field. No new scoring rule is introduced.
 
 The existing question/native source stack carries the original post-commit materialization/verdict/recovery mirror callers. No new delivery controller or source-derived action is designed here.
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.

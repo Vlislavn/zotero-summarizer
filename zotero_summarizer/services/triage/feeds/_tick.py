@@ -156,7 +156,8 @@ def _auto_render_slate(tick_id: str) -> None:
     if k <= 0:
         return
     try:
-        from zotero_summarizer.services._common import rank_quality_first_enabled, settings
+        from zotero_summarizer.services._common import settings
+        from zotero_summarizer.services.model.quality_flags import rank_quality_first_enabled
         from zotero_summarizer.services.library import deep_review, paper_render
         from zotero_summarizer.services.triage.daily_select import assemble_daily_slate
 

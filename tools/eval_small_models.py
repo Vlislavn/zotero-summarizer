@@ -160,7 +160,7 @@ def main() -> int:
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
     from zotero_summarizer.services.setup.calibration import load_review_papers
     from zotero_summarizer.settings import Settings
 

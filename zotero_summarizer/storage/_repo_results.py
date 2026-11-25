@@ -12,7 +12,7 @@ from zotero_summarizer.domain import (  # noqa: F401
     EXPLICIT_FEEDBACK_SIGNALS,
     READING_PRIORITY_SORT_RANK,
 )
-from zotero_summarizer.storage.repositories import (  # noqa: F401
+from zotero_summarizer.storage.db_core import (  # noqa: F401
     _connect_to,
     _get_conn,
     _json_to_list,
@@ -83,97 +83,6 @@ def insert_result(
         count = _insert_pending_changes(conn, item_id, title, pending_changes or [])
         conn.commit()
         return count
-    finally:
-        conn.close()
-
-
-def update_result_row_after_override(
-    result_row_id: int,
-    response_dict: dict[str, Any],
-    composite_score: float,
-    reading_priority: str,
-    forced_priority: str,
-) -> bool:
-    safe_result_row_id = int(result_row_id)
-    if safe_result_row_id <= 0:
-        return False
-
-    conn = _get_conn()
-    try:
-        cursor = conn.execute(
-            """
-            UPDATE triage_results
-            SET response_json = ?,
-                composite_score = ?,
-                reading_priority = ?,
-                forced_priority = ?
-            WHERE id = ?
-            """,
-            (
-                json.dumps(response_dict or {}, ensure_ascii=False),
-                float(composite_score),
-                str(reading_priority or "").strip(),
-                str(forced_priority or "").strip(),
-                safe_result_row_id,
-            ),
-        )
-        conn.commit()
-        return int(cursor.rowcount or 0) > 0
-    finally:
-        conn.close()
-
-
-def insert_triage_dimension_override(
-    item_id: str,
-    original_dimensions: dict[str, Any],
-    override_dimensions: dict[str, Any],
-    merged_dimensions: dict[str, Any],
-    new_composite_score: float,
-    new_priority: str,
-    *,
-    result_row_id: int | None = None,
-    corpus_affinity: float = 0.0,
-    original_composite_score: float | None = None,
-    original_priority: str = "",
-) -> int:
-    safe_item_id = str(item_id or "").strip()
-    if not safe_item_id:
-        return 0
-
-    safe_result_row_id = int(result_row_id) if result_row_id else None
-    conn = _get_conn()
-    try:
-        cursor = conn.execute(
-            """
-            INSERT INTO triage_dimension_overrides (
-                item_id,
-                result_row_id,
-                original_dimensions_json,
-                override_dimensions_json,
-                merged_dimensions_json,
-                corpus_affinity,
-                original_composite_score,
-                new_composite_score,
-                original_priority,
-                new_priority
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                safe_item_id,
-                safe_result_row_id,
-                json.dumps(original_dimensions or {}, ensure_ascii=False),
-                json.dumps(override_dimensions or {}, ensure_ascii=False),
-                json.dumps(merged_dimensions or {}, ensure_ascii=False),
-                float(corpus_affinity),
-                None if original_composite_score is None else float(original_composite_score),
-                float(new_composite_score),
-                str(original_priority or "").strip(),
-                str(new_priority or "").strip(),
-            ),
-        )
-        conn.commit()
-        return int(cursor.lastrowid or 0)
     finally:
         conn.close()
 
@@ -383,8 +292,6 @@ def delete_result(item_id: str) -> bool:
 __all__ = [
     "create_batch_run",
     "insert_result",
-    "update_result_row_after_override",
-    "insert_triage_dimension_override",
     "get_latest_results",
     "get_all_results",
     "get_results_by_batch_ids",

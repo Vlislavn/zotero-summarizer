@@ -136,7 +136,7 @@ def test_disabled_metadata_features_prepare_cache_before_discovery_identity(jour
     from zotero_summarizer.models import AppState
     from zotero_summarizer.runtime import RuntimeState
     from zotero_summarizer.services import lifecycle
-    from zotero_summarizer.services.search import pipeline
+    from zotero_summarizer.services.search import federate
     from zotero_summarizer.storage.corpus_read import _corpus_fingerprint
 
     for name in ("prestige", "full_text_refine", "openreview"):
@@ -146,9 +146,9 @@ def test_disabled_metadata_features_prepare_cache_before_discovery_identity(jour
     assert runtime.openalex_cache is not None
     assert runtime.openalex_client is runtime.unpaywall_client is runtime.openreview_client is None
     identity = _corpus_fingerprint(str(journey.paths.corpus_db_path))
-    monkeypatch.setattr(pipeline, "settings", lambda: journey.paths)
-    monkeypatch.setattr(pipeline, "_SEARCH_OPENALEX", None)
-    client = pipeline._search_openalex_client(runtime, journey.config)
+    monkeypatch.setattr(federate, "settings", lambda: journey.paths)
+    monkeypatch.setattr(federate, "_SEARCH_OPENALEX", None)
+    client = federate._search_openalex_client(runtime, journey.config)
     try:
         assert _corpus_fingerprint(str(journey.paths.corpus_db_path)) == identity
     finally:
@@ -160,18 +160,18 @@ def test_discovery_search_client_uses_runtime_cache_without_prestige(journey, mo
     from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
     from zotero_summarizer.models import AppState
     from zotero_summarizer.runtime import RuntimeState
-    from zotero_summarizer.services.search import pipeline
+    from zotero_summarizer.services.search import federate
 
     cache = OpenAlexCache(journey.paths.corpus_db_path) if cached else None
     runtime = RuntimeState(app_state=AppState(config=journey.config), openalex_cache=cache)
-    monkeypatch.setattr(pipeline, "settings", lambda: journey.paths)
-    monkeypatch.setattr(pipeline, "_SEARCH_OPENALEX", None)
-    client = pipeline._search_openalex_client(runtime, journey.config)
+    monkeypatch.setattr(federate, "settings", lambda: journey.paths)
+    monkeypatch.setattr(federate, "_SEARCH_OPENALEX", None)
+    client = federate._search_openalex_client(runtime, journey.config)
     try:
         assert isinstance(client.cache, OpenAlexCache)
         if cached:
             assert client.cache is cache
-        assert pipeline._search_openalex_client(runtime, journey.config) is client
+        assert federate._search_openalex_client(runtime, journey.config) is client
     finally:
         client._http.close()
 

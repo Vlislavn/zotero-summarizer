@@ -485,3 +485,12 @@ def test_acquire_missing_reports_browser_setup_instead_of_login(monkeypatch):
     with pytest.raises(APIError) as caught:
         _paper_pdf.pdf_for_item("OTHER", read_state=lambda: None, allow_acquire_missing=True)
     assert caught.value.error == "browser_extra_unavailable"
+
+
+def test_zotero_tags_become_at_most_eight_clean_keywords():
+    tags = ["zs:internal", "x" * 61, "\U0001F525", "2024", {"tag": "ImageNet"}, "GlassNet", *[f"kw{i}" for i in range(9)]]
+    content, kept = {"keywords": []}, {"keywords": ["mine"]}
+    for target in (content, kept):
+        _paper_read_meta.apply_metadata_fallbacks(target, zotero_detail={"tags": tags}, title="", pdf_stem="")
+    assert content["keywords"] == ["ImageNet", "GlassNet", *[f"kw{i}" for i in range(6)]]
+    assert kept["keywords"] == ["mine"]

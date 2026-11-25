@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from zotero_summarizer.settings import Settings
 
@@ -39,6 +39,9 @@ class RuntimeState:
 
     # The validated config holder (``AppState.config`` is the GoalsConfig).
     app_state: "AppState | None" = None
+
+    # Process-local policy for model constructors; macOS mobile startup sets CPU.
+    forced_local_model_device: Literal["cpu"] | None = None
 
     # PDF + embedding singletons. Stage clients are cached below;
     # services.llm.factory owns their lazy resolution and construction.
@@ -117,6 +120,13 @@ def get_context() -> AppContext:
         set_context(AppContext(settings=Settings.load()))
     assert _context is not None
     return _context
+
+
+def local_model_device_override() -> Literal["cpu"] | None:
+    """Return the active device override without constructing an app context."""
+    if _context is None:
+        return None
+    return _context.state.forced_local_model_device
 
 
 _request_memo: ContextVar[dict[Any, Any] | None] = ContextVar("request_memo", default=None)

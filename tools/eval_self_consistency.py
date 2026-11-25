@@ -49,7 +49,7 @@ from typing import Any
 
 # --- repo imports (run via `uv run python tools/...`) -----------------------
 from zotero_summarizer.models.providers import resolve_stage
-from zotero_summarizer.services._common import read_config
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services.library import quality_eval
 from zotero_summarizer.services.llm.factory import build_client_for_stage
 from zotero_summarizer.settings import Settings

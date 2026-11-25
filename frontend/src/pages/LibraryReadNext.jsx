@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   fetchCollections,
   fetchTags,
@@ -13,22 +13,29 @@ import {
   syncScoreRanks,
 } from '../api/libraryApi.js';
 import ReadNextView from '../components/library/ReadNextView.jsx';
-import LibraryFilterBar from '../components/library/LibraryFilterBar.jsx';
-import ExpandableList from '../components/library/ExpandableList.jsx';
-import PredictionsBar from '../components/library/PredictionsBar.jsx';
+import AppliedFilters from '../components/library/AppliedFilters.jsx';
+import LibraryFilters from '../components/library/LibraryFilterSheet.jsx';
+import LibraryJobsPanel from '../components/library/LibraryJobsPanel.jsx';
+import LibraryStatusLine, { LibraryEmptyState } from '../components/library/LibraryStatusLine.jsx';
+import { emptyState } from '../components/library/libraryStatus.js';
+import { addToCollectionSheet, fetchSheet, forceSheet, sendReceipt, sendSheet } from '../components/library/zoteroCopy.js';
+import useConfirmSheet from '../hooks/useConfirmSheet.jsx';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import { useReviewCoolLoop } from '../hooks/useReviewCoolLoop.js';
-import ZoteroActionsMenu from '../components/library/ZoteroActionsMenu.jsx';
-import { StatusBanner, formatShortDate } from '../components/library/shared.jsx';
+import usePendingCount from '../hooks/usePendingCount.js';
+import useLibraryFilters from '../hooks/useLibraryFilters.js';
+import { syncNow } from '../syncClient.js';
 import { Section } from '../components/paper/review/primitives.jsx';
-import {
-  EMPTY_FILTERS, buildPredicate, goalHighKeys, isFilterActive,
-  serializeFilters, hydrateFilters, prestigeBucketCounts,
-  sortQueue, serializeSort, hydrateSort,
-} from '../utils/relevanceBands.js';
+import { DEFAULT_SORT, buildPredicate, goalHighKeys, sortQueue } from '../utils/relevanceBands.js';
 import { isMachineTag } from '../utils/tags.js';
+import { flattenCollections } from './pendingHelpers.js';
 import { fulltextMessage } from './todayHelpers.js';
 import { readStorage, writeStorage } from '../utils/safeStorage.js';
+import {
+  ORDER_STORAGE_KEY, BALANCED_ORDER, orderAvailable, readStoredOrder, sortByPreset,
+} from '../utils/readNextOrder.js';
+import useOpenPaper from '../hooks/useOpenPaper.js';
+import { isDecided } from '../components/library/readNextCopy.js';
 import useServerAvailable from '../hooks/useServerAvailable.js';
 import useUnavailableText from '../hooks/useUnavailableText.js';
 import { allPapers } from '../offlineStore.js';
@@ -36,26 +43,15 @@ import { allPapers } from '../offlineStore.js';
 // Library page — a single "Read next" surface (Stage 2). The former Browse tab
 // and Triage monitor are merged in: the sidebar collection/tag filters + a
 // search box scope the ranked queue, and an opt-in "Select" mode sends papers to
-// triage. Scoring never runs on open; the Rescore button owns recompute.
+// triage. Scoring never runs on open; the Rescore button (Library jobs panel) owns recompute.
 
 // Fetch the WHOLE ranked library in one request (the backend ranks every item);
 // ReadNextView reveals it incrementally so the DOM stays light. High cap, not
 // truly unbounded, so a pathological library can't build a multi-MB response.
 const QUEUE_LIMIT = 5000;
-
-function flattenCollections(nodes, depth = 0, parent = '') {
-  const flat = [];
-  for (const node of nodes || []) {
-    flat.push({
-      key: node.key, name: node.name, item_count: node.item_count || 0, depth,
-      parent, hasChildren: Boolean(node.children?.length),
-    });
-    if (node.children?.length) {
-      flat.push(...flattenCollections(node.children, depth + 1, node.name));
-    }
-  }
-  return flat;
-}
+// A verdict patches its row in place (no queue re-read, H07); one re-read reconciles when the detail
+// closes, the window regains focus or 30 s pass without a verdict.
+const RECONCILE_IDLE_MS = 30000;
 
 // arXiv subject tags ("Computer Science - Artificial Intelligence") drown the
 // tags the owner wrote — list them after the rest (order otherwise unchanged).
@@ -69,46 +65,34 @@ export default function LibraryReadNext() {
   const navigate = useNavigate();
   const { status } = useSetupStatus();
   const serverAvailable = useServerAvailable();
-  const { say: sayUnavailable } = useUnavailableText();
+  const { say: sayUnavailable, kind: connectionKind } = useUnavailableText();
   const zoteroConnected = status?.zotero?.db_found === true;
-  const [searchParams, setSearchParams] = useSearchParams();
-  // Client-side smart filters (Phase 1) — hydrated from the URL on mount so a
-  // filtered view is shareable / survives reload, then mirrored back on change.
-  const [clientFilters, setClientFilters] = useState(() => hydrateFilters(searchParams));
-  // Explicit Zotero-column sort (Title/Creator/Publication/Year/Date Added);
-  // 'best' = the server's blended order untouched. URL-persisted like filters.
-  const [sort, setSort] = useState(() => hydrateSort(searchParams));
+  const [selected, setSelected] = useState(() => new Set());
+  // Scope, search, Show read, smart filters and the sort: one hook owns the state and its URL
+  // (a filtered view is a link that survives reload).
+  const dropSelection = useCallback(() => setSelected(new Set()), []);
+  const filters = useLibraryFilters({ onScopeChange: dropSelection });
+  const {
+    clientFilters, filtersActive, filterSig, sort, setSort,
+    selectedCollection, selectedTag, clearScope,
+    search, searchInput, setSearchInput, applySearch, clearSearch, includeRead, setIncludeRead,
+  } = filters;
+  // Read-next order preset (Best match only), kept on this device; Balanced = server order.
+  const [order, setOrder] = useState(readStoredOrder);
   const [queue, setQueue] = useState([]);
   const [queueMeta, setQueueMeta] = useState({
     read_hidden: 0, total_unread: 0, decided_count: 0, status: 'ready', model_ready: true,
     error: null, computed_at: null, scores_stale: false, distribution: null,
-    semantic: false, reranker_loading: false, semantic_unavailable: false,
+    semantic: false, reranker_loading: false, semantic_unavailable: false, order_meta: null,
   });
   const pollRef = useRef(null);
   const queueRequest = useRef(null);
-  const [queueLoading, setQueueLoading] = useState(false);
+  const [queueLoading, setQueueLoading] = useState(true);  // the first read starts on mount: no frame says «not scored» before it
   const [queueErr, setQueueErr] = useState(null);
-  const [includeRead, setIncludeRead] = useState(false);
   const [collections, setCollections] = useState([]);
   const [tags, setTags] = useState([]);
-  const [selectedCollection, setSelectedCollection] = useState(() => searchParams.get('c') || '');
-  const [selectedTag, setSelectedTag] = useState(() => searchParams.get('t') || '');
-  // "Browse & filter" drawer (collections + tags + smart filters). Default
-  // COLLAPSED everywhere so the ranked queue — the task — owns the fold (Serial
-  // Position); the collapsed summary still shows the active scope, so nothing is
-  // hidden. Power-users who open it are remembered (localStorage).
-  const [browseOpen, setBrowseOpen] = useState(() => {
-    const saved = readStorage('zs:libraryBrowseOpen');
-    return saved === '1';
-  });
-  function toggleBrowse(open) {
-    setBrowseOpen(open);
-    writeStorage('zs:libraryBrowseOpen', open ? '1' : '0');
-  }
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
+  const searchRef = useRef(null);  // `/` focuses it (ReadNextView keys)
   const [selectMode, setSelectMode] = useState(false);
-  const [selected, setSelected] = useState(() => new Set());
   const [starting, setStarting] = useState(false);
   const [addingToCollection, setAddingToCollection] = useState(false);
   const [syncingAll, setSyncingAll] = useState(false);
@@ -130,6 +114,8 @@ export default function LibraryReadNext() {
   const ftPollRef = useRef(null);
   const [message, setMessage] = useState('');
   const [isError, setIsError] = useState(false);
+  const [warned, setWarned] = useState('');  // the receipt text that carries a warning (it stops being one when the message changes)
+  const [ask, confirmDialog] = useConfirmSheet();
 
   const flatCollections = useMemo(() => flattenCollections(collections), [collections]);
   // Browse list: hide empty leaf collections; two collections with one name show
@@ -144,27 +130,6 @@ export default function LibraryReadNext() {
   }, [flatCollections, selectedCollection]);
 
   // ------ Client-side smart filters (over the already-loaded queue) ------
-  // Mirror the active filters into the URL (compact keys, defaults omitted) so a
-  // filtered view is a shareable link; `replace` keeps filter clicks out of history.
-  // Guard the write: only navigate when our filter params actually changed (a bare
-  // setSearchParams every render can loop, since its identity changes with the
-  // location it just updated). Non-filter params are preserved.
-  useEffect(() => {
-    const FILTER_KEYS = ['b', 'pr', 'g', 'w', 'q', 'vn', 's', 'sd'];
-    const target = { ...serializeFilters(clientFilters), ...serializeSort(sort) };
-    const current = new URLSearchParams();
-    for (const [k, v] of searchParams.entries()) {
-      if (FILTER_KEYS.includes(k)) current.append(k, v);
-    }
-    if (current.toString() !== new URLSearchParams(target).toString()) {
-      const merged = new URLSearchParams(searchParams);
-      FILTER_KEYS.forEach((k) => merged.delete(k));
-      Object.entries(target).forEach(([k, v]) => merged.set(k, v));
-      setSearchParams(merged, { replace: true });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientFilters, sort]);
-
   const filterCtx = useMemo(() => ({
     goalHigh: goalHighKeys(queue),
     prestigeFloor: queueMeta.distribution?.prestige_floor ?? null,
@@ -176,43 +141,63 @@ export default function LibraryReadNext() {
   // What the list actually shows: client filters apply only when the model is
   // ready (the bar is hidden otherwise), the explicit sort applies always —
   // sorting by Title/Year needs no model.
+  // Order presets act only on a search-free list whose response has the parts; they re-rank it
+  // only while no Zotero field is chosen (the field IS the order then).
+  const orderMeta = orderAvailable({
+    sortField: DEFAULT_SORT.field, search, modelReady: queueMeta.model_ready, meta: queueMeta.order_meta,
+  }) ? queueMeta.order_meta : null;
   const displayedQueue = useMemo(
-    () => sortQueue(queueMeta.model_ready ? filteredQueue : queue, sort),
-    [queueMeta.model_ready, filteredQueue, queue, sort],
+    () => sortByPreset(
+      sortQueue(queueMeta.model_ready ? filteredQueue : queue, sort),
+      sort.field === DEFAULT_SORT.field ? order : BALANCED_ORDER, orderMeta,
+    ),
+    [queueMeta.model_ready, filteredQueue, queue, sort, order, orderMeta],
   );
+  function changeOrder(next) {
+    setOrder(next);
+    writeStorage(ORDER_STORAGE_KEY, JSON.stringify(next));
+  }
+  // The open paper (`?open=KEY`) is owned here: ReadNextView remounts on a server filter change.
+  // ‹ › and «3 of N» walk the undecided rows of the displayed list.
+  const navKeys = useMemo(
+    () => displayedQueue.filter((row) => !isDecided(row)).map((row) => row.item_key),
+    [displayedQueue],
+  );
+  const openPaper = useOpenPaper(navKeys);
+  const loadQueueRef = useRef(null);
+  const rowsStale = useRef(false);
+  const idleTimer = useRef(null);
+  const writes = useRef(new Set());  // verdict writes in flight: a re-read must not overtake them
+  const reconcile = useCallback(() => {
+    clearTimeout(idleTimer.current);
+    if (!rowsStale.current) return;
+    rowsStale.current = false;
+    Promise.allSettled([...writes.current]).then(() => loadQueueRef.current());
+  }, []);
+  const patchRows = useCallback((patches) => {
+    const fields = new Map(patches);
+    setQueue((rows) => rows.map((row) => (fields.has(row.item_key) ? { ...row, ...fields.get(row.item_key) } : row)));
+    rowsStale.current = true;
+    clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(reconcile, RECONCILE_IDLE_MS);
+  }, [reconcile]);
+  const trackWrite = useCallback((write) => {
+    writes.current.add(write);
+    write.then(() => writes.current.delete(write), () => writes.current.delete(write));
+  }, []);
+  useEffect(() => {
+    window.addEventListener('focus', reconcile);
+    return () => { window.removeEventListener('focus', reconcile); clearTimeout(idleTimer.current); };
+  }, [reconcile]);
+  useEffect(() => { if (!openPaper.key) reconcile(); }, [openPaper.key, reconcile]);
   const visibleSelected = useMemo(
     () => new Set((queueLoading || queueErr ? [] : displayedQueue)
       .filter((row) => selected.has(row.item_key)).map((row) => row.item_key)),
     [displayedQueue, selected, queueLoading, queueErr],
   );
-  const whyOptions = useMemo(
-    () => [...new Set(queue.map((i) => i.why_reason).filter(Boolean))].sort(),
-    [queue],
-  );
-  const venueOptions = useMemo(
-    () => [...new Set(queue.map((i) => i.venue).filter(Boolean))].sort(),
-    [queue],
-  );
-  const prestigeCounts = useMemo(
-    () => prestigeBucketCounts(queue, filterCtx.prestigeFloor),
-    [queue, filterCtx.prestigeFloor],
-  );
-  const goalEnabled = useMemo(() => queue.some((i) => typeof i.goal_sim === 'number'), [queue]);
-  const qualityEnabled = useMemo(() => queue.some((i) => i.quality_grade), [queue]);
   // Proposals already on the rows (e.g. from the startup prewarm) — lets the
   // predictions bar say "N ready below" instead of implying nothing happened.
   const proposedCount = useMemo(() => queue.filter((i) => i.proposed_verdict).length, [queue]);
-  const filtersActive = isFilterActive(clientFilters);
-  const filterSig = useMemo(
-    () => JSON.stringify({ ...serializeFilters(clientFilters), ...serializeSort(sort) }),
-    [clientFilters, sort],
-  );
-
-  const clearClientFilters = useCallback(() => setClientFilters(EMPTY_FILTERS), []);
-  const toggleBand = useCallback((band) => setClientFilters((f) => ({
-    ...f,
-    bands: f.bands.includes(band) ? f.bands.filter((b) => b !== band) : [...f.bands, band],
-  })), []);
 
   // ------ Initial sidebar load ------
   useEffect(() => {
@@ -262,6 +247,9 @@ export default function LibraryReadNext() {
       semantic: Boolean(data?.semantic),
       reranker_loading: Boolean(data?.reranker_loading),
       semantic_unavailable: Boolean(data?.semantic_unavailable),
+      order_meta: data?.rank_coverage
+        ? { coverage: data.rank_coverage, fill: data.rank_fill || {}, balancedWeights: data.balanced_weights }
+        : null,
     });
   }, []);
 
@@ -308,7 +296,7 @@ export default function LibraryReadNext() {
       }
     } catch (err) {
       // Preserve the last-good list on a transient failure (don't blank the page);
-      // the banner surfaces the error. err.status drives the message in ReadNextView.
+      // the status line surfaces the error. err.status drives its message (libraryStatus.js).
       if (current()) setQueueErr(err);
     } finally {
       request.settled = true;
@@ -316,6 +304,7 @@ export default function LibraryReadNext() {
     }
   }, [queueArgs, applyQueueData]);
 
+  loadQueueRef.current = loadQueue;
   useEffect(() => {
     loadQueue();
     return () => {
@@ -339,30 +328,6 @@ export default function LibraryReadNext() {
     writeStorage('zs.reviewOrder', JSON.stringify(displayedQueue.map((i) => i.item_key)));
   }, [displayedQueue]);
 
-  function selectCollection(key) {
-    setSelectedCollection(key);
-    setSelected(new Set());
-    setSearchParams((prev) => { const next = new URLSearchParams(prev); key ? next.set('c', key) : next.delete('c'); return next; }, { replace: true });
-  }
-
-  function selectTag(tag) {
-    setSelectedTag(tag);
-    setSelected(new Set());
-    setSearchParams((prev) => { const next = new URLSearchParams(prev); tag ? next.set('t', tag) : next.delete('t'); return next; }, { replace: true });
-  }
-
-  function applySearch() {
-    setSearch(searchInput.trim());
-  }
-
-  function clearFilters() {
-    setSelectedCollection('');
-    setSelectedTag('');
-    setSearchInput('');
-    setSearch('');
-    setSearchParams((prev) => { const next = new URLSearchParams(prev); next.delete('c'); next.delete('t'); return next; }, { replace: true });
-  }
-
   function toggleItem(key) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -380,6 +345,7 @@ export default function LibraryReadNext() {
   async function handleAddToCollection(collectionKey, force = false) {
     if (!visibleSelected.size || !collectionKey) return;
     const name = flatCollections.find((c) => c.key === collectionKey)?.name || collectionKey;
+    if (!force && !(await ask(addToCollectionSheet(visibleSelected.size, name)))) return;
     setAddingToCollection(true);
     setMessage('');
     let added = 0;
@@ -388,7 +354,7 @@ export default function LibraryReadNext() {
         const data = await addItemToCollection(key, { collectionKey, force });
         if (data?.requires_force) {
           setAddingToCollection(false);
-          if (window.confirm('Zotero appears to be running. Add anyway? (a backup is taken first)')) {
+          if (await ask(forceSheet(`add ${visibleSelected.size} paper${visibleSelected.size === 1 ? '' : 's'} to “${name}”`))) {
             return await handleAddToCollection(collectionKey, true);
           }
           setMessage(`Cancelled — ${added} of ${visibleSelected.size} added to “${name}”. Close Zotero, then retry.`);
@@ -410,15 +376,15 @@ export default function LibraryReadNext() {
     }
   }
 
-  // Bulk verdict / mark-read finished (BulkVerdictBar): show the outcome and, once
-  // anything landed, drop the selection and refetch the queue.
-  function handleBulkDone(msg, failed, partial = !failed) {
+  // Bulk verdict / mark-read finished (BulkVerdictBar): show the outcome and, once anything landed,
+  // drop the selection and refetch the queue (a verdict batch already patched its rows: reload = false).
+  function handleBulkDone(msg, failed, partial = !failed, reload = true) {
     setMessage(msg);
     setIsError(failed);
     if (!partial) return;
     setSelected(new Set());
     if (!failed) setSelectMode(false);
-    loadQueue();
+    if (reload) loadQueue();
   }
 
   async function handleRunTriage() {
@@ -439,37 +405,53 @@ export default function LibraryReadNext() {
   }
 
   // ------ Bulk: acquire OA full-text PDFs → Zotero (background job) ------
-  function pollFulltext() {
+  // Show one status answer: progress while it runs (and poll again), else the finished result.
+  function showFulltext(s) {
     if (ftPollRef.current) { clearTimeout(ftPollRef.current); ftPollRef.current = null; }
-    fetchFulltextStatus().then((s) => {
-      const p = s?.progress || {};
-      if (s?.running) {
-        setMessage(`Fetching full text… ${p.done || 0}/${p.total || 0} checked (this can take several minutes).`);
-        ftPollRef.current = setTimeout(pollFulltext, 4000);
-        return;
-      }
-      const r = s?.result || {};
-      setFetchingFulltext(false);
-      if (r.error) { setMessage(`Full-text fetch failed: ${r.error}`); setIsError(true); return; }
-      const pdf = fulltextMessage(r);
-      if (!pdf) {
-        setMessage('Full-text fetch failed: Full-text result is missing outcomes');
-        setIsError(true);
-        return;
-      }
-      setMessage(
-        `Attached ${r.attached || 0} full-text PDF(s) to Zotero`
-        + ` (skipped ${r.skipped_has_pdf || 0} already attached; ${pdf.unavailable} unavailable).`
-        + (r.attached ? ' They upload to zotero.org on the next sync.' : '')
-        + (r.backup_path ? ` Backup: ${r.backup_path}.` : ''),
-      );
-      setIsError(false);
-    }).catch((err) => {
+    const p = s?.progress || {};
+    if (s?.running) {
+      setMessage(`Fetching full text… ${p.done || 0}/${p.total || 0} checked (this can take several minutes).`);
+      ftPollRef.current = setTimeout(pollFulltext, 4000);
+      return;
+    }
+    const r = s?.result || {};
+    setFetchingFulltext(false);
+    if (r.error) { setMessage(`Full-text fetch failed: ${r.error}`); setIsError(true); return; }
+    const pdf = fulltextMessage(r);
+    if (!pdf) {
+      setMessage('Full-text fetch failed: Full-text result is missing outcomes');
+      setIsError(true);
+      return;
+    }
+    setMessage(
+      `Attached ${r.attached || 0} full-text PDF(s) to Zotero`
+      + ` (skipped ${r.skipped_has_pdf || 0} already attached; ${pdf.unavailable} unavailable).`
+      + (r.attached ? ' They upload to zotero.org on the next sync.' : '')
+      + (r.backup_path ? ` Backup: ${r.backup_path}.` : ''),
+    );
+    setIsError(false);
+  }
+
+  function pollFulltext() {
+    fetchFulltextStatus().then(showFulltext).catch((err) => {
       setFetchingFulltext(false);
       setMessage(`Full-text status unavailable: ${err.message || err}. The server job may still be running.`);
       setIsError(true);
     });
   }
+
+  // Opening the page while a fetch is still running resumes its progress (a finished old result is not shown).
+  useEffect(() => {
+    if (!zoteroConnected || !serverAvailable) return undefined;
+    let cancelled = false;
+    Promise.resolve(fetchFulltextStatus()).then((s) => {
+      if (cancelled || !s?.running) return;
+      setFetchingFulltext(true);
+      showFulltext(s);
+    }).catch(() => {});  // a probe: no answer means nothing to resume
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoteroConnected, serverAvailable]);
 
   // ------ "Review cool papers" auto-review loop ------
   // The fleet orchestration — pin the cool keys, dedup via an attempted-ledger, drain
@@ -478,11 +460,13 @@ export default function LibraryReadNext() {
   const {
     fleetStatus, autoReview, coolUndecided, handleReviewCool, stopReviewCool,
   } = useReviewCoolLoop({
-    queue, queueArgs, applyQueueData, loadQueue, zoteroConnected, setMessage, setIsError,
+    queue, queueArgs, applyQueueData, loadQueue, zoteroReady: zoteroConnected, setMessage, setIsError,
     prestigeFloor: filterCtx.prestigeFloor,
   });
 
-  // One-click Zotero export chain (Tesler: the system owns the rescore→tags→
+  // The sheets name a paper count only when the list is unscoped (then it is the whole library).
+  const libraryCount = !selectedCollection && !selectedTag && !search ? queueMeta.total_unread + queueMeta.read_hidden : 0;
+  // Zotero export chain, after a confirmation sheet (Tesler: the system owns the rescore→tags→
   // ranks sequence the user previously had to remember and order correctly):
   // 1. rescore the library IF the cached scores predate the current model (or
   //    were never computed), waiting on the cheap status poll;
@@ -490,6 +474,7 @@ export default function LibraryReadNext() {
   // Staleness is re-checked from the SERVER at every entry (not the closure),
   // so the force-retry recursion never re-runs a rescore that just finished.
   async function handleSyncAll(force = false) {
+    if (!force && !(await ask(sendSheet({ papers: libraryCount, scoresStale: queueMeta.scores_stale })))) return;
     setSyncingAll(true);
     setMessage('');
     try {
@@ -508,7 +493,7 @@ export default function LibraryReadNext() {
       const tags = await syncRelTags({ force });
       if (tags?.requires_force) {
         setSyncingAll(false);
-        if (window.confirm('Zotero appears to be running. Sync anyway? (a backup is taken first)')) {
+        if (await ask(forceSheet('write the tags and ranks'))) {
           return await handleSyncAll(true);
         }
         setMessage('Sync cancelled — close Zotero, then retry.');
@@ -523,21 +508,19 @@ export default function LibraryReadNext() {
         // Zotero opened BETWEEN the steps; the tag step is idempotent, so a
         // forced rerun of the whole chain is safe and keeps the code one path.
         setSyncingAll(false);
-        if (window.confirm('Zotero opened mid-sync. Finish anyway? (a backup is taken first)')) {
+        if (await ask(forceSheet('finish writing'))) {
           return await handleSyncAll(true);
         }
-        setMessage('Tags synced; rank stamping cancelled — close Zotero, then run “Sync all” again.');
+        setMessage('Tags synced; rank stamping cancelled — close Zotero, then run “Send to Zotero” again.');
         setIsError(false);
         return;
       }
       if (ranks?.stale) { setMessage(ranks.message); setIsError(false); return; }
       recordZoteroSync('ranks');
-      setMessage(
-        `Zotero is up to date — ${tags?.tagged || 0} relevance tag(s) refreshed, `
-        + `${ranks?.ranked || 0} papers ranked into Call Number. `
-        + 'In Zotero, sort the Call Number column ascending to read best-first.',
-      );
+      const receipt = sendReceipt(tags, ranks);
+      setMessage(receipt.text);
       setIsError(false);
+      setWarned(receipt.warning ? receipt.text : '');
       loadQueue(false);
     } catch (err) {
       setMessage(`Sync-all failed: ${err.message || err}`);
@@ -548,13 +531,14 @@ export default function LibraryReadNext() {
   }
 
   async function handleFetchFulltext(force = false) {
+    if (!force && !(await ask(fetchSheet({ papers: libraryCount })))) return;
     setFetchingFulltext(true);
     setMessage('');
     try {
       const data = await fetchFulltext({ force });
       if (data?.requires_force) {
         setFetchingFulltext(false);
-        if (window.confirm('Zotero appears to be running. Fetch + attach anyway? (a backup is taken first)')) {
+        if (await ask(forceSheet('fetch and attach the PDFs'))) {
           return await handleFetchFulltext(true);
         }
         setMessage('Full-text fetch cancelled — close Zotero, then retry.');
@@ -572,172 +556,104 @@ export default function LibraryReadNext() {
     }
   }
 
-  // Active scope shown in the collapsed drawer summary so folding it never hides
-  // what's applied (Working Memory). Collection name (not key), tag, filters-on.
-  const browseScope = [
-    flatCollections.find((c) => c.key === selectedCollection)?.name,
-    selectedTag && `# ${selectedTag}`,
-    filtersActive && 'filters on',
-  ].filter(Boolean);
+  // ------ The status line and the empty list (libraryStatus.js picks the one message) ------
+  const pending = usePendingCount(serverAvailable);
+  const offline = queueMeta.status === 'offline';
+  const scoringError = queueMeta.status === 'error' && queueMeta.error ? queueMeta.error : null;
+  const unscored = useMemo(() => queue.filter((row) => typeof row.relevance_score !== 'number').length, [queue]);
+  const scopeName = flatCollections.find((c) => c.key === selectedCollection)?.name
+    || (selectedCollection ? 'this collection' : selectedTag);
+  const base = {
+    loading: queueLoading, err: queueErr, offline, scoringError, computing: queueMeta.status === 'computing',
+    modelReady: queueMeta.model_ready, computedAt: queueMeta.computed_at,
+  };
+  const statusCtx = {
+    ...base, rows: queue.length, connection: serverAvailable ? 'ok' : connectionKind,
+    scoresStale: queueMeta.scores_stale, unscored, pending,
+    // What the page's actions last said (sync, fetch, add to collection, triage, bulk verdict): a job still
+    // running shows its progress, a finished one stays until dismissed.
+    receipt: message ? { text: message, error: isError, warning: warned === message, busy: syncingAll || fetchingFulltext } : null,
+  };
+  const empty = emptyState({
+    ...base, rows: displayedQueue.length, rawCount: queue.length, hasActiveFilters: queueMeta.model_ready && filtersActive,
+    search, scopeName, includeRead, readHidden: queueMeta.read_hidden,
+  });
+  const statusHandlers = {
+    sync: () => syncNow(), retry: () => loadQueue(false), reload: () => window.location.reload(),
+    rescore: () => loadQueue(true), clearFilters: filters.clearFilters, clearSearch, clearScope,
+    showRead: () => setIncludeRead(true), dismiss: () => { setMessage(''); setIsError(false); setWarned(''); },
+  };
 
   return (
     <div>
-      {/* ----- Single full-width Read-next surface (Stage 2). Collections, tags,
-          and smart filters fold into ONE "Browse & filter" drawer so the ranked
-          queue + decision card own the whole width. Three labelled regions keep
-          read-only FIND, suggestion-making REVIEW QUEUE, and whole-library WRITE
-          EXPORT distinct; one outer border, hairline rhythm between. ----- */}
+      {confirmDialog}
+      <div data-testid="library-status-row" className="my-2 flex flex-wrap items-center gap-2">
+      <LibraryStatusLine ctx={statusCtx} handlers={statusHandlers} />
+      <LibraryJobsPanel
+        ctx={statusCtx}
+        onRescore={statusHandlers.rescore}
+        unavailable={serverAvailable ? '' : sayUnavailable('Jobs need the Mac (offline)')}
+        zotero={zoteroConnected ? {
+          pending, syncing: syncingAll, fetching: fetchingFulltext, syncedAt: zoteroSyncedAt,
+          onSend: () => handleSyncAll(false), onFetch: () => handleFetchFulltext(false),
+        } : null}
+        picks={{
+          fleetStatus, onRun: handleReviewCool, onStop: stopReviewCool, autoActive: autoReview.active,
+          stopping: autoReview.stopping, coolCount: coolUndecided, proposedCount, queueAtLimit: queue.length >= QUEUE_LIMIT,
+        }}
+      />
+      </div>
+      {/* ----- Single full-width Read-next surface (Stage 2). Collections, tags and
+          smart filters are one «Filter» sheet beside the search, so the ranked
+          queue owns the whole width; two regions (find, then the list), one outer
+          border, hairline rhythm between. The whole-library jobs sit above, in the
+          Library jobs panel. ----- */}
       <div className="glass rounded-2xl border border-slate-200 p-3 divide-y divide-slate-200/60">
-        {/* Region A — FIND: read-only, instant scoping (search + browse drawer). */}
-        <Section label="Find">
+        {/* Region A — find: read-only, instant scoping (search + the Filter sheet). */}
+        <Section>
           <div className="flex flex-wrap gap-2 items-center">
             <input
-              type="text"
+              ref={searchRef}
+              type="search"
+              enterKeyHint="search"
+              aria-label="Search by meaning"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyUp={(e) => { if (e.key === 'Enter') applySearch(); }}
               disabled={!serverAvailable}
               placeholder={serverAvailable ? 'Search by meaning… (e.g. hallucination mitigation)' : sayUnavailable('Meaning search needs the Mac (offline)')}
-              className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+              className="min-h-11 flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 sm:min-h-0"
             />
-            {/* Search is semantic by default (hybrid); Enter submits — no Meaning/
-                Exact toggle, no separate Search button (the input IS the control). */}
-            {(selectedCollection || selectedTag || search) && (
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="px-3 py-2 rounded-lg bg-slate-200 text-slate-700 text-sm hover:bg-slate-300"
-              >
-                Clear
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={applySearch}
+              disabled={!serverAvailable}
+              className="px-4 py-2 rounded-lg bg-teal-600 text-white text-sm hover:bg-teal-700 disabled:opacity-50"
+            >
+              Go
+            </button>
+            <LibraryFilters
+              f={filters}
+              collections={browseCollections}
+              tags={tags}
+              queue={queue}
+              ctx={filterCtx}
+              modelReady={queueMeta.model_ready}
+              serverAvailable={serverAvailable}
+              readCount={includeRead ? queue.filter((row) => row.read).length : queueMeta.read_hidden}
+              matchCount={displayedQueue.length}
+              loading={queueLoading}
+            />
           </div>
-
-          {/* Collections + tags + smart filters in ONE collapsible drawer. The
-              summary carries the active scope (Working Memory), so a collapsed
-              drawer never hides what's filtering the queue. */}
-          <details
-            open={browseOpen}
-            onToggle={(e) => toggleBrowse(e.currentTarget.open)}
-            className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60"
-          >
-            <summary className="cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden px-3 py-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 rounded-xl">
-              <span className="font-semibold uppercase tracking-wider text-slate-400">Browse &amp; filter</span>
-              {browseScope.length === 0 ? (
-                <span className="text-slate-400">all items</span>
-              ) : (
-                browseScope.map((s) => (
-                  <span key={s} className="inline-flex items-center px-1.5 py-0 rounded-full bg-white border border-slate-200 text-slate-600">{s}</span>
-                ))
-              )}
-              <span className="ml-auto text-slate-400" aria-hidden="true">{browseOpen ? '▾' : '▸'}</span>
-            </summary>
-
-            <div className="px-3 pb-3 pt-1 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
-              <div>
-                <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2">Collections</h2>
-                <ExpandableList count={browseCollections.length + 1}>
-                  <button
-                    type="button"
-                    onClick={() => selectCollection('')}
-                    className={`w-full text-left text-xs px-2 py-1 rounded mb-1 ${
-                      selectedCollection === ''
-                        ? 'bg-teal-600 text-white'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                    }`}
-                  >
-                    All items
-                  </button>
-                  {browseCollections.map((entry) => (
-                    <button
-                      type="button"
-                      key={entry.key}
-                      onClick={() => selectCollection(entry.key)}
-                      style={{ paddingLeft: 8 + entry.depth * 14 }}
-                      className={`w-full text-left text-xs px-2 py-1 rounded mb-1 ${
-                        selectedCollection === entry.key
-                          ? 'bg-teal-600 text-white'
-                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                      }`}
-                    >
-                      <span>{entry.label}</span>
-                      <span className="mono opacity-70"> ({entry.item_count})</span>
-                    </button>
-                  ))}
-                </ExpandableList>
-              </div>
-
-              <div>
-                <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2">Top Tags</h2>
-                <ExpandableList count={Math.min(tags.length, 100) + 1}>
-                  <button
-                    type="button"
-                    onClick={() => selectTag('')}
-                    className={`w-full text-left text-xs px-2 py-1 rounded mb-1 ${
-                      selectedTag === ''
-                        ? 'bg-amber-600 text-white'
-                        : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
-                    }`}
-                  >
-                    All tags
-                  </button>
-                  {tags.slice(0, 100).map((tagEntry) => (
-                    <button
-                      type="button"
-                      key={tagEntry.tag}
-                      onClick={() => selectTag(tagEntry.tag)}
-                      className={`w-full text-left text-xs px-2 py-1 rounded mb-1 ${
-                        selectedTag === tagEntry.tag
-                          ? 'bg-amber-600 text-white'
-                          : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
-                      }`}
-                    >
-                      <span>{tagEntry.tag}</span>
-                      <span className="mono opacity-70"> ({tagEntry.item_count})</span>
-                    </button>
-                  ))}
-                </ExpandableList>
-              </div>
-            </div>
-
-            {/* Smart client-side filters — only meaningful once the model has scored
-                the library (bands/prestige/goal all key off the relevance score). */}
-            {queueMeta.model_ready && queue.length > 0 && (
-              <div className="px-3 pb-3">
-                <LibraryFilterBar
-                  filters={clientFilters}
-                  onChange={setClientFilters}
-                  whyOptions={whyOptions}
-                  venueOptions={venueOptions}
-                  prestigeCounts={prestigeCounts}
-                  goalEnabled={goalEnabled}
-                  qualityEnabled={qualityEnabled}
-                  onClear={clearClientFilters}
-                />
-              </div>
-            )}
-          </details>
+          <AppliedFilters
+            f={filters}
+            collectionName={flatCollections.find((c) => c.key === selectedCollection)?.name}
+            modelReady={queueMeta.model_ready}
+          />
         </Section>
 
-        {/* Region B — REVIEW QUEUE: the work surface. Predict lives HERE, atop the
-            rows whose Confirm/Override cards it produces, with its own feedback. */}
-        <Section label="Review queue">
-          <fieldset disabled={!serverAvailable}>
-          <PredictionsBar
-            fleetStatus={fleetStatus}
-            onRun={handleReviewCool}
-            onStop={stopReviewCool}
-            autoActive={autoReview.active}
-            stopping={autoReview.stopping}
-            coolCount={coolUndecided}
-            proposedCount={proposedCount}
-            queueAtLimit={queue.length >= QUEUE_LIMIT}
-          />
-          </fieldset>
-          {!serverAvailable && <p role="status" className="mt-2 text-xs text-amber-800">{queueMeta.status === 'offline'
-            ? `Cached working set — verdicts and notes save on this device. ${sayUnavailable('Review, meaning search and Zotero export need the Mac.')}`
-            : 'App sync is not confirmed. Use Sync now before server-only actions; local review remains available.'}</p>}
-          <div className="mt-3">
+        {/* Region B — the ranked list: the work surface. */}
+        <Section>
             <ReadNextView
           // Remount on a deliberate SERVER filter change so the incremental-reveal
           // count and any expanded row reset — but NOT on the 4s status poll, and
@@ -748,25 +664,23 @@ export default function LibraryReadNext() {
           // The explicit Zotero-column sort applies in both cases (displayedQueue).
           items={displayedQueue}
           serverAvailable={serverAvailable}
-          offline={queueMeta.status === 'offline'}
+          offline={offline}
           sort={sort}
           onSortChange={setSort}
+          order={order}
+          onOrderChange={changeOrder}
+          orderMeta={orderMeta}
           loading={queueLoading}
           err={queueErr}
-          includeRead={includeRead}
-          onToggleIncludeRead={() => setIncludeRead((v) => !v)}
-          readHidden={queueMeta.read_hidden}
           totalUnread={queueMeta.total_unread}
           decidedCount={queueMeta.decided_count}
-          status={queueMeta.status}
+          queueItems={queue}
           modelReady={queueMeta.model_ready}
-          error={queueMeta.error}
-          computedAt={queueMeta.computed_at}
-          scoresStale={queueMeta.scores_stale}
-          distribution={queueMeta.distribution}
-          onRescore={() => loadQueue(true)}
-          onReload={() => loadQueue(false)}
           onSaved={() => loadQueue()}
+          openState={openPaper}
+          onFocusSearch={() => searchRef.current?.focus()}
+          onRowsChange={patchRows}
+          onWrite={trackWrite}
           selectMode={selectMode}
           onToggleSelectMode={() => { setSelectMode((v) => !v); setSelected(new Set()); }}
           selected={visibleSelected}
@@ -779,55 +693,16 @@ export default function LibraryReadNext() {
           addingToCollection={addingToCollection}
           rawCount={queue.length}
           hasActiveFilters={queueMeta.model_ready && filtersActive}
-          onClearClientFilters={clearClientFilters}
-          activeBands={clientFilters.bands}
-          onBandClick={toggleBand}
           filterSig={filterSig}
           semantic={queueMeta.semantic}
           searchQuery={search}
           rerankerLoading={queueMeta.reranker_loading}
           semanticUnavailable={queueMeta.semantic_unavailable}
           prestigeFloor={filterCtx.prestigeFloor}
+          cohortFull={!selectedCollection && !selectedTag}
         />
-          </div>
+            <LibraryEmptyState state={empty} handlers={statusHandlers} />
         </Section>
-
-        {/* Region C — EXPORT TO ZOTERO: the heavy, occasional whole-library WRITES
-            and their last-synced status, which belongs HERE beside Sync — never
-            under Predict (the conflation that made Predict look like it should
-            change a sync timestamp). Hick's/Miller's Law: the four actions stay in
-            one grouped disclosure. */}
-        {zoteroConnected && (
-          <Section label="Export to Zotero">
-            <div className="flex flex-wrap gap-2 items-center">
-              <ZoteroActionsMenu
-                disabled={syncingAll || !serverAvailable}
-                actions={[
-                  {
-                    label: 'Sync all → Zotero', busy: syncingAll, busyLabel: 'Syncing…',
-                    onClick: () => handleSyncAll(false),
-                    title: 'One click, whole chain: rescore the library if the model changed since, then write zs:rel/<band> relevance tags AND stamp the Call-Number ranks (zr0001…) into Zotero. Backup-first; needs Zotero closed (you\'ll be asked to force otherwise). Then just sort the Call Number column in Zotero.',
-                  },
-                  {
-                    label: 'Fetch full text', busy: fetchingFulltext, busyLabel: 'Fetching…',
-                    disabled: fetchingFulltext, onClick: () => handleFetchFulltext(false),
-                    title: 'Download the arXiv full-text PDF for every library paper that has an arXiv link but no PDF, and attach it natively to Zotero. Skips papers that already have a PDF. Backs up first; runs with Zotero closed; PDFs upload to zotero.org on the next sync.',
-                  },
-                ]}
-              />
-            </div>
-            {(zoteroSyncedAt.tags || zoteroSyncedAt.ranks) && (
-              <p className="mt-2 text-[11px] text-slate-400">
-                Last synced — relevance tags: {formatShortDate(zoteroSyncedAt.tags) || 'never'} ·
-                Call-Number ranks: {formatShortDate(zoteroSyncedAt.ranks) || 'never'}
-              </p>
-            )}
-          </Section>
-        )}
-
-        {/* One shared transient slot for action results (sync / add-to-collection /
-            triage). Self-gates to null when empty, so no stray hairline. */}
-        <StatusBanner message={message} isError={isError} />
       </div>
     </div>
   );

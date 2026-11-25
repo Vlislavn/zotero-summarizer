@@ -103,6 +103,10 @@ scan: ## Advisory code-health report, whole tree
 	if [ -x frontend/node_modules/.bin/oxlint ]; then \
 	  DEADCODE_OXLINT=$(CURDIR)/frontend/node_modules/.bin/oxlint $(DEADCODE) scan --no-history 2>&1 | sed 's/^/  /'; \
 	else echo "  oxlint missing: run 'cd frontend && npm install' to scan JS/TS"; fi; \
+	echo "── Complexity (McCabe > 15) ──"; \
+	if command -v $(call tool,ruff) >/dev/null 2>&1; then \
+	  $(call tool,ruff) check --isolated --select C901 --config 'lint.mccabe.max-complexity = 15' zotero_summarizer --output-format concise 2>&1 | sed 's/^/  /' || true; \
+	else echo "warning: ruff not found; complexity block skipped" >&2; fi; \
 	true
 
 scan-overlaps: ## Two-pass overlaps, Python + JS/TS (~12 min, ~1.8 GB RSS; run alone)

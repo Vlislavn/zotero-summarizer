@@ -9,7 +9,7 @@ import sys
 from typing import Any
 from unittest.mock import patch
 
-from zotero_summarizer.services._common import read_config
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.settings import offline_requested
 
 

@@ -1,8 +1,9 @@
 # cli — the `zotero-summarizer` command-line interface
 
-The `_telegram-child` has two purposes: `auth` (interactive terminal only) and `digest`
+The `_telegram-child` has three purposes: `auth` (interactive terminal only), `digest`
 (the Settings 'Collect' action: `collect_pages` + digest, persisted in-child as
-`telegram-today.json`). It retains the dedicated session/fuse/lease and a receipt
+`telegram-today.json`) and `comments` (Weekly «Load discussions»: reads the comments of the
+post ids in `--source-ids`, saved as conversation snapshots; no model). It retains the dedicated session/fuse/lease and a receipt
 verified before the parent proceeds (`integrations.telegram_child.run_child` spawns it; `cli/_telegram.py` holds the child body); failures expose bounded status codes, never raw
 SDK messages/account paths. The `conversations` purpose and its v2 bundle export were
 removed (retired; historical bundles stay readable in Weekly).
@@ -45,7 +46,10 @@ __init__.build_parser()
           ├─ register_goldenset_setup_tag_colors(gs_sub)  # _goldenset_setup_colors.py: setup-tag-colors
           └─ register_goldenset_feedback(gs_sub)  # _goldenset_feedback.py: analyze-feedback
    ├─ register_faithbench(subparsers)  # _faithbench.py: faithbench build/run/judge/report/interpretation
-   └─ register_research_feed(...)      # _research_feed.py: research-feed run/view/telegram-auth
+   ├─ register_research_feed(...)      # _research_feed.py: research-feed run/view/telegram-auth
+   ├─ register_review_feedback(...)    # _review_feedback.py: review-feedback list/check
+   ├─ register_similar(subparsers)     # _similar.py: similar "<query>" [--limit N] [--json]
+   └─ register_candidates(subparsers)  # _candidates.py: candidates <note.md> [--limit N]
 main() = parse args → validate command budgets → selected Settings/.env → offline flags → dispatch
 ```
 
@@ -53,6 +57,9 @@ main() = parse args → validate command budgets → selected Settings/.env → 
 |---|---|
 | `__init__.py` | `build_parser()` + `main()` (the entry point `zotero-summarizer`) |
 | `__main__.py` | enables `python -m zotero_summarizer.cli` |
+| `_review_feedback.py` | `review-feedback list` (one line per saved evidence package: paper, parts and reasons, snapshot status, checks) and `review-feedback check KEY [--part P] [--set PART=confirmed\|rejected\|unclear --note …]` (each part's shown text, its reasons, and where its phrases and quotes occur in `source.txt`; `--set` writes `check.json`). Local files only under `Settings.review_feedback_dir`: no model, no network, no database; both mark a snapshot `pending` for over 10 minutes as `interrupted` (the app retries it on the next save) |
+| `_similar.py` | `similar "<query>" [--limit 10] [--json]`: the app's «Meaning» search without the server. Builds the minimal runtime (goals.yaml config, `EmbeddingCache`, `ZoteroReader`; no gate, no data writes, no background workers), waits ≤20 s for the cross-encoder (else fusion order, flagged), then calls `reading_queue.build_reading_queue(search=q, semantic=True, include_read=True, include_abstract=True)` — the same call as `GET /api/library/reading-queue?semantic=true&include_read=true`, so results equal the app's. Prints a flags line (`semantic`, `reranked`, `zotero_copy=fresh\|stale since …`) then one line per paper: rank · title · year · first author · read/unread · why_reason (≤160; `-` without a loaded gate) · `zotero://select/library/items/KEY`; `--json` prints the items. Exit 1 with one stderr line when the corpus is off, there are no candidates or the runtime fails; a 55 s watchdog exits 3. Ends with `os._exit` so a model-load thread cannot keep the process alive |
+| `_candidates.py` | `candidates <note.md> [--limit 10]`: papers to offer for one Obsidian note (the vault's «Кандидаты из Zotero» button runs it). Read-only: the `feed` stage's model, built with `local_only=True` (loopback only, so the note never leaves the machine), turns the note into an English query; `similar`'s bootstrap and search return 15 papers; `services/library/note_candidates` drops papers the note already links or was offered, deep-review grade D and the model's «no». Prints one JSON object (`query`, `lines` — Markdown links with the review grade, `keys`, `searched`, `dropped`, `stale_since`, `seconds`); the button merges the lines into the note. Exit 1 with one stderr line on failure; a 150 s watchdog exits 3; ends with `os._exit` |
 | `_helpers.py` | shared CLI helpers: feed-id resolution, run-log writing, slugs |
 | `_app.py` | `serve` (uvicorn `api.app:create_app`, `factory=True`; leaves existing listeners intact and reports a bind error on an occupied port; the process-killing helper and `--no-kill` option are removed) / `mcp` / `migrate` / `smoke-test` / `prefetch-models` (download the ML models for offline use; `--check` reports cache status; includes the MiniCheck claim-checker only when `quality_review.shadow_claim_check` is on). `__init__.apply_offline_env()` projects the selected Settings environment before handler model imports; importing CLI or building its parser reads no default `.env` or model SDK. `ZS_OFFLINE`/`HF_HUB_OFFLINE` still select cache-only model loading. `verify-deep-review` runs the real digest + quality path headlessly against the live `deep_review` model on ONE already-built paper's cached `qa_text` (`--item-key`, default `4NIMLFMV`; `--with-goals` adds the heavier goal board) — prints per-phase timing + the digest JSON; the end-to-end "does a review actually produce a digest" check without Zotero or the server. It computes `sub_concurrency` via the SAME `_common.deep_review_sub_concurrency` helper the background job uses (and prints it in the tier line), so its wall-clock is a faithful production receipt — a remote provider's rubric/goal sub-calls run in parallel here exactly as they would in the app. `--provider`/`--model` override the deep_review stage for THIS run only (e.g. `--provider default --model qwen3.5:4b` to drive the pipeline against a local ollama model when the configured provider is unreachable/over-budget) |
 | `_mobile_serve.py` | Explicit `serve-mobile --origin HTTPS_TS_ORIGIN --owner-login EXACT_LOGIN`: owned private Unix by default. `--trusted-loopback-port PORT` consciously trusts local host processes and binds only 127.0.0.1:PORT (1024..65535), retaining owner/HTTPS admission. Never auto-falls back or configures Tailscale. Original signal/resource lifetime covers both transports. |
@@ -64,6 +71,9 @@ main() = parse args → validate command budgets → selected Settings/.env → 
 | `_goldenset_setup_colors.py` | `setup-tag-colors` — prints the one-time Zotero setup (colors + number keys 1-4 for the four `label:<priority>` tags) for native keypress labeling. Non-destructive (prints the plan; writes nothing into your synced Zotero settings); `--json` for machine output |
 | `_faithbench.py` | `faithbench build/run/judge/report` — faithfulness mini-benchmark of the deep_review-stage model (span-verified QA + traps + review-claim grounding). Build stages the review CSV before publishing the immutable benchmark file as its version marker; QA runs require explicit approval of every generated review-CSV row and bind that CSV hash into the manifest. `build --max-builder-windows` bounds contiguous 6,000-character source windows per paper; its CLI/env/default precedence, preflight behavior and cost are documented below. `run` is resumable via `--run-id` and takes `--provider/--model` to sweep a model for THIS run only (no goals.yaml edit; recorded in the manifest); `judge` uses the pinned remote judge (`CUSTOM_BASE_URL`/`CUSTOM_API_KEY`). See `services/faithbench/README.md` |
 | `_research_feed.py` / `_telegram.py` | `research-feed run` produces RSS or explicitly selected Telegram reports; `view` prints retained Markdown without processing (a non-`.md` or missing report is a one-line `error:` with exit 2); `telegram-auth` owns explicit interactive authorization. RSS generation reuses deep review unless `--cached-only` (papers without a cached triage are listed by title but do not make the exit code 1); queuing Zotero changes requires `--queue-zotero`. A generating run prints plain progress on stderr (screening count, «screened N/M», the full-text review step). |
+
+`similar` and `candidates` share `_similar._run_with_watchdog`: each supplies its own runner and deadline;
+normal completion flushes both streams before the hard exit.
 
 Handlers use lazy imports inside the function bodies to keep CLI startup fast.
 
@@ -243,3 +253,9 @@ runs only from **Weekly → Telegram** in the UI, and the one-time `telegram-aut
 command is the sole terminal step. The `research-feed run` command is RSS-only. See
 [Telegram news](../../docs/features.md#telegram-news). Source and synthetic lifecycle
 tests are not live-account acceptance.
+
+`serve`/`verify-deep-review` take the per-paper LLM call width from `services/llm/concurrency.deep_review_sub_concurrency` (no longer `services/_common`).
+
+CLI commands load/save goals.yaml through `services/config_io` (`read_config`, `write_user_config`).
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.

@@ -70,7 +70,7 @@ export const STATUS_TABS = [
 
 export const statusLabel = (status) => STATUS_TABS.find((tab) => tab.value === status)?.label || status;
 
-export function flattenCollections(nodes, depth = 0) {
+export function flattenCollections(nodes, depth = 0, parent = '') {
   const flat = [];
   for (const node of nodes || []) {
     flat.push({
@@ -78,9 +78,11 @@ export function flattenCollections(nodes, depth = 0) {
       name: node.name,
       item_count: node.item_count || 0,
       depth,
+      parent,
+      hasChildren: Boolean(node.children?.length),
     });
     if (node.children?.length) {
-      flat.push(...flattenCollections(node.children, depth + 1));
+      flat.push(...flattenCollections(node.children, depth + 1, node.name));
     }
   }
   return flat;
@@ -97,7 +99,7 @@ export function parseCommaTags(text) {
     .filter(Boolean);
 }
 
-export function readPayload(change) {
+function readPayload(change) {
   try {
     if (typeof change.payload_json === 'string') {
       return JSON.parse(change.payload_json || '{}');

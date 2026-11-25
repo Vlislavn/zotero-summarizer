@@ -217,7 +217,7 @@ def _attach_openreview(
 
 def fetch(out: Path) -> int:
     """HEAVY: federate + attach OpenReview + score every query, freeze to JSON."""
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
     from zotero_summarizer.services.search.federate import federate
     from zotero_summarizer.settings import Settings
 

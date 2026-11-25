@@ -6,7 +6,8 @@ import pytest
 
 from zotero_summarizer.cli import main
 from zotero_summarizer.models.config import GoalsConfig
-from zotero_summarizer.services import _adapters, _common
+from zotero_summarizer.services import _adapters
+from zotero_summarizer.services import config_io
 from zotero_summarizer.services.golden.csv_store import load_golden_rows
 from zotero_summarizer.services.model import classifier
 from zotero_summarizer.settings import Settings
@@ -37,7 +38,7 @@ def _project(tmp_path, monkeypatch):
         "draft_model": "test", "refine_model": "test",
         "api_base": "http://localhost", "api_key_env": "TEST_CLASSIFIER_API_KEY",
     })
-    monkeypatch.setattr(_common, "read_config", lambda *args: config)
+    monkeypatch.setattr(config_io, "read_config", lambda *args: config)
     return settings
 
 

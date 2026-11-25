@@ -17,7 +17,7 @@ from zotero_summarizer.services.research_feed import cursor, render, runner
 def _abstract_cache(settings, monkeypatch):
     from types import SimpleNamespace
     from zotero_summarizer.runtime import get_context
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
     from zotero_summarizer.services.research_feed import source
     from zotero_summarizer.services.setup.bootstrap import _default_goals_config
     from zotero_summarizer.services.triage import summarization
@@ -32,7 +32,7 @@ def _abstract_cache(settings, monkeypatch):
         reading_priority='should_read'))
     monkeypatch.setattr(summarization, 'run_abstract_dry', generate)
     candidate = source.load_candidates(settings.triage_db_path, start=START, end=END, limit=1, venue='')[0]
-    profile = runner.load_profile(settings.data_dir)
+    profile = runner.ensure_profile(settings.data_dir)
     checkpoint = cursor.CandidateCursor(settings)
     row = checkpoint.row(candidate, profile)
     return checkpoint, candidate, profile, row, generate

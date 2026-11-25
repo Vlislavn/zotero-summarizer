@@ -2,7 +2,7 @@
 
 from contextlib import closing, contextmanager
 
-from zotero_summarizer.storage import repositories, review_notes
+from zotero_summarizer.storage import db_core, review_notes
 
 
 def _target_key(keys):
@@ -24,9 +24,12 @@ def _body(conn, keys):
     return "\n\n".join(parts)
 
 
-def snapshot(conn, item_key) -> dict:
-    """Read alias-family revision/body/target and signature-bound pending state."""
-    keys = review_notes.resolve_item_key_aliases(conn, item_key)
+def snapshot(conn, item_key, resolve=None) -> dict:
+    """Read alias-family revision/body/target and signature-bound pending state.
+
+    Bulk readers pass one ``review_notes.alias_resolver(conn)`` instead of rebuilding the graph per key.
+    """
+    keys = resolve(item_key) if resolve else review_notes.resolve_item_key_aliases(conn, item_key)
     placeholders = ",".join("?" for _ in keys)
     revision = int(conn.execute(
         "SELECT COALESCE(MAX(revision), 0) FROM sync_changes "
@@ -80,7 +83,7 @@ def acknowledge(conn, desired) -> bool:
 @contextmanager
 def current_for_mirror(db_path, item_key):
     """Serialize delivery after save; normal exit alone does not acknowledge it."""
-    with closing(repositories._connect_to(db_path)) as conn, conn:
+    with closing(db_core._connect_to(db_path)) as conn, conn:
         # ponytail: external backup/write holds the app writer lock, as with
         # current manual/label mirrors; a dedicated worker is a separate concern.
         conn.execute("BEGIN IMMEDIATE")

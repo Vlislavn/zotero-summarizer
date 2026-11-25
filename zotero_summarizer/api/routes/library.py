@@ -147,7 +147,7 @@ async def get_discovery(item_key: str) -> dict[str, Any]:
 
 
 async def find_new_relevant(item_key: str, req: DiscoveryRequest) -> dict[str, Any]:
-    sess = await asyncio.to_thread(discovery.find_new, item_key, **req.model_dump())
+    sess = await asyncio.to_thread(discovery.start_discovery, item_key, **req.model_dump())
     return await asyncio.to_thread(discovery.discovery_view, sess)
 
 
@@ -366,15 +366,6 @@ async def run_university_login() -> dict[str, Any]:
     return await asyncio.to_thread(university_access.start_login)
 
 
-async def get_review_fleet_calibration() -> dict[str, Any]:
-    """Honest calibration: agreement (+ Cohen's kappa) between the fleet's PROPOSED
-    verdicts and the user's CONFIRMED labels, over items that have both. Flagged
-    ``insufficient`` until enough matched pairs accumulate — agreement is then
-    self-consistency, not human-validated accuracy."""
-    from zotero_summarizer.services.library import quality_calibration
-    return await asyncio.to_thread(quality_calibration.compute_proposal_calibration)
-
-
 async def queue_reject_tag(req: RejectTagRequest) -> dict[str, Any]:
     """Queue a Pending ❌ tag for an item (Deep Review 'Remove'). The drop +
     training is the separate ``POST /api/golden/verdict`` (dont_read) call; this
@@ -451,7 +442,6 @@ router.add_api_route("/api/library/deep-review/run", run_deep_review, methods=["
 router.add_api_route("/api/library/deep-review/status", get_deep_review_status, methods=["GET"])
 router.add_api_route("/api/library/review-fleet/run", run_review_fleet, methods=["POST"])
 router.add_api_route("/api/library/review-fleet/status", get_review_fleet_status, methods=["GET"])
-router.add_api_route("/api/library/review-fleet/calibration", get_review_fleet_calibration, methods=["GET"])
 router.add_api_route("/api/library/university-access/status", get_university_access_status, methods=["GET"])
 router.add_api_route("/api/library/university-login", run_university_login, methods=["POST"])
 router.add_api_route("/api/library/reject-tag", queue_reject_tag, methods=["POST"])

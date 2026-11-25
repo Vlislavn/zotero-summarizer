@@ -13,12 +13,12 @@ from zotero_summarizer.api.routes.triage import router
 from zotero_summarizer.mcp.tools import triage as mcp_triage
 from zotero_summarizer.models import SummarizeResponse
 from zotero_summarizer.services.triage import triage_jobs as jobs
-from zotero_summarizer.storage import repositories as db
+from zotero_summarizer.storage import db_core, repositories as db
 
 
 @pytest.mark.parametrize("fail_b", [False, True])
 def test_http_and_mcp_report_active_parallel_items_through_read_summary_and_completion(monkeypatch, tmp_path, fail_b):
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "triage.db")
+    monkeypatch.setattr(db_core, "DB_PATH", tmp_path / "triage.db")
     db.init_db()
     job = _new_job("progress", ["A", "B", "C"])
     _state().triage_jobs = {"progress": job}
@@ -96,7 +96,7 @@ def test_http_and_mcp_report_active_parallel_items_through_read_summary_and_comp
 
 
 def test_legacy_persisted_progress_is_not_restored_as_live_work(monkeypatch, tmp_path):
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "triage.db")
+    monkeypatch.setattr(db_core, "DB_PATH", tmp_path / "triage.db")
     db.init_db()
     job = _new_job("legacy", ["A"], status="interrupted")
     job.update(current_item_key="A", current_title="Old completed title")

@@ -1,14 +1,86 @@
 """Lookup methods of ZoteroReader (find / membership / tags) — mixin."""
 from __future__ import annotations
 
+import re
 import sqlite3  # noqa: F401  (type hints)
 from typing import Any  # noqa: F401
 
-from zotero_summarizer.domain import normalize_doi
+from zotero_summarizer.domain import normalize_arxiv_id, normalize_doi
 from zotero_summarizer.integrations._zotero_read_common import (
     _NON_BIBLIOGRAPHIC_TYPES_SQL,
+    _field_value_sql,
     _USER_LIBRARY_ID_SELECT,
 )
+
+
+_LIVE_FIELD_ROWS = f"""
+    FROM items i
+    JOIN itemTypes it ON it.itemTypeID = i.itemTypeID
+    JOIN itemData id ON id.itemID = i.itemID
+    JOIN fields f ON f.fieldID = id.fieldID
+    JOIN itemDataValues v ON v.valueID = id.valueID
+    LEFT JOIN deletedItems di ON di.itemID = i.itemID
+    WHERE i.libraryID = ? AND di.itemID IS NULL
+      AND it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
+"""
+_EARLIEST_FIRST = "ORDER BY i.dateAdded, i.itemID"
+_ARXIV_ID_RE = re.compile(r"^(?:\d{4}\.\d{4,5}|[a-z\-]+(?:\.[a-z]{2})?/\d{7})$")
+_MIN_TITLE_CHARS = 12
+_YEAR_RE = re.compile(r"(?<!\d)((?:15|16|17|18|19|20)\d\d)(?!\d)")
+
+
+def _doi_match(conn: sqlite3.Connection, lib: int, doi: str) -> str | None:
+    # Feed DOI may be `https://doi.org/10.x` while Zotero stores bare `10.x` (or vice
+    # versa): match every common stored variant of the normalized DOI.
+    bare = normalize_doi(doi)
+    if not bare:
+        return None
+    variants = [bare, f"doi:{bare}", f"https://doi.org/{bare}", f"http://doi.org/{bare}"]
+    row = conn.execute(
+        f"SELECT i.key {_LIVE_FIELD_ROWS} AND f.fieldName = 'DOI' "
+        f"AND lower(v.value) IN ({','.join('?' for _ in variants)}) {_EARLIEST_FIRST} LIMIT 1",
+        (lib, *variants),
+    ).fetchone()
+    return str(row["key"]) if row else None
+
+
+def _arxiv_match(conn: sqlite3.Connection, lib: int, arxiv_id: str) -> str | None:
+    """Exact arXiv id (not a substring of a longer id/DOI): the LIKE only pre-filters."""
+    want = normalize_arxiv_id(arxiv_id)
+    if not _ARXIV_ID_RE.match(want):
+        return None
+    mention = re.compile(rf"(?<![0-9a-z-]){re.escape(want)}(?:v\d+)?(?![0-9])")
+    rows = conn.execute(
+        f"SELECT i.key, f.fieldName AS field, v.value AS value {_LIVE_FIELD_ROWS} "
+        f"AND f.fieldName IN ('url', 'DOI', 'extra', 'archiveID') AND lower(v.value) LIKE ? "
+        f"{_EARLIEST_FIRST}",
+        (lib, f"%{want}%"),
+    )
+    for row in rows:
+        value = str(row["value"]).lower()
+        if ("arxiv" in value or row["field"] == "archiveID") and mention.search(value):
+            return str(row["key"])
+    return None
+
+
+def _title_key(title: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (title or "").lower())
+
+
+def _title_year_match(conn: sqlite3.Connection, lib: int, title: str, year: int) -> str | None:
+    want = _title_key(title)
+    if len(want) < _MIN_TITLE_CHARS:
+        return None
+    rows = conn.execute(
+        f"SELECT i.key, v.value AS title, {_field_value_sql('date')} AS date "
+        f"{_LIVE_FIELD_ROWS} AND f.fieldName = 'title' {_EARLIEST_FIRST}",
+        (lib,),
+    )
+    for row in rows:
+        stored = _YEAR_RE.search(str(row["date"]))
+        if stored and abs(int(stored.group(1)) - year) <= 1 and _title_key(row["title"]) == want:
+            return str(row["key"])
+    return None
 
 
 class ZoteroLookupMixin:
@@ -43,76 +115,30 @@ class ZoteroLookupMixin:
         return self._execute_read(_read)
 
     def find_by_external_id(
-        self, doi: str | None = None, arxiv_id: str | None = None
+        self, doi: str | None = None, arxiv_id: str | None = None,
+        *, title: str | None = None, year: int | None = None,
     ) -> str | None:
-        """Look up an existing user-library item by DOI or arXiv ID.
+        """Key of the EARLIEST live user-library item that is the same paper, else None.
 
-        Used for dedup before materializing a feed item: if the paper is already
-        in the user's library, skip creating a duplicate.
-        Returns the item key if found, else None.
+        Used before creating an item (feed ingest filter, Search coverage, every Add).
+        Tried in order: DOI (bare/``doi:``/URL variants) → exact arXiv id (version
+        stripped; read from url/DOI incl. ``10.48550/arxiv.<id>``/Extra/archiveID) →
+        normalized title + year (±1, both required, title ≥ 12 chars). Trashed items
+        and attachments/notes never match.
         """
-        if not doi and not arxiv_id:
+        if not (doi or arxiv_id or (title and year)):
             return None
 
         def _read(conn: sqlite3.Connection) -> str | None:
             user_lib_row = conn.execute(_USER_LIBRARY_ID_SELECT).fetchone()
             if not user_lib_row:
                 return None
-            user_lib_id = int(user_lib_row["libraryID"])
-
-            # DOI match. Normalize to the bare form and match every common
-            # stored variant: the feed DOI may be `https://doi.org/10.x` while
-            # Zotero stores bare `10.x` (or vice-versa). Matching only the raw
-            # lower-cased string silently missed those, re-materializing dupes.
-            if doi:
-                bare = normalize_doi(doi)
-                if bare:
-                    variants = [
-                        bare,
-                        f"doi:{bare}",
-                        f"https://doi.org/{bare}",
-                        f"http://doi.org/{bare}",
-                    ]
-                    placeholders = ",".join("?" for _ in variants)
-                    row = conn.execute(
-                        f"""
-                        SELECT i.key FROM items i
-                        JOIN itemData id ON id.itemID=i.itemID
-                        JOIN fields f ON f.fieldID=id.fieldID
-                        JOIN itemDataValues v ON v.valueID=id.valueID
-                        LEFT JOIN deletedItems di ON di.itemID=i.itemID
-                        WHERE i.libraryID=? AND f.fieldName='DOI'
-                          AND lower(v.value) IN ({placeholders})
-                          AND di.itemID IS NULL
-                        LIMIT 1
-                        """,
-                        (user_lib_id, *variants),
-                    ).fetchone()
-                    if row:
-                        return str(row["key"])
-
-            # arXiv ID: check URL field (Zotero typically stores arXiv as URL)
-            if arxiv_id:
-                arxiv_norm = arxiv_id.strip().lower()
-                if arxiv_norm:
-                    pattern = f"%{arxiv_norm}%"
-                    row = conn.execute(
-                        """
-                        SELECT i.key FROM items i
-                        JOIN itemData id ON id.itemID=i.itemID
-                        JOIN fields f ON f.fieldID=id.fieldID
-                        JOIN itemDataValues v ON v.valueID=id.valueID
-                        LEFT JOIN deletedItems di ON di.itemID=i.itemID
-                        WHERE i.libraryID=? AND f.fieldName IN ('url', 'DOI')
-                          AND lower(v.value) LIKE ?
-                          AND di.itemID IS NULL
-                        LIMIT 1
-                        """,
-                        (user_lib_id, pattern),
-                    ).fetchone()
-                    if row:
-                        return str(row["key"])
-            return None
+            lib = int(user_lib_row["libraryID"])
+            return (
+                (_doi_match(conn, lib, doi) if doi else None)
+                or (_arxiv_match(conn, lib, arxiv_id) if arxiv_id else None)
+                or (_title_year_match(conn, lib, title, year) if title and year else None)
+            )
 
         return self._execute_read(_read)
 

@@ -91,11 +91,12 @@ def schedule_on_startup(config: Any, app_state: Any) -> bool:
     the startup log). Skipped when ``prewarm_on_startup_k`` is 0 or deep review is
     disabled. Zotero is optional: kept feed papers can acquire PDFs into the app
     cache before review."""
-    k = resolve_prewarm_k(config)
-    if k <= 0 or not config.quality_review.enabled:
-        return False
-    _flight.run_in_background(lambda: _prewarm_worker(k, config, app_state), name="deep-review-prewarm")
-    return True
+    return _flight.schedule_prewarm(
+        config,
+        env_var=_ENV_PREWARM_K,
+        worker=lambda k: _prewarm_worker(k, config, app_state),
+        name="deep-review-prewarm",
+    )
 
 
 __all__ = ["schedule_on_startup", "resolve_prewarm_k"]

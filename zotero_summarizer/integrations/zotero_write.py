@@ -12,10 +12,12 @@ from typing import Any, Callable, Sequence, TypeVar
 
 from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
     LOGGER,
+    ZOTERO_KEY_ALPHABET,
     WriteColumns,
     ZoteroWriteError,
     is_expected_sqlite_io,
     read_write_columns,
+    resolve_zotero_data_dir,
 )
 from zotero_summarizer.integrations._zotero_write_items import ZoteroItemWriteMixin
 from zotero_summarizer.integrations._zotero_write_feed import ZoteroFeedWriteMixin
@@ -43,17 +45,10 @@ class ZoteroWriter(
 ):
     """Write adapter that applies reviewed tag/note changes to Zotero SQLite."""
 
-    _KEY_ALPHABET = "23456789ABCDEFGHIJKLMNPQRSTUVWXYZ"
+    _KEY_ALPHABET = ZOTERO_KEY_ALPHABET
 
     def __init__(self, zotero_data_dir: str | Path | None = None) -> None:
-        data_dir = (
-            Path(zotero_data_dir or (Path.home() / "Zotero")).expanduser().resolve()
-        )
-        db_path = data_dir / "zotero.sqlite"
-        if not data_dir.exists():
-            raise ZoteroWriteError(f"Zotero data directory not found: {data_dir}")
-        if not db_path.exists():
-            raise ZoteroWriteError(f"Zotero database not found: {db_path}")
+        data_dir, db_path = resolve_zotero_data_dir(zotero_data_dir, ZoteroWriteError)
 
         self.data_dir = data_dir
         self.db_path = db_path

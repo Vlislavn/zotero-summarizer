@@ -66,6 +66,11 @@ runtime.py → settings / models
 ```
 
 - `integrations/` and `storage/` never import `services/` or `api/`.
+- Within `storage/`, import shared DB helpers from the `db_core` leaf, never
+  from the `repositories` facade. Move shared code down rather than relying
+  on import order or moving an import into a function. `deadcode cycles` blocks
+  import-time cycles; function-local edges still count in advisory reports
+  and block with `--strict-lazy`.
 - `services/` may import only `api.errors` from the API layer, not `api.app` or
   `api.routes`. New service modules belong in a domain subpackage.
 - `runtime.py` is foundational process state and must not import `services/` or
@@ -93,6 +98,7 @@ implementation contract.
 | RSS, summarization and daily selection | [`services/triage/`](../zotero_summarizer/services/triage/README.md) |
 | Reading, full-text review, paper brief and Q&A | [`services/library/`](../zotero_summarizer/services/library/README.md) |
 | Query-driven Search and explicit Add recovery | [`services/search/`](../zotero_summarizer/services/search/README.md) |
+| Owner-defined conference lists, kept apart from the pool | [`services/conferences/`](../zotero_summarizer/services/conferences/README.md) |
 | Weekly research-feed reports | [`services/research_feed/`](../zotero_summarizer/services/research_feed/README.md) |
 | Proposed/native Zotero changes | [`services/zotero/`](../zotero_summarizer/services/zotero/README.md) |
 | Device snapshots, mutation receipts and conflicts | [`services/sync/`](../zotero_summarizer/services/sync/README.md) |

@@ -4,6 +4,7 @@ from html.parser import HTMLParser
 import json
 import sqlite3
 
+from zotero_summarizer.integrations._zotero_write_common import is_expected_sqlite_io
 from zotero_summarizer.integrations._zotero_write_tags import _owns_note
 from zotero_summarizer.integrations.zotero_read import ZoteroReadError
 from zotero_summarizer.services.library.app_library_reader import AppLibraryReader
@@ -17,11 +18,7 @@ def fingerprint(value):
 
 
 def _expected_io(exc):
-    code = getattr(exc, "sqlite_errorcode", 0) & 255
-    return isinstance(exc, OSError) or code in {
-        sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_IOERR,
-        sqlite3.SQLITE_CANTOPEN, sqlite3.SQLITE_READONLY,
-    }
+    return isinstance(exc, OSError) or (isinstance(exc, sqlite3.Error) and is_expected_sqlite_io(exc))
 
 
 def app_context(db_path, keys):

@@ -10,6 +10,15 @@ import { useEffect } from 'react';
 //   - 'j' → onNext(), 'k' → onPrev()  (preventDefault on both)
 //   - a key present in `actionKeys` → onAction(actionKeys[key], key) once the
 //     list has a selection (preventDefault)
+//   - optional onEnter / onEscape / onUndo ('z') / onSlash ('/') — a key with no
+//     handler is left alone; Enter is also left to a focused control (it activates it)
+//   - an auto-repeating key press fires none of the above except j / k (one press,
+//     one action: a held '4' is ONE verdict)
+//   - `allowFrom`: a control matching this selector (rows, verdict pills) keeps the
+//     list keys, so they work right after a click focused it
+//   - an open modal dialog (`[role=dialog][aria-modal=true]`, e.g. a Sheet) silences every key: the page behind
+//     it is inert, so its list must not act. `allowModal`: a selector for content that makes a modal ours
+//     (the Library detail Sheet keeps its verdict keys)
 //   - listens on window; re-binds when its deps change
 //
 // Params (single options object):
@@ -17,6 +26,9 @@ import { useEffect } from 'react';
 //   - onAction: (mapped, rawKey) => void — fired for an action key
 //   - actionKeys: Record<string, unknown> — e.g. { 1: 'must_read', ... }
 //   - hasSelection: boolean — gate action keys (no-op with nothing selected)
+//   - onEnter, onEscape, onUndo, onSlash: () => void — optional, see above
+//   - allowFrom: string — CSS selector of controls that do not silence the keys
+//   - allowModal: string — CSS selector; a modal dialog containing a match does not silence the keys
 //   - enabled: boolean (default true) — master switch
 //   - deps: unknown[] — extra deps so handlers see fresh closures
 export function useKeyboardNav({
@@ -25,6 +37,12 @@ export function useKeyboardNav({
   onAction,
   actionKeys = {},
   hasSelection = true,
+  onEnter,
+  onEscape,
+  onUndo,
+  onSlash,
+  allowFrom,
+  allowModal,
   enabled = true,
   deps = [],
 }) {
@@ -40,8 +58,11 @@ export function useKeyboardNav({
         + '[role="radio"], [role="switch"], [role="tab"], [role="menu"], [role="menubar"], '
         + '[role="menuitem"], [role="tree"], [role="treeitem"], [role="grid"]',
       );
-      if (control) return;
+      if (control && !(allowFrom && control.matches(allowFrom))) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const foreign = [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')]
+        .some((dialog) => !(allowModal && dialog.querySelector(allowModal)));
+      if (foreign) return;
 
       if (e.key === 'j') {
         e.preventDefault();
@@ -53,6 +74,13 @@ export function useKeyboardNav({
         onPrev?.();
         return;
       }
+      if (e.repeat) return;
+      const own = { Enter: !control && onEnter, Escape: onEscape, z: onUndo, '/': onSlash }[e.key];
+      if (own) {
+        e.preventDefault();
+        own();
+        return;
+      }
       if (Object.prototype.hasOwnProperty.call(actionKeys, e.key) && hasSelection) {
         e.preventDefault();
         onAction?.(actionKeys[e.key], e.key);
@@ -61,7 +89,7 @@ export function useKeyboardNav({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, onPrev, onNext, onAction, hasSelection, ...deps]);
+  }, [enabled, onPrev, onNext, onAction, hasSelection, onEnter, onEscape, onUndo, onSlash, allowFrom, allowModal, ...deps]);
 }
 
 export default useKeyboardNav;

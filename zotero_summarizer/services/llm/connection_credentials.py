@@ -1,6 +1,8 @@
 """Shared authorization replacement is a separate effect, never registration rollback."""
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import settings, state, read_config, write_json_atomic, read_json_or_empty
+from zotero_summarizer.services._common import settings, state
+from zotero_summarizer.services._io import write_json_atomic, read_json_or_empty
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services.llm import connection_state as store
 from zotero_summarizer.services.llm.connection_impact import dependencies
 from zotero_summarizer.services.research_feed.profile import load_profile
@@ -16,7 +18,7 @@ def credential_impact(name, selected=None):
     else:
         return {'providers': [], 'consumers': []}
     provider = next((p for p in config.llm_routing.providers if p.api_key_env == name and p.auth_mode != 'none'), None)
-    return dependencies(config, load_profile(current.data_dir, persist_default=False), provider) if provider else {'providers': [], 'consumers': []}
+    return dependencies(config, load_profile(current.data_dir), provider) if provider else {'providers': [], 'consumers': []}
 
 
 def replace(command):

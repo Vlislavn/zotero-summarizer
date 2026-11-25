@@ -21,7 +21,8 @@ from zotero_summarizer.models.setup import (
     ZoteroStatus,
 )
 from zotero_summarizer.services import readiness
-from zotero_summarizer.services._common import read_config, settings, state
+from zotero_summarizer.services._common import settings, state
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services.llm import credentials, operational_check
 from zotero_summarizer.services.model.model_card import model_card
 from zotero_summarizer.services.zotero.zotero import zotero_status_payload

@@ -11,12 +11,34 @@ import { coolUndecidedKeys } from '../utils/relevanceBands.js';
 // Injected deps couple it to the page's queue: `queue` drives the cool count;
 // `queueArgs(force)` builds the reading-queue request; `applyQueueData(data)`
 // renders a fetched queue (streaming reloads); `loadQueue(force)` is the page's
-// full reload; `setMessage`/`setIsError` drive the shared status banner;
+// full reload; `setMessage`/`setIsError` drive the page's status line (its receipt);
 // `zoteroReady` gates the mount-resume effect.
 const FLEET_CHUNK = 5;              // picks per fleet round (stays inside its batch budget)
 const AUTO_REVIEW_MAX_DRAINS = 5;   // bound: how many foreign (prewarm) runs to wait out before our keys run
 
+const FLEET_POLL_MS = 3000;
+
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+// The one fleet-status poll loop: fetch, report every status via onStatus, return the
+// first non-running status (null if `stopped()` turns true between polls). A transient
+// fetch error just waits and retries — never false-finishes. `wait(ms)` is how callers
+// sleep (plain timer, or the cancellable fleetPollRef slot).
+async function pollFleetStatus({ wait, onStatus, stopped = () => false }) {
+  for (;;) {
+    if (stopped()) return null;
+    let s;
+    try {
+      s = await fetchReviewFleetStatus();
+    } catch {
+      await wait(FLEET_POLL_MS);
+      continue;
+    }
+    await onStatus(s);
+    if (s.status !== 'running') return s;
+    await wait(FLEET_POLL_MS);
+  }
+}
 
 export function useReviewCoolLoop({ queue, prestigeFloor = null, queueArgs, applyQueueData, loadQueue, zoteroReady, setMessage, setIsError }) {
   const [fleetStatus, setFleetStatus] = useState({
@@ -33,45 +55,35 @@ export function useReviewCoolLoop({ queue, prestigeFloor = null, queueArgs, appl
   const coolUndecided = useMemo(() => coolUndecidedKeys(queue, prestigeFloor).length, [queue, prestigeFloor]);
 
   // Lightweight mount-resume poller: reflect an already-running fleet and reload
-  // ONCE when it finishes (NOT the streaming auto-loop).
-  const pollFleet = useCallback(() => {
-    if (fleetPollRef.current) { clearTimeout(fleetPollRef.current); fleetPollRef.current = null; }
-    fleetPollRef.current = setTimeout(async () => {
-      let s;
-      try {
-        s = await fetchReviewFleetStatus();
-      } catch {
-        pollFleet();  // transient — keep waiting, don't false-finish
-        return;
-      }
-      setFleetStatus(s);
-      if (s.status === 'running') pollFleet();
-      else loadQueue(false);  // done → one reload picks up the proposals
-    }, 3000);
+  // ONCE when it finishes (NOT the streaming auto-loop). Its waits live in
+  // fleetPollRef, so a newer pollFleet / handleReviewCool / unmount cancels the
+  // pending wait (the superseded chain simply never resumes).
+  const pollFleet = useCallback(async () => {
+    const wait = (ms) => new Promise((resolve) => {
+      if (fleetPollRef.current) clearTimeout(fleetPollRef.current);
+      fleetPollRef.current = setTimeout(resolve, ms);
+    });
+    await wait(FLEET_POLL_MS);
+    await pollFleetStatus({ wait, onStatus: setFleetStatus });
+    loadQueue(false);  // done → one reload picks up the proposals
   }, [loadQueue]);
 
   // Await a fleet run to settle, STREAMING the queue each time a paper finishes
   // (cheap cached read) so reviews/verdicts/quality chips appear mid-run instead of
   // only at the end. Returns the terminal status (null if the user hit Stop).
-  async function pollFleetUntilDone() {
+  function pollFleetUntilDone() {
     let lastCompleted = -1;
-    for (;;) {
-      if (autoStopRef.current) return null;
-      let s;
-      try {
-        s = await fetchReviewFleetStatus();
-      } catch {
-        await sleep(3000);  // transient — keep waiting, don't false-finish
-        continue;
-      }
-      setFleetStatus(s);
-      if (typeof s.completed === 'number' && s.completed !== lastCompleted) {
-        lastCompleted = s.completed;
-        try { applyQueueData(await fetchReadingQueue(queueArgs(false))); } catch { /* keep last-good list */ }
-      }
-      if (s.status !== 'running') return s;
-      await sleep(3000);
-    }
+    return pollFleetStatus({
+      wait: sleep,
+      stopped: () => autoStopRef.current,
+      onStatus: async (s) => {
+        setFleetStatus(s);
+        if (typeof s.completed === 'number' && s.completed !== lastCompleted) {
+          lastCompleted = s.completed;
+          try { applyQueueData(await fetchReadingQueue(queueArgs(false))); } catch { /* keep last-good list */ }
+        }
+      },
+    });
   }
 
   // Loop the fleet over EVERY undecided cool pick in the current (max 5,000 row)
@@ -143,13 +155,7 @@ export function useReviewCoolLoop({ queue, prestigeFloor = null, queueArgs, appl
       // the bar never shows a stale "Reviewing N of 5" next to a re-enabled button —
       // then fall through to the terminal status.
       if (autoStopRef.current) {
-        for (;;) {
-          let s;
-          try { s = await fetchReviewFleetStatus(); } catch { await sleep(3000); continue; }
-          setFleetStatus(s);
-          if (s.status !== 'running') break;
-          await sleep(3000);
-        }
+        await pollFleetStatus({ wait: sleep, onStatus: setFleetStatus });
       }
       autoStopRef.current = false;
       setAutoReview({ active: false, stopping: false });

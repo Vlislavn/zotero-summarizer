@@ -17,7 +17,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import now_iso_z, settings
+from zotero_summarizer.domain import is_sha256_hex
+from zotero_summarizer.services._common import settings
+from zotero_summarizer.services._io import now_iso_z
 from zotero_summarizer.services.search._models import (
     Candidate,
     QueryPlan,
@@ -170,7 +172,7 @@ def load(session_id: str) -> ResearchSession:
 
 def find_discovery(context_fingerprint: str) -> ResearchSession | None:
     """Strict namespace lookup; corrupt/ambiguous matches are never cache misses."""
-    if len(context_fingerprint) != 64 or any(c not in "0123456789abcdef" for c in context_fingerprint):
+    if not is_sha256_hex(context_fingerprint):
         raise ValueError("Invalid discovery fingerprint")
     matches = []
     for path in _dir().glob(f"discovery_{context_fingerprint}_*.json"):

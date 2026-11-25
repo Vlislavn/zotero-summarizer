@@ -44,14 +44,14 @@ export function localProfileForStage(routing, catalog, stage = 'default') {
     || catalog?.profiles?.find((profile) => profile.id === 'existing') || null;
 }
 
-export function splitLines(text) {
+function splitLines(text) {
   return String(text || '')
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
 }
 
-export function joinLines(items) {
+function joinLines(items) {
   if (!Array.isArray(items)) return '';
   return items.join('\n');
 }

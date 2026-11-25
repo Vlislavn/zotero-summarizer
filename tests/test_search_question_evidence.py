@@ -101,6 +101,46 @@ def test_call_budget_counts_attempts_and_reserves_verification(journey, monkeypa
     assert result.evidence_status["promoted_candidate_ids"] == []
 
 
+def test_within_candidate_budget_reuses_duplicate_before_skipping_new_question(journey, monkeypatch):
+    monkeypatch.setenv("ZS_SEARCH_EVIDENCE_CALLS", "3")
+    research = stored_session(questions=[QUESTION, QUESTION, "Another question?"])
+    research.candidates = [research.candidates[10]]
+    session.save(research)
+
+    evidence.run_question_evidence(research, journey.deps, {})
+
+    first, duplicate, skipped = session.load(research.id).candidates[0].question_evidence
+    assert first["state"] == "sufficient"
+    assert duplicate == dict(first, question_index=1)
+    assert skipped["reason"] == "call_budget_exhausted" and not skipped["generation_attempted"]
+    assert skipped["source_version_id"] == first["source_version_id"]
+    assert len(journey.generator.calls) == len(journey.verifier.calls) == 1
+    assert research.evidence_status["calls_used"] == 2
+
+
+def test_delete_during_retrieval_stops_before_assessment_or_receipt_save(journey, monkeypatch):
+    research = stored_session()
+    session.save(research)
+    retrieve = evidence.retrieve_original_passages
+    save_merge = Mock(wraps=session.save_merge)
+
+    def retrieve_then_delete(*args, **kwargs):
+        passages = retrieve(*args, **kwargs)
+        session.delete(research.id)
+        return passages
+
+    monkeypatch.setattr(evidence, "retrieve_original_passages", retrieve_then_delete)
+    monkeypatch.setattr(session, "save_merge", save_merge)
+    evidence.run_question_evidence(research, journey.deps, {})
+
+    assert journey.acquired == ["P01"]
+    assert journey.generator.calls == journey.verifier.calls == []
+    save_merge.assert_called_once_with(research)  # Only the initial checking state.
+    assert research.evidence_status["state"] == "checking"
+    with pytest.raises(FileNotFoundError):
+        session.load(research.id)
+
+
 def test_delete_between_generation_and_verification_does_not_recreate_session(journey):
     journey.generator.on_call = lambda: session.delete("cancelled-evidence")
     run(journey, name="cancelled-evidence")

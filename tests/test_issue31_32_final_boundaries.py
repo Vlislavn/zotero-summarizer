@@ -45,12 +45,12 @@ def test_cli_denied_source_rejected_before_any_client_build(tmp_path, monkeypatc
     from zotero_summarizer.api.errors import APIError
     from zotero_summarizer.services.llm import factory
     from zotero_summarizer.services.setup.bootstrap import _default_goals_config
-    from zotero_summarizer.services import _common
+    from zotero_summarizer.services import config_io
     path = tmp_path / 'paper_render' / 'A' / 'paper_read.json'
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps({'full_text': DENIAL, 'title': 'Legacy denied artifact'}))
     monkeypatch.setattr(_app.Settings, 'load', lambda **kwargs: SimpleNamespace(data_dir=tmp_path, config_path=tmp_path / 'config'))
-    monkeypatch.setattr(_common, 'read_config', lambda path: _default_goals_config())
+    monkeypatch.setattr(config_io, 'read_config', lambda path: _default_goals_config())
     def forbidden(*args, **kwargs):
         pytest.fail('Client build happened before source admission')
     monkeypatch.setattr(factory, 'build_client_for_stage', forbidden)

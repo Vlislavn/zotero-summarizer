@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal
 from urllib.parse import quote
 
-from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK
+from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK, unique_non_empty_strings
 
 from zotero_summarizer.mcp.api_client import _api_request, _fetch_pending_rows, _fetch_triage_row, _fetch_triage_rows
 from zotero_summarizer.mcp.config import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT
@@ -15,7 +15,6 @@ from zotero_summarizer.mcp.helpers import (
     _error,
     _extract_data_or_error,
     _extract_error_payload,
-    _normalize_unique_strings,
     _ok,
     _require_non_empty_text,
 )
@@ -136,7 +135,7 @@ async def search_papers(
         return _error("validation_error", str(exc))
     normalized_priority = [
         value.lower()
-        for value in _normalize_unique_strings(priority)
+        for value in unique_non_empty_strings(priority)
         if value.lower() in READING_PRIORITY_SORT_RANK
     ]
     safe_score_min, safe_score_max = _clamp_score_bounds(score_min, score_max)

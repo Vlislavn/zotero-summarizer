@@ -76,7 +76,7 @@ def main() -> None:
     from sklearn.model_selection import GroupKFold
 
     from zotero_summarizer.domain import paper_group_id, score_to_priority
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
     from zotero_summarizer.services._common import settings as get_settings
     from zotero_summarizer.services.golden import hybrid_gt
     from zotero_summarizer.services.model import classifier, golden_metrics

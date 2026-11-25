@@ -133,16 +133,36 @@ def test_proposed_dont_read_does_not_hide_paper(monkeypatch):
     assert proposed["proposed"] == "dont_read"
 
 
+def test_rows_carry_review_display_fields_null_without_review(monkeypatch):
+    """Display-only: a current review adds tldr/read_decision/minutes/has_code; none → all null."""
+    from zotero_summarizer.services.library import deep_review
+
+    def rev(link, tldr="t" * 400):
+        return {"digest": {"tldr": tldr, "read_decision": "skim", "estimated_read_minutes": 12},
+                **({"code_link": link} if link is not None else {})}
+
+    reviews = {"L": rev({"found": True, "exists": True}), "U": rev({"found": True, "exists": None}),
+               "D": rev({"found": True, "exists": False}), "N": rev({"found": False}), "K": rev(None)}
+    _patch_state(monkeypatch, _FakeReader([_item(k) for k in "LUDNKX"]), _FakeGate("sha1"))
+    _seed("sha1", L=6.0, U=5.0, D=4.0, N=3.0, K=2.0, X=1.0)
+    monkeypatch.setattr(deep_review, "current_reviews", lambda: reviews)
+    rows = {i["item_key"]: i for i in reading_queue.build_reading_queue()["items"]}
+    assert [rows[k]["has_code"] for k in "LUDNKX"] == [True, True, False, False, None, None]
+    assert rows["L"]["review_digest"] == {"tldr": "t" * 300}
+    assert (rows["L"]["read_decision"], rows["L"]["estimated_read_minutes"]) == ("skim", 12)
+    assert all(rows["X"][k] is None for k in ("review_digest", "read_decision", "estimated_read_minutes", "has_code"))
+
+
 def test_positive_verdict_stays_visible_and_sorts_after_undecided(monkeypatch):
     """A positive verdict (must/should/could_read) is a reading INTENT, not 'done':
     the paper stays in Read next, flagged ``decided`` and sorted AFTER the papers
     still awaiting a decision (even with the highest relevance). Only ``dont_read``
-    hides."""
+    hides. (``should_read`` here; the owner's own Must read leads — next test.)"""
     from zotero_summarizer.storage import repositories
 
     _patch_state(monkeypatch, _FakeReader([_item("A"), _item("B"), _item("L")]), _FakeGate("sha1"))
     _seed("sha1", A=3.0, B=4.5, L=5.0)
-    monkeypatch.setattr(repositories, "list_label_verdict_priorities", lambda db_path: {"L": "must_read"})
+    monkeypatch.setattr(repositories, "list_label_verdict_priorities", lambda db_path: {"L": "should_read"})
     monkeypatch.setattr(repositories, "list_user_verdict_keys", lambda db_path: {"L"})
     res = reading_queue.build_reading_queue()
     keys = [i["item_key"] for i in res["items"]]
@@ -150,11 +170,12 @@ def test_positive_verdict_stays_visible_and_sorts_after_undecided(monkeypatch):
     assert set(keys) == {"A", "B", "L"}         # nothing hidden
     assert res["read_hidden"] == 0 and res["decided_count"] == 1
     decided = next(i for i in res["items"] if i["item_key"] == "L")
-    assert decided["user_priority"] == "must_read" and decided["decided"] is True
+    assert decided["user_priority"] == "should_read" and decided["decided"] is True
 
 
 def test_decided_papers_follow_undecided_keeping_relevance_order(monkeypatch):
-    """Decided papers trail the undecided ones; relevance order holds within each."""
+    """Decided papers trail the undecided ones; relevance order holds within each.
+    The owner's own Must read ("must") leads as a group instead."""
     from zotero_summarizer.storage import repositories
 
     _patch_state(
@@ -168,7 +189,7 @@ def test_decided_papers_follow_undecided_keeping_relevance_order(monkeypatch):
     monkeypatch.setattr(repositories, "list_user_verdict_keys", lambda db_path: set(labels))
     res = reading_queue.build_reading_queue()
     keys = [i["item_key"] for i in res["items"]]
-    assert keys == ["plain", "could", "should", "must"]
+    assert keys == ["must", "plain", "could", "should"]
 
 
 def test_read_items_hidden_live_and_shown_with_toggle(monkeypatch):

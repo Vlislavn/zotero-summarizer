@@ -139,6 +139,16 @@ class Settings:
             raise ValueError("feedback schedule safety wall must be positive and <=600")
 
     @property
+    def zotero_read_copy_path(self) -> Path:
+        """Refreshed read-only copy of Zotero's ``zotero.sqlite`` the reader queries."""
+        return self.data_dir / "zotero_read" / "zotero.sqlite"
+
+    @property
+    def topic_tree_path(self) -> Path:
+        """Topic tree ``[{topic, leaf, definition}]`` (exact Zotero collection names) for auto-filing new Adds; absent = no filing."""
+        return self.data_dir / "topics" / "tree.json"
+
+    @property
     def today_exposure_log_dir(self) -> Path:
         """Append-only Today exposure JSONL, one ``YYYY-MM-DD.jsonl`` per local day."""
         return self.data_dir / "today-exposure"
@@ -153,6 +163,20 @@ class Settings:
         """Today AI card store (cards/, consent, token ledger, breaker) — operational,
         not part of the review identity."""
         return self.data_dir / "card"
+
+    @property
+    def review_feedback_dir(self) -> Path:
+        """Per-review feedback evidence packages (``<paper>/<version>/``); never read by the app's logic."""
+        return self.data_dir / "review_feedback"
+
+    @property
+    def conferences_dir(self) -> Path:
+        """Conference lists (``<id>/<year>.json``) and their own owner config; read only by ``services.conferences``."""
+        return self.data_dir / "conferences"
+
+    @property
+    def conferences_config_path(self) -> Path:
+        return self.conferences_dir / "config.yaml"
 
     @property
     def feedback_schedule_dir(self) -> Path:

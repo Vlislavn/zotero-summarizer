@@ -135,7 +135,7 @@ def _gate_config() -> tuple[bool, int, tuple[str, ...], tuple[str, ...]]:
     """Read the gate knobs from the live goals config (env wins). Returns
     ``(enabled, llm_floor, hide_grades, hide_bands)``. Optional-feature boundary:
     no config / no state → the ON / floor 2 / {D} / {flag} defaults (cold-start safe,
-    mirrors ``_common.band_primary_enabled``)."""
+    mirrors ``quality_flags.band_primary_enabled``)."""
     from zotero_summarizer.services._common import state
     from zotero_summarizer.services.config_overrides import _as_bool
     app_state = getattr(state(), "app_state", None)

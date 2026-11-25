@@ -215,7 +215,7 @@ def main() -> int:
         raise ValueError("--chunk-chars must be one or more positive integers")
 
     from zotero_summarizer.models.providers import resolve_stage
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
     from zotero_summarizer.services.llm.factory import build_client_for_provider
     from zotero_summarizer.services.setup.calibration import load_review_papers, swap_used_mb
     from zotero_summarizer.settings import Settings

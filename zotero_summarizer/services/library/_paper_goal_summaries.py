@@ -22,6 +22,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from zotero_summarizer.models import GoalSummary
+from zotero_summarizer.runtime import local_model_device_override
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.faithbench._corpus import chunk_spans, chunk_text
 from zotero_summarizer.services.library._grounding import quote_is_grounded
@@ -93,7 +94,11 @@ def _get_embedder(model_name: str) -> Any:
         if model_name not in _EMBEDDERS:
             try:
                 from sentence_transformers import SentenceTransformer
-                _EMBEDDERS[model_name] = SentenceTransformer(model_name)
+                override = local_model_device_override()
+                if override is None:
+                    _EMBEDDERS[model_name] = SentenceTransformer(model_name)
+                else:
+                    _EMBEDDERS[model_name] = SentenceTransformer(model_name, device=override)
                 LOGGER.info("goal-summaries embedder ready: %s", model_name)
             except Exception:  # noqa: BLE001 - optional dep / download boundary
                 LOGGER.warning("goal-summaries embedder %s unavailable; dense leg off", model_name)

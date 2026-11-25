@@ -16,7 +16,8 @@ from zotero_summarizer.services.model.classifier_temporal import (
     _temporal_holdout_metrics,
 )
 from zotero_summarizer.services import run_log
-from zotero_summarizer.services._common import now_iso_z, settings
+from zotero_summarizer.services._common import settings
+from zotero_summarizer.services._io import now_iso_z
 from zotero_summarizer.services.model.classifier_store import write_archive
 from zotero_summarizer.services.model.classifier_inputs import load_training_inputs
 from zotero_summarizer.services.model.golden_metrics import spearman_correlation

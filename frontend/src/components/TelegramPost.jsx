@@ -3,12 +3,13 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { telegramFeedApi } from '../api/researchFeedApi.js';
 import Icon from './ui/Icon.jsx';
 import PostFeedback from './PostFeedback.jsx';
-import TelegramLink from './TelegramLink.jsx';
+import TelegramLink, { isSafeHref } from './TelegramLink.jsx';
 import TelegramThread from './TelegramThread.jsx';
 import { ago, commentsText, feedbackText } from './telegramRunText.js';
 
 const HEADLINE_CHARS = 110;
 const BULLETS = 3;
+export const cardId = (sourceId) => `tg-post-${sourceId}`;  // the anchor a trend row links to
 
 // «[c123]» citations and list markers are bookkeeping, not text; at most 3 lines (old paragraph gists are split the same way).
 const bullets = (text) => (text || '').replace(/\s*\[c\d+\]/g, '').split('\n')
@@ -18,7 +19,7 @@ const bullets = (text) => (text || '').replace(/\s*\[c\d+\]/g, '').split('\n')
 // A line that is only a link is no headline: the first text line wins, and a pure link post is named by its channel.
 const BARE_URL = /^<?https?:\/\/\S+>?$/;
 const clean = (row) => row.trim().replace(/^[-*•–—]\s+/, '');
-function headlineOf(text, channel) {
+export function headlineOf(text, channel) {
   const lines = (text || '').split('\n').map(clean).filter(Boolean);
   const line = lines.find((row) => !BARE_URL.test(row)) || (lines.length && channel ? `Link post from @${channel}` : '');
   if (line.length <= HEADLINE_CHARS) return line;
@@ -64,11 +65,11 @@ export default function TelegramPost({ post }) {
   const first = rows.findIndex((line) => line.trim() && headlineOf(line, post.channel) === headline);
   const body = (first >= 0 && clean(rows[first]) === headline ? [...rows.slice(0, first), ...rows.slice(first + 1)] : rows).join('\n').trim();  // the headline is not repeated
   const toggle = (name) => setOpen(open === name ? null : name);
-  if (done) return <li className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-1.5 text-sm text-slate-600">
+  if (done) return <li id={cardId(post.source_id)} tabIndex={-1} className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-1.5 text-sm text-slate-600 focus:outline focus:outline-2 focus:outline-forest-800">
     <Icon name="check" size={14} /><span className="min-w-0 flex-1 truncate">{headline} · @{post.channel}{feedbackText(post, reasons) && ` · ${feedbackText(post, reasons)}`}</span>
     <button type="button" onClick={() => mark.mutate(false)} className="min-h-11 text-forest-800 underline underline-offset-4 sm:min-h-8">Undo</button>
   </li>;
-  return <li className={`rounded-xl border border-slate-200 px-4 pb-1 pt-3.5 ${reasons ? 'bg-slate-50' : 'bg-white'}`}>
+  return <li id={cardId(post.source_id)} tabIndex={-1} className={`rounded-xl border border-slate-200 px-4 pb-1 pt-3.5 focus:outline focus:outline-2 focus:outline-forest-800 ${reasons ? 'bg-slate-50' : 'bg-white'}`}>
     {post.continues && <p className="mb-1 break-words text-xs text-slate-600">Continues <TelegramLink href={post.continues.permalink}>@{post.continues.channel}: {headlineOf(post.continues.text, post.continues.channel)}</TelegramLink></p>}
     <h3 className="break-words text-base font-medium leading-snug text-slate-900">{headline}</h3>
     {discussion && (points.length
@@ -90,6 +91,9 @@ export default function TelegramPost({ post }) {
         <span aria-hidden="true">·</span><time dateTime={post.published_at}>{ago(post.published_at)}</time>
         {/* With comments, the count is the “All comments (N)” label below — said once. */}
         {discussion && !discussion.comment_count && <><span aria-hidden="true">·</span><span>{commentsText(0)}</span></>}
+        {/* The stored post permalink, never composed; digests saved without one show nothing. */}
+        {isSafeHref(post.permalink) && <><span aria-hidden="true">·</span>
+          <TelegramLink href={post.permalink} className="relative text-forest-800 underline underline-offset-2 before:absolute before:-inset-x-1 before:-inset-y-3.5 before:content-[''] sm:before:-inset-y-1">Open in Telegram</TelegramLink></>}
         {feedbackText(post, reasons) && <><span aria-hidden="true">·</span><span>{feedbackText(post, reasons)}</span></>}
       </p>
       <button type="button" disabled={mark.isPending} onClick={() => mark.mutate(true)}
@@ -107,7 +111,6 @@ export default function TelegramPost({ post }) {
     {open === 'comments' && <TelegramThread sourceId={post.source_id} />}
     {open === 'details' && <div className="space-y-3 pb-3 text-sm">
       {body && <p className="whitespace-pre-wrap break-words text-slate-800">{body}</p>}
-      <p><TelegramLink href={post.permalink}>Open post</TelegramLink></p>
       <PostFeedback post={post} reasons={reasons} onReasons={save.mutate} pending={save.isPending} />
       {save.isError && <p role="alert" className="text-rose-700">Could not save: {save.error?.message}</p>}
     </div>}

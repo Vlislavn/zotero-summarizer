@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from zotero_summarizer.models.research_feed import TelegramTransportError
 from zotero_summarizer.models.telegram_discussion import (
     TelegramCollectionStopped, TelegramConversation, TelegramTarget)
-from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services._io import now_iso_z
 from zotero_summarizer.services.research_feed import telegram_gist as gist
 from zotero_summarizer.services.research_feed import telegram_nli
 from zotero_summarizer.services.research_feed import telegram_progress as progress
@@ -33,6 +33,7 @@ LOG = logging.getLogger(__name__)
 COMMENT_CONCURRENCY = 1  # whole threads are paged: serial reads stay under Telegram's request flood limit
 FETCH_FACTOR = 3  # comments are fetched for at most FETCH_FACTOR * summary_top candidates
 POOL_FACTOR = 6   # only the POOL_FACTOR * summary_top most-replied posts get a goal score (embedding is the slow part)
+MAX_AGE = timedelta(days=14)  # older posts stay out of the pool (the 500-post window itself is not widened)
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,7 @@ class DigestRequest:
     probe: object = None
     nli_dir: object = None  # local NLI gate folder (Settings.nli_model_dir); None = lines are not checked
     noul: object = None  # Jev engine for the disagreement check (integrations.jev.noul); None = no disagreement block
+    exclude_ids: frozenset[str] = frozenset()  # source_ids shown in recent digests or marked done: never a card again
 
 
 async def _fetch_comments(reply_client, gated, *, limits, stop):
@@ -82,13 +84,22 @@ async def _fetch_comments(reply_client, gated, *, limits, stop):
     return await asyncio.gather(*(one(g) for g in targets)) if targets else []
 
 
-def _conversation(result, messages):
+def conversation(post, messages):
     peer_id = messages[0].peer_id
     root_id = messages[0].thread_id
     return TelegramConversation(
-        target=TelegramTarget(kind="broadcast", username=result.post.username or "unavailable"),
-        origin=result.post, peer_id=peer_id, root_id=root_id, messages=messages,
+        target=TelegramTarget(kind="broadcast", username=post.username or "unavailable"),
+        origin=post, peer_id=peer_id, root_id=root_id, messages=messages,
         status="fetched" if messages else "empty", observed_at=now_iso_z())
+
+
+def _pool(posts, request: DigestRequest) -> list:
+    """The most-replied posts of the last MAX_AGE that were not already shown or marked done."""
+    cutoff = request.now() - MAX_AGE
+    fresh = (p for p in posts if p.source_id not in request.exclude_ids
+             and datetime.fromisoformat(p.published_at.replace("Z", "+00:00")) >= cutoff)
+    return sorted((p for p in fresh if p.replies_count > 0), key=lambda p: p.replies_count,
+                  reverse=True)[:POOL_FACTOR * request.summary_top]
 
 
 async def run(conn, result, request: DigestRequest):
@@ -99,8 +110,7 @@ async def run(conn, result, request: DigestRequest):
                        for row in store.list_posts(conn, limit=WINDOW_LIMIT)}
     window = [row["post"] for row in evaluation_rows.values()]
     kept_posts, dedup_info = relevance.dedup(window)
-    pool = sorted((p for p in kept_posts if p.replies_count > 0), key=lambda p: p.replies_count,
-                  reverse=True)[:POOL_FACTOR * request.summary_top]
+    pool = _pool(kept_posts, request)
     # SPECTER2 cosine on non-Latin text is noise (0.86-0.93 for every post), so those posts use the
     # keyword probe: an honest "no goal match" beats a made-up 'why for you'.
     probe = request.probe or relevance.keyword_probe
@@ -128,7 +138,7 @@ async def run(conn, result, request: DigestRequest):
             try:
                 with conn:
                     conn.execute("BEGIN IMMEDIATE")
-                    conversations.save_snapshot(conn, _conversation(gate_result, payload))
+                    conversations.save_snapshot(conn, conversation(post, payload))
                 row = evaluation_rows.get((post.channel_id, post.message_id))
                 if row is not None:
                     evaluation = dict(row["evaluation"] or {})
@@ -171,11 +181,11 @@ async def run(conn, result, request: DigestRequest):
         "gist_version": gist.GIST_VERSION, "dedup": dedup_info, "gated": len(shown),
         "gate": [{"source_id": g.post.source_id, "score": round(value, 4),
                   "kept": g.post.source_id in shown_ids,
-                  "goal": g.matched_goal if fit[g.post.source_id] > 0 else None, "route": g.route}
+                  "goal": g.matched_goal if fit[g.post.source_id] > 0 and g.post.text.strip() else None, "route": g.route}
                  for g, value in ranked],
         "comments_posts": len(comments_by_post), "flood_degraded": flood_degraded,
         "summaries": summaries}
     return result
 
 
-__all__ = ["run", "DigestRequest"]
+__all__ = ["run", "DigestRequest", "conversation"]

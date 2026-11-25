@@ -25,6 +25,7 @@ and to dodge Chromium's per-profile ``SingletonLock``.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import logging
 import os
 import tempfile
@@ -88,7 +89,7 @@ def _load_playwright() -> tuple[Callable[[], Any] | None, type[BaseException] | 
     callers catch browser failures narrowly (no bare ``except``)."""
     for module_name in ("patchright.sync_api", "playwright.sync_api"):
         try:
-            module = __import__(module_name, fromlist=["sync_playwright", "Error"])
+            module = importlib.import_module(module_name)  # ai-slop: ignore[security/dynamic-import] fixed two-name allowlist of the optional `browser` extra
         except ImportError:
             continue
         return module.sync_playwright, module.Error

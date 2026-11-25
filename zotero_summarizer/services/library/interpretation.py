@@ -7,7 +7,8 @@ from zotero_summarizer.integrations.llm import build_response_format
 from zotero_summarizer.models import PaperDigest
 from zotero_summarizer.models.interpretation import InterpretationItem
 from zotero_summarizer.models.digest_generation import PaperDigestGeneration, InterpretationDigestGeneration
-from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services._common import to_text
+from zotero_summarizer.services.llm.json_response import extract_json_blob
 from zotero_summarizer.services.faithbench._corpus import chunk_text, sha256_text
 from zotero_summarizer.services.library._digest_audit import canonical_hash, contract_hashes, digest_contract_payload
 from zotero_summarizer.services.library._digest_audit_export import _validate_audit

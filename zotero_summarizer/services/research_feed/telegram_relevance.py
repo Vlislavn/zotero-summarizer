@@ -15,6 +15,13 @@ from zotero_summarizer.models.research_feed import TelegramPost
 
 DEFAULT_TAU = 0.35
 _WORD = re.compile(r"\w+", re.UNICODE)
+# English function words: sharing one with a goal is not a topical match ("and" links any two sentences).
+_FUNCTION_WORDS = frozenset({"and", "for", "the", "with", "from", "that", "this", "are", "not", "but", "our",
+                             "can", "how", "its"})
+# Legal ad markers only (an advertiser's #реклама / erid token / «на правах рекламы» / promo code / an «Реклама.» line).
+_AD_MARK = re.compile(
+    r"#\s*реклама\b|\berid\b\s*[:=]?\s*\w+|на\s+правах\s+рекламы|\bпромокод\b"
+    r"|^[^\w\n]*реклама[^\w\n]*$|^[^\S\n]*реклама[^\S\n]*[.:—–-]", re.IGNORECASE | re.MULTILINE)
 
 
 def _ordinal(post: TelegramPost) -> tuple:
@@ -69,7 +76,7 @@ class GateResult:
     route: str  # "cosine" | "probe"
 
 
-def _unit_rows(vectors: np.ndarray) -> np.ndarray:
+def unit_rows(vectors: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(vectors, axis=1, keepdims=True)
     return vectors / np.where(norms == 0.0, 1.0, norms)
 
@@ -82,19 +89,30 @@ def _is_mostly_non_latin(text: str) -> bool:
     return latin < 0.5 * len(letters)
 
 
+def is_ad_post(text: str) -> bool:
+    """True when the post carries a legal advertising marker (not merely promo-sounding words)."""
+    return _AD_MARK.search(text) is not None
+
+
+def _tokens(text: str) -> set[str]:
+    return {m.group(0).casefold() for m in _WORD.finditer(text)}
+
+
+def _shared(tokens: set[str], goal: str) -> int:
+    """How many goal words (3+ letters, not function words) occur among the post's tokens."""
+    return len(({word for word in _tokens(goal) if len(word) > 2} - _FUNCTION_WORDS) & tokens)
+
+
 def keyword_probe(text: str, goals: list[str]) -> bool:
-    """Cheap offline yes/no fallback: any goal word token present in the post."""
-    tokens = {m.group(0).casefold() for m in _WORD.finditer(text)}
-    for goal in goals:
-        words = {m.group(0).casefold() for m in _WORD.finditer(goal) if len(m.group(0)) > 2}
-        if words & tokens:
-            return True
-    return False
+    """Cheap offline yes/no fallback: a goal shares at least one non-function word with the post."""
+    tokens = _tokens(text)
+    return any(_shared(tokens, goal) for goal in goals)
 
 
 def _hit_goal(text: str, goals: list[str]) -> str:
-    """The first goal the keyword probe matches (an injected probe falls back to the first goal)."""
-    return next((goal for goal in goals if keyword_probe(text, [goal])), goals[0])
+    """The goal sharing the most words with the post, first on a tie (no shared word: the first goal)."""
+    tokens = _tokens(text)
+    return max(goals, key=lambda goal: _shared(tokens, goal))
 
 
 def gate(posts: list[TelegramPost], goals: list[str], *, scorer, min_keep: int,
@@ -113,8 +131,8 @@ def gate(posts: list[TelegramPost], goals: list[str], *, scorer, min_keep: int,
     cosine_posts = [p for p in posts if not (probe is not None and _is_mostly_non_latin(p.text))]
     cosine_index = {id(p): i for i, p in enumerate(cosine_posts)}
     if cosine_posts:
-        goal_vectors = _unit_rows(np.asarray(scorer(goals), dtype=np.float32))
-        post_vectors = _unit_rows(np.asarray(scorer([p.text for p in cosine_posts]), dtype=np.float32))
+        goal_vectors = unit_rows(np.asarray(scorer(goals), dtype=np.float32))
+        post_vectors = unit_rows(np.asarray(scorer([p.text for p in cosine_posts]), dtype=np.float32))
         sims = post_vectors @ goal_vectors.T
     for post in posts:
         if id(post) in cosine_index:
@@ -163,4 +181,4 @@ def specter2_scorer(texts: list[str]) -> np.ndarray:
     return classifier_embed._encode_chunk(tok, mdl, torch, list(texts), device)
 
 
-__all__ = ["dedup", "gate", "GateResult", "keyword_probe", "specter2_scorer", "DEFAULT_TAU"]
+__all__ = ["dedup", "gate", "GateResult", "is_ad_post", "keyword_probe", "specter2_scorer", "DEFAULT_TAU"]

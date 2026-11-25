@@ -12,7 +12,7 @@ topic + questions
   arxiv · europepmc · openalex lex+sem · crossref · semantic scholar · openreview · library (unwired)
   │ dedup.to_version_families (union-find on shared ids; never title-merge)
   ▼ rank.score_query_relevance (our cross-encoder over the union; source rank is candidate-gen only)
-  ▼ rank.rank_candidates (constrained contract) → pipeline._annotate_library_coverage → _relevance.attach_relevance
+  ▼ rank.rank_candidates (constrained contract) → federate._annotate_library_coverage → _relevance.attach_relevance
 run_screen ─save→ ResearchSession(status=screened)                                   [fast]
   │ /screen claims screened→reviewing (session.claim) and spawns run_review          [slow]
   ▼ run_review: _fulltext → review.light_review → re-rank → review.select_deep_set
@@ -27,7 +27,7 @@ run_screen ─save→ ResearchSession(status=screened)                          
 | `_models.py` | `ScreenRequest`, `ConfirmedConstraints`, `Provenance`, `Candidate`, `SearchIntent`, `QueryPlan`, `ResearchSession` (JSON round-trip, `to_dict(for_storage=)`) |
 | `intent.py` | topic → `SearchIntent` → per-source `QueryPlan` (model `search_queries`/`semantic_query`; fallback `_tight_query` quoted phrase + anchored bag; `QueryPlan.display()` is the wire projection (plain source labels, e.g. «OpenAlex · keyword search», «Must mention (title/abstract)», «Filters» = AI-suggested vs confirmed-by-you, «Needs your confirmation: …» with the same plain constraint names; no row for `legacy_unknown`); its `retrieval <source>` rows are plain sentences from `_accounting.describe_retrieval`, plus one «Some sources failed» row when a receipt says failed) |
 | `_queries.py` · `_publication_types.py` · `_accounting.py` | complementary lexical passes · exact-DOI publication-type recovery (`ZS_SEARCH_TYPE_LOOKUPS`) · per-source retrieval accounting |
-| `federate.py` | channel fan-out, quotas, provenance, constraint filter, OpenReview signal channel |
+| `federate.py` | channel fan-out, quotas, provenance, constraint filter, OpenReview signal channel; shared OpenAlex client and library coverage for Search and Discovery |
 | `dedup.py` | version families; `reconcile_operation_state` |
 | `rank.py` | `score_query_relevance` + `rank_candidates` (`ZS_SEARCH_RANK_EPSILON`) |
 | `_relevance.py` | pool-relative band (strong/on_topic/weak; `ZS_SEARCH_STRONG_FLOOR`/`ZS_SEARCH_MILD_FLOOR`) + ≤3 `why` chips |
@@ -36,10 +36,10 @@ run_screen ─save→ ResearchSession(status=screened)                          
 | `_fulltext.py` | OA full text for non-Zotero candidates: PMC → Europe PMC `fullTextXML`, else arXiv/Unpaywall/direct OA PDF; optional request-local `outcome` |
 | `_question_evidence.py` · `_question_policy.py` | opt-in original-text question evidence · receipt validity (`current_receipt`) and promotion |
 | `refine.py` | opt-in agentic PRF rounds before deep-set selection (`ZS_SEARCH_AGENTIC`) |
-| `pipeline.py` | `SearchDeps`/`default_deps`, `run_screen`, `run_review`, `_annotate_library_coverage` |
-| `materialize.py` | the only Search→Zotero write: `materialize_candidate` |
-| `discovery.py` | saved-seed discovery: public retrieval + optional consent-bound assessment |
-| `session.py` | one JSON per session under `Settings.search_dir`: `save`, `save_merge`, `update`, `claim`, `materialize_once`, `find_discovery`, `list_sessions`, `delete`/`is_deleted` |
+| `pipeline.py` | `SearchDeps`/`default_deps`, `run_screen`, `run_review` |
+| `materialize.py` | the only Search→Zotero write: `materialize_candidate` (picker key → collection name via `services.zotero.collections.resolve_collection_name`) |
+| `discovery.py` | saved-seed discovery: public retrieval + optional consent-bound assessment; the entry point is `start_discovery` (formerly `find_new`; the route path is unchanged) |
+| `session.py` | one JSON per session under `Settings.search_dir`: `save`, `save_merge`, `update`, `claim`, `materialize_once`, `find_discovery`, `list_sessions`, `delete`/`is_deleted` (`find_discovery` checks digests with `domain.is_sha256_hex`) |
 
 ## Ranking and review invariants
 
@@ -133,6 +133,13 @@ run_screen ─save→ ResearchSession(status=screened)                          
 - Check-write-stamp runs under the session lock via `session.materialize_once`, so concurrent Adds write once.
   An existing coverage hit reuses `existing_zotero_key` (no writer, no plan); either path stamps
   `materialized_zotero_key`. Re-add returns `already_added`.
+- Before creating, `_do_write` re-asks the live library (`library/existing_item.existing_library_key`: DOI → arXiv id →
+  title+year), not the session's coverage snapshot; a hit is reused like a coverage hit (`already_added`, nothing
+  written). Skipped when a plan is retained (that retry owns its key). A lookup failure proceeds with the Add.
+- Before writing a NEW item, `library/topic_filing.topic_paths(title, abstract)` picks topic leaves (Jev, Settings → Checklist engine; `[]` = Inbox only) and they are added by the same atomic write as `matched_collections`; the response carries `filed` (leaf names, `[]` when none).
+- After a NEW item is added (after the session lock, never for `already_added`) `fulltext.attach_best_effort`
+  tries to attach an open-access PDF; the Add never fails or rolls back for it. The response carries
+  `fulltext` (the outcome string, e.g. `attached_arxiv`, `no_oa_source`, `zotero_running` or an error text).
 - A new item first saves `planned_zotero_key` (eight ASCII uppercase letters/digits) in the session before
   backup/native work; a failed prewrite save dispatches nothing. Native or finalization failure retains the
   plan and the retry reuses the writer's existing-key no-op. A plan is not coverage or a success receipt.
@@ -148,7 +155,9 @@ run_screen ─save→ ResearchSession(status=screened)                          
 - `ScreenRequest.evidence_policy` is `baseline` (default) or `question_evidence`. The existing review worker
   runs `_question_evidence` before top-ten light review; `_question_policy.apply_question_policy` promotes
   sufficient answers after quality ranking. No questions, disabled budgets or missing prerequisites keep
-  baseline order.
+  baseline order. `_resolve_admission` validates limits, evaluator binding and prerequisites before
+  `_check_candidate` acquires originals and updates receipts for each eligible candidate. `run_question_evidence`
+  owns ranking, candidate selection and session saves; per-question checks can stop a deleted session before saving.
 - Reuses `_fulltext.acquire_full_text`, Library hybrid retrieval, faithbench `ANSWER_PROMPT`/`parse_answer` and
   strict quote guards, plus an independent configured Deep-review verifier. Only exactly located, unambiguous
   original quotes count; generated summaries never supply offsets. Over-budget originals are unknown, not
@@ -190,7 +199,8 @@ run_screen ─save→ ResearchSession(status=screened)                          
   size/mtime markers such as `corpus_cache.db` (also the OpenAlex cache, written constantly by Today preparation
   and by Find itself), which made unchanged seeds 409 `discovery_stale` (#275). Freshness fingerprints (`_freshness`) must be
   `current` before work, publication and Add.
-- Only explicit Review may claim a discovery session (`explicit_review_required` 409).
+- Only explicit Review may claim a discovery session (`explicit_review_required` 409). `pipeline.run_review`
+  checks Discovery freshness at that boundary; Discovery retrieval does not import the pipeline.
 
 ## Extension points and deferred seams
 
@@ -201,3 +211,9 @@ run_screen ─save→ ResearchSession(status=screened)                          
 - No dedicated bioRxiv/medRxiv leaf (OpenAlex, Europe PMC and Crossref index them).
 - Reuse provider leaves, identifier dedup, session serialization and `QueryPlan.display()`; add no
   competing retrieval/ranking loop.
+
+Paper fan-out width comes from `services/llm/concurrency.deep_review_fleet_concurrency`.
+
+`intent` and `refine` parse LLM JSON with `services/llm/json_response.extract_json_blob`.
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.

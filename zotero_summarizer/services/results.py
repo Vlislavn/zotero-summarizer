@@ -19,7 +19,8 @@ from zotero_summarizer.models import (
     TriageFeedbackResponse,
 )
 from zotero_summarizer.services import interaction_log
-from zotero_summarizer.services._common import LOGGER, safe_parse_response_json
+from zotero_summarizer.services._common import LOGGER
+from zotero_summarizer.services.llm.json_response import safe_parse_response_json
 from zotero_summarizer.storage import repositories as triage_db
 
 

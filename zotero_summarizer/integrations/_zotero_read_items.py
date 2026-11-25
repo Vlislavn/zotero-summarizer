@@ -9,19 +9,8 @@ from zotero_summarizer.integrations._zotero_read_common import (
     _ANNOTATION_TYPE_NAMES,
     _NON_BIBLIOGRAPHIC_TYPES_SQL,
     _USER_LIBRARY_ID_SELECT,
+    _field_value_sql,
 )
-
-
-def _field_value_sql(field_name: str) -> str:
-    """Correlated subquery for one Zotero ``itemData`` field's value on the current
-    item (``i.itemID``), '' when absent. ``field_name`` is a hardcoded field constant
-    (never user input), so inlining the literal is injection-safe."""
-    return (
-        "COALESCE((SELECT v.value FROM itemData id "
-        "JOIN fields f ON f.fieldID = id.fieldID "
-        "JOIN itemDataValues v ON v.valueID = id.valueID "
-        f"WHERE id.itemID = i.itemID AND f.fieldName = '{field_name}' LIMIT 1), '')"
-    )
 
 
 class ZoteroItemsMixin:
@@ -277,41 +266,6 @@ class ZoteroItemsMixin:
         return [
             {"note_key": str(row["note_key"]), "note": str(row["note"] or ""),
              "date_added": str(row["dateAdded"] or ""), "date_modified": str(row["dateModified"] or "")}
-            for row in rows
-        ]
-
-    @staticmethod
-    def _read_item_annotations(conn: sqlite3.Connection, item_id: int) -> list[dict[str, Any]]:
-        rows = conn.execute(
-            """
-            SELECT a.itemID, a.text, a.comment, a.pageLabel, a.type,
-                   a.color, ann.dateAdded, ann.key AS annotation_key,
-                   ai.key AS attachment_key, ann.dateModified
-            FROM itemAnnotations a
-            JOIN items ann ON ann.itemID = a.itemID
-            JOIN itemAttachments att ON att.itemID = a.parentItemID
-            JOIN items ai ON ai.itemID = att.itemID
-            WHERE att.parentItemID = ?
-              AND ann.itemID NOT IN (SELECT itemID FROM deletedItems)
-              AND att.itemID NOT IN (SELECT itemID FROM deletedItems)
-            ORDER BY ann.dateAdded ASC
-            """,
-            (item_id,),
-        ).fetchall()
-        return [
-            {
-                "text": str(row["text"] or ""),
-                "comment": str(row["comment"] or ""),
-                "page_label": str(row["pageLabel"] or ""),
-                "type": _ANNOTATION_TYPE_NAMES.get(
-                    int(row["type"]), f"unknown_{int(row['type'])}"
-                ),
-                "color": str(row["color"] or ""),
-                "date_added": str(row["dateAdded"] or ""),
-                "annotation_key": str(row["annotation_key"]),
-                "attachment_key": str(row["attachment_key"]),
-                "date_modified": str(row["dateModified"] or ""),
-            }
             for row in rows
         ]
 

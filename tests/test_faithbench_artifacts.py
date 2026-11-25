@@ -54,7 +54,7 @@ def test_frozen_path_rejects_symlink_escape(tmp_path):
 
 
 def test_failed_freeze_does_not_publish_or_damage_old_version(monkeypatch, tmp_path):
-    from zotero_summarizer.services import _common
+    from zotero_summarizer.services import _io
 
     old_sha = freeze_paper_text(tmp_path, "P1", "old text")
     before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
@@ -62,7 +62,7 @@ def test_failed_freeze_does_not_publish_or_damage_old_version(monkeypatch, tmp_p
     def interrupted_publish(*args):
         raise OSError("injected publication failure")
 
-    monkeypatch.setattr(_common.os, "replace", interrupted_publish)
+    monkeypatch.setattr(_io.os, "replace", interrupted_publish)
     with pytest.raises(OSError, match="injected publication failure"):
         freeze_paper_text(tmp_path, "P1", "new text")
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before

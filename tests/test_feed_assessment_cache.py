@@ -352,7 +352,7 @@ def test_feed_loader_keeps_raw_qualified_publication_before_card_projection(
 @pytest.mark.parametrize('kind', ['intact', 'digest_only', 'missing_audit', 'null_audit', 'malformed_audit',
                                 'digest_empty_list', 'digest_list', 'digest_false', 'digest_zero', 'digest_string'])
 def test_base_only_default_feed_consumption_requires_retained_base_proof(audit_env, kind):
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
 
     path = audit_env.settings.config_path
     path.write_text(json.dumps(audit_env.config.model_dump(mode='json')))

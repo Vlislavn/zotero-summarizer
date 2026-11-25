@@ -5,7 +5,7 @@ import pytest
 
 from zotero_summarizer.services.search._models import Candidate
 from zotero_summarizer.services.search.dedup import to_version_families
-from zotero_summarizer.services.search.pipeline import _annotate_library_coverage
+from zotero_summarizer.services.search.federate import _annotate_library_coverage
 
 
 @pytest.mark.parametrize("namespace", ["doi", "arxiv"])

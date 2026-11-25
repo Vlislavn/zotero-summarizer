@@ -69,7 +69,7 @@ export function Disclosure({ summary, children, defaultOpen = false, count = nul
 // summary while closed, chevron on the right. Native <details>, so keyboard and
 // no-JS work and every closed section keeps its content in the DOM. Sections the
 // reader needs by default pass `defaultOpen`; everything else stays one quiet line.
-export function Fold({ id, label, summary, defaultOpen = false, children }) {
+export function Fold({ id, label, summary, defaultOpen = false, feedbackField, children }) {
   return (
     <details id={id} open={defaultOpen || undefined} className="group scroll-mt-20 border-t border-slate-200/70 first:border-t-0">
       <summary className="grid min-h-11 cursor-pointer select-none list-none grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded py-3 [&::-webkit-details-marker]:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest-400 focus-visible:ring-offset-1">
@@ -81,7 +81,7 @@ export function Fold({ id, label, summary, defaultOpen = false, children }) {
           <path d="M4 2l4 4-4 4" />
         </svg>
       </summary>
-      <div className="pb-5 pt-1">{children}</div>
+      <div className="pb-5 pt-1" data-feedback-field={feedbackField}>{children}</div>
     </details>
   );
 }
@@ -131,13 +131,29 @@ export function Bullets({ items }) {
   );
 }
 
-// A single inline statistic (label over value), borderless — for the rigor /
-// relevance spine. Several sit in a row separated by a hairline, not boxes.
-export function Stat({ label, value, hint }) {
+// A neutral, clickable location pointer for a located finding: "§ Methods · p.4"
+// jumps to that section in the Paper map (one-code-one-meaning — the location is
+// slate, the problem/match keeps its own tone). Only rendered on the story page,
+// where the overlay supplies the section + the SectionMap renders the target.
+export function SectionAnchor({ section }) {
+  if (!section) return null;
+  // `approx` = the section-level fallback (no exact/fuzzy span grounded it). Render
+  // it conservatively (≈ prefix, muted) so an uncertain location never reads as an
+  // asserted one — the brittle-localization warning from the research.
+  const approx = section.match === 'approx';
+  const pg = section.page ? ` · p.${section.page}` : '';
+  const label = `${approx ? '≈ ' : ''}§ ${section.title}${pg}`;
   return (
-    <div title={hint} className="min-w-0">
-      <div className="text-[11px] uppercase tracking-[0.06em] font-medium text-slate-500">{label}</div>
-      <div className="mt-0.5 text-sm font-medium text-slate-800 truncate">{value}</div>
-    </div>
+    <a
+      href={`#secmap-${section.id}`}
+      title={`${approx ? 'approximate location — ' : ''}${section.title}${pg} — jump to the paper map`}
+      className={`inline-flex max-w-[12rem] items-center rounded px-1.5 py-0.5 align-middle text-[10px] font-medium sm:max-w-[18rem] ${
+        approx
+          ? 'bg-slate-50 text-slate-400 hover:bg-slate-100'
+          : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
+      }`}
+    >
+      <span className="truncate">{label}</span>
+    </a>
   );
 }

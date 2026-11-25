@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import Today from './Today.jsx';
@@ -53,7 +53,10 @@ it.each([
     else if (url.pathname === '/api/daily/triage-status') data = { running: false };
     else if (url.pathname === '/api/zotero/collections') data = { items: [{ key: 'C1', name: 'Reading' }] };
     else if (url.pathname === '/api/zotero/tags') data = { items: [] };
+    else if (url.pathname === '/api/zotero/status') data = { available: true, stats: {} };
+    else if (url.pathname === '/api/pending/count') data = { count: 0 };
     else if (url.pathname === '/api/library/review-fleet/status') data = { status: 'idle' };
+    else if (url.pathname === '/api/library/fetch-fulltext/status') data = { running: false };
     else if (url.pathname === '/api/library/reading-queue') data = {
       items: url.searchParams.get('search') || url.searchParams.get('include_read') === 'true'
         ? papers.slice(0, 1) : papers,
@@ -74,7 +77,7 @@ it.each([
     await screen.findByRole('option', { name: /^Reading/ });
     fireEvent.change(screen.getByTitle('Target Zotero collection'), { target: { value: 'C1' } });
     fireEvent.change(screen.getByLabelText('Feed source'), { target: { value: 'arXiv' } });
-    const button = screen.getByRole('button', { name: action === 'trash' ? 'Trash' : 'Add to library' });
+    const button = screen.getByRole('button', { name: action === 'trash' ? /^Not interested \(\d+ selected\)$/ : 'Add to library' });
     fireEvent.click(button);
   } else {
     fireEvent.click(screen.getByRole('button', { name: 'Select', exact: true }));
@@ -84,17 +87,30 @@ it.each([
       fireEvent.click(checkbox);
     }
     if (filter === 'quality') {
-      fireEvent.click(screen.getByText('Browse & filter'));
-      fireEvent.click(screen.getByRole('button', { name: 'A/B', exact: true }));
+      fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+      fireEvent.click(screen.getByRole('button', { name: 'A/B 1' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Show 1 paper' }));
     } else if (filter === 'search') {
       const input = screen.getByPlaceholderText(/^Search by meaning/);
       fireEvent.change(input, { target: { value: 'Alpha' } });
       fireEvent.keyUp(input, { key: 'Enter' });
-    } else fireEvent.click(screen.getByRole('checkbox', { name: 'Show already-read' }));
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+      fireEvent.click(screen.getByRole('checkbox', { name: /^Show read papers/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Show papers' }));
+    }
     await waitFor(() => expect(screen.queryByText('Beta 2')).toBeNull());
     if (action === 'collection') {
       fireEvent.change(screen.getByTitle('Target Zotero collection for the selected papers'), { target: { value: 'C1' } });
       fireEvent.click(screen.getByRole('button', { name: 'Add to collection (1)' }));
+      const asked = await screen.findByRole('dialog');  // the confirmation sheet comes first: count, backup line
+      expect(within(asked).getByRole('heading', { name: 'Add 1 paper to “Reading”?' })).toBeTruthy();
+      expect(asked.textContent).toMatch(/Backup first/);
+      fireEvent.click(within(asked).getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      expect(writes).toHaveLength(0);
+      fireEvent.click(screen.getByRole('button', { name: 'Add to collection (1)' }));
+      fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Add to collection' }));
     } else fireEvent.click(screen.getByRole('button', { name: 'Run triage (1)' }));
   }
   await waitFor(() => expect(writes).toHaveLength(1));

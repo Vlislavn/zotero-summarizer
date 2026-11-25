@@ -98,7 +98,7 @@ def _slugify_model(model_name: str) -> str:
 
 
 def _utc_iso_now() -> str:
-    from zotero_summarizer.services._common import now_iso_z
+    from zotero_summarizer.services._io import now_iso_z
     return now_iso_z()
 
 

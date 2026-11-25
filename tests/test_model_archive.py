@@ -12,7 +12,7 @@ import pytest
 import joblib
 from zipfile import BadZipFile, ZipFile
 
-from zotero_summarizer.services._common import atomic_write
+from zotero_summarizer.services._io import atomic_write
 from zotero_summarizer.services.model.classifier_training import save_trained
 from zotero_summarizer.services.model import classifier_store as store
 from zotero_summarizer.services.model.classifier_backup import restore_snapshot, snapshot_current

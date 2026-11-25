@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import re
 
+from zotero_summarizer.domain import is_sha256_hex
 from zotero_summarizer.models.research_feed import FeedAssessment, FeedProjectAssessment, FeedReviewContext
 from zotero_summarizer.models.digest_generation import FeedDigestGeneration
 from zotero_summarizer.services.library._prompt_security import untrusted_input
@@ -190,7 +191,7 @@ def qualify(entry, context):
 
 def cached_reader(settings):
     """Invocation-local config only: no lifecycle, provider or native reader setup."""
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
 
     config = None
     def load(key):
@@ -223,10 +224,6 @@ def current_review(key, *, config=None):
     return entry
 
 
-def _sha256(value):
-    return type(value) is str and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
-
-
 def projection_evidence(review):
     """Reader owns freshness; qualify retained evidence without extraction or models."""
     from zotero_summarizer.services.library._review_cache import REVIEW_CONTRACT_VERSION
@@ -246,12 +243,12 @@ def projection_evidence(review):
         return evidence
     identity = review.get("review_identity")
     evidence["reason"] = "review_source_unbound"
-    if (not isinstance(identity, dict) or not _sha256(identity.get("source_sha256"))
+    if (not isinstance(identity, dict) or not is_sha256_hex(identity.get("source_sha256"))
             or identity.get("source_kind") not in ("library", "override")
             or not isinstance(identity.get("source_path"), str) or not identity["source_path"].strip()):
         return evidence
     evidence.update(availability="available", source_binding=dict(identity))
-    if not _sha256(identity.get("generation_sha256")):
+    if not is_sha256_hex(identity.get("generation_sha256")):
         evidence["reason"] = "review_generation_unbound"
     elif (type(review.get("review_contract_version")) is not int
             or review["review_contract_version"] != REVIEW_CONTRACT_VERSION):

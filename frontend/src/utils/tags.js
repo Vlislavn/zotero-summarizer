@@ -5,6 +5,6 @@
 // browse filter). Genuine content tags ("Computer Science - …") carry no
 // short-prefix-colon, so they pass through. The user can still type any literal
 // tag (Postel's Law).
-export const MACHINE_TAG_RE = /^([a-z]{1,3}:|label:|\/)/i;
+const MACHINE_TAG_RE = /^([a-z]{1,3}:|label:|\/)/i;
 
 export const isMachineTag = (tag) => MACHINE_TAG_RE.test(String(tag || ''));

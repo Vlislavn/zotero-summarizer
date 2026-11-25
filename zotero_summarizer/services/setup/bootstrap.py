@@ -20,7 +20,8 @@ from zotero_summarizer.models.config import (
     GoalsConfig,
     LLMConfig,
 )
-from zotero_summarizer.services._common import LOGGER, write_user_config
+from zotero_summarizer.services._common import LOGGER
+from zotero_summarizer.services.config_io import write_user_config
 from zotero_summarizer.settings import Settings
 
 

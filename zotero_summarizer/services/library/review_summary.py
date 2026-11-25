@@ -13,6 +13,7 @@ from zotero_summarizer.models import SummarizeResponse
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.golden.goldenset import GoldenSample, _PRIORITY_TO_RELEVANCE
 from zotero_summarizer.services.golden.csv_store import edit_csv
+from zotero_summarizer.services.triage.daily_select import drop_trashed_guids
 from zotero_summarizer.services.triage.daily_select._candidate import parse_payload
 from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.storage.feed_identity import row_feed_keys
@@ -34,7 +35,7 @@ def _drop_trashed_rearrivals(
 ) -> list[dict[str, Any]]:
     """Drop rows whose stable GUID matches a paper the user explicitly trashed.
 
-    The review-listing counterpart to ``daily_select._drop_trashed_guids``: the
+    The review-listing counterpart to ``daily_select.drop_trashed_guids``: the
     Today *slate* already suppresses trashed re-arrivals, but the ``gate_rejected``
     spot-check (and the Review page) listed straight from the table, so a paper
     the user trashed kept resurfacing under a new feed_item_id. Matching on the
@@ -44,9 +45,7 @@ def _drop_trashed_rearrivals(
     trashed_guids = feeds_storage.fetch_trashed_guids(
         conn, decisions=_TRASH_DECISIONS, outcomes=_TRASH_OUTCOMES,
     )
-    if not trashed_guids:
-        return rows
-    return [r for r in rows if str(r.get("guid") or "").strip() not in trashed_guids]
+    return drop_trashed_guids(rows, trashed_guids=trashed_guids)
 
 
 def _parse_stored_summary(

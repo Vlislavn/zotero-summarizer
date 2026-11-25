@@ -14,7 +14,9 @@ import hashlib
 import json
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import read_config, to_text, write_json_atomic
+from zotero_summarizer.services._common import to_text
+from zotero_summarizer.services._io import write_json_atomic
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services.research_feed import profile as profiles, telegram_review
 from zotero_summarizer.services.research_feed.telegram_selection import output_dir as _output_dir
 from zotero_summarizer.settings import offline_requested
@@ -107,7 +109,7 @@ def set_collect_consent(settings, allow: bool) -> dict:
 
 def set_remote_consent(settings, token: str, allow: bool) -> dict:
     """Record (or withdraw) consent for the CURRENT saved remote boundary."""
-    profile = profiles.load_profile(settings.data_dir, persist_default=False)
+    profile = profiles.load_profile(settings.data_dir)
     config = read_config(settings.config_path, settings.calibration_path)
     current = describe(settings, config, profile)
     if current is None or current["local"]:

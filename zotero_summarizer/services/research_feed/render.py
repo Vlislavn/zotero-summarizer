@@ -9,7 +9,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
-from zotero_summarizer.services._common import write_json_atomic
+from zotero_summarizer.services._io import write_json_atomic
 from zotero_summarizer.services.research_feed.cursor import NOT_CACHED
 from zotero_summarizer.services.research_feed.source import PLAIN_REASONS
 

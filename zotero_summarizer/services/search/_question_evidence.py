@@ -159,6 +159,53 @@ def _assess(row: dict, passages: list[dict], deps: Any, *, session_id: str) -> i
     return 2
 
 
+def _resolve_admission(sess: Any, deps: Any) -> tuple[dict, dict]:
+    limits = evidence_limits()
+    if not sess.questions:
+        raise ValueError("no_questions")
+    if not limits["candidates"] or not limits["calls"]:
+        raise ValueError("evidence_budget_disabled")
+    evaluators = _evaluators(deps.config)
+    if evaluators != current_binding():
+        raise ValueError("current_evaluator_unavailable")
+    if deps.extractor is None or deps.llm is None or deps.llm_light is None:
+        raise ValueError("evidence_prerequisites_unavailable")
+    return limits, evaluators
+
+
+def _check_candidate(candidate: Any, sess: Any, deps: Any, fulltext: dict, *, call_limit: int) -> bool:
+    """Update this candidate's receipts; return False when deletion stops a row check."""
+    rows = candidate.question_evidence
+    if call_limit - sess.evidence_status["calls_used"] < 2:
+        for row in rows:
+            row["reason"] = "call_budget_exhausted"
+        return True
+    try:
+        groups, source = _snapshot(candidate, sess, deps, fulltext)
+    except Exception as exc:  # noqa: BLE001 — acquisition/retrieval boundary, unknown is not a negative
+        for row in rows:
+            row.update(reason=str(exc) if isinstance(exc, ValueError) and str(exc) in {
+                "source_empty", "source_character_budget_exceeded", "invalid_original_locator"
+            } else "source_unavailable", error_type=type(exc).__name__,
+                error_code=getattr(exc, "error", ""))
+        return True
+
+    assessed = {}
+    for row, passages in zip(rows, groups, strict=True):
+        row.update(source)
+        if store.is_deleted(sess.id):
+            return False
+        if row["question_id"] in assessed:
+            row.update(assessed[row["question_id"]], question_index=row["question_index"])
+            continue
+        if call_limit - sess.evidence_status["calls_used"] < 2:
+            row["reason"] = "call_budget_exhausted"
+        else:
+            sess.evidence_status["calls_used"] += _assess(row, passages, deps, session_id=sess.id)
+        assessed[row["question_id"]] = row
+    return True
+
+
 def run_question_evidence(sess: Any, deps: Any, fulltext: dict) -> None:
     if sess.evidence_policy != "question_evidence":
         return
@@ -166,16 +213,7 @@ def run_question_evidence(sess: Any, deps: Any, fulltext: dict) -> None:
         candidate.question_evidence = [_receipt(candidate, sess, i) for i in range(len(sess.questions))]
     sess.evidence_status = {"state": "unavailable", "promoted_candidate_ids": []}
     try:
-        limits = evidence_limits()
-        if not sess.questions:
-            raise ValueError("no_questions")
-        if not limits["candidates"] or not limits["calls"]:
-            raise ValueError("evidence_budget_disabled")
-        evaluators = _evaluators(deps.config)
-        if evaluators != current_binding():
-            raise ValueError("current_evaluator_unavailable")
-        if deps.extractor is None or deps.llm is None or deps.llm_light is None:
-            raise ValueError("evidence_prerequisites_unavailable")
+        limits, evaluators = _resolve_admission(sess, deps)
     except ValueError as exc:
         sess.evidence_status["reason"] = str(exc)
         store.save_merge(sess)
@@ -192,33 +230,8 @@ def run_question_evidence(sess: Any, deps: Any, fulltext: dict) -> None:
     for candidate in eligible:
         if store.is_deleted(sess.id):
             return
-        rows = candidate.question_evidence
-        if limits["calls"] - sess.evidence_status["calls_used"] < 2:
-            for row in rows:
-                row["reason"] = "call_budget_exhausted"
-        else:
-            try:
-                groups, source = _snapshot(candidate, sess, deps, fulltext)
-            except Exception as exc:  # noqa: BLE001 — acquisition/retrieval boundary, unknown is not a negative
-                for row in rows:
-                    row.update(reason=str(exc) if isinstance(exc, ValueError) and str(exc) in {
-                        "source_empty", "source_character_budget_exceeded", "invalid_original_locator"
-                    } else "source_unavailable", error_type=type(exc).__name__,
-                        error_code=getattr(exc, "error", ""))
-            else:
-                assessed = {}
-                for row, passages in zip(rows, groups, strict=True):
-                    row.update(source)
-                    if store.is_deleted(sess.id):
-                        return
-                    if row["question_id"] in assessed:
-                        row.update(assessed[row["question_id"]], question_index=row["question_index"])
-                        continue
-                    if limits["calls"] - sess.evidence_status["calls_used"] < 2:
-                        row["reason"] = "call_budget_exhausted"
-                    else:
-                        sess.evidence_status["calls_used"] += _assess(row, passages, deps, session_id=sess.id)
-                    assessed[row["question_id"]] = row
+        if not _check_candidate(candidate, sess, deps, fulltext, call_limit=limits["calls"]):
+            return
         if store.is_deleted(sess.id):
             return
         store.save_merge(sess)

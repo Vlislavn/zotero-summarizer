@@ -1,21 +1,25 @@
 import { useState } from 'react';
-import { submitVerdict } from '../../api/goldenApi.js';
-import { queueRejectTag, updateItemTags } from '../../api/libraryApi.js';
+import { updateItemTags } from '../../api/libraryApi.js';
+import { decide } from '../../utils/verdictUndo.js';
 import { pretty } from '../../utils/priorityLabels.js';
+import useConfirmSheet from '../../hooks/useConfirmSheet.jsx';
+import { forceSheet, markReadSheet, notInterestedSheet } from './zoteroCopy.js';
 
-// Bulk verdict + "mark read" for the Read-next selection bar (L-11): the same
-// per-paper writes the row panel uses (submitVerdict; dont_read also queues the ❌
-// tag; 👀 "skimmed" is the engagement tag that moves a paper out of the queue),
-// applied one by one so a failure reports how many landed instead of hiding it.
+// Bulk verdict + "mark read" for the Read-next selection bar (L-11): verdicts go through
+// utils/verdictUndo like the detail's pills (surface library_bulk; dont_read queues its ❌ tag after the
+// Undo window) and the page shows ONE Undo for the batch (`onVerdicts`); 👀 "skimmed" is the engagement
+// tag that moves a paper out of the queue. Applied one by one so a failure reports how many landed.
 const VERDICTS = ['must_read', 'should_read', 'could_read', 'dont_read'];
 const BTN = 'px-2 py-0.5 rounded-md border border-slate-300 bg-white text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed';
 
-export default function BulkVerdictBar({ keys, disabled, onDone }) {
+export default function BulkVerdictBar({ keys, disabled, onDone, onVerdicts, priorOf }) {
   const [busy, setBusy] = useState(false);
+  const [ask, dialog] = useConfirmSheet();
   const n = keys.length;
 
-  async function apply(label, confirmText, write) {
-    if (!n || (confirmText && !window.confirm(confirmText))) return;
+  // `sheet`: the confirmation to ask first (null = none).
+  async function apply(label, sheet, write, landed) {
+    if (!n || (sheet && !(await ask(sheet)))) return;
     setBusy(true);
     let done = 0;
     try {
@@ -23,27 +27,33 @@ export default function BulkVerdictBar({ keys, disabled, onDone }) {
         await write(key);
         done += 1;
       }
-      onDone(`${label}: ${done} paper${done === 1 ? '' : 's'}.`, false);
+      if (landed) { landed(done); onDone('', false, true, false); } else onDone(`${label}: ${done} paper${done === 1 ? '' : 's'}.`, false);
     } catch (err) {
+      landed?.(done);
       onDone(`${label} stopped after ${done} of ${n}: ${err.message || err}`, true, done > 0);
     } finally {
       setBusy(false);
     }
   }
 
-  const verdict = (priority) => apply(
-    `Verdict “${pretty(priority)}”`,
-    priority === 'dont_read' ? `Remove ${n} paper${n === 1 ? '' : 's'}? Each gets a ❌ tag queued for Zotero.` : '',
-    async (key) => {
-      const result = await submitVerdict({ item_key: key, user_priority: priority });
-      if (priority === 'dont_read' && !result?.saved_offline) await queueRejectTag(key);
-    },
-  );
+  const verdict = (priority) => {
+    const batch = [];
+    return apply(
+      `Verdict “${pretty(priority)}”`,
+      priority === 'dont_read' ? notInterestedSheet(n) : null,
+      async (key) => {
+        const handle = decide(key, priority, { prior: priorOf(key), surface: 'library_bulk', keepOpen: batch.length > 0 });
+        batch.push({ key, handle });
+        await handle.done;
+      },
+      (landed) => onVerdicts({ priority, batch: batch.slice(0, landed) }),
+    );
+  };
 
-  const markRead = () => apply('Marked read', '', async (key) => {
+  const markRead = () => apply('Marked read', markReadSheet(n), async (key) => {
     let data = await updateItemTags(key, { addTags: ['👀'] });
     if (data?.requires_force) {
-      if (!window.confirm('Zotero appears to be running. Change tags anyway? (a backup is taken first)')) throw new Error('cancelled');
+      if (!(await ask(forceSheet('change the tags')))) throw new Error('cancelled');
       data = await updateItemTags(key, { addTags: ['👀'], force: true });
     }
     if (data?.requires_force) throw new Error('tag change not applied');
@@ -52,6 +62,7 @@ export default function BulkVerdictBar({ keys, disabled, onDone }) {
   const off = disabled || busy || n === 0;
   return (
     <span className="inline-flex flex-wrap items-center gap-1" role="group" aria-label="Bulk verdict">
+      {dialog}
       <span className="text-[11px] text-slate-500">{busy ? 'Saving…' : `Set verdict (${n}):`}</span>
       {VERDICTS.map((priority) => (
         <button key={priority} type="button" disabled={off} className={BTN}

@@ -16,13 +16,13 @@ from test_support_fixtures import (
 def test_actual_cli_assembly_mocktransport_gold_firewall_and_protected_state(tmp_path, monkeypatch, capsys):
     from zotero_summarizer.services.model import claim_checker
     from zotero_summarizer.services.llm import factory
-    from zotero_summarizer.services import _common
+    from zotero_summarizer.services import _io
     def forbidden(*args, **kwargs):
         raise AssertionError('production baseline construction/write is forbidden')
     monkeypatch.setattr(claim_checker, 'get_claim_checker', forbidden)
     monkeypatch.setattr(factory, 'build_client_for_provider', forbidden)
-    monkeypatch.setattr(_common, 'atomic_write', forbidden)
-    monkeypatch.setattr(_common, 'write_json_atomic', forbidden)
+    monkeypatch.setattr(_io, 'atomic_write', forbidden)
+    monkeypatch.setattr(_io, 'write_json_atomic', forbidden)
     cfg, _, case, config_path = fixture(tmp_path, kind='native')
     protected = [tmp_path / 'selected/data' / name for name in (
         'golden.csv', 'corpus_cache.db', 'triage_history.db', 'models/model.joblib', 'labels.json')]

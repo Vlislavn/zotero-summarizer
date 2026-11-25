@@ -5,7 +5,8 @@ from contextlib import closing
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import connect_sqlite_ro, settings
+from zotero_summarizer.services._common import settings
+from zotero_summarizer.services._io import connect_sqlite_ro
 from zotero_summarizer.services.library._review_cache import usable_reviews_for_keys
 from zotero_summarizer.services.triage.daily_select._candidate import _row_item_key
 from zotero_summarizer.services.triage.daily_select._recommendation import recommendation, review_entry
@@ -16,13 +17,14 @@ from zotero_summarizer.storage.feeds_lookup import (
     get_processed_feed_item_by_pk, has_pending_materialization, materialized_key_for,
 )
 from zotero_summarizer.storage.review_note_projection import snapshot as note_snapshot
+from zotero_summarizer.storage.review_notes import alias_resolver
 
 
-def _member(conn, row: dict[str, Any]) -> dict[str, Any]:
+def _member(conn, row: dict[str, Any], resolve) -> dict[str, Any]:
     verdict = current_feed_verdict(conn, row) or {}
     quality = _quality_from_row(row)
     target = materialized_key_for(conn, row)
-    note = note_snapshot(conn, row_feed_keys(row)[0])
+    note = note_snapshot(conn, row_feed_keys(row)[0], resolve)
     sync = row.get("zotero_sync_status")
     if target:
         sync = "synced"
@@ -56,9 +58,10 @@ def read_members(item_ids: list[int]) -> dict[str, Any]:
     members = []
     with closing(connect_sqlite_ro(settings().triage_db_path)) as conn:
         conn.execute("BEGIN")
+        resolve = alias_resolver(conn)  # one identity-graph scan per request, not per member
         for pk in dict.fromkeys(item_ids):
             row = get_processed_feed_item_by_pk(conn, pk)
-            members.append(_member(conn, row) if row is not None else {
+            members.append(_member(conn, row, resolve) if row is not None else {
                 "item_id": pk, "available": False, "reason": "not_found",
             })
     keys = [member.get(field, "") for member in members

@@ -8,15 +8,16 @@ import {
 import {
   fetchProvenanceList,
   fetchReviewDetail,
-  submitVerdict,
   deleteVerdict,
   fetchEffectiveLabels,
   fetchBorderSuggestions,
 } from '../api/goldenApi.js';
 import { fetchCollections, fetchTags } from '../api/libraryApi.js';
+import { flattenCollections } from './pendingHelpers.js';
 import { humanizeError } from '../utils/humanizeError.js';
+import { pretty } from '../utils/priorityLabels.js';
+import { UNDO_WINDOW_MS, decide } from '../utils/verdictUndo.js';
 import { useKeyboardNav } from '../hooks/useKeyboardNav.js';
-import { useOptimisticAction } from '../hooks/useOptimisticAction.js';
 import { useFocusOnChange } from '../hooks/useFocusOnChange.js';
 import PaperListItem from '../components/PaperListItem.jsx';
 import ProvenanceBreakdown from '../components/ProvenanceBreakdown.jsx';
@@ -27,6 +28,7 @@ import AuthorByline from '../components/AuthorByline.jsx';
 import PaperDetailLayout from '../components/PaperDetailLayout.jsx';
 import PaperDetailView from '../components/paper/PaperDetailView/index.jsx';
 import HintBanner from '../components/ui/HintBanner.jsx';
+import UndoToast from '../components/library/UndoToast.jsx';
 import {
   PRIORITY_FILTERS,
   FLAG_FILTERS,
@@ -40,17 +42,6 @@ import {
   TriageProgress,
   sortBorderByUncertainty,
 } from './AnnotationVerdict_helpers.jsx';
-
-// Flatten the Zotero collection tree into indented <option>s for a compact
-// <select> (annotate's left column is narrow — a dropdown beats Library's tree).
-function flattenCollections(nodes, depth = 0) {
-  const flat = [];
-  for (const node of nodes || []) {
-    flat.push({ key: node.key, name: `${' '.repeat(depth * 2)}${node.name}`, item_count: node.item_count || 0 });
-    if (node.children?.length) flat.push(...flattenCollections(node.children, depth + 1));
-  }
-  return flat;
-}
 
 // Tightly-composed metadata strip for the sticky top zone. Stays ~60-90px.
 function DetailTopStrip({ detail }) {
@@ -110,9 +101,8 @@ export default function AnnotationVerdict() {
   const [selectedTag, setSelectedTag] = useState('');
   const [search, setSearch] = useState('');
   const [selectedKey, setSelectedKey] = useState(deepLinkedKey);
-  // Phase 1.18 batch-mode bundle: keyboard shortcuts (j/k navigate, 1-4 priority),
-  // optimistic auto-advance on verdict save, flashStatus for keyboard feedback.
-  const [flashStatus, setFlashStatus] = useState(null);
+  // Batch mode: j/k navigate, 1-4 set a verdict, z undoes it; the last verdict shows as an Undo toast.
+  const [toast, setToast] = useState(null);
   // Open/closed state of the embedded paper-brief pane (parity with Library's InlineAnnotate).
   const [readerOpen, setReaderOpen] = useState(false);
   const listRef = useRef(null);
@@ -295,17 +285,6 @@ export default function AnnotationVerdict() {
   );
 
   // ---------- Mutations ----------
-  const submitMutation = useMutation({
-    networkMode: 'always',
-    mutationFn: submitVerdict,
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['review-detail', variables.item_key] });
-      queryClient.invalidateQueries({ queryKey: ['provenance-list'] });
-      // Refresh "Used as GT" badges immediately.
-      queryClient.invalidateQueries({ queryKey: ['effective-labels'] });
-    },
-  });
-
   const deleteMutation = useMutation({
     networkMode: 'always',
     mutationFn: (itemKey) => deleteVerdict(itemKey),
@@ -320,49 +299,63 @@ export default function AnnotationVerdict() {
 
   function handleSelect(item) {
     setSelectedKey(item.item_key);
-    submitMutation.reset();
     deleteMutation.reset();
   }
 
-  // Optimistic save: advance to next paper instantly, run the mutation in the
-  // background, roll the selection back on error. Doherty Threshold: keeps
-  // batch-mode flow under 400 ms perceived. The advance-then-mutate-then-
-  // rollback sequence is the reusable useOptimisticAction hook.
-  const runOptimisticSave = useOptimisticAction({
-    mutate: submitMutation.mutate,
-    optimisticUpdate: (_vars, ctx) => {
-      setFlashStatus(`Saving ${ctx.itemKey} → ${ctx.user_priority}…`);
-      advance('next');
-    },
-    onSuccess: (data, _vars, ctx) => {
-      // The verdict is mirrored to Zotero as a `label:<priority>` tag (the
-      // ground truth) and the comment as a note. Flag a soft failure on either
-      // (e.g. Zotero open) without undoing the saved verdict.
-      const soft = data?.label_error || data?.note_error;
-      setFlashStatus(`${data?.saved_offline ? 'Saved on this device' : 'Saved in the app'}: ${ctx.itemKey} → ${ctx.user_priority}`);
-      setTimeout(() => setFlashStatus(null), 4000);
-      if (soft) {
-        const what = data?.label_error ? 'label not written' : 'note not written';
-        setFlashStatus(`Saved ${ctx.itemKey} → ${ctx.user_priority} (${what}: ${soft})`);
-        setTimeout(() => setFlashStatus(null), 4000);
-      }
-    },
-    rollback: (err, _vars, ctx) => {
-      setSelectedKey(ctx.itemKey);
-      setFlashStatus(`Save failed for ${ctx.itemKey}: ${humanizeError(err)}`);
-    },
-  });
+  // A verdict is written through utils/verdictUndo (in order, 8 s Undo; no ❌ tag from this tab): advance to the
+  // next paper at once (Doherty), put the selection back and say so if the save fails. An overwrite needs no
+  // confirm — the toast's Undo (or `z`) restores the prior verdict.
+  const refreshAfterWrite = useCallback((key) => {
+    queryClient.invalidateQueries({ queryKey: ['review-detail', key] });
+    queryClient.invalidateQueries({ queryKey: ['provenance-list'] });
+    queryClient.invalidateQueries({ queryKey: ['effective-labels'] });  // "Used as GT" badges
+  }, [queryClient]);
 
+  const saveVerdict = useCallback((key, priority, { comment = '', prior = null, title, moves = true }) => {
+    const handle = decide(key, priority, { prior, comment, surface: 'library_verdicts', rejectTag: false });
+    if (moves) advance('next');
+    setToast({ kind: 'saved', message: `${pretty(priority)}: “${title || 'this paper'}”`, handle, key });
+    handle.done.then((data) => {
+      refreshAfterWrite(key);
+      // Soft failures: the verdict saved, but Zotero (label tag / note) or the server was out of reach.
+      const soft = data?.label_error || data?.note_error;
+      const note = soft ? `${data.label_error ? 'Label' : 'Note'} not written to Zotero: ${soft}`
+        : data?.saved_offline && 'Saved on this device';
+      if (note) setToast((t) => (t?.handle === handle ? { ...t, note } : t));
+    }, (err) => {
+      setSelectedKey(key);
+      setToast({
+        kind: 'failed', message: `Couldn’t save “${title || 'this paper'}”: ${humanizeError(err)}`,
+        retry: () => saveVerdict(key, priority, { comment, prior, title, moves: false }),
+      });
+    });
+  }, [advance, refreshAfterWrite]);
+
+  const undoVerdict = useCallback(() => {
+    if (toast?.kind !== 'saved') return;
+    const { handle, key } = toast;
+    setToast(null);
+    setSelectedKey(key);
+    handle.undo().then(() => refreshAfterWrite(key), () => {
+      refreshAfterWrite(key);
+      setToast({ kind: 'failed', message: 'Couldn’t undo — check your verdict for this paper.' });
+    });
+  }, [toast, refreshAfterWrite]);
+  const savedHandle = toast?.handle;  // only a saved toast has one
+  useEffect(() => {
+    if (!savedHandle) return undefined;
+    const id = setTimeout(() => setToast(null), UNDO_WINDOW_MS);
+    return () => clearTimeout(id);
+  }, [savedHandle]);
+
+  // The panel and the keys act on the selected paper's loaded detail: its verdict is the Undo target.
   const handleVerdictSubmit = useCallback(
     ({ user_priority, comment }) => {
-      if (!selectedKey) return;
-      const itemKey = selectedKey;
-      runOptimisticSave(
-        { item_key: itemKey, user_priority, comment },
-        { context: { itemKey, user_priority } },
-      );
+      const current = detailQuery.data;
+      if (current?.item_key !== selectedKey) return;
+      saveVerdict(selectedKey, user_priority, { comment, prior: current.verdict ?? null, title: current.title });
     },
-    [selectedKey, runOptimisticSave],
+    [detailQuery.data, selectedKey, saveVerdict],
   );
 
   function handleVerdictDelete() {
@@ -371,36 +364,24 @@ export default function AnnotationVerdict() {
   }
 
   // ---------- Keyboard shortcuts ----------
-  // j/k move between papers; 1–4 set a priority. Disabled while typing in the
-  // comment textarea or the search box (the reusable useKeyboardNav hook owns
-  // the typing/modifier guards). The number-key path keeps Annotate's overwrite
-  // guard so a fumbled key can't silently replace a deliberate verdict.
+  // j/k move between papers; 1–4 set a verdict (keeping its comment); z undoes the last one. Disabled while
+  // typing in the comment textarea or the search box (the reusable useKeyboardNav hook owns those guards).
   const handlePriorityKey = useCallback(
     (priority) => {
-      if (!selectedKey || !detailQuery.isSuccess || detailQuery.data?.item_key !== selectedKey) return;
-      const existing = detailQuery.data.verdict ?? null;
-      if (
-        existing
-        && existing.user_priority
-        && existing.user_priority !== priority
-        && !window.confirm(
-          `Overwrite your verdict (${existing.user_priority} → ${priority}) for this paper?`,
-        )
-      ) {
-        return;
-      }
-      handleVerdictSubmit({ user_priority: priority, comment: existing?.comment ?? '' });
+      if (!detailQuery.isSuccess) return;  // a failed or loading read: no verdict on an unseen paper
+      handleVerdictSubmit({ user_priority: priority, comment: detailQuery.data?.verdict?.comment ?? '' });
     },
-    [selectedKey, detailQuery.isSuccess, detailQuery.data, handleVerdictSubmit],
+    [handleVerdictSubmit, detailQuery.isSuccess, detailQuery.data],
   );
 
   useKeyboardNav({
     onPrev: () => advance('prev'),
     onNext: () => advance('next'),
     onAction: handlePriorityKey,
+    onUndo: undoVerdict,
     actionKeys: PRIORITY_BY_KEY,
     hasSelection: Boolean(selectedKey),
-    deps: [advance, selectedKey, handlePriorityKey],
+    deps: [advance, selectedKey, handlePriorityKey, undoVerdict],
   });
 
   const detail = detailQuery.data;
@@ -408,6 +389,8 @@ export default function AnnotationVerdict() {
   // Keep keyboard focus on the detail pane after the selection changes so j/k
   // navigation stays anchored where the user's attention moved.
   const detailFocusRef = useFocusOnChange(selectedKey);
+
+  const toastEl = toast && <UndoToast toast={toast} onUndo={undoVerdict} onDismiss={() => setToast(null)} />;
 
   // Right column: empty / loading / loaded
   let detailContent = null;
@@ -429,6 +412,7 @@ export default function AnnotationVerdict() {
         emptyState={
           <DetailShell>
             <div className="text-sm text-slate-500 p-4">Loading paper detail…</div>
+            {toastEl}
             <ErrorBanner error={detailQuery.error} title="Detail load failed" />
           </DetailShell>
         }
@@ -443,22 +427,12 @@ export default function AnnotationVerdict() {
         bottomStrip={
           <div className="space-y-2">
             <GroundTruthOneLiner detail={detail} />
-            {flashStatus && (
-              <div
-                role="status"
-                aria-live="polite"
-                className="px-3 py-2 rounded-lg bg-teal-50 border border-teal-300 text-sm text-teal-900"
-              >
-                {flashStatus}
-              </div>
-            )}
+            {toastEl}
             <VerdictPanel
               itemKey={detail.item_key}
               existingVerdict={detail.verdict}
               onSubmit={handleVerdictSubmit}
               onDelete={handleVerdictDelete}
-              submitting={submitMutation.isPending}
-              submitError={submitMutation.error?.message || null}
               deleting={deleteMutation.isPending}
               deleteError={deleteMutation.error?.message || null}
             />
@@ -621,7 +595,7 @@ export default function AnnotationVerdict() {
               >
                 <option value="">All collections</option>
                 {flatCollections.map((c) => (
-                  <option key={c.key} value={c.key}>{c.name} ({c.item_count})</option>
+                  <option key={c.key} value={c.key}>{'\u00A0'.repeat(c.depth * 2)}{c.name} ({c.item_count})</option>
                 ))}
               </select>
               <select

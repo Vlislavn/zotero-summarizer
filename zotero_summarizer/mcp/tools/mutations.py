@@ -3,11 +3,11 @@ from __future__ import annotations
 from typing import Any, Literal
 from urllib.parse import quote
 
+from zotero_summarizer.domain import unique_non_empty_strings
 from zotero_summarizer.mcp.api_client import _api_request, _base_item_update_payload
 from zotero_summarizer.mcp.helpers import (
     _error,
     _extract_data_or_error,
-    _normalize_unique_strings,
     _ok,
     _require_non_empty_text,
 )
@@ -26,8 +26,8 @@ async def manage_tags(
     if validation_error is not None:
         return validation_error
 
-    normalized_add = _normalize_unique_strings(add_tags)
-    normalized_remove = _normalize_unique_strings(remove_tags)
+    normalized_add = unique_non_empty_strings(add_tags)
+    normalized_remove = unique_non_empty_strings(remove_tags)
     if not normalized_add and not normalized_remove:
         return _error("validation_error", "at least one tag must be added or removed")
 
@@ -67,8 +67,8 @@ async def manage_collections(
     if validation_error is not None:
         return validation_error
 
-    add_paths = _normalize_unique_strings(add_collection_paths)
-    remove_paths = _normalize_unique_strings(remove_collection_paths)
+    add_paths = unique_non_empty_strings(add_collection_paths)
+    remove_paths = unique_non_empty_strings(remove_collection_paths)
     if not add_paths and not remove_paths:
         return _error("validation_error", "at least one collection path must be added or removed")
 

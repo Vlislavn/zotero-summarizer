@@ -1,7 +1,9 @@
 """Feed command/tick contracts from A030–A035, without models or live Zotero."""
 import asyncio
 import sqlite3
+from contextlib import nullcontext
 from types import SimpleNamespace
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -9,9 +11,100 @@ from zotero_summarizer.cli import build_parser
 from zotero_summarizer.cli import _feeds as cli
 from zotero_summarizer.integrations.app_rss import AppRssReader
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
+from zotero_summarizer.integrations.zotero_write import ZoteroWriteError
 from zotero_summarizer.services.triage.feeds import _common, _loop, _tick, _tick_phases
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.storage import feeds, rss
+
+
+@pytest.fixture
+def read_marks(monkeypatch):
+    """Trace read-state effects without opening either database."""
+    trace = Mock()
+    trace.open_triage.side_effect = [nullcontext(trace.app), nullcontext(trace.native)]
+    trace.mark_rss.return_value = 2
+    trace.writer.mark_feed_items_read.return_value = 3
+    monkeypatch.setattr(_tick_phases, "_triage_conn", trace.open_triage)
+    monkeypatch.setattr(rss, "mark_rss_items_read", trace.mark_rss)
+    monkeypatch.setattr(feeds, "record_read_marked", trace.record)
+    return trace
+
+
+def _read_item(item_id, **source):
+    return dict(feed_library_id="4", item_id=item_id, **source)
+
+
+@pytest.mark.parametrize("writer_state", ["updated", "already-read", "unavailable", "locked"])
+def test_mark_processed_read_orders_writes_and_commits(read_marks, caplog, writer_state):
+    trace = read_marks
+    writer = None if writer_state == "unavailable" else trace.writer
+    if writer_state == "locked":
+        writer.mark_feed_items_read.side_effect = ZoteroWriteError("database is locked")
+    if writer_state == "already-read":
+        writer.mark_feed_items_read.return_value = 0
+    results = _tick_phases._TickResults(
+        triaged=[(_read_item("11", source_type="app_rss"), object())],
+        fast_rejected=[(_read_item(12), object())],
+        errors=[(_read_item(99), "failed")],
+        gate_rejected=[(_read_item(14, source="app_rss"), None), (_read_item(15), None)],
+        library_skipped=[_read_item(11, source="app_rss"), _read_item(16)],
+        processed_dup_skipped=[_read_item(0, source="app_rss"), _read_item(17, source=" app_rss ")],
+    )
+    stale = [(5, 18, "app_rss"), (6, 19, "zotero"), (5, -1, "app_rss")]
+
+    count = _tick_phases.mark_processed_read(results, stale, writer=writer, tick_id="test")
+
+    # IDs retain collection order/duplicates; receipts retain their own order
+    # and source matching (including whitespace) and attempt nonpositive IDs.
+    expected = [call.open_triage(), call.mark_rss(trace.app, [11, 11, 14, 18])]
+    expected += [call.record(trace.app, feed_library_id=4, feed_item_id=i) for i in [11, 14, 11, 0, 17]]
+    expected += [call.record(trace.app, feed_library_id=5, feed_item_id=i) for i in [18, -1]]
+    expected.append(call.app.commit())
+    if writer is not None:
+        expected.append(call.writer.mark_feed_items_read([12, 16, 17, 15, 19]))
+    if writer_state in ("updated", "already-read"):
+        expected.append(call.open_triage())
+        expected += [call.record(trace.native, feed_library_id=4, feed_item_id=i) for i in [12, 15, 16]]
+        expected += [call.record(trace.native, feed_library_id=6, feed_item_id=19), call.native.commit()]
+    assert trace.mock_calls == expected
+    assert count == (5 if writer_state == "updated" else 2)
+    if writer_state == "locked":
+        assert "[test] mark_feed_items_read failed: database is locked" in caplog.text
+
+
+@pytest.mark.parametrize("failed_effect", ["mark_rss", "app_record", "app_commit", "native_record", "native_commit"])
+def test_mark_processed_read_propagates_storage_errors(read_marks, failed_effect):
+    trace = read_marks
+    stale = [(4, 11, "app_rss"), (5, 12, "zotero")]
+    results = _tick_phases._TickResults([], [], [], [], [], [])
+    failure = sqlite3.OperationalError("test write failure")
+    effects = {
+        "mark_rss": (trace.mark_rss, 2),
+        "app_record": (trace.record, 3),
+        "app_commit": (trace.app.commit, 4),
+        "native_record": (trace.record, 7),
+        "native_commit": (trace.native.commit, 8),
+    }
+    method, expected_length = effects[failed_effect]
+    method.side_effect = [None, failure] if failed_effect == "native_record" else failure
+
+    with pytest.raises(sqlite3.OperationalError, match="test write failure"):
+        _tick_phases.mark_processed_read(results, stale, writer=trace.writer, tick_id="test")
+
+    expected = [
+        call.open_triage(), call.mark_rss(trace.app, [11]),
+        call.record(trace.app, feed_library_id=4, feed_item_id=11), call.app.commit(),
+        call.writer.mark_feed_items_read([12]), call.open_triage(),
+        call.record(trace.native, feed_library_id=5, feed_item_id=12), call.native.commit(),
+    ]
+    assert trace.mock_calls == expected[:expected_length]
+
+
+def test_mark_processed_read_does_nothing_without_positive_ids(read_marks):
+    results = _tick_phases._TickResults([], [], [(_read_item(99), "failed")], [], [_read_item(0)], [])
+    stale = [(4, -1, "app_rss"), (5, 0, "zotero")]
+    assert _tick_phases.mark_processed_read(results, stale, writer=read_marks.writer, tick_id="test") == 0
+    assert read_marks.mock_calls == []
 
 
 def _report(**changes):

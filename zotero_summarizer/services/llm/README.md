@@ -74,6 +74,8 @@ timeout/transport/malformed observations retain manual-ID recovery without claim
 login or model operation. In-flight non-Telegram
 clients may keep their prior credentials. Auth receipts distinguish stored from
 unknown, never infer rollback from cancellation or failed transport.
+`connections.py` / `connection_credentials.py` read the research profile with `research_feed.profile.load_profile(data_dir)`,
+which only reads (no `persist_default`); `ensure_profile` seeds the default file.
 
 `ProviderConfig.auth_mode=none` returns None **before** keyring/env lookup. Installed
 OpenAI requests use SDK request-local auth omission plus owned no-proxy,
@@ -142,6 +144,11 @@ Viewing, registration, listing, impact and selection saving never invoke a probe
   No unsupported parameter is injected and generator configuration is unchanged.
   Declared `structured_output` applies schema constraints to every Pydantic call
   through the shared adapter, including CLI calls and verifier/correction passes.
+- `concurrency.py` holds the LLM fan-out widths (`effective_llm_concurrency`, `deep_review_fleet_concurrency`,
+  `deep_review_sub_concurrency`): local provider → serial, remote → its caps; shared by the daemon,
+  deep-review job and `verify-deep-review` CLI.
+- `json_response.py` parses JSON objects out of LLM output (`extract_json_blob`: plain, fenced or
+  prose-wrapped; raises `ValueError`) and stored `response_json` cells (`safe_parse_response_json`: bad → `{}` + warning).
 - `thinking.py` translates effort to Anthropic budgets, OpenAI
   `reasoning_effort`, or qwen/vLLM `enable_thinking`. Explicit `off` sends
   `reasoning_effort: none` in the plain OpenAI dialect; omitting it would preserve
@@ -231,3 +238,7 @@ The one seam that turns Settings → Checklist engine (`checklist_engine` off / 
 `integrations/jev.Target`: `resolve(config)` for deep reviews, `noul_for(settings)` for Telegram's disagreement check, `check()` for
 the Settings Test (a failed Cloud test says the key was rejected or the service unreachable; a failed Local test points at the address). Cloud reads its saved access key from the OS keyring (legacy env fallback), is refused under `ZS_OFFLINE`, and
 the key is never returned or logged; Local sends no key. No target → callers use the language-model path.
+
+Provider/connection services load and write goals.yaml through `services/config_io` (`read_config`, `write_user_config`, `write_config_atomic`).
+
+File, JSON-write and timestamp helpers (`atomic_write`, `write_json_atomic`, `now_iso_z`, `connect_sqlite_ro`, …) come from `services/_io`, not `_common`.

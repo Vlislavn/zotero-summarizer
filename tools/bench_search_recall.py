@@ -28,7 +28,7 @@ from zotero_summarizer.domain import normalize_arxiv_id, normalize_doi
 from zotero_summarizer.integrations.openalex import OpenAlexClient
 from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
 from zotero_summarizer.models.providers import resolve_stage
-from zotero_summarizer.services._common import read_config
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services.llm.factory import build_client_for_stage
 from zotero_summarizer.services.search._models import Candidate, QueryPlan
 from zotero_summarizer.services.search.federate import federate

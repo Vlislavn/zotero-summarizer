@@ -1,3 +1,4 @@
+import { Link, useLocation } from 'react-router-dom';
 import LinksRow from '../LinksRow.jsx';
 import DeepReviewSection from '../DeepReviewSection.jsx';
 import TagOfInterestEditor from '../TagOfInterestEditor.jsx';
@@ -5,7 +6,6 @@ import CollectionEditor from '../CollectionEditor.jsx';
 import PaperReaderPane from '../../library/PaperReaderPane.jsx';
 import AskPaperBox from '../../library/AskPaperBox.jsx';
 import ReviewNotes from '../review/ReviewNotes.jsx';
-import OpenBriefButton from '../../library/OpenBriefButton.jsx';
 import VerdictPanel from '../../VerdictPanel.jsx';
 import useServerAvailable from '../../../hooks/useServerAvailable.js';
 import AbstractBlock from './AbstractBlock.jsx';
@@ -57,7 +57,7 @@ export default function PaperDetailView({
   show = {},
   // compact (Library row card): drop the per-goal board and lead the Decide
   // zone with "Open full review" — the full
-  // digest/figures/abstract live in the new-tab brief, not duplicated inline.
+  // digest/figures/abstract live on the full review page, not duplicated inline.
   compact = false,
   readerOpen = false,
   onReaderOpenChange,
@@ -70,6 +70,7 @@ export default function PaperDetailView({
   extras = null,
 }) {
   const serverAvailable = useServerAvailable();
+  const location = useLocation();
   const { questionMirror, beginNoteDelivery } = useNoteDelivery(itemKey, detail?.user_note || '', detail?.questions || []);
   if (!detail) return null;
   const editable = mode === 'editable';
@@ -88,6 +89,23 @@ export default function PaperDetailView({
     questions={detail.questions || []} questionMirror={questionMirror}
     onMirrorStart={beginNoteDelivery} onSaved={onDeepReviewDone} onDirtyChange={onNotesDirtyChange} />;
 
+  // compact (Library row card): the verdict leads the panel, above the digest —
+  // the decision is the reason the row was opened (Serial Position).
+  const verdictPanel = showVerdict && (
+    <VerdictPanel
+      itemKey={itemKey}
+      existingVerdict={verdict.existing}
+      onSubmit={verdict.onSubmit}
+      onDelete={verdict.onDelete}
+      submitting={verdict.submitting}
+      submitError={verdict.submitError}
+      submitWarning={verdict.submitWarning}
+      submitNotice={verdict.submitNotice}
+      deleting={verdict.deleting}
+      deleteError={verdict.deleteError}
+    />
+  );
+
   // ONE flat, hairline-divided column for both modes (Law of Common Region:
   // a divider, not a box). Editable splits into Decide / Act chunks (Miller's
   // Law); read-only drops the verdict/collection (Annotate owns the verdict in
@@ -100,12 +118,21 @@ export default function PaperDetailView({
             opens on the verdict banner, the decision (Serial Position), never on
             links. */}
         <div className="divide-y divide-slate-200/60">
+          {compact && verdictPanel && <Section>{verdictPanel}</Section>}
           {/* compact drops the "Decide"/"Act" eyebrows — the chip banner + the
               verdict picker are self-evidently those zones (Occam). */}
           <Section label={compact ? undefined : 'Decide'}>
             <div className="space-y-4">
               {compact && (
-                <OpenBriefButton itemKey={itemKey} hasPdf={hasPdf} label="Open full review ↗" />
+                // Same-tab link, no artifact build and no POST: the page reads what exists.
+                // `state.from` lets the page's Back return to this exact URL (history -1).
+                <Link
+                  to={`/paper/${encodeURIComponent(itemKey)}?autoRun=false`}
+                  state={{ from: `${location.pathname}${location.search}` }}
+                  className="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg bg-teal-700 text-white text-[13px] font-semibold hover:bg-teal-800"
+                >
+                  Open full review ↗
+                </Link>
               )}
               <DeepReviewSection
                 itemKey={itemKey}
@@ -128,20 +155,7 @@ export default function PaperDetailView({
               its saved comment and Cancel/Update boundary. */}
           <Section label={compact ? undefined : 'Act'}>
             <div className="space-y-4">
-              {showVerdict && (
-                <VerdictPanel
-                  itemKey={itemKey}
-                  existingVerdict={verdict.existing}
-                  onSubmit={verdict.onSubmit}
-                  onDelete={verdict.onDelete}
-                  submitting={verdict.submitting}
-                  submitError={verdict.submitError}
-                  submitWarning={verdict.submitWarning}
-                  submitNotice={verdict.submitNotice}
-                  deleting={verdict.deleting}
-                  deleteError={verdict.deleteError}
-                />
-              )}
+              {!compact && verdictPanel}
               {notes}
               {/* Collection lifted OUT of the disclosure — filing into Read Next
                   is a daily primary action, not the long tail (Pareto / Serial

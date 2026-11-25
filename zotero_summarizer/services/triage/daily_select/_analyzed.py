@@ -15,6 +15,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from zotero_summarizer.services._common import normalized_title_key
 from zotero_summarizer.services.model.rank_blend import quality_bonus
 from zotero_summarizer.services.triage.daily_select._allocation import _to_slate_paper
 from zotero_summarizer.services.triage import today_exposure
@@ -36,7 +37,7 @@ _PRIORITY_ORDER = {"must_read": 0, "should_read": 1, "could_read": 2}
 def _title_key(cand: dict[str, Any]) -> str:
     """Normalized title: one paper arrives under several feed keys (arXiv versions, cross-posted
     feeds, same-title series), so identity for display is the title, as in the Library queue."""
-    return "".join(ch for ch in (cand.get("title") or "").lower() if ch.isalnum())
+    return normalized_title_key(cand.get("title"))
 
 
 def _first_per_title(cands: list, seen: set[str], title=_title_key) -> list:

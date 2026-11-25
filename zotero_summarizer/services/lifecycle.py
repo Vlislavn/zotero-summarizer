@@ -14,7 +14,8 @@ from zotero_summarizer.runtime import RuntimeState
 from zotero_summarizer.services import corpus
 from zotero_summarizer.services.triage import triage_jobs
 from zotero_summarizer.services._adapters import build_pdf_extractor
-from zotero_summarizer.services._common import LOGGER, read_config, settings, setup_logging, state
+from zotero_summarizer.services._common import LOGGER, settings, setup_logging, state
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.settings import Settings, automatic_gate_updates_enabled
 from zotero_summarizer.storage import repositories as triage_db
 from zotero_summarizer.storage.corpus import EmbeddingCache
@@ -71,7 +72,7 @@ def _init_models(
 
 
 def _init_database(current_settings: Settings, app_state: RuntimeState) -> None:
-    triage_db.DB_PATH = current_settings.triage_db_path
+    triage_db.set_db_path(current_settings.triage_db_path)
     triage_db.init_db()
     app_state.corpus_write_lock = asyncio.Lock()
 

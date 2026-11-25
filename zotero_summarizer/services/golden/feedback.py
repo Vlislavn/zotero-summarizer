@@ -17,6 +17,40 @@ def _parse_created_at(value: str | None) -> datetime | None:
         return None
 
 
+# Calibration thresholds (1..5 scale): a strong implicit signal that the model
+# scored low is a false negative; a weak one that it scored high, a false positive.
+_STRONG_RELEVANCE = 4.0
+_LOW_PREDICTED_SCORE = 2.5
+_WEAK_RELEVANCE = 2.0
+_HIGH_PREDICTED_SCORE = 3.5
+
+
+def _predicted_score(latest_result: dict[str, Any]) -> float | None:
+    """The model's score for an item (composite, else relevance), or None if absent/non-numeric."""
+    raw = latest_result.get("composite_score")
+    if raw is None:
+        raw = latest_result.get("relevance_score")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _calibration_feedback_type(
+    base_feedback_type: str, inferred_relevance: float, predicted_score: float | None
+) -> str:
+    """Suffix the feedback type when the inferred relevance contradicts the model's score."""
+    if predicted_score is None:
+        return base_feedback_type
+    if inferred_relevance >= _STRONG_RELEVANCE and predicted_score <= _LOW_PREDICTED_SCORE:
+        return f"{base_feedback_type}_false_negative"
+    if inferred_relevance <= _WEAK_RELEVANCE and predicted_score >= _HIGH_PREDICTED_SCORE:
+        return f"{base_feedback_type}_false_positive"
+    return base_feedback_type
+
+
 def infer_feedback_events_from_corpus_items(
     items: list[Any],
     stale_days_for_weak_negative: int,
@@ -31,23 +65,9 @@ def infer_feedback_events_from_corpus_items(
         original_priority = str(
             latest_result.get("forced_priority") or latest_result.get("reading_priority") or ""
         ).strip()
-        predicted_score_raw = latest_result.get("composite_score")
-        if predicted_score_raw is None:
-            predicted_score_raw = latest_result.get("relevance_score")
-
-        predicted_score: float | None = None
-        if predicted_score_raw is not None:
-            try:
-                predicted_score = float(predicted_score_raw)
-            except (TypeError, ValueError):
-                predicted_score = None
-
-        feedback_type = base_feedback_type
-        if predicted_score is not None:
-            if inferred_relevance >= 4.0 and predicted_score <= 2.5:
-                feedback_type = f"{base_feedback_type}_false_negative"
-            elif inferred_relevance <= 2.0 and predicted_score >= 3.5:
-                feedback_type = f"{base_feedback_type}_false_positive"
+        feedback_type = _calibration_feedback_type(
+            base_feedback_type, inferred_relevance, _predicted_score(latest_result)
+        )
 
         events.append(
             {

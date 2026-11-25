@@ -286,11 +286,14 @@ class EmbeddingCache(CorpusReadMixin, CorpusNearestMixin):
 
     @staticmethod
     def _parse_list(raw: str | None) -> list[str]:
+        # tags_json/collections_json are written only by upsert via json.dumps(list[str]) and are
+        # NULL on legacy rows, so malformed JSON cannot come from the app; the corpus is a
+        # rebuildable cache, so a hand-damaged cell reads as "no tags" rather than failing ranking.
         try:
             value = json.loads(raw or "[]")
             if isinstance(value, list):
                 return [str(v) for v in value if str(v).strip()]
-        except Exception as _:
+        except (ValueError, TypeError):
             pass
         return []
 

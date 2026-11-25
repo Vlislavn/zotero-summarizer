@@ -9,7 +9,7 @@ from typing import Any
 
 from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK, VERDICT_SOURCE_USER
 from zotero_summarizer.storage import question_sync, review_notes
-from zotero_summarizer.storage.repositories import _connect_to
+from zotero_summarizer.storage.db_core import _connect_to
 
 SYNC_CHANGES_TABLE = """
 CREATE TABLE IF NOT EXISTS sync_changes (
@@ -112,10 +112,17 @@ def _write_value(conn: sqlite3.Connection, request: dict[str, Any]) -> None:
         return
     now = datetime.now(timezone.utc).isoformat()
     model_priority = request.get("model_priority")
+    keys = [key for key in review_notes.alias_resolver(conn)(item_key) if key != item_key]
+    # A new row inherits the app's decision-time snapshot from the paper's other-key row.
+    sibling = conn.execute(
+        "SELECT proposal_json, reasons_json FROM label_verdicts WHERE proposal_json IS NOT NULL "
+        f"AND item_key IN ({','.join('?' * len(keys))}) ORDER BY datetime(created_at) DESC, id DESC LIMIT 1", keys,
+    ).fetchone() if keys else None
     conn.execute(
         """INSERT INTO label_verdicts
-           (item_key, original_derived_priority, user_priority, comment, created_at, source)
-           VALUES (?, ?, ?, ?, ?, ?)
+           (item_key, original_derived_priority, user_priority, comment, created_at, source,
+            proposal_json, reasons_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(item_key) DO UPDATE SET
              original_derived_priority=excluded.original_derived_priority,
              user_priority=excluded.user_priority,
@@ -123,7 +130,8 @@ def _write_value(conn: sqlite3.Connection, request: dict[str, Any]) -> None:
                AND label_verdicts.comment = excluded.comment THEN '' ELSE excluded.comment END,
              created_at=excluded.created_at, source=excluded.source""",
         (item_key, model_priority if model_priority in READING_PRIORITY_SORT_RANK else "unknown", request["value"],
-         request.get("comment") or "", now, VERDICT_SOURCE_USER),
+         request.get("comment") or "", now, VERDICT_SOURCE_USER,
+         sibling["proposal_json"] if sibling else None, sibling["reasons_json"] if sibling else None),
     )
 
 

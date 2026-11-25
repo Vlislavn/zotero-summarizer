@@ -29,7 +29,7 @@ from zotero_summarizer.models.zotero_actions import preview_hash
 from zotero_summarizer.services import _common
 from zotero_summarizer.services.library import _review_cache
 from zotero_summarizer.services.zotero import pending, pending_confirmation, zotero
-from zotero_summarizer.storage import pending_actions, repositories
+from zotero_summarizer.storage import db_core, pending_actions, repositories
 
 
 @pytest.fixture(autouse=True)
@@ -441,7 +441,7 @@ def test_competing_batches_keep_their_prepared_reference_after_claim_commit(gene
 
     def run(label):
         role.set(label)
-        with repositories.with_db_path(repositories.DB_PATH):
+        with repositories.with_db_path(db_core.DB_PATH):
             return apply(rows[label])
 
     monkeypatch.setattr(b.writer, "apply_changes", delivering)

@@ -216,3 +216,15 @@ def test_empty_artifact_body_fails_before_resolving_model(monkeypatch, mode):
     with pytest.raises(APIError) as caught:
         qa.ask_paper("KEY", "Which dataset?", mode=mode)
     assert caught.value.error == "extraction_empty"
+
+
+def test_pdf_presence_checks_read_the_held_pdf_and_never_acquire(paper, monkeypatch):
+    calls = []
+    monkeypatch.setattr(_pdf_acquire, "acquire_pdf_for", lambda *a, **k: calls.append(a))
+    with pytest.raises(APIError) as caught:
+        qa.require_pdf(_FEED)
+    assert caught.value.error == "needs_pdf"
+    assert qa.pdf_is_held(_FEED) is False
+    assert qa.require_pdf("KEY") is None
+    assert paper_render.held_pdf("KEY") == paper.pdf.resolve()
+    assert calls == []

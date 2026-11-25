@@ -9,6 +9,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
 
 from .llm import LOGGER
+from .llm_requests import begin_owned_invocation
 
 _OBSERVER = ContextVar('completion_observer', default=None)
 
@@ -38,14 +39,8 @@ class CompletionGuard(BaseCallbackHandler):
         self._invocation = Lock()
 
     def begin_request(self):
-        if not self._invocation.acquire(blocking=False):
-            raise RuntimeError("Verification client already has an owned invocation")
-        try:
-            self.completed = False
-            self._request = self._request_owner() if self._request_owner is not None else None
-        except BaseException:
-            self._invocation.release()
-            raise
+        self._request = begin_owned_invocation(self._invocation, self._request_owner)
+        self.completed = False
 
     def finish_request(self):
         if not self.completed:

@@ -69,7 +69,7 @@ def test_clamp_raises_on_nan():
 
 # --- #4 atomic_write leaves the original intact when the write fails --------
 def test_atomic_write_preserves_original_on_failure():
-    from zotero_summarizer.services._common import atomic_write
+    from zotero_summarizer.services._io import atomic_write
 
     d = Path(tempfile.mkdtemp())
     target = d / "data.txt"

@@ -81,7 +81,7 @@ path: HackerNoon tag feeds (e.g. `https://hackernoon.com/tagged/ai-agents/feed`,
 Search by topic and confirmed constraints to get deduplicated candidates and selected
 reviews. Result links are real web or identifier addresses, never guessed from titles.
 Adding a result to Zotero is always your explicit action; after an uncertain Add, recovery
-reuses the same planned item instead of creating a duplicate. Provider diagnostics tell an
+reuses the same planned item instead of creating a duplicate. Every Add (Search, Today, Feed review) first checks the library — same DOI, same arXiv id, or same title and year (±1) — and links the paper you already have instead of creating a copy; the existing item is not changed. After an Add (also Today's and Feed review's Apply approved) an open-access PDF is attached to the new item when one exists; if none is found or the network is off, the Add still succeeds without a PDF. When a Checklist engine is on (Settings → Checklist engine, local or cloud), a new Add is also filed into up to three topic folders it picks from your topic tree (`data/topics/tree.json`; Search Add shows them as `filed`); when the engine is off, unsure or unreachable, the paper lands in Inbox only and the Add is never blocked. Provider diagnostics tell an
 empty result apart from a failure but say nothing about relevance or complete coverage. [Code](../zotero_summarizer/services/search/) · [Tests](../tests/test_search_materialize_recovery.py).
 
 ### Related saved papers
@@ -102,20 +102,29 @@ already in your library. Search providers receive only public metadata; sending 
 private seed comments to the named model needs separate consent. Stale results are
 rechecked, and discovery never adds a paper: Add stays your explicit action. [Code](../zotero_summarizer/services/search/) · [Tests](../tests/test_discovery_server.py).
 
+### Conferences
+
+List the conferences you follow in `data/conferences/config.yaml`, open **Conferences** and press **Update**: the page shows
+«≈N requests» first, and only that press reads the free Crossref list (ASCO, AACR, ESMO, ESMO AI). You get **Late-breaking**
+(abstract number starting `LBA` or `LB`), then **All abstracts** by page with title search; all other levels are shown as unknown, with the rule
+that decided each. Abstract text is collapsed, stored only under `data/conferences/` and never enters Today, Search or the
+paper pool. A failed download keeps the previous list. ESMO lists are titles only; **Import abstracts…** merges your own CSV/XLSX
+into any list, offline. No scoring, topics or model. [Code](../zotero_summarizer/services/conferences/) · [Test](../tests/test_conferences_leak.py) · [Import test](../tests/test_conferences_import.py).
+
 ## Choose and read
 
 ### Daily triage
 
-**Today** ranks RSS papers against your research goals and lets you **Add** or **Trash**
+**Today** ranks RSS papers against your research goals and lets you **Add** or mark **Not interested**
 them; start and watch backlog triage there, while **Ops** monitors or cancels review jobs
-started from Library. Add requires a current full-text review; Trash does not. The optional
+started from Library. Add requires a current full-text review; Not interested does not. must / should / could adds the paper to your Zotero Inbox in one tap (if Zotero is open, the Add waits — the banner and toast say to close Zotero and apply it in Ops › Feed review); Not interested adds nothing. Undo takes back the decision, never an item already in Zotero. Deciding a card (must / should / could / Not interested, or the bulk Add / Not interested) removes it from the list at once and shows one toast for 8 s: Undo restores the card undecided in place, and optional reason chips (positive set for must/should/could, negative set for Not interested) are offered in the toast. Decided papers are kept in the retained visit, so they are not re-shortlisted and do not come back on reload; a card that needs attention (failed action, read-marking or note error) stays. Adds that wait for Zotero show only in the banner “N papers wait for Zotero” with a link to Ops › Feed review. When every paper is decided Today says “All caught up”. The optional
 background daemon runs the same pipeline but never adds a paper to Zotero. Abstract-only
 triage never recommends a full read; that decision comes from the full-text review.
 Today also records, locally only (`data/today-exposure/<day>.jsonl`; `ZS_TODAY_EXPOSURE_LOG=0`
 turns it off), which papers it showed, how long each stayed on screen and which links
 you opened, and adds up to two clearly marked "Random check" papers per day from just
 below its bar (`ZS_TODAY_EXPLORATION_SLOTS`) so the ranking can later be checked against
-unbiased data. A review that is outdated but still of the same PDF stays on Today with an *Outdated review · Regenerate* line (a different or unresolved PDF is left out). Below the cards, **Not reviewed yet (N)** lists the best-ranked papers that have no usable review (same ranking, no verdict buttons); opening one starts its full review on the paper page. [Code](../zotero_summarizer/services/triage/) · [Tests](../tests/test_review_eligibility.py) · [Source-mode boundary](../tests/test_abstract_reading_boundary.py).
+unbiased data. When Zotero has not yet uploaded papers in your library to its cloud (they are missing on the iPad until it does), a line under the Today title says «N papers waiting for Zotero sync»; it is hidden at 0 and when Zotero cannot be read, and the app only reads Zotero's database to count them. A review that is outdated but still of the same PDF stays on Today with an *Outdated review · Regenerate* line (a different or unresolved PDF is left out). Below the cards, **Not reviewed yet (N)** lists the best-ranked papers that have no usable review (same ranking, no verdict buttons); opening one starts its full review on the paper page. [Code](../zotero_summarizer/services/triage/) · [Tests](../tests/test_review_eligibility.py) · [Source-mode boundary](../tests/test_abstract_reading_boundary.py).
 
 ### Today cards
 
@@ -128,6 +137,18 @@ consent (or with AI off / offline) the card is facts-only and says why. Cards us
 separate `card` model (operational, never affecting a review) and are generated ahead of
 time for Today's top papers, so opening one is instant; generation respects a per-paper
 call cap, a daily token cap and a circuit breaker. [Code](../zotero_summarizer/services/card/).
+
+### Library list
+
+**Library → Read next** shows one status row under the title, with the Library jobs control at its right edge (offline, load error, scoring, or `Scores updated … · N not scored · N Zotero changes to apply ›`) and one message per empty list, never stacked banners. **Filter** opens a sheet: searchable Collection and Tag that apply at once, Rigor, Goals, Code and Model guess chips with counts (Rigor and Code have a `Not reviewed` bucket), Journal, Prestige and **Show read papers**; applied filters show as chips with one **Clear all**, and the search text, filters and Show read are in the address. The closed **Library jobs** panel holds Rescore, **Send to Zotero…**, **Fetch missing PDFs…** and the top-pick reviews; a job's result appears in the status line. Send to Zotero and Fetch missing PDFs always ask first in a sheet (paper count, one backup line); the Send receipt shows the backup path and the failed and skipped counts. [Code](../frontend/src/components/library/LibraryStatusLine.jsx) · [Tests](../frontend/src/components/library/libraryStatus.test.js), [filters](../frontend/src/components/library/LibraryFilterSheet.test.jsx), [jobs](../frontend/src/components/library/LibraryJobsPanel.test.jsx).
+
+### Library detail and verdicts
+
+Tap a Read next row to open the paper in a full-screen sheet (phone) or a split view (wide screen); the address carries `?open=`, ‹ › walk the undecided papers, and closing returns to the row. Choose a verdict in the bar: it saves at once, the row updates in place, the next undecided paper opens, and an 8 s **Undo** is offered (the ❌ tag request is sent after that window and cancelled by Undo; a batch of verdicts has one Undo). Opening a paper builds nothing and writes nothing. Keys: `j`/`k` move, `1`–`4` verdict, `z` undo, `Enter` open, `Esc` close, `/` search; they are silent while you type. [Code](../frontend/src/components/library/LibraryDetail.jsx) · [Tests](../frontend/src/components/library/LibraryDetail.test.jsx).
+
+### Read next order
+
+Library → Read next has ONE **Order** list: Balanced (the server order), Relevance, My goals, Rigor first and Custom (four sliders), then Zotero's own fields (title, date added, …) with a direction arrow. A preset re-sorts the list at once on this device, remembered per device; your own Must read stay first, nothing is hidden, a line under the toolbar shows the shares and how many papers each signal is known for, and **Why it's here** in the opened paper shows its group, each signal's weight × value and the key. A Zotero field replaces the ranked order. While a search runs, offline, or when the model is not ready, the presets are disabled with the reason shown. Order changes only this list: Zotero rank numbers, «Review top N» and Today keep their own order. On a phone the shares line waits behind ⓘ. [Code](../frontend/src/utils/readNextOrder.js) · [Tests](../frontend/src/utils/readNextOrder.test.js).
 
 ### Reading reviews
 
@@ -143,6 +164,10 @@ silently rewritten. If a job's status is unknown, use the read-only retry; it ne
 a duplicate review. Web articles are reviewed from extracted text, not a visual copy of the
 page. [Code](../zotero_summarizer/services/library/) · [Tests](../tests/test_review_source_boundary.py).
 
+### Method card
+
+On a paper's review page, **How it works** (above Findings, one fold: the card, then the digest's Methods and Limitations) explains the method: core idea, what it was compared against, what the authors claim is new, and up to three steps to repeat it. **Build card** reads the whole paper once with the review model; a row appears only if its quote is found in the paper, and each row's § opens that quote. It starts collapsed to a short paragraph (**Expand** shows all four blocks); a card that could not be tied to the paper shows only «Step-by-step view unavailable for this paper.»; a failed build can be retried after 5 minutes, and a card never changes the review. "Novelty N/5" is no longer shown. Closest-prior-work checking is not built yet. [Code](../zotero_summarizer/services/library/method_card/README.md) · [Tests](../tests/test_method_card.py) · [UI](../frontend/src/components/paper/review/MethodCard.jsx).
+
 ### Paper questions and notes
 
 Ask a question about a paper, even before it has a PDF or review, to get an answer quoted
@@ -151,6 +176,24 @@ read the raw PDF need the PDF. Questions and manual notes are saved separately f
 answering, and a failed save keeps your draft with a **Retry** button instead of resending
 automatically. Leaving a paper with an unsaved note asks first: cancelling keeps the draft,
 and leaving never saves it silently. A note saved in the app is not yet confirmed in Zotero. [Code](../zotero_summarizer/services/library/review_questions.py) · [Tests](../tests/test_review_questions.py) · [UI](../frontend/src/pages/PaperReviewPage.jsx) · [Navigation tests](../frontend/src/pages/PaperReviewPage.test.jsx).
+
+### Review feedback
+
+On a paper page, **Give feedback** outlines each part of the review (verdict, top sentence, rigor, red flags,
+metrics, strength/weakness, reading plan, findings, assessment, relevance, methods, code link; **Whole review** in the
+bar). Tap a part, pick any of eight reasons (such as "unsupported fact", "too long", "good as is") and/or write a note up
+to 1000 characters, then **Save**; Esc or **Done** leaves the mode. Feedback is stored per part, paper and review
+version, so a regenerated review starts clean; **Your feedback on this review** lists it with Edit and Withdraw. Each
+save writes an evidence package under `data/review_feedback/` (your words, the text each part showed, the review as stored,
+the paper text re-extracted from its PDF and a PDF copy up to 25 MB, with hash checks against what the review read).
+`zotero-summarizer review-feedback list|check` shows the packages and searches the part text in the paper; a recorded
+verdict appears as «Checked: …». All feedback downloads as one JSON file. No tokens or network are used.
+[Code](../zotero_summarizer/services/library/review_feedback.py) · [Tests](../tests/test_review_feedback_parts.py).
+
+### Saved papers from the command line
+
+`zotero-summarizer similar "<query>" [--limit 10] [--json]` runs the same «Meaning» search as the Library page without the server (one line per paper with a `zotero://` link; also works while Zotero holds its database locked: the last copy is used and marked stale). [Code](../zotero_summarizer/cli/_similar.py) · [Tests](../tests/test_cli_similar.py).
+`zotero-summarizer candidates <note.md> [--limit 10]` picks up to 10 saved papers for one Obsidian note: a local model (the Feed stage model; nothing leaves the machine) turns the note into an English query, the «Meaning» search returns 15 papers, and papers the note already links or was offered, papers whose deep review graded them D and papers the local model calls not useful are dropped. It prints JSON and never writes the note; the vault's «Кандидаты из Zotero» button adds the lines. [Code](../zotero_summarizer/cli/_candidates.py).
 
 ## Save results
 
@@ -164,6 +207,14 @@ note enters Pending only after its review is published, and staging it is not "s
 Zotero". When a write's outcome is uncertain, the app shows it as unconfirmed and never
 replays it automatically; because the app and Zotero keep separate databases, a partial
 write may need repair in Zotero. [Code](../zotero_summarizer/services/zotero/) · [Tests](../tests/test_pending_confirmation.py), [rejection](../tests/test_pending_rejection_atomic.py).
+
+### Keeping the library clean
+
+Add papers from the app when you can: every app Add checks for an existing copy (DOI, arXiv id,
+title and year) and attaches an open-access PDF when one exists. Adding with
+the Zotero connector also works, but it bypasses those checks, so duplicates, missing PDFs and
+unfiled papers can appear. Topic collections hold topics only; reading status stays in `label:*`
+tags. A paper may sit in several topic collections.
 
 ### RSS read-state backups
 
@@ -206,7 +257,7 @@ unavailable, never repaired or regenerated. [Code](../zotero_summarizer/services
 
 In **Weekly → Telegram sources**, choose public channels, groups or forum topics, a local
 model and work limits and allow reading them once (a remembered, revocable checkbox). **Weekly** (linked from Today) shows
-**Сегодня в каналах** with the digest age and one **Проверить каналы** button: it runs in the background with staged progress and Russian errors, and new posts appear when it finishes. **Тренды недели** come first: the top 5 of up to 15 topics (**Show all N trends**) the channels discuss now, each with a short label, a one-line gist, notable ideas/tools, a new/growing marker against the previous week and the channels (links to posts). Below, compact cards: channel, age, headline, a few discussion lines (one per picked comment, plus a «Спор:» line for the main disagreement) where each line expands to the exact comment(s) it cites; lines are checked by a local NLI model (`data/models/nli-mdeberta`), **Важное (n)** quotes, **All comments (n)**, **Подробнее**, a «Continues …» line for series posts and «Also in: topic». Authorize
+**Channels** with the digest age and one **Check channels** button: it runs in the background with staged progress and English errors, and new posts appear when it finishes. **Trends** come first: the top 5 of up to 15 topics (**Show all N trends**) the channels discuss now, each with a short label, a one-line gist, a new/growing/hot marker against the previous week and — always visible — where it comes from («12 posts in 6 channels this week (11 the week before) · @a, @b and 3 more»). Opening a trend shows its notable ideas/tools and the posts behind it: those with a discussion card link to the card on the same page (a card marked Done opens under «n read»), the rest open in Telegram, and it says plainly when none has comments yet («2 of 4 posts have a discussion card»; comments are collected only for the most discussed posts of each check). **Load discussions** in an opened trend reads, after a confirmation on every press, the comments of up to 12 of its posts that had replies — through your Telegram session, read-only, no model — and shows them in a collapsed **Discussions** block with a «Telegram ↗» link per comment; during a Telegram rate limit it says «Telegram asked to wait until HH:MM» and sends no request. Below, compact **Discussions** cards: channel, age, an **Open in Telegram** link to the original post (the stored permalink; none shown when a digest has none), headline, a few discussion lines (one per picked comment, plus a «Disagreement» line when two picked comments clash) where each line expands to the exact comment(s) it cites, each with a «Telegram ↗» link to the original comment when its discussion group is public (none for private groups or comments stored before permalinks); lines are checked by a local NLI model (`data/models/nli-mdeberta`), **Highlights (n)**, **All comments (n)**, **Details**, a «Continues …» line for series posts and «Also in: topic». Authorize
 your Telegram account once in a terminal with `zotero-summarizer research-feed telegram-auth` (shown as one
 copyable command on the page; optional `telegram` extra); the app never joins
 chats, sends messages or reads your personal inbox, and saving or viewing never collects or

@@ -11,11 +11,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from zotero_summarizer.services._common import (
-    deep_review_fleet_concurrency,
-    deep_review_sub_concurrency,
-    now_iso_z,
-)
+from zotero_summarizer.services._io import now_iso_z
+from zotero_summarizer.services.llm.concurrency import deep_review_fleet_concurrency, deep_review_sub_concurrency
 
 from zotero_summarizer.models import PaperDigest
 from zotero_summarizer.services.library import (
@@ -29,6 +26,7 @@ from zotero_summarizer.services.library import (
     quality_review,
     reading_queue,
     _review_attempt,
+    source_text,
 )
 # Cache primitives are re-exported here as the public seam.
 from zotero_summarizer.services.library._review_cache import (  # noqa: F401
@@ -182,6 +180,7 @@ def _review_one(
 
     model_digest = digest_dump = quality_dump = goal_dump = paper_type_dump = section_overlay = code_link_dump = text_window = None
     reading_policy_flags: list[str] = []
+    unreadable = ""
 
     if pdf_path and quality_enabled:
         sink = progress_sink if progress_sink is not None else (lambda _p: None)
@@ -190,35 +189,37 @@ def _review_one(
         text, text_window = _paper_body.read_body(extractor, pdf_path, config, lean_tier)  # ONE cleaned body for every stage
         if not text:
             raise ValueError("PDF extraction returned no text")
-        def compute_digest() -> Any:
-            reporter.phase("digest", is_call=True)
-            digest = _map_reduce.digest_for_strategy(
-                title, text, config, map_llm=llm_map or llm, reduce_llm=llm_digest or llm,
-                budget=_map_reduce.ChunkBudget(
-                    max_chars=text_window["cap"], chunk_chars=config.quality_review.map_chunk_chars, sub_concurrency=sub_concurrency, whole_body=text_window["whole_body"],
-                ),
-                focus_prompt=focus_prompt, response_format=response_format, verification_audit=verification_audit,
-                **({"feed_context": feed_context, "feed_out": feed_out} if feed_context is not None else {}))
-            reporter.finish("digest")
-            return digest
+        unreadable = source_text.unreadable_source(text, title)  # bot-wall/error page: no LLM stage, no verdict
+        if not unreadable:
+            def compute_digest() -> Any:
+                reporter.phase("digest", is_call=True)
+                digest = _map_reduce.digest_for_strategy(
+                    title, text, config, map_llm=llm_map or llm, reduce_llm=llm_digest or llm,
+                    budget=_map_reduce.ChunkBudget(
+                        max_chars=text_window["cap"], chunk_chars=config.quality_review.map_chunk_chars, sub_concurrency=sub_concurrency, whole_body=text_window["whole_body"],
+                    ),
+                    focus_prompt=focus_prompt, response_format=response_format, verification_audit=verification_audit,
+                    **({"feed_context": feed_context, "feed_out": feed_out} if feed_context is not None else {}))
+                reporter.finish("digest")
+                return digest
 
-        digest, (quality_dump, goal_dump, paper_type_dump, section_overlay, code_link_dump) = _deep_review_layers.digest_with_layers(
-            compute_digest, _deep_review_layers.ExtraLayersCtx(
-                item_key=item_key, title=title, pdf_path=pdf_path, text=text, max_chars=text_window["cap"],
-                llm=llm, llm_light=llm_map, config=config,
-                prestige=(prestige_scores or {}).get(item_key),
-                prestige_floor_value=prestige_floor_value, reporter=reporter, lean_tier=lean_tier,
-                sub_concurrency=sub_concurrency, item_type=detail.get("item_type"),
-                web_article=bool(item.get("web_article")),
-                abstract=str(detail.get("abstract") or item.get("abstract") or ""),
-            ))
-        model_digest, digest_dump = digest.model_dump(), digest.model_dump()  # distinct: projection must not alias the retained raw digest
-        from zotero_summarizer.services.library.review_fleet.propose import apply_reading_policy
-        digest_dump, _, reading_policy_flags = apply_reading_policy(
-            digest_dump, quality_dump,
-        )
-        PaperDigest.model_validate(digest_dump)
-        reporter.summary()
+            digest, (quality_dump, goal_dump, paper_type_dump, section_overlay, code_link_dump) = _deep_review_layers.digest_with_layers(
+                compute_digest, _deep_review_layers.ExtraLayersCtx(
+                    item_key=item_key, title=title, pdf_path=pdf_path, text=text, max_chars=text_window["cap"],
+                    llm=llm, llm_light=llm_map, config=config,
+                    prestige=(prestige_scores or {}).get(item_key),
+                    prestige_floor_value=prestige_floor_value, reporter=reporter, lean_tier=lean_tier,
+                    sub_concurrency=sub_concurrency, item_type=detail.get("item_type"),
+                    web_article=bool(item.get("web_article")),
+                    abstract=str(detail.get("abstract") or item.get("abstract") or ""),
+                ))
+            model_digest, digest_dump = digest.model_dump(), digest.model_dump()  # distinct: projection must not alias the retained raw digest
+            from zotero_summarizer.services.library.review_fleet.propose import apply_reading_policy
+            digest_dump, _, reading_policy_flags = apply_reading_policy(
+                digest_dump, quality_dump,
+            )
+            PaperDigest.model_validate(digest_dump)
+            reporter.summary()
 
     final_identity = build_review_identity(config=config, pdf_path=pdf_path, source_kind=source_kind, focus_prompt=focus_prompt)
     if review_identity != final_identity:
@@ -239,7 +240,8 @@ def _review_one(
         "model_digest": model_digest,
         "model_read_decision": str((model_digest or {}).get("read_decision") or ""),
         "reading_policy_flags": reading_policy_flags,
-        "needs_pdf": not bool(pdf_path),
+        "needs_pdf": not bool(pdf_path) or bool(unreadable),  # unreadable source: retry like a missing PDF
+        **({"source_unreadable": unreadable} if unreadable else {}),
         "needs_login": False,
         "login_url": "",
         "gate_relevance": item.get("gate_relevance"),

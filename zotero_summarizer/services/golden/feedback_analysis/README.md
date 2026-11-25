@@ -10,9 +10,9 @@ private report through a dedicated child process (manual `goldenset analyze-feed
 | file | responsibility |
 |---|---|
 | `__init__.py` | exports `freeze_inputs`, `verify_inputs`, `FreezeBudgets`, `BudgetExceeded`, `analyze_inputs`, `AnalysisBudgets`, `run_feedback_analysis`, `OperationBudgets` |
-| `inputs.py` | path/boundary admission, work/safety guard, file capture (`freeze_inputs`), replay verification (`verify_inputs`) |
+| `inputs.py` | path/boundary admission, work/safety guard, file capture (`freeze_inputs`), replay verification (`verify_inputs`); `coerce_budgets` is the one None/instance/known-field-dict coercion for both budget classes |
 | `sqlite_snapshot.py` | WAL-aware read-only online backup; schema/revision metadata read from the retained database only |
-| `provenance.py` | version-1 manifest wire validation and deterministic `content_digest` |
+| `provenance.py` | version-1 manifest wire validation and deterministic `content_digest`; `source_projection` is the per-source identity (status, sha256, byte size) that both the manifest digest and the schedule's source identity hash; digest checks use `domain.is_sha256_hex` |
 | `history.py` | bounded retained-source readers; ambiguity-safe current alias graph |
 | `analysis.py` | `analyze_inputs(destination, *, budgets=None)`: retained-only result (no publication/training/live mutation) |
 | `metrics.py` | separate unique-paper descriptive channels, Wilson intervals, eligibility metadata |
@@ -51,7 +51,8 @@ private report through a dedicated child process (manual `goldenset analyze-feed
 - `verify_inputs(destination) -> dict` validates the wire format, exact artifact inventory, full SHA-256/size, content
   identity and retained SQLite metadata without reading source locators; it refuses incomplete, changed, extra or
   symlinked artifacts. It is integrity checking, not authentication against someone who replaces bytes and recomputes
-  the manifest.
+  the manifest. Manifest and strict JSON readers share `provenance.unique_object` to reject duplicate keys as
+  `ValueError`, with distinct messages at the two boundaries.
 - Not a cross-file atomic transaction: capture can follow the logical cutoff, so analysis reconciles by cutoff and
   revisions and keeps unrecoverable gaps; CSV row timing is unknown. Logs are read twice over the same opened prefix
   (incompatible mutation fails). No lock covers adversarial write-and-restore or same-user namespace races.
@@ -66,7 +67,7 @@ private report through a dedicated child process (manual `goldenset analyze-feed
   precedence; a malformed env value raises even when overridden); verification uses the same env cap. SQLite progress,
   backup callbacks and file-chunk boundaries check it; blocking filesystem calls cannot be interrupted in-process.
 - New directories/files request POSIX 0700/0600; source permissions never change. Manifest replacement reuses
-  `services._common.atomic_write` (no fsync, no power-loss durability).
+  `services._io.atomic_write` (no fsync, no power-loss durability).
 
 ## Analysis (`analyze_inputs`)
 
@@ -91,6 +92,11 @@ private report through a dedicated child process (manual `goldenset analyze-feed
 - `label_transition` recognizes `offline_sync` and `sync_conflict_resolution` beside `user`/`zotero`, for transitions
   only: either sync source on `human_feedback` stays `nonpreference`; outcomes stay outcomes; `machine_add` feedback
   stays provisional. Raw provenance is retained, not authenticated.
+- `label_transition` events carry `post_read` (a change/retraction after a usable published review); the interaction-log channel counts them as `post_read_label_changes`. A logged decision whose item key is in none of the retained snapshots or alias maps (test fixtures, papers gone from every snapshot; only judged when a feed-item snapshot is retained) is flagged `unknown_item` on the event, counted in `coverage.unknown_item_events` and listed as one `unknown_item` gap; its eligibility is unchanged.
+- Result size: `result.json` is capped at 64 MiB (`MAX_OUTPUT_BYTES`; consumers parse it whole in memory, ~6x its size).
+  To stay under it, event keys whose value is null are omitted (absent == null) and `coverage.content_multiplicity`
+  lists only groups seen more than once (absent group = count 1). Readers must use `.get`; older published runs with
+  explicit nulls stay valid. Live-size data (4,011 CSV rows, 49,920 events): 68.3 MB → 57.6 MB, growth ≈ 4 MB/week.
 - Mixed ordinal/binary log evidence: conflicting latest ordinal observations remain a conflict (never a binary
   substitute); binary class support is reported separately; a later unambiguous ordinal observation resolves it.
 - Report Markdown wraps recorded surfaces in code spans longer than any recorded backtick run (literal evidence text).

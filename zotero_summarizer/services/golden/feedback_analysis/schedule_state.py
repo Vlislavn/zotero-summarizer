@@ -8,11 +8,12 @@ import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from zotero_summarizer.services._common import atomic_write
+from zotero_summarizer.domain import is_sha256_hex
+from zotero_summarizer.services._io import atomic_write
 
 from .history import aware_time
 from .inputs import _no_symlinks, verify_inputs
-from .provenance import canonical_bytes, utc_iso
+from .provenance import canonical_bytes, source_projection, utc_iso
 from .report import PROTOCOL_MAX_BYTES, hash_file, read_protocol, verify_report, write_protocol
 
 INTENT_KEYS = {"schema_version", "intent_id", "window_start", "cutoff", "schedule_rules_sha256"}
@@ -46,7 +47,7 @@ def _name(value):
 
 
 def _sha(value):
-    if type(value) is not str or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+    if not is_sha256_hex(value):
         raise ValueError("invalid full schedule hash")
     return value
 
@@ -131,9 +132,7 @@ def content_key(payload, intent):
 
 
 def source_identity(manifest):
-    sources = {name: {key: source[key] for key in ("status", "sha256", "byte_size")}
-               for name, source in manifest["sources"].items()}
-    return hashlib.sha256(canonical_bytes(sources)).hexdigest()
+    return hashlib.sha256(canonical_bytes(source_projection(manifest))).hexdigest()
 
 
 def _candidate(settings, record):
@@ -286,7 +285,7 @@ def scheduled_receipt(settings, intent, attempt, record, guard, *, committed, re
         previous = aware_time(previous_cutoff)
         result = read_result(Path(record["run_path"]) / "result.json", guard)
         late["at_or_before_previous_cutoff"] = sum(
-            aware_time(event["time"]) <= previous for event in result["events"] if aware_time(event["time"]) is not None)
+            aware_time(event["time"]) <= previous for event in result["events"] if aware_time(event.get("time")) is not None)
     path = attempt / ("schedule-recovery.json" if recovery else "schedule-receipt.json")
     result = {"schema_version": 1, "intent_id": intent["intent_id"], "window_start": intent["window_start"],
               "cutoff": intent["cutoff"], "status": receipt["status"], "publication_action": "committed" if committed else "reused",

@@ -233,6 +233,10 @@ def test_pull_has_resumable_cursor_and_compact_offline_context(tmp_path, monkeyp
                     "year": "2026",
                     "abstract_preview": "abstract",
                     "reading_priority": "should_read",
+                    "review_digest": {"tldr": "row-only"},
+                    "read_decision": "skim",
+                    "estimated_read_minutes": 12,
+                    "has_code": True,
                 }
             ],
         },
@@ -251,7 +255,8 @@ def test_pull_has_resumable_cursor_and_compact_offline_context(tmp_path, monkeyp
     assert paper["verdict"]["user_priority"] == "should_read"
     assert paper["review_note"] == "my note"
     assert paper["model_priority"] == "should_read"
-    assert paper["review_digest"]["tldr"] == "short digest"
+    assert paper["review_digest"]["tldr"] == "short digest"  # the snapshot digest, not the row's
+    assert (paper["read_decision"], paper["estimated_read_minutes"], paper["has_code"]) == ("skim", 12, True)
     repositories.upsert_review_note(db, "P1", "new note")
 
     delta = service.pull(db, initial["cursor"])

@@ -217,7 +217,7 @@ def test_user_owned_keys_never_in_env_registry_still_holds() -> None:
 @pytest.fixture
 def enabled_calibration_settings(tmp_path):
     from zotero_summarizer.settings import Settings
-    from zotero_summarizer.services._common import write_user_config
+    from zotero_summarizer.services.config_io import write_user_config
 
     selected = Settings.load(project_root=tmp_path)
     config = _default_goals_config()

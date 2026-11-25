@@ -31,7 +31,9 @@ from __future__ import annotations
 from typing import Any
 
 from zotero_summarizer.models.triage import ProposedVerdict, QualityEval
-from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services._io import now_iso_z
+from zotero_summarizer.services.library import source_text
+from zotero_summarizer.services.library._concern_dedupe import dedupe_concerns
 
 # Grades that read as "this is a strong paper" for the verdict lift.
 _HIGH_GRADES = frozenset({"A", "B"})
@@ -171,9 +173,11 @@ def apply_reading_policy(
     return digest, raw, flags
 
 
-def project_review(entry: dict[str, Any]) -> dict[str, Any]:
+def project_review(entry: dict[str, Any], *, present: bool = True) -> dict[str, Any]:
     """Derive presentation from retained model output without modifying either source.
-    ``previous_review`` is a stored backup, never part of the projected review."""
+    ``previous_review`` is a stored backup, never part of the projected review.
+    ``present=False`` skips the display-only clean-up (concern dedupe, unreadable-source
+    suppression): the verification audit hashes this view, so the clean-up must not move it."""
     entry = {key: value for key, value in entry.items() if key != "previous_review"}
     source = entry.get("model_digest") or entry.get("digest")
     if not source:
@@ -184,6 +188,13 @@ def project_review(entry: dict[str, Any]) -> dict[str, Any]:
             quality = QualityEval(quality_band="uncertain", basis="not_assessed").model_dump()
         elif "grade" not in quality:
             quality = {**quality, "grade": ""}
+    if present and quality and quality.get("red_flags"):  # distinct + true concerns for stored reviews too
+        found = bool((entry.get("code_link") or {}).get("found"))
+        quality = {**quality, "red_flags": dedupe_concerns(quality["red_flags"], code_found=found)}
+    if present and (reason := source_text.unreadable_review(entry)):  # a bot-wall/error page was "reviewed": no verdict fields
+        source = source_text.withheld_digest(source, reason)
+        quality = QualityEval(quality_band="uncertain", basis="not_assessed").model_dump()
+        entry = {**entry, "source_unreadable": reason, "model_read_decision": ""}
     digest, raw, flags = apply_reading_policy(source, quality)
     retained_flags = [] if entry.get("model_digest") else entry.get("reading_policy_flags", [])
     return {**entry, "digest": digest, "quality": quality, "model_read_decision": entry.get("model_read_decision", raw),

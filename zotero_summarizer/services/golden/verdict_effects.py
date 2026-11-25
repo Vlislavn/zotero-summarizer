@@ -65,19 +65,26 @@ def append_training_row(item_key: str, priority: str, comment: str) -> None:
     )
 
 
-def cancel_pending_feed_add(db_path: Path, item_key: str) -> int:
-    """Retire every unmaterialized sibling after an explicit negative verdict."""
+def _settle_pending_feed_add(db_path: Path, item_key: str, settle) -> int:
     with feeds_storage.open_triage_conn(db_path) as conn:
         row = feeds_storage.get_processed_feed_item_by_stable_key(conn, item_key)
         if row is None and item_key.startswith(LEGACY_FEED_PREFIX):
             suffix = item_key[len(LEGACY_FEED_PREFIX):]
             if suffix.isdigit():
                 row = feeds_storage.get_processed_feed_item_by_id(conn, int(suffix))
-        count = feeds_storage.cancel_pending_materialization(
-            conn, str(row.get("stable_feed_key") or "")
-        ) if row is not None else 0
+        count = settle(conn, str(row.get("stable_feed_key") or "")) if row is not None else 0
         conn.commit()
         return count
+
+
+def cancel_pending_feed_add(db_path: Path, item_key: str) -> int:
+    """Retire every unmaterialized sibling after an explicit negative verdict."""
+    return _settle_pending_feed_add(db_path, item_key, feeds_storage.cancel_pending_materialization)
+
+
+def release_pending_feed_add(db_path: Path, item_key: str) -> int:
+    """Return every parked sibling Add to the undecided state after an undone verdict."""
+    return _settle_pending_feed_add(db_path, item_key, feeds_storage.release_pending_materialization)
 
 
 def add_feed_verdict_to_library(item_key: str, priority: str, db_path: Path | None = None) -> dict[str, Any]:

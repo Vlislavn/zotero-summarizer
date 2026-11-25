@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from typing import Any
 
+from zotero_summarizer.domain import unique_non_empty_strings
 from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
     ZoteroWriteError,
     generate_unique_key,
@@ -322,18 +323,7 @@ class ZoteroTagMixin:
         else:
             raw_tags = []
 
-        seen: set[str] = set()
-        normalized: list[str] = []
-        for raw in raw_tags:
-            tag = raw.strip()
-            if not tag:
-                continue
-            folded = tag.casefold()
-            if folded in seen:
-                continue
-            seen.add(folded)
-            normalized.append(tag)
-        return normalized
+        return unique_non_empty_strings(raw_tags)
 
     def _ensure_tag(
         self,

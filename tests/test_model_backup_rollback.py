@@ -21,7 +21,7 @@ from zotero_summarizer.services.model.classifier_backup import (
 )
 from zotero_summarizer.services.model.classifier_training import save_trained
 from zotero_summarizer.services.model.classifier_store import load_trained, read_metadata, write_archive
-from zotero_summarizer.services._common import atomic_write
+from zotero_summarizer.services._io import atomic_write
 
 
 def _write_fake_model(model_dir: Path, name: str, *, oof: float) -> None:

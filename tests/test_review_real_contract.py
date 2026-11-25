@@ -17,7 +17,7 @@ import pytest
 from tests._reading_contract import aggregate, canonical_text, check_html
 from tests._real_review_manifest import digest, load_manifest, sentences
 from tests.test_application_browser_live import application_browser  # noqa: F401
-from zotero_summarizer.services._common import read_config
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services.library import _paper_read_brief, _review_cache, _review_identity
 from zotero_summarizer.storage import feeds
 from zotero_summarizer.storage.feed_identity import stable_feed_key_from_parts

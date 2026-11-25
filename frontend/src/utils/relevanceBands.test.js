@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   isCoolUndecided, coolUndecidedKeys, scoreToBand,
   sortQueue, serializeSort, hydrateSort, DEFAULT_SORT,
+  EMPTY_FILTERS, hydrateFilters, serializeFilters, buildPredicate, isFilterActive, bandCounts, facetCounts,
 } from './relevanceBands.js';
 
 describe('isCoolUndecided — the auto-review work-list predicate', () => {
@@ -105,5 +106,65 @@ describe('sort URL (de)serialize — compact keys, defaults omitted', () => {
 
   it('an unknown field in the URL falls back to the default sort', () => {
     expect(hydrateSort(new URLSearchParams('s=nope'))).toEqual(DEFAULT_SORT);
+  });
+});
+
+describe('the retired Why filter (w)', () => {
+  const rows = [{ item_key: 'A', relevance_score: 2.5, why_reason: 'x' }, { item_key: 'B', relevance_score: 2.6, why_reason: 'y' }];
+
+  it('is not read from an old link: only b applies', () => {
+    const f = hydrateFilters(new URLSearchParams('w=x&b=could_read'));
+    expect(f).toEqual({ ...EMPTY_FILTERS, bands: ['could_read'] });
+    expect(rows.filter(buildPredicate(f, {})).map((r) => r.item_key)).toEqual(['A', 'B']);
+  });
+
+  it('is not written, and a lone w is no active filter', () => {
+    expect(serializeFilters({ ...EMPTY_FILTERS, why: ['x'], bands: ['could_read'] })).toEqual({ b: 'could_read' });
+    expect(isFilterActive(hydrateFilters(new URLSearchParams('w=x')))).toBeFalsy();
+  });
+});
+
+describe('bandCounts — the Model guess chip counts', () => {
+  it('counts scored rows per band and skips unscored ones', () => {
+    const rows = [{ relevance_score: 4.6 }, { relevance_score: 3.6 }, { relevance_score: 3.0 }, { relevance_score: 2.0 }, { relevance_score: 1.0 }, {}];
+    expect(bandCounts(rows)).toEqual({ must_read: 1, should_read: 1, could_read: 2, dont_read: 1 });
+  });
+
+  it('counts what the band filter keeps when the prestige floor demotes a row', () => {
+    const rows = [{ item_key: 'A', relevance_score: 4.6, prestige_known: true, prestige_score: 1.0 }];
+    expect(bandCounts(rows, 3.0)).toEqual({ must_read: 0, should_read: 1, could_read: 0, dont_read: 0 });
+  });
+});
+
+describe('Rigor and Code buckets: papers without a review are a bucket with a count, not a silent drop', () => {
+  const rows = [
+    { item_key: 'A', quality_grade: 'A', has_code: true, goal_sim: 0.9 },
+    { item_key: 'B', quality_grade: 'd', has_code: false, goal_sim: 0.1 },
+    { item_key: 'C', quality_grade: null, has_code: null },
+    { item_key: 'D', has_code: null },
+  ];
+  const keep = (filters) => rows.filter(buildPredicate({ ...EMPTY_FILTERS, ...filters })).map((r) => r.item_key);
+
+  it('counts every row in exactly one bucket per facet; Goals count only rows with a goal signal', () => {
+    expect(facetCounts(rows, new Set(['A']))).toEqual({
+      rigor: { high: 1, low: 1, nr: 2 }, code: { found: 1, none: 1, nr: 2 }, goal: { high: 1, low: 1 },
+    });
+  });
+
+  it('keeps exactly what each chip counted', () => {
+    expect(keep({ quality: 'high' })).toEqual(['A']);
+    expect(keep({ quality: 'low' })).toEqual(['B']);
+    expect(keep({ quality: 'nr' })).toEqual(['C', 'D']);
+    expect(keep({ code: 'found' })).toEqual(['A']);
+    expect(keep({ code: 'none' })).toEqual(['B']);
+    expect(keep({ code: 'nr' })).toEqual(['C', 'D']);
+  });
+
+  it('code round-trips through the URL key `code`, defaults omitted; a bad value is dropped', () => {
+    expect(serializeFilters({ ...EMPTY_FILTERS, code: 'nr', quality: 'nr' })).toEqual({ q: 'nr', code: 'nr' });
+    expect(hydrateFilters(new URLSearchParams('code=none&q=nr'))).toMatchObject({ code: 'none', quality: 'nr' });
+    expect(hydrateFilters(new URLSearchParams('code=maybe')).code).toBe('any');
+    expect(serializeFilters(EMPTY_FILTERS)).toEqual({});
+    expect(isFilterActive({ ...EMPTY_FILTERS, code: 'found' })).toBe(true);
   });
 });

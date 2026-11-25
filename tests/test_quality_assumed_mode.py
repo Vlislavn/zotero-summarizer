@@ -77,7 +77,7 @@ def test_full_review_grades_uncertain_type_generically_and_marks_it(monkeypatch,
 
 def test_verify_cli_keeps_assumed_rubric_and_existing_quality_call_budget(tmp_path, monkeypatch, capsys):
     from zotero_summarizer.cli import _app, _review_source, build_parser
-    from zotero_summarizer.services import _common
+    from zotero_summarizer.services import config_io
     from zotero_summarizer.services.library import _map_reduce
     from zotero_summarizer.services.llm import factory
     from zotero_summarizer.services.setup.bootstrap import _default_goals_config
@@ -92,7 +92,7 @@ def test_verify_cli_keeps_assumed_rubric_and_existing_quality_call_budget(tmp_pa
     generators = []
     monkeypatch.setattr(_app.Settings, "load", lambda **_kwargs: SimpleNamespace(data_dir=tmp_path, config_path=tmp_path / "config"))
     monkeypatch.setattr(_review_source, "read_source", lambda *_args: (path, {}, BODY, "Study", "fixture"))
-    monkeypatch.setattr(_common, "read_config", lambda _path: config)
+    monkeypatch.setattr(config_io, "read_config", lambda _path: config)
     monkeypatch.setattr(factory, "build_client_for_provider", lambda *_args, **_kwargs: client)
     monkeypatch.setattr(_map_reduce, "digest_for_strategy", lambda *_args, **_kwargs:
                         generators.append(True) or PaperDigest(tldr="A concept.", read_decision="skip"))

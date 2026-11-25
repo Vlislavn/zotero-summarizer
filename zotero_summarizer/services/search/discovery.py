@@ -14,9 +14,8 @@ from zotero_summarizer.services.search import require_online, session as session
 from zotero_summarizer.services.search._models import QueryPlan, ResearchSession, SearchIntent
 from zotero_summarizer.services.search.dedup import _Union
 from zotero_summarizer.services.search._relevance import attach_relevance
-from zotero_summarizer.services.search.federate import federate
+from zotero_summarizer.services.search.federate import _annotate_library_coverage, _search_openalex_client, federate
 from zotero_summarizer.services.search.intent import build_query_plan
-from zotero_summarizer.services.search.pipeline import _annotate_library_coverage, _search_openalex_client
 from zotero_summarizer.services.search.rank import _epsilon, rank_candidates, score_query_relevance
 from zotero_summarizer.services.zotero.zotero import resolve_reader_for_key
 from zotero_summarizer.storage.library_context import read_context, read_discovery_membership
@@ -334,7 +333,7 @@ def _run(sess, inputs, consent_token, *, retrieve):
     return sess
 
 
-def find_new(item_key: str, *, context_fingerprint: str, consent_token: str | None = None,
+def start_discovery(item_key: str, *, context_fingerprint: str, consent_token: str | None = None,
              retry: bool = False) -> ResearchSession:
     global _active_session
     with sessions._lock_for("discovery"):

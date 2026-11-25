@@ -6,7 +6,7 @@ import PageTitle from '../components/ui/PageTitle.jsx';
 
 // Library page — one surface, two modes (Increment 3 nav collapse). The default
 // "Read next" mode is the unchanged ranked reading queue (LibraryReadNext); the
-// "Batch label" mode is the former Annotate page (AnnotationVerdict), which owns
+// "My verdicts" mode is the former Annotate page (AnnotationVerdict), which owns
 // the shared VerdictPicker + the 1/2/3/4 priority keys + j/k navigation flow.
 // Folding it in here drops a top-level nav entry (Hick's Law) while keeping the
 // whole keyboard-driven labelling workflow reachable — and the deep-link the
@@ -18,7 +18,7 @@ import PageTitle from '../components/ui/PageTitle.jsx';
 
 const MODES = [
   { id: 'read', label: 'Read next' },
-  { id: 'batch', label: 'Select & label' },
+  { id: 'batch', label: 'My verdicts' },
 ];
 
 const VALID_MODES = new Set(MODES.map((m) => m.id));
@@ -51,33 +51,35 @@ export default function Library() {
 
   return (
     <div>
-      <PageTitle title="Library" page="library" />
-      <div
-        role="tablist"
-        aria-label="Library modes"
-        className="flex flex-wrap gap-1.5 mb-4"
-      >
-        {MODES.map((m) => {
-          const active = m.id === mode;
-          return (
-            <button
-              key={m.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => selectMode(m.id)}
-              className={[
-                'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border',
-                active
-                  ? 'bg-forest-800 text-white border-forest-800'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100',
-              ].join(' ')}
-            >
-              {m.label}
-            </button>
-          );
-        })}
-      </div>
+      <PageTitle
+        title="Library"
+        page="library"
+        phoneSubtitle={false}
+        actions={(
+          <div role="tablist" aria-label="Library modes" className="flex gap-1.5">
+            {MODES.map((m) => {
+              const active = m.id === mode;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => selectMode(m.id)}
+                  className={[
+                    'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border',
+                    active
+                      ? 'bg-forest-800 text-white border-forest-800'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100',
+                  ].join(' ')}
+                >
+                  {m.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      />
       {mode === 'batch' ? <AnnotationVerdict /> : <LibraryReadNext />}
     </div>
   );

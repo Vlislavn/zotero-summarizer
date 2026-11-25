@@ -104,7 +104,8 @@ revision_bounds: retained manifest sync_changes availability + min/max
 config: all resolved bounds + split_at + split_default name
 rules: versioned identity/time/label/prediction/CI interpretations
 coverage: sources, tables, raw counts, unique current paper groups,
-          content multiplicity, exclusions, date coverage, snapshot profiles
+          content multiplicity (sparse: only groups seen more than once; an absent
+          group means count 1), exclusions, date coverage, snapshot profiles
 papers: [current canonical families + alias proof locators + snapshot references]
 events: [local normalized observations, one per accepted source record]
 periods: {last_7d, last_30d, all_time}
@@ -128,6 +129,11 @@ Each event includes `observation_id`, `locator`, `content_group`, `paper_key`,
 actual local comment, revision/null, reconciliation, event-time gate identity and
 null historical inference-model identity. Optional fields retain recorded
 categories, feed name or an unconfirmed overlap group.
+
+Serialization (size cap, same meaning): an event key whose value is null is
+omitted, so **absent == null** for every key above; readers use `.get`. Results
+published before this change carry explicit nulls and `coverage.content_multiplicity`
+for every group (all counts, including 1); both forms are valid version 1.
 
 - Observation IDs identify **source locators**, not human actions. JSONL locators
   carry line and exact byte offsets; CSV carries multiline line/byte ranges;

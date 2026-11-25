@@ -20,7 +20,8 @@ import logging
 import os
 from typing import Any
 
-from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services._common import to_text
+from zotero_summarizer.services.llm.json_response import extract_json_blob
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.search import session as session_store
 from zotero_summarizer.services.search._models import Candidate, ResearchSession, SearchIntent
@@ -28,7 +29,7 @@ from zotero_summarizer.services.search._relevance import attach_relevance
 from zotero_summarizer.services.search.dedup import to_version_families
 from zotero_summarizer.services.search.federate import federate
 from zotero_summarizer.services.search.intent import _as_str_list, build_query_plan
-from zotero_summarizer.services.search.pipeline import _annotate_library_coverage
+from zotero_summarizer.services.search.federate import _annotate_library_coverage
 from zotero_summarizer.services.search.rank import rank_candidates, score_query_relevance
 from zotero_summarizer.settings import offline_requested
 

@@ -15,7 +15,7 @@ from tests.test_connection_boundaries import selection
 from zotero_summarizer.models.connections import ModelTestRequest
 from zotero_summarizer.runtime import AppContext, set_context
 from zotero_summarizer.services import config as config_service
-from zotero_summarizer.services._common import write_json_atomic
+from zotero_summarizer.services._io import write_json_atomic
 from zotero_summarizer.services.llm import connections, connection_test, connection_state as store
 
 

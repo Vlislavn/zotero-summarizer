@@ -22,7 +22,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from zotero_summarizer.storage.repositories import _connect_to
+from zotero_summarizer.storage.db_core import _connect_to
 
 _TEAMS = ("a0", "a2", "both")
 

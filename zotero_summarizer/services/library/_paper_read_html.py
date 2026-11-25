@@ -8,9 +8,15 @@ from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services._io import now_iso_z
 
 _FIGURE_NAME_RE = re.compile(r"^fig\d+_[A-Za-z0-9_.-]+\.(png|jpe?g)$")
+_REVIEW_OUTDATED_FINDING = "review_outdated: the saved review is outdated (model or prompts changed), so this page has no brief or digest"
+_REVIEW_OUTDATED_NOTE = "Saved review is outdated (model or prompts changed) — regenerate it to see the brief and digest"
+# A current review can still lack a digest (quality-only, or digest generation failed).
+# Same silent gap as an outdated review: the page looks complete without its brief.
+_REVIEW_NO_DIGEST_FINDING = "review_no_digest: the saved review holds no digest, so this page has no brief or digest"
+_REVIEW_NO_DIGEST_NOTE = "This saved review holds no brief or digest."
 
 
 def _audit_passed(audit: Any) -> bool:
@@ -28,11 +34,20 @@ def write_outputs(
     code_link: dict[str, Any] | None = None,
     interpretation: dict[str, Any] | None = None,
     model_read_decision: str | None = None,
+    review_outdated: bool = False,
+    review_without_digest: bool = False,
 ) -> dict[str, Any]:
-    """Publish staged outputs only after all blocking checks pass."""
+    """Publish staged outputs only after all blocking checks pass. ``review_outdated``: a
+    saved review exists but is not current, so the page has no digest — say so (non-blocking).
+    ``review_without_digest``: the saved review is current but carries no digest."""
     html_text = _render_presentation(content, digest, quality, goal_summaries, code_link, interpretation,
-                                     model_read_decision=model_read_decision)
+                                     model_read_decision=model_read_decision, review_outdated=review_outdated,
+                                     review_without_digest=review_without_digest)
     audit = _audit_presentation(html_text, content, staging / "figures")
+    if review_outdated and not digest and isinstance(audit, dict):
+        audit.setdefault("minor", []).append(_REVIEW_OUTDATED_FINDING)
+    if review_without_digest and not digest and isinstance(audit, dict) and not review_outdated:
+        audit.setdefault("minor", []).append(_REVIEW_NO_DIGEST_FINDING)
     if not _audit_passed(audit):
         raise APIError(error="paper_audit_failed", message="Paper audit failed; rebuild after fixing extraction",
                        status_code=422, details={"audit": audit})
@@ -63,6 +78,8 @@ def _render_presentation(
     interpretation: dict[str, Any] | None = None,
     *,
     model_read_decision: str | None = None,
+    review_outdated: bool = False,
+    review_without_digest: bool = False,
 ) -> str:
     from zotero_summarizer.services.library import _paper_read_brief as brief
     from zotero_summarizer.services.library.review_fleet.propose import apply_reading_policy
@@ -84,6 +101,9 @@ def _render_presentation(
     brief_block = brief.brief_html(content, digest=digest, quality=quality, goal_summaries=goal_summaries,
                                    saved_read_estimate=saved_read_estimate)
     quality_block = brief.quality_panel_html(quality)
+    outdated_note = f'<p class="stale-note" role="status">{_REVIEW_OUTDATED_NOTE}</p>' if review_outdated else ""
+    if not outdated_note and review_without_digest and not digest:
+        outdated_note = f'<p class="stale-note" role="status">{_REVIEW_NO_DIGEST_NOTE}</p>'
     empty_state = (
         '<section class="fade-in"><div class="empty-state">No figures or review are available yet. '
         "Open the original PDF in Zotero for the full text, or run a deep review to add a digest."
@@ -91,6 +111,9 @@ def _render_presentation(
         if not figures and not digest and not quality and not (goal_summaries or []) else ""
     )
     tldr_html = f'<p class="tldr">{_h(str(digest["tldr"]))}</p>' if (digest and digest.get("tldr")) else ""
+    if digest and digest.get("executive_summary"):
+        tldr_html += ('<div class="proposal"><div class="dlbl">What they propose</div>'
+                      f'<p>{_h(str(digest["executive_summary"]))}</p></div>')
     refs = int(content.get("references_count") or 0)
     foot_meta = f"{int(content.get('n_pages') or 0)} pages · {len(figures)} figures · {refs} references"
 
@@ -114,6 +137,7 @@ def _render_presentation(
     <div class="subtitle">{_h(authors)}</div>
     {tldr_html}
   </header>
+  {outdated_note}
   {code_link_block}
   {brief_block}
   {quality_block}{interpretation_block}
@@ -161,8 +185,8 @@ def _digest_section_html(digest: dict[str, Any]) -> str:
         val = str(digest.get(key) or "")
         return f'<div class="drow"><span class="dlbl">{label}</span><span>{_h(val)}</span></div>' if val else ""
 
-    def _bullets(label: str, key: str) -> str:
-        items = [str(x) for x in (digest.get(key) or []) if x]
+    def _bullets(label: str, key: str, source: dict[str, Any] | None = None) -> str:
+        items = [str(x) for x in ((digest if source is None else source).get(key) or []) if x]
         if not items:
             return ""
         inner = "".join(f"<li>{_h(x)}</li>" for x in items)
@@ -177,10 +201,7 @@ def _digest_section_html(digest: dict[str, Any]) -> str:
             f'<div class="dgroup-body">{body}</div></details>'
         )
 
-    summary_body = "".join(filter(None, [
-        _row("Executive summary", "executive_summary"),
-        _bullets("Key findings", "key_findings"),
-    ]))
+    summary_body = _bullets("Key findings", "key_findings")
     strength = str(digest.get("key_strength") or "")
     weakness = str(digest.get("key_weakness") or "")
     assess = [_row("Controversies", "controversies")]
@@ -191,11 +212,13 @@ def _digest_section_html(digest: dict[str, Any]) -> str:
         assess.append(f'<div class="drow"><span class="dlbl">Weakness</span><span class="dneg">{_h(weakness)}</span></div>')
     parameters = digest.get("parameters") or {}
     param_values = [str(parameters.get(key) or "") for key in ("dataset", "sample_size", "architecture")]
-    param_values += [str(x) for key in ("baselines", "metrics") for x in (parameters.get(key) or [])]
+    param_values += [str(x) for x in (parameters.get("baselines") or [])]
     params = "; ".join(value for value in param_values if value)
+    # One "How it works" group, like the review page: the study's parts first, then the prose.
     methods_body = "".join(filter(None, [
-        _row("Methods", "methods"), _row("Limitations", "limitations"),
         f'<div class="drow"><span class="dlbl">Parameters</span><span>{_h(params)}</span></div>' if params else "",
+        _row("Methods", "methods"), _row("Limitations", "limitations"),
+        _bullets("Metrics", "metrics", parameters),  # one "system vs comparator on benchmark: a vs b" sentence each
     ]))
     impact_body = "".join(filter(None, [
         _row("Industry", "industry_impact"), _row("Academia", "academy_impact"),
@@ -203,9 +226,9 @@ def _digest_section_html(digest: dict[str, Any]) -> str:
         _bullets("Implementation", "implementation"),
     ]))
     blocks = "".join(filter(None, [
-        _group("Summary", summary_body, open_=True),
+        _group("Findings", summary_body, open_=True),
         _group("Assessment", "".join(filter(None, assess))),
-        _group("Methods & limits", methods_body),
+        _group("How it works", methods_body),
         _group("Impact & action", impact_body),
     ]))
     verdict = str(digest.get("verdict") or "")
@@ -312,6 +335,7 @@ body.dark{--bg:#0e140f;--card:#16201a;--text:#eef3ee;--muted:#9baf9f;--accent:#7
 .subtitle{font-family:var(--font-mono);font-size:13px;color:var(--muted)}
 .tldr{margin-top:12px;font-size:15.5px;font-style:italic;color:var(--text);line-height:1.55}
 .sec-title{font-family:var(--font-display);margin:30px 0 12px;font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.stale-note{margin:0 0 18px;padding:2px 0 2px 12px;border-left:2px solid var(--caution);background:var(--caution-wash);color:var(--caution);font-size:13px;line-height:1.5}
 .digest-fold{margin:22px 0}
 .fold-h{cursor:pointer;font-family:var(--font-display);font-size:14px;font-weight:600;color:var(--text);list-style:none;padding:13px 16px;border:1px solid var(--border);border-radius:12px;background:var(--card);box-shadow:var(--shadow);display:flex;gap:11px;align-items:baseline;line-height:1.4}
 .fold-h::-webkit-details-marker{display:none}.fold-h::after{content:'▸';margin-left:auto;color:var(--muted);font-size:12px}
@@ -320,6 +344,7 @@ body.dark{--bg:#0e140f;--card:#16201a;--text:#eef3ee;--muted:#9baf9f;--accent:#7
 .fold-tag{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.06em;color:var(--hema);background:var(--accent-soft);border-radius:5px;padding:2px 7px;flex-shrink:0}
 .digest-card{background:var(--card);border:1px solid var(--border);border-top:none;border-radius:0 0 12px 12px;padding:18px 20px;display:flex;flex-direction:column;gap:14px}
 .drow{display:grid;grid-template-columns:128px 1fr;gap:6px 16px;align-items:start;line-height:1.55}
+.proposal{margin-top:14px;padding-top:12px;border-top:1px solid var(--hair);max-width:66ch}.proposal p{margin:2px 0 0;font-size:15px;line-height:1.55}
 .reading-plan{margin-top:14px;overflow-wrap:anywhere}.reading-plan dl{margin:0;display:grid;gap:10px}
 .reading-plan dd{margin:0;min-width:0;font-size:15px}
 .dlbl{font-family:var(--font-mono);font-size:11px;letter-spacing:.02em;text-transform:uppercase;color:var(--muted);padding-top:1px}

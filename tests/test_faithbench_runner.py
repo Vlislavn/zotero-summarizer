@@ -398,14 +398,14 @@ def test_resume_does_not_repair_interior_corruption(tmp_path):
 
 
 def test_manifest_publication_failure_leaves_no_partial_manifest(monkeypatch, tmp_path):
-    from zotero_summarizer.services import _common
+    from zotero_summarizer.services import _io
 
     paths = RunPaths(tmp_path / "run")
 
     def interrupted(*args):
         raise OSError("manifest publication interrupted")
 
-    monkeypatch.setattr(_common.os, "replace", interrupted)
+    monkeypatch.setattr(_io.os, "replace", interrupted)
     with pytest.raises(OSError, match="manifest publication interrupted"):
         write_or_check_manifest(paths, {"model": "test", "generation_sha256": "a" * 64,
                                        "benchmark_content_sha256": "a" * 64})
@@ -424,13 +424,13 @@ def test_missing_manifest_never_relabels_existing_responses(tmp_path):
 
 
 def test_interrupted_repair_preserves_the_original_and_archive(monkeypatch, tmp_path):
-    from zotero_summarizer.services import _common
+    from zotero_summarizer.services import _io
     from zotero_summarizer.services.faithbench._runner import _repair_jsonl_tail
 
     path = tmp_path / "responses.jsonl"
     raw = b'{"item_id": "done"}\n{"unfinished":'
     path.write_bytes(raw)
-    replace = _common.os.replace
+    replace = _io.os.replace
 
     def interrupt_repair(source, target):
         if target == path:
@@ -438,7 +438,7 @@ def test_interrupted_repair_preserves_the_original_and_archive(monkeypatch, tmp_
         replace(source, target)
 
     with monkeypatch.context() as scoped:
-        scoped.setattr(_common.os, "replace", interrupt_repair)
+        scoped.setattr(_io.os, "replace", interrupt_repair)
         with pytest.raises(OSError, match="repair interrupted"):
             _repair_jsonl_tail(path)
     assert path.read_bytes() == raw

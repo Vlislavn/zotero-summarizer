@@ -54,6 +54,7 @@ from zotero_summarizer.domain import (
     ReadingPriority,
     VERDICT_SOURCE_AUTO_QUALITY,
     VERDICT_SOURCE_MACHINE_ADD,
+    VERDICT_SOURCE_USER,
     score_to_priority,
 )
 from zotero_summarizer.storage import feeds as feeds_storage
@@ -113,11 +114,56 @@ def _load_label_state(db_path: Path) -> dict[str, dict[str, Any] | None]:
 
 
 def _training_label_state(db_path: Path) -> dict[str, dict[str, Any] | None]:
-    """``_load_label_state`` minus machine-derived gate verdicts (not ground truth)."""
-    return {
+    """``_load_label_state`` minus machine-derived gate verdicts (not ground truth),
+    with one effective user verdict per paper (:func:`_one_verdict_per_paper`)."""
+    return _one_verdict_per_paper({
         key: verdict for key, verdict in _load_label_state(db_path).items()
         if verdict is None or verdict.get("source") != VERDICT_SOURCE_AUTO_QUALITY
-    }
+    }, db_path)
+
+
+def _one_verdict_per_paper(
+    state: dict[str, dict[str, Any] | None], db_path: Path,
+) -> dict[str, dict[str, Any] | None]:
+    """Give every alias key of a paper with a user verdict that paper's LATEST user verdict.
+
+    A paper can hold a ``feed:g:`` row and a Zotero-key row; each used to train on
+    its own value. All rows stay stored; the winner is marked with ``family`` (its
+    real row key) so :func:`_one_row_per_paper` emits the paper once. Deletion
+    markers (``None``) and families without a user verdict are left as they are.
+    """
+    resolver = repositories.label_alias_resolver(db_path)
+    real = repositories.list_label_verdict_keys(db_path)
+    done: set[str] = set()
+    for key in [k for k, v in state.items() if v is not None and v.get("source") == VERDICT_SOURCE_USER]:
+        if key in done:
+            continue
+        keys = resolver(key)
+        done.update(keys)
+        users = [state[k] for k in keys if state.get(k) and state[k].get("source") == VERDICT_SOURCE_USER]
+        winner = max(users, key=lambda v: (v["created_at"], v["id"]))
+        home = next(k for k in keys if k in real and state.get(k) and state[k]["id"] == winner["id"])
+        for k in keys:
+            if state.get(k, True) is not None:
+                state[k] = {**winner, "item_key": k, "family": home}
+    return state
+
+
+def _one_row_per_paper(
+    rows: Iterable[dict[str, Any]], state: dict[str, dict[str, Any] | None],
+) -> list[dict[str, Any]]:
+    """Keep one training row per paper: the row on the winner's own key, else the first."""
+    rows = list(rows)
+    best: dict[str, tuple[int, int]] = {}
+    families = []
+    for index, row in enumerate(rows):
+        key = (row.get("item_key") or "").strip()
+        family = (state.get(key) or {}).get("family")
+        families.append(family)
+        if family is not None:
+            best[family] = min(best.get(family, (2, index)), (int(key != family), index))
+    return [row for index, row in enumerate(rows)
+            if families[index] is None or best[families[index]][1] == index]
 
 
 def _active_rows(
@@ -247,7 +293,7 @@ def load_hybrid_labels(
 
     with csv_path.open("r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
-        for row in _active_rows(reader, user):
+        for row in _one_row_per_paper(_active_rows(reader, user), user):
             key = (row.get("item_key") or "").strip()
             if not key:
                 continue
@@ -256,10 +302,14 @@ def load_hybrid_labels(
 
     # User verdicts on rows the CSV has not seen yet (e.g. fresh feed:* row
     # marked before the next goldenset export). Keep them — the gate
-    # retrainer should still see the user's signal.
+    # retrainer should still see the user's signal (once per paper).
+    papers = {(user.get(key) or {}).get("family") for key in out} - {None}
     for key, verdict in user.items():
-        if verdict is not None and key not in out:
-            out[key] = _entry(key, None)
+        family = verdict.get("family") if verdict is not None else None
+        if verdict is None or key in out or (family is not None and family in papers):
+            continue
+        out[key] = _entry(key, None)
+        papers.add(family)
     return out
 
 
@@ -286,7 +336,7 @@ def apply_hybrid(
     user = _training_label_state(db_path)
     outcomes = load_resolved_outcomes(db_path)
     out: list[dict[str, Any]] = []
-    for row in _active_rows(_with_training_samples(rows, user), user):
+    for row in _one_row_per_paper(_active_rows(_with_training_samples(rows, user), user), user):
         key = (row.get("item_key") or "").strip()
         new = dict(row)
         v = user.get(key) if key else None

@@ -1055,7 +1055,7 @@ wheels = [
 [[package]]
 name = "deadcode-audit"
 version = "0.2.0"
-source = { git = "https://github.com/Vlislavn/deadcode-audit.git?rev=main#b05930ea3604e4f23b761c887324f666918d5dfe" }
+source = { git = "https://github.com/Vlislavn/deadcode-audit.git?rev=main#61018eb665676e427aa188bf3a8f499d4fc81608" }
 dependencies = [
     { name = "pyyaml", marker = "python_full_version >= '3.11'" },
 ]

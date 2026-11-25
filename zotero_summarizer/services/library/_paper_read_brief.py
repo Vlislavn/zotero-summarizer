@@ -41,7 +41,7 @@ _METHOD_CLAUSE = (
 )
 _LEGEND = (
     "<b>FLAG</b> serious concerns or missing checks · <b>NEUTRAL</b> mixed results · "
-    "<b>HIGHLIGHT</b> most applicable checks met"
+    "<b>HIGHLIGHT</b> most applicable checks met, no critical gap, no automatic warning"
 )
 # Short plain-English labels for the decisive-signal list (the full prompt
 # questions live in _quality_prompts and drive the collapsed checklist).

@@ -100,7 +100,7 @@ def _computed_review(key, entry, *, source_text=None, source_path=None, config=N
     from tests.test_digest_verification import PAPER, _Verifier, _digest
     from tests.test_review_source_boundary import _Mapper
     from zotero_summarizer.models import PaperDigest
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
     from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 
     if not os.environ.get('PYTEST_CURRENT_TEST'):

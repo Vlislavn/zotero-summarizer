@@ -10,8 +10,10 @@ import sqlite3
 import sys
 from typing import Any
 
+import psutil
+
 from zotero_summarizer.models.providers import STAGES, resolve_stage
-from zotero_summarizer.services._common import read_config
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.settings import Settings
 
 
@@ -59,7 +61,7 @@ def _optional_extras(_: Settings) -> dict[str, Any]:
 
 
 def _environment(settings: Settings) -> dict[str, Any]:
-    memory = __import__("psutil").virtual_memory().total / 1024**3
+    memory = psutil.virtual_memory().total / 1024**3
     disk_root = (
         settings.data_dir if settings.data_dir.exists() else settings.data_dir.parent
     )
@@ -150,14 +152,12 @@ def _zotero(settings: Settings) -> dict[str, Any]:
 
 
 def _schema_version(path: Path, namespace: str) -> int:
+    from zotero_summarizer.storage.migrations import current_version
+
     if not path.exists():
         return 0
     with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
-        row = conn.execute(
-            "SELECT version FROM schema_migrations WHERE namespace = ?",
-            (namespace,),
-        ).fetchone()
-    return int(row[0]) if row else 0
+        return current_version(conn, namespace)
 
 
 def _database(settings: Settings) -> dict[str, Any]:

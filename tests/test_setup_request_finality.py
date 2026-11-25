@@ -217,7 +217,7 @@ def test_exact_late_terminal_survives_successor_config_and_credential_publicatio
     assert original.run_id in held["request_attempts"]
     request.terminal("synthetic", "stop", native_id=native_id, native_required=True)
     assert not boundary.held() and original.is_abandoned()
-    from zotero_summarizer.services._common import read_json_or_empty
+    from zotero_summarizer.services._io import read_json_or_empty
     saved = read_json_or_empty(boundary.settings.data_dir / "setup_doctor.json")
     assert saved["run_id"] == successor.run_id and not saved["ready"]  # reconciliation cannot publish Ready
     assert doctor_requests.request_attempts(boundary.settings)[original.run_id]["completion"]["coherent"]
@@ -236,7 +236,7 @@ def test_cancel_at_owned_transport_boundary_is_positive_no_dispatch_proof(bounda
 
 
 def test_malformed_persisted_request_state_fences_without_inventing_live_work(boundary):
-    from zotero_summarizer.services._common import write_json_atomic
+    from zotero_summarizer.services._io import write_json_atomic
     from zotero_summarizer.services.setup import doctor_requests
     write_json_atomic(boundary.settings.data_dir / "setup_doctor.json", {"request_attempts": {"bad": {}}})
     payload = {"ready": True, "request_attempts": doctor_requests.request_attempts(boundary.settings), "checks": []}
@@ -249,7 +249,7 @@ def test_malformed_persisted_request_state_fences_without_inventing_live_work(bo
 
 @pytest.mark.parametrize("corruption", ["summary", "identity", "success_without_terminal", "reason_type"])
 def test_persisted_request_semantics_cannot_forge_observed_completion(boundary, corruption):
-    from zotero_summarizer.services._common import read_json_or_empty, write_json_atomic
+    from zotero_summarizer.services._io import read_json_or_empty, write_json_atomic
     from zotero_summarizer.services.setup import doctor_requests
 
     attempt = la.SetupAttempt()

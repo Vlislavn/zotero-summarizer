@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from zotero_summarizer.services._common import write_json_atomic
+from zotero_summarizer.services._io import write_json_atomic
 from zotero_summarizer.services.golden.relabel_audit._constants import (
     AUDIT_PRIORITY_NAMES,
     PRIORITY_TO_SCORE,

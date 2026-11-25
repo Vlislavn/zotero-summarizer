@@ -4,8 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 
-const api = vi.hoisted(() => ({ fetchConfig: vi.fn(), fetchLlmReachability: vi.fn(async () => ({ stages: [] })), updateConfig: vi.fn(), listModels: vi.fn(),
-  fetchAiPresets: vi.fn(), saveAiCredential: vi.fn(), validateSetup: vi.fn(), detectZotero: vi.fn(),
+const api = vi.hoisted(() => ({ fetchConfig: vi.fn(), fetchLlmReachability: vi.fn(async () => ({ stages: [] })), updateConfig: vi.fn(),
+  fetchAiPresets: vi.fn(), validateSetup: vi.fn(), detectZotero: vi.fn(),
   updatePaths: vi.fn(), fetchDoctorStatus: vi.fn(), runDoctor: vi.fn(), cancelDoctor: vi.fn(),
   fetchConnections: vi.fn(), registerConnection: vi.fn(), listConnectionModels: vi.fn(), previewConnection: vi.fn(),
   applyConnection: vi.fn(), readConnection: vi.fn(), testConnection: vi.fn() }));
@@ -139,7 +139,6 @@ it.each(['registration', 'selection'])('a fresh foreign %s publication cannot ad
 });
 
 it('rechecks hardware compatibility when the model picker replaces the selected profile model', async () => {
-  api.listModels.mockResolvedValue({ models: ['qwen3:8b', 'qwen3:30b'] });
   const view = show();
   try {
     fireEvent.click(await screen.findByRole('radio', { name: /Full local/ }));
@@ -181,9 +180,7 @@ it('wires Full local through safe profile, save, real-check request, honest UNKN
     await waitFor(() => expect(screen.getByRole('button', { name: 'Next' }).disabled).toBe(false));
     expect(screen.getByRole('link', { name: 'Official model source' }).href).toBe('https://ollama.com/library/qwen3:8b');
     expect(screen.getByText(/approximately 5.2 GB/)).toBeTruthy();
-    expect(api.listModels).not.toHaveBeenCalled();
     expect(api.runDoctor).not.toHaveBeenCalled();
-    expect(api.saveAiCredential).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Set up Zotero Summarizer' }));
@@ -226,7 +223,6 @@ it.each([['qwen3:8b', false], ['qwen3:30b', true]])('revalidates a resumed resea
     await waitFor(() => expect(api.fetchAiPresets).toHaveBeenCalled());
     await waitFor(() => expect(finish.disabled).toBe(blocked));
     expect(api.runDoctor).not.toHaveBeenCalled();
-    expect(api.listModels).not.toHaveBeenCalled();
     expect(api.updateConfig).not.toHaveBeenCalled();
   } finally { view.unmount(); view.client.clear(); }
 });
@@ -247,8 +243,6 @@ it.each([undefined, 503, 404, 422])('wizard path save status %s retires only unc
     expect(screen.queryByText('Restart required to apply new paths.')).toBeNull();
     expect(api.updateConfig).not.toHaveBeenCalled();
     expect(api.runDoctor).not.toHaveBeenCalled();
-    expect(api.listModels).not.toHaveBeenCalled();
-    expect(api.saveAiCredential).not.toHaveBeenCalled();
   } finally { view.unmount(); view.client.clear(); }
 });
 
@@ -271,6 +265,5 @@ it.each([undefined, 503, 404, 422])('wizard Finish status %s preserves its origi
     expect(api.updateConfig).toHaveBeenCalledTimes(1);
     expect(api.updateConfig.mock.calls[0][0].research_goals).toEqual(['Synthetic research goal']);
     expect(api.runDoctor).not.toHaveBeenCalled();
-    expect(api.listModels).not.toHaveBeenCalled();
   } finally { view.unmount(); view.client.clear(); }
 });

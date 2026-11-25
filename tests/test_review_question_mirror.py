@@ -19,7 +19,7 @@ from zotero_summarizer.services.triage import daily_actions, feeds
 from zotero_summarizer.services.triage.feeds import _daily_materialize
 from zotero_summarizer.services.zotero import zotero
 from zotero_summarizer.services.zotero.pending import USER_NOTE_MARKER, build_user_note_html
-from zotero_summarizer.storage import repositories, review_note_projection, review_notes
+from zotero_summarizer.storage import db_core, repositories, review_note_projection, review_notes
 
 
 @pytest.fixture
@@ -208,7 +208,7 @@ def test_busy_snapshot_admission_returns_five_unknown_fields_without_delivery(mi
     path, writes, resources = mirror_env
     original = review_questions.save_question(_payload())
     real_connect = sqlite3.connect
-    monkeypatch.setattr(repositories, "_connect_to", lambda db_path: real_connect(db_path, timeout=0))
+    monkeypatch.setattr(db_core, "_connect_to", lambda db_path: real_connect(db_path, timeout=0))
     monkeypatch.setattr(review_note_projection, "acknowledge", lambda *_args: pytest.fail("unavailable snapshot acknowledged"))
     with closing(real_connect(path, timeout=0)) as locked:
         locked.execute("BEGIN IMMEDIATE")

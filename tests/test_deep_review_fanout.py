@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from zotero_summarizer.models.providers import ProviderConfig
-from zotero_summarizer.services._common import deep_review_fleet_concurrency
+from zotero_summarizer.services.llm.concurrency import deep_review_fleet_concurrency
 
 
 def _remote(max_sub=None):
@@ -47,7 +47,7 @@ def test_none_provider_falls_to_remote_all_n():
 def test_independent_of_triage_job_concurrency(monkeypatch):
     # The whole point: a remote batch must NOT read TRIAGE_JOB_CONCURRENCY (pinned to 1
     # in .env for local-RAM triage). Make settings() blow up — the width still resolves.
-    import zotero_summarizer.services._common as common
+    import zotero_summarizer.services.llm.concurrency as common
 
     class _NoTriageKnob:
         config_path = calibration_path = Path("/nonexistent/goals.yaml")  # → knobs unset

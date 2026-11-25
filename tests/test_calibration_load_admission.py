@@ -7,7 +7,7 @@ import pytest
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models.providers import LLMRoutingConfig, ProviderConfig
-from zotero_summarizer.services import _common
+from zotero_summarizer.services import config_io
 from zotero_summarizer.services.llm import factory
 from zotero_summarizer.services.setup import calibration
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
@@ -31,7 +31,7 @@ def calibration_trial(tmp_path, monkeypatch):
                                   api_key_env="UNUSED_SYNTHETIC_KEY")
         config = _default_goals_config()
         config.llm_routing = LLMRoutingConfig(providers=[provider], default={"provider": "fixture", "model": "fixture-model"})
-        monkeypatch.setattr(_common, "read_config", lambda *_a, **_k: config)
+        monkeypatch.setattr(config_io, "read_config", lambda *_a, **_k: config)
         monkeypatch.setattr(factory, "resolve_api_key", lambda _p: observe("credential") or "synthetic")
 
         def prompt(_text):
@@ -144,7 +144,7 @@ def test_http_calibration_job_exposes_admission_refusal_not_ready(calibration_tr
 @pytest.mark.parametrize("cached", [False, True])
 def test_disabled_ai_calibration_cannot_construct_or_update_tier_state(calibration_trial, kind, cached):
     settings, _provider, seen = calibration_trial(kind, "example.test", cached=cached)
-    config = _common.read_config(settings.config_path, settings.calibration_path)
+    config = config_io.read_config(settings.config_path, settings.calibration_path)
     config.llm_enabled = False
     before = settings.calibration_path.read_bytes() if settings.calibration_path.exists() else None
     progress = []
@@ -157,7 +157,7 @@ def test_disabled_ai_calibration_cannot_construct_or_update_tier_state(calibrati
 
 def test_disabled_ai_calibration_refuses_before_retained_paper_read(calibration_trial, monkeypatch):
     settings, _provider, seen = calibration_trial("openai", "example.test")
-    _common.read_config(settings.config_path, settings.calibration_path).llm_enabled = False
+    config_io.read_config(settings.config_path, settings.calibration_path).llm_enabled = False
     monkeypatch.setattr(calibration, "load_review_papers", lambda *_a, **_k: pytest.fail("Disabled AI read retained paper"))
     with pytest.raises(APIError) as error:
         calibration.run_full_calibration(settings, item_keys=["SYNTHETIC1"])
@@ -170,7 +170,7 @@ def test_http_disabled_ai_calibration_job_fails_without_new_tier_stamp(calibrati
     from zotero_summarizer.services.setup import calibration_job
 
     settings, _provider, seen = calibration_trial("openai", "example.test", cached=cached)
-    _common.read_config(settings.config_path, settings.calibration_path).llm_enabled = False
+    config_io.read_config(settings.config_path, settings.calibration_path).llm_enabled = False
     before = settings.calibration_path.read_bytes() if settings.calibration_path.exists() else None
     monkeypatch.setattr(setup, "get_settings", lambda: settings)
     monkeypatch.setattr(calibration_job, "_JOB", {"status": "idle"})

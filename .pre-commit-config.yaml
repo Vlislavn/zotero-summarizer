@@ -25,8 +25,8 @@ repos:
       # deadcode-audit tracks main (no pin; `make deadcode-update` refreshes it). Its diff gates
       # see only committed changes vs the base, so they run at pre-push and in `make lint`.
       - id: deadcode-gates
-        name: deadcode-audit (orphans, vulture, redundancy; committed diff vs base)
-        entry: bash -c 'b="${DEADCODE_BASE:-origin/main}"; d=.venv/bin/deadcode; $d runtime-consumer-check --compare-branch "$b" && $d vulture-changed --compare-branch "$b" && $d redundancy --compare-branch "$b"'
+        name: deadcode-audit (orphans, vulture, redundancy; committed diff vs base; hard import cycles, whole tree)
+        entry: bash -c 'b="${DEADCODE_BASE:-origin/main}"; d=.venv/bin/deadcode; $d runtime-consumer-check --compare-branch "$b" && $d vulture-changed --compare-branch "$b" && $d redundancy --compare-branch "$b" && $d cycles'
         language: system
         pass_filenames: false
         always_run: true

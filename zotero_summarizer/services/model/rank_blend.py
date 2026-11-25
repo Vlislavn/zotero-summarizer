@@ -38,6 +38,7 @@ from __future__ import annotations
 
 from collections import deque
 from statistics import median
+from typing import NamedTuple
 
 from zotero_summarizer.domain import ReadingPriority
 
@@ -50,6 +51,61 @@ def _norm(v: float, lo: float, hi: float, degenerate: float = 0.5) -> float:
     # tied values are uninformative, 1.0 for a lone sole-evidence value (caller
     # decides — see ``blend_scores``).
     return (v - lo) / (hi - lo) if hi > lo else degenerate
+
+
+class _Cohort(NamedTuple):
+    """Normalised per-row terms of one cohort (``None`` = the row's signal is unknown)."""
+
+    rel: list[float]
+    goal: list[float | None]
+    prestige: list[float | None]
+    prestige_median: float | None  # the median of the known values, normalised (unknown-row fill)
+    weights: tuple[float, float, float]  # relevance, goals, prestige — after folding absent signals
+
+
+def _cohort(
+    relevance: list[float],
+    goal_sim: list[float | None],
+    prestige: list[float | None],
+    goal_weight: float,
+    prestige_weight: float,
+) -> _Cohort:
+    """The min-max normalisation shared by ``blend_scores`` and ``blend_parts``."""
+    n = len(relevance)
+    if len(goal_sim) != n or len(prestige) != n:
+        raise ValueError(
+            f"parallel lists required: relevance={n}, goal_sim={len(goal_sim)}, "
+            f"prestige={len(prestige)}"
+        )
+    rels = [float(r) for r in relevance]
+    gss = [float(g) for g in goal_sim if g is not None]
+    prs = [float(p) for p in prestige if p is not None]
+    if n == 0:
+        return _Cohort([], [], [], None, (1.0, 0.0, 0.0))
+    rlo, rhi = min(rels), max(rels)
+    glo, ghi = (min(gss), max(gss)) if gss else (0.0, 1.0)
+    plo, phi = (min(prs), max(prs)) if prs else (0.0, 1.0)
+    pmed = median(prs) if prs else None
+
+    w_goal = goal_weight if gss else 0.0
+    w_prest = prestige_weight if pmed is not None else 0.0
+    w_rel = 1.0 - w_goal - w_prest
+
+    # Sole-evidence fill for a degenerate goal range: when exactly ONE row in a
+    # multi-row cohort carries a positive goal_sim, it is the only goal evidence
+    # and must top the goal axis (1.0), clearly above the no-evidence rows pinned
+    # at 0.0 — NOT the neutral 0.5 used when several identical present values
+    # can't be separated. (A single-row cohort, n == 1, has no rows to rank
+    # against, so it stays uninformative.)
+    goal_degen = 1.0 if (len(gss) == 1 and n > 1 and gss[0] > 0) else 0.5
+
+    return _Cohort(
+        rel=[_norm(r, rlo, rhi) for r in rels],
+        goal=[None if g is None else _norm(float(g), glo, ghi, goal_degen) for g in goal_sim],
+        prestige=[None if p is None else _norm(float(p), plo, phi) for p in prestige],
+        prestige_median=_norm(pmed, plo, phi) if pmed is not None else None,
+        weights=(w_rel, w_goal, w_prest),
+    )
 
 
 def blend_scores(
@@ -69,43 +125,44 @@ def blend_scores(
     list is irrelevant (min-max over the cohort); only order within the
     cohort matters.
     """
-    n = len(relevance)
-    if len(goal_sim) != n or len(prestige) != n:
-        raise ValueError(
-            f"parallel lists required: relevance={n}, goal_sim={len(goal_sim)}, "
-            f"prestige={len(prestige)}"
-        )
-    if n == 0:
-        return []
+    c = _cohort(relevance, goal_sim, prestige, goal_weight, prestige_weight)
+    w_rel, w_goal, w_prest = c.weights
+    fill = c.prestige_median if c.prestige_median is not None else 0.0
+    return [
+        w_rel * rn + w_goal * (0.0 if gn is None else gn) + w_prest * (fill if pn is None else pn)
+        for rn, gn, pn in zip(c.rel, c.goal, c.prestige)
+    ]
 
-    rels = [float(r) for r in relevance]
-    gss = [float(g) for g in goal_sim if g is not None]
-    prs = [float(p) for p in prestige if p is not None]
-    rlo, rhi = min(rels), max(rels)
-    glo, ghi = (min(gss), max(gss)) if gss else (0.0, 1.0)
-    plo, phi = (min(prs), max(prs)) if prs else (0.0, 1.0)
-    pmed = median(prs) if prs else None
 
-    w_goal = goal_weight if gss else 0.0
-    w_prest = prestige_weight if pmed is not None else 0.0
-    w_rel = 1.0 - w_goal - w_prest
+def blend_parts(
+    relevance: list[float],
+    goal_sim: list[float | None],
+    prestige: list[float | None],
+    *,
+    goal_weight: float = GOAL_BLEND_WEIGHT,
+    prestige_weight: float = PRESTIGE_BLEND_WEIGHT,
+) -> tuple[list[dict[str, float]], dict[str, float], dict[str, float]]:
+    """``(parts, fill, weights)`` behind ``blend_scores`` — same normalisation, rounded to 3 places.
 
-    # Sole-evidence fill for a degenerate goal range: when exactly ONE row in a
-    # multi-row cohort carries a positive goal_sim, it is the only goal evidence
-    # and must top the goal axis (1.0), clearly above the no-evidence rows pinned
-    # at 0.0 — NOT the neutral 0.5 used when several identical present values
-    # can't be separated. (A single-row cohort, n == 1, has no rows to rank
-    # against, so it stays uninformative.)
-    goal_degen = 1.0 if (len(gss) == 1 and n > 1 and gss[0] > 0) else 0.5
-
-    out: list[float] = []
-    for i in range(n):
-        rn = _norm(rels[i], rlo, rhi)
-        gn = _norm(float(goal_sim[i]), glo, ghi, goal_degen) if goal_sim[i] is not None else 0.0
-        pv = prestige[i]
-        pn = _norm(float(pv) if pv is not None else pmed, plo, phi) if pmed is not None else 0.0
-        out.append(w_rel * rn + w_goal * gn + w_prest * pn)
-    return out
+    ``parts[i]`` holds the 0..1 terms the row's signals KNOW (``relevance``,
+    ``goals``, ``prestige``; an unknown signal is omitted). ``fill`` is the term an
+    unknown row takes (``goals`` 0.0; ``prestige`` the normalised median, only when
+    some row knows it). ``weights`` are the blend's effective weights after an
+    absent signal's weight went to relevance.
+    """
+    c = _cohort(relevance, goal_sim, prestige, goal_weight, prestige_weight)
+    parts = []
+    for rn, gn, pn in zip(c.rel, c.goal, c.prestige):
+        row = {"relevance": round(rn, 3)}
+        if gn is not None:
+            row["goals"] = round(gn, 3)
+        if pn is not None:
+            row["prestige"] = round(pn, 3)
+        parts.append(row)
+    fill = {"goals": 0.0}
+    if c.prestige_median is not None:
+        fill["prestige"] = round(c.prestige_median, 3)
+    return parts, fill, dict(zip(("relevance", "goals", "prestige"), (round(w, 4) for w in c.weights)))
 
 
 # --- Order-time deep-review QUALITY lift -------------------------------------
@@ -232,6 +289,7 @@ __all__ = [
     "DEFAULT_PROMOTE_GOAL_SIM",
     "DEFAULT_PROMOTE_RELEVANCE_FLOOR",
     "blend_scores",
+    "blend_parts",
     "quality_bonus",
     "order_within_bands",
     "promote_band",

@@ -40,7 +40,7 @@ def test_all_thirteen_native_states_have_explicit_prebudget_disposition(tmp_path
     row = runner._latest_rows(settings.triage_db_path)[key]
     original = source.load_candidates(settings.triage_db_path, start=START, end=END, limit=1, venue="")[0]
     effective, _entry = source.admit_history(original, row)
-    expected = runner.triage_candidate(effective, row, runner.load_profile(settings.data_dir)).model_dump(mode="json")
+    expected = runner.triage_candidate(effective, row, runner.ensure_profile(settings.data_dir)).model_dump(mode="json")
     expected["include"] = status == "eligible"
     payload = _run(settings)
     assert len(payload["cards"]) == int(status == "eligible")
@@ -128,7 +128,7 @@ def test_no_prior_history_keeps_pure_projection_separate_from_cached_only_admiss
     with sqlite3.connect(settings.triage_db_path) as conn:
         conn.execute("DELETE FROM processed_feed_items WHERE stable_feed_key=?", (key,))
     candidate = source.load_candidates(settings.triage_db_path, start=START, end=END, limit=1, venue="")[0]
-    assert runner.triage_candidate(candidate, None, runner.load_profile(settings.data_dir)).include is False
+    assert runner.triage_candidate(candidate, None, runner.ensure_profile(settings.data_dir)).include is False
     payload = _run(settings)
     entry = payload["metadata"]["source_history"][key]
     assert entry["history"] == "missing" and entry["reason"] == "no_prior_history"

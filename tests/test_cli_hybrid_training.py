@@ -9,7 +9,7 @@ from tests.test_hybrid_gt import _seed_outcome
 from zotero_summarizer.cli import main
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.models.config import GoalsConfig
-from zotero_summarizer.services import _common
+from zotero_summarizer.services import config_io
 from zotero_summarizer.services.golden.csv_store import edit_csv, load_golden_rows
 from zotero_summarizer.services.model import classifier, classifier_embed, classifier_persistence as cp
 from zotero_summarizer.services.model.eval_baseline import _featurize, _runners
@@ -44,7 +44,7 @@ def dataset(tmp_path, monkeypatch):
     })
     config.corpus.enabled = False
     config.prestige.enabled = False
-    monkeypatch.setattr(_common, "read_config", lambda *args: config)
+    monkeypatch.setattr(config_io, "read_config", lambda *args: config)
     monkeypatch.setattr(classifier_embed, "compute_embedding", _fake_embedding)
     monkeypatch.setattr(classifier_embed, "compute_embeddings_batch", _fake_embeddings_batch)
     return settings, config

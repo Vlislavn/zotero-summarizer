@@ -59,7 +59,7 @@ or incompatible required cached gate fails explicitly instead of training.
 
 ```
               ┌─────────── shared/infra (top level) ───────────┐
-              │ _common _adapters lifecycle run_log             │
+              │ _common _io _adapters lifecycle run_log         │
               │ interaction_log config health results            │
               │ corpus emoji_signals                             │
               └────────────────────────────────────────────────┘
@@ -68,6 +68,7 @@ or incompatible required cached gate fails explicitly instead of training.
       └────────────────────────────> zotero/ (queue + apply writes)
    mobile PWA ←typed mutations/cursor→ sync/ ──> golden label history
    research_feed/ ──projects existing RSS + deep reviews──> weekly digest
+   conferences/ ──Crossref on an explicit click──> data/conferences/ (read by nothing else)
    card/ ──reuses library full-text + code cascade + OpenAlex──> Today card facts
 ```
 
@@ -83,20 +84,28 @@ observed model/terminal guard before OnPrem discards metadata and closes the
 transport on construction failure or callback completion. Ordinary clients keep
 their prior options; all setup local-LLM requests must first pass admission.
 
-Shared files: `_common` (helpers: settings/logging/sqlite-ro/now_iso_z/html_to_text/
+`_common.to_text` and `_common.unique_non_empty_strings` re-export `integrations.llm.to_text` and `domain.unique_non_empty_strings` (one implementation each).
+`_common.normalized_title_key` supplies the title-only display key to Library and Today;
+each caller owns ranking and which copies to keep.
+`golden/feedback_analysis/provenance.unique_object` is the one duplicate-key JSON object hook (inputs reuse it).
+
+LLM-output JSON parsing (`extract_json_blob`, `safe_parse_response_json`) lives in `llm/json_response.py`.
+
+Shared files: `_common` (settings/state accessors, logging, `html_to_text`, `clamp`, `is_app_rss_source`);
+`_io` (leaf: sqlite-ro/now_iso/now_iso_z and
 `atomic_write` (callback) + `write_json_atomic`
-(dict→JSON) for tmp+replace artifact/cache writes. JSON publication delegates to
+(dict→JSON; keyword-only `indent=None`, default output unchanged) for tmp+replace artifact/cache writes. JSON publication delegates to
 the callback writer: both use a unique sibling staging file per invocation and
 clean it up on failure. They do not serialize read–modify–write operations or
 promise power-loss durability (`fsync`);
 `read_json_or_empty` (their read
 counterpart: missing state file → `{}`, an EXISTING-but-corrupt file raises),
-`is_app_rss_source` (the one definition of "row came from the app-RSS reader"),
-NaN-rejecting `clamp`; `emoji_signals`
-bins via `domain` so label derivation == prediction; `read_config` applies the
+`is_app_rss_source` (the one definition of "row came from the app-RSS reader", in `_common`),
+NaN-rejecting `clamp` (in `_common`); `emoji_signals`
+bins via `domain` so label derivation == prediction; `config_io.read_config` (goals.yaml load/save lives in `config_io.py`, not `_common`) applies the
 strict-offline override after env config, disabling prestige, OpenReview, and
 full-text refinement. `settings.offline_requested` is the one toggle used by
-RSS, uncached PDF, library acquisition, and Search network boundaries; the LLM-concurrency gates
+RSS, uncached PDF, library acquisition, and Search network boundaries; the LLM-concurrency gates (`services/llm/concurrency.py`)
 `effective_llm_concurrency` (triage per-item fan-out, remote→`TRIAGE_JOB_CONCURRENCY`),
 `deep_review_fleet_concurrency` (papers reviewed at once: `quality_review.fleet_papers`, else
 remote→`max_sub_concurrency`, else all N — NOT the triage knob, so a remote batch isn't throttled
@@ -115,7 +124,7 @@ All LLM clients are constructed through `services/llm/factory`, which calls
 stage, ...)` owns snapshot/identity checks and lazy cache admission; `RuntimeState`
 retains cache/lock/generation/invalidation and models-only provider metadata,
 without importing services or API code), `lifecycle` (startup composition root — small `_init_*`
-builders wire each singleton onto `RuntimeState`; LLM clients are NOT built here,
+builders wire each singleton onto `RuntimeState`; startup sets the default triage DB path via `repositories.set_db_path()`; LLM clients are NOT built here,
 they resolve lazily per stage so startup never depends on a provider being reachable;
 `_init_metadata_clients` builds the THREE optional network clients — OpenAlex prestige,
 Unpaywall full-text, and the authenticated OpenReview peer-review Search source
@@ -142,7 +151,7 @@ reason instead of degrading silently; new subsystem = one checker + one row),
 `run_log` (run IDs combine a readable timestamp with a stdlib UUID, so same-second
 and concurrent commands cannot share report paths; latest-per-classifier reads
 append order, not lexical ID order),
-`interaction_log` (append-only **agentic interaction log** → `data/interaction-events.jsonl`:
+`interaction_log` (append-only **agentic interaction log** → `data/interaction-events.jsonl`; label events carry `post_read` when the change was made after the paper had a usable published review:
 one immutable JSON line per human reading decision — including explicit `label_transition`
 assignment/change/retraction events with separate prior-user/current-user/model values — plus
 the daemon's 7-day behavioural outcome; reuses `run_log`'s NDJSON appender,
@@ -153,18 +162,19 @@ Emitted by the shared `golden.label_verdicts` command used by every deliberate l
 the legacy verdict feedback paths, and the outcome daemon — `results` also calls it. The JSONL
 append still follows the current-label commit, not a transactional outbox; failure
 does not roll back that prior durable decision),
-`config` (GET/PUT `/api/config`; PUT persists via `_common.write_user_config` — only
+`config` (GET/PUT `/api/config`; PUT persists via `config_io.write_user_config` — only
 the `USER_OWNED_KEYS` (intent + LLM connection + university access), so `goals.yaml`
 stays intent-only; re-applies `ZS_*` env before the hot-swap; invalidates stage
 clients; does not validate provider availability; an edit to `research_goals` schedules a
 background Today-slate rescore so persisted per-item `goal_sims` — the slate's
 rank-blend input — don't go stale against the new goals),
+`config_io` (goals.yaml `read_config`/`write_user_config`/`write_config_atomic`/`derive_num_ctx`, import-light so low-level services can use it; `read_config` layers `config_overrides`),
 `config_overrides` (the auto-derived `ZS_*` env override registry for every
 system-owned knob — `apply_env_overrides` re-validates, `render_overrides_doc`
 generates `docs/overrides.md`; precedence: code default < `goals.yaml` < `ZS_*` env;
 `read_config` additionally forces `prestige.enabled` off under `ZS_OFFLINE` so the
 now-default-on OpenAlex prestige never hits the network air-gapped),
-`health` (reports `starting` until the runtime config exists), `results` (`dashboard_results(item_keys="a,b")` = batch latest-row lookup, ≤200 keys),
+`health` (reports `starting` until the runtime config exists and exposes the effective local-model device policy as `auto` or `cpu`, without probing accelerators), `results` (`dashboard_results(item_keys="a,b")` = batch latest-row lookup, ≤200 keys),
 `corpus` (embeddings/affinity), `emoji_signals`
 (emoji→engagement taxonomy; `READ_EMOJIS` = non-meta engagement emojis only, used by the library read/hide partition).
 

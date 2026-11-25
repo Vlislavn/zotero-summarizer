@@ -35,7 +35,8 @@ from typing import Any, Callable
 from pydantic import BaseModel, Field, field_validator
 
 from zotero_summarizer.domain import normalize_reading_priority
-from zotero_summarizer.services._common import connect_sqlite_ro, html_to_text
+from zotero_summarizer.services._common import html_to_text
+from zotero_summarizer.services._io import connect_sqlite_ro
 
 
 LOGGER = logging.getLogger(__name__)

@@ -1,7 +1,7 @@
 """Launch-time PREWARM of the review fleet: pre-decide the top-N reading verdicts.
 
-Sibling of ``deep_review_prewarm`` — modeled 1:1 on its ``schedule_on_startup``
-pattern. On startup it spawns the single-flight ``fleet`` job in the background so
+Sibling of ``deep_review_prewarm``; both schedule through ``_flight.schedule_prewarm``.
+On startup it spawns the single-flight ``fleet`` job in the background so
 the Read-next top picks already carry a ``proposed_verdict`` the first time the
 user opens the library (Confirm/Override, not decide-from-scratch).
 
@@ -47,11 +47,7 @@ def schedule_on_startup(config: Any, app_state: Any) -> bool:
     """Spawn the prewarm worker when enabled; return whether it was scheduled (for
     the startup log). Skipped when ``prewarm_on_startup_k`` is 0 or deep review is
     disabled."""
-    k = resolve_prewarm_k(config)
-    if k <= 0 or not config.quality_review.enabled:
-        return False
-    _flight.run_in_background(lambda: _prewarm_worker(k))
-    return True
+    return _flight.schedule_prewarm(config, env_var=_ENV_PREWARM_K, worker=_prewarm_worker)
 
 
 __all__ = ["schedule_on_startup", "resolve_prewarm_k"]

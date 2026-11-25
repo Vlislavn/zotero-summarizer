@@ -135,7 +135,7 @@ def set_local_profile(
     model: str | None = None,
 ) -> dict[str, Any]:
     """Persist the shared local-profile resolution used by the CLI."""
-    from zotero_summarizer.services._common import read_config, write_user_config
+    from zotero_summarizer.services.config_io import read_config, write_user_config
 
     if profile_name not in LOCAL_PROFILES:
         raise ValueError(f"unknown local profile {profile_name!r}")

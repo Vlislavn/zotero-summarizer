@@ -3,7 +3,7 @@ from contextlib import closing
 from uuid import UUID
 
 from zotero_summarizer.storage import review_notes, review_questions
-from zotero_summarizer.storage.repositories import _connect_to
+from zotero_summarizer.storage.db_core import _connect_to
 
 
 def validate_mutation(request):

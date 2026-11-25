@@ -7,7 +7,7 @@ from tests.test_connection_task import connection_home, register
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models.connections import ConnectionSelection, ReplaceConnectionCredential
 from zotero_summarizer.services.llm import connections as task, connection_state as store
-from zotero_summarizer.services._common import write_json_atomic
+from zotero_summarizer.services._io import write_json_atomic
 
 
 def selection(registered, model='manual'):

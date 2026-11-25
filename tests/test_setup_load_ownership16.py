@@ -257,7 +257,7 @@ def test_api_cancellation_retains_dry_callback_ownership_and_hold(monkeypatch, b
 
 
 def test_sticky_hold_reconciles_persisted_ready_and_modes_but_not_hosted(monkeypatch, boundary):
-    from zotero_summarizer.services._common import read_config, write_user_config
+    from zotero_summarizer.services.config_io import read_config, write_user_config
     original = la.SetupAttempt()
     boundary.start(boundary.ticket(original))
     monkeypatch.setattr(doctor, "_RUNNERS", {key: lambda _, key=key: doctor._row(key, "ready", "synthetic")

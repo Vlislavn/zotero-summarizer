@@ -10,12 +10,13 @@ import stat
 import time
 from dataclasses import dataclass, fields
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 from zotero_summarizer.settings import Settings
 
 from .provenance import (ALIGNMENT, RETAINED_PATHS, canonical_bytes, declared_provenance,
-                         digest_manifest, source_record, timestamp_now, utc_iso, validate_manifest)
+                         digest_manifest, source_record, timestamp_now, unique_object, utc_iso, validate_manifest)
 from .sqlite_snapshot import capture_sqlite, inspect_snapshot
 
 DEFAULT_WALL_CAP_SECONDS = 60.0
@@ -47,17 +48,22 @@ class FreezeBudgets:
                 raise ValueError(f"{field.name} must be a positive integer <= {field.default}")
 
 
-def _budgets(value) -> FreezeBudgets:
+def coerce_budgets(value, cls, wall_cap_env: str):
+    """Budgets dataclass `cls` from None/instance/known-field dict; env sets the default wall cap."""
     # Validate even an overridden environment value; never hide malformed config.
-    wall = float(os.environ.get(WALL_CAP_ENV, DEFAULT_WALL_CAP_SECONDS))
-    default = FreezeBudgets(wall_cap_seconds=wall)
+    wall = float(os.environ.get(wall_cap_env, cls.wall_cap_seconds))
+    default = cls(wall_cap_seconds=wall)
     if value is None:
         return default
-    if isinstance(value, FreezeBudgets):
+    if isinstance(value, cls):
         return value
-    if type(value) is not dict or value.keys() - {field.name for field in fields(FreezeBudgets)}:
-        raise ValueError("budgets must be FreezeBudgets or a known-field dict")
-    return FreezeBudgets(**({"wall_cap_seconds": default.wall_cap_seconds} | value))
+    if type(value) is not dict or value.keys() - {field.name for field in fields(cls)}:
+        raise ValueError(f"budgets must be {cls.__name__} or a known-field dict")
+    return cls(**({"wall_cap_seconds": default.wall_cap_seconds} | value))
+
+
+def _budgets(value) -> FreezeBudgets:
+    return coerce_budgets(value, FreezeBudgets, WALL_CAP_ENV)
 
 
 class BudgetExceeded(ValueError):
@@ -258,7 +264,7 @@ def freeze_inputs(settings: Settings, destination: Path, *, cutoff: datetime, pr
         payload = canonical_bytes(manifest)
         if len(payload) > MAX_MANIFEST_BYTES:
             raise BudgetExceeded("frozen-input manifest byte budget exhausted")
-        from zotero_summarizer.services._common import atomic_write
+        from zotero_summarizer.services._io import atomic_write
 
         def write_manifest(path):
             guard.check()
@@ -273,15 +279,6 @@ def freeze_inputs(settings: Settings, destination: Path, *, cutoff: datetime, pr
         raise
 
 
-def _unique_keys(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate input manifest key")
-        result[key] = value
-    return result
-
-
 def verify_inputs(destination: Path) -> dict:
     """Validate shape, retained bytes and DB metadata; never follow source locators."""
     guard = _Guard(_budgets(None))
@@ -291,5 +288,5 @@ def verify_inputs(destination: Path) -> dict:
         raw = handle.read(MAX_MANIFEST_BYTES + 1)
     if len(raw) > MAX_MANIFEST_BYTES:
         raise BudgetExceeded("frozen-input manifest byte budget exhausted")
-    manifest = json.loads(raw, object_pairs_hook=_unique_keys)
+    manifest = json.loads(raw, object_pairs_hook=partial(unique_object, duplicate_message="duplicate input manifest key"))
     return _verify_retained(destination, manifest, guard, published=True)

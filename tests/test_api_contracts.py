@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from zotero_summarizer.storage import repositories as triage_db
+from zotero_summarizer.storage import db_core, repositories as triage_db
 import pytest
 from pydantic import ValidationError
 
@@ -45,7 +45,7 @@ def test_corpus_import_request_rejects_oversized_batches():
 
 
 def test_insert_feedback_events_upserts_duplicate_signal(monkeypatch, tmp_path):
-    monkeypatch.setattr(triage_db, "DB_PATH", tmp_path / "triage_history.db")
+    monkeypatch.setattr(db_core, "DB_PATH", tmp_path / "triage_history.db")
     triage_db.init_db()
 
     triage_db.insert_feedback_events(
@@ -79,7 +79,7 @@ def test_insert_feedback_events_upserts_duplicate_signal(monkeypatch, tmp_path):
 
 
 def test_get_latest_results_for_items_returns_latest_prediction(monkeypatch, tmp_path):
-    monkeypatch.setattr(triage_db, "DB_PATH", tmp_path / "triage_history.db")
+    monkeypatch.setattr(db_core, "DB_PATH", tmp_path / "triage_history.db")
     triage_db.init_db()
 
     triage_db.insert_result(

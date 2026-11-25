@@ -17,10 +17,10 @@ export function AuthCommand() {
 }
 
 export function RunButton({ run }) {
-  const { status, start, running, needsConsent } = run;
+  const { status, value, start, running, needsConsent } = run;
   const busy = running || start.isPending;
   return <Button className="min-h-11 shrink-0 disabled:!bg-sage-200 disabled:!text-forest-800 sm:min-h-10" disabled={busy || status.isPending} onClick={() => start.mutate(needsConsent)}>
-    {busy ? <span className="inline-flex items-center gap-2"><Spinner size="xs" color="teal" />Checking…</span>
+    {busy ? <span className="inline-flex items-center gap-2"><Spinner size="xs" color="teal" />{value?.kind === 'discussions' ? 'Loading discussions…' : 'Checking…'}</span>
       : needsConsent ? 'Allow & check channels' : 'Check channels'}
   </Button>;
 }
@@ -28,9 +28,10 @@ export function RunButton({ run }) {
 // Everything the run needs to say besides the button: consent line, progress, errors.
 export function RunStatus({ run }) {
   const { status, value, start, running, needsConsent } = run;
-  const code = start.error?.body?.error || (value?.state === 'error' ? value.error : null);
+  const own = value?.kind !== 'discussions';  // a «Load discussions» result is told beside its trend's button
+  const code = start.error?.body?.error || (own && value?.state === 'error' ? value.error : null);
   const known = failureText(code, value?.retry_at);
-  const warning = value?.state === 'reviewed' && value.retry_at ? partialText(value.retry_at) : null;
+  const warning = own && value?.state === 'reviewed' && value.retry_at ? partialText(value.retry_at) : null;
   return <>
     {needsConsent && <p className="rounded-xl border border-slate-200 p-3 text-sm leading-relaxed text-slate-700">{CONSENT_TEXT}</p>}
     {running && <div role="status" aria-live="polite" className="space-y-1.5 sm:max-w-md">

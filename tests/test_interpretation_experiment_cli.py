@@ -62,7 +62,7 @@ def test_actual_cli_uses_current_runtime_role_and_thinking_owners(strategy, tmp_
     import inspect
     from pathlib import Path
     from zotero_summarizer.cli import _interpretation
-    from zotero_summarizer.services import _common
+    from zotero_summarizer.services import config_io
     from zotero_summarizer.services.faithbench import _interpretation as runner
     from zotero_summarizer.services.llm import factory
 
@@ -71,7 +71,7 @@ def test_actual_cli_uses_current_runtime_role_and_thinking_owners(strategy, tmp_
     config.quality_review.chunk_strategy = strategy
     config.llm_enabled = True
     monkeypatch.setattr(_interpretation.Settings, 'load', lambda **kwargs: settings)
-    monkeypatch.setattr(_common, 'read_config', lambda path: config)
+    monkeypatch.setattr(config_io, 'read_config', lambda path: config)
     events = []
 
     def default(profile):

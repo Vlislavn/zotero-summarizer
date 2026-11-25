@@ -184,3 +184,14 @@ def owned_request(guard):
         guard.finish_request()
     finally:
         guard.end_request()
+
+
+def begin_owned_invocation(lock, request_owner):
+    """Take the single-owner invocation ``lock`` and open its request; release the lock on failure."""
+    if not lock.acquire(blocking=False):
+        raise RuntimeError("Verification client already has an owned invocation")
+    try:
+        return request_owner() if request_owner is not None else None
+    except BaseException:
+        lock.release()
+        raise

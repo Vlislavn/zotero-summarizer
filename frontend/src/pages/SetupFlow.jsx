@@ -191,7 +191,7 @@ export default function SetupFlow() {
 
   if (configQuery.isError && !draft) {
     return <div className="glass rounded-2xl border border-slate-200 p-5 space-y-3">
-      <h2 className="font-medium">Setup needs configuration recovery</h2>
+      <h1 className="font-medium">Setup needs configuration recovery</h1>
       <Banner kind="error">{humanizeError(configQuery.error)}</Banner>
       <p>Missing configuration can be created only with an explicit real model. Existing invalid configuration is never overwritten; repair the complete configuration and reload.</p>
       <a className="underline" href="/settings#ai-models">Open connection and configuration recovery</a>
@@ -203,7 +203,7 @@ export default function SetupFlow() {
   if (configQuery.isLoading || !draft) {
     return (
       <div className="glass rounded-2xl border border-slate-200 p-6 text-sm text-slate-500">
-        Preparing setup…
+        <h1 className="font-normal">Preparing setup…</h1>
       </div>
     );
   }
@@ -220,7 +220,7 @@ export default function SetupFlow() {
       <div className="glass rounded-2xl border border-slate-200 p-5 space-y-5">
         <header className="space-y-3">
           <div className="flex items-center justify-between gap-3">
-            <h2 ref={headingRef} tabIndex={-1} className="text-lg font-medium text-slate-900">Set up Zotero Summarizer</h2>
+            <h1 ref={headingRef} tabIndex={-1} className="text-lg font-medium text-slate-900">Set up Zotero Summarizer</h1>
             {step < 4 && (
               <Button variant="secondary" onClick={handleSkip} className="shrink-0">Skip for now</Button>
             )}

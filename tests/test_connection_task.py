@@ -8,7 +8,7 @@ from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models import AppState, GoalsConfig
 from zotero_summarizer.runtime import AppContext, RuntimeState, set_context
 from zotero_summarizer.settings import Settings
-from zotero_summarizer.services._common import write_user_config
+from zotero_summarizer.services.config_io import write_user_config
 
 
 @pytest.fixture

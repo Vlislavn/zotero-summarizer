@@ -12,7 +12,7 @@ import pytest
 from zotero_summarizer.api.routes.results import router
 from zotero_summarizer.domain import EXPLICIT_FEEDBACK_SIGNALS, TRIAGE_APPROVED_TAG, TRIAGE_REJECTED_TAG
 from zotero_summarizer.services import results
-from zotero_summarizer.storage import repositories as db
+from zotero_summarizer.storage import db_core, repositories as db
 
 
 def _event(item_id, signal):
@@ -22,7 +22,7 @@ def _event(item_id, signal):
 
 def _database(monkeypatch, tmp_path):
     path = tmp_path / "triage.db"
-    monkeypatch.setattr(db, "DB_PATH", path)
+    monkeypatch.setattr(db_core, "DB_PATH", path)
     db.init_db()
     return path
 

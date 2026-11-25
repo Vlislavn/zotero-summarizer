@@ -78,7 +78,7 @@ def test_http_scope_reaches_real_workers_once(client, monkeypatch, payload, expe
     from copy import deepcopy
     from tests.test_research_feed import _review
     from zotero_summarizer.runtime import get_context
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.config_io import read_config
     from zotero_summarizer.services.setup.bootstrap import _default_goals_config
     from zotero_summarizer.services.zotero import generated_notes
 

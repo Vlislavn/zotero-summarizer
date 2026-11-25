@@ -42,7 +42,7 @@ export default function TelegramToday({ headerAction = null }) {
     <RunStatus run={run} />
     <Async loading={today.isPending} error={today.error} empty={posts.length === 0
       && <p className="text-sm text-slate-600">No discussions yet. Press “Check channels” to read your selected channels (pick them in Telegram sources).</p>}>
-      <TelegramFeed data={data} />
+      <TelegramFeed data={data} run={run} />
     </Async>
   </section>;
 }

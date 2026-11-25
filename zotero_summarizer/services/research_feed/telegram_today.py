@@ -13,7 +13,7 @@ from datetime import datetime
 import logging
 import time
 
-from zotero_summarizer.services._common import now_iso_z, write_json_atomic
+from zotero_summarizer.services._io import now_iso_z, write_json_atomic
 from zotero_summarizer.services.research_feed.telegram_collect import collect_pages
 from zotero_summarizer.services.research_feed import telegram_history
 from zotero_summarizer.services.research_feed.telegram_selection import output_dir as _output_dir
@@ -165,4 +165,13 @@ def read_today(settings) -> dict:
     return value
 
 
-__all__ = ["build_today", "persist_today", "collect_and_persist", "read_today", "thread"]
+def read_page(settings) -> dict:
+    """``read_today`` plus each trend's «Load discussions» state (read-time only: never saved or archived)."""
+    from zotero_summarizer.services.research_feed import telegram_discussions
+
+    value = read_today(settings)
+    telegram_discussions.overlay(settings, value.get("trends") or {})
+    return value
+
+
+__all__ = ["build_today", "persist_today", "collect_and_persist", "read_today", "read_page", "thread"]

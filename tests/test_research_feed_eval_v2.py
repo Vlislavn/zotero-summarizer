@@ -23,7 +23,7 @@ def test_qualified_v2_uses_frozen_outputs_not_legacy_profile_or_native_replay(mo
     monkeypatch.setattr(evaluator, "ResearchProfile", forbidden)
     monkeypatch.setattr(runner, "_assess", forbidden)
     monkeypatch.setattr(runner, "_latest_rows", forbidden)
-    monkeypatch.setattr(runner, "load_profile", forbidden)
+    monkeypatch.setattr(runner, "ensure_profile", forbidden)
     result = evaluator.evaluate(payload)
 
     assert payload == before

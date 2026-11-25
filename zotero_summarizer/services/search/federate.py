@@ -12,6 +12,7 @@ exception from a channel propagates (fail-fast), it is not swallowed here.
 """
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from collections.abc import Callable
 import re
@@ -23,13 +24,82 @@ from zotero_summarizer.integrations.crossref import search_crossref
 from zotero_summarizer.integrations.europepmc import search_europepmc
 from zotero_summarizer.integrations.openreview import search_openreview
 from zotero_summarizer.integrations.semantic_scholar import search_semantic_scholar
-from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.models import GoalsConfig
+from zotero_summarizer.services._common import settings
+from zotero_summarizer.services._io import now_iso_z
 from zotero_summarizer.services.search._models import Candidate, Provenance
 from zotero_summarizer.services.search.dedup import to_version_families
 
 # A library candidate finder: takes the plan's library query, returns Candidates
 # (already corpus-resolved). None when no corpus/library is available.
 LibraryFinder = Callable[[str], list[Candidate]]
+
+LOGGER = logging.getLogger(__name__)
+
+# Process-lazy keyless OpenAlex for Search federation — built once, reused (an
+# OpenAlexClient owns an httpx pool; per-screen construction would leak one).
+_SEARCH_OPENALEX: Any = None
+
+
+def _search_openalex_client(app: Any, config: GoalsConfig) -> Any:
+    """OpenAlex for Search, wired INDEPENDENTLY of prestige (correction #11): reuse
+    the app's prestige client if present, else lazily build a keyless polite-pool
+    client so the broadest source contributes even when prestige is disabled."""
+    if app.openalex_client is not None:
+        return app.openalex_client
+    global _SEARCH_OPENALEX
+    if _SEARCH_OPENALEX is None:
+        from zotero_summarizer.integrations.openalex import OpenAlexClient
+        from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
+
+        cache = app.openalex_cache or OpenAlexCache(settings().corpus_db_path)
+        _SEARCH_OPENALEX = OpenAlexClient(cache, mailto=config.prestige.user_agent_email or None)
+    return _SEARCH_OPENALEX
+
+
+def _annotate_library_coverage(candidates: list[Candidate], reader: Any) -> None:
+    """Resolve coverage over every retained DOI/arXiv in each version family.
+
+    A hit owns its returned key. Only complete misses establish False; partial
+    lookup failures remain unknown. No reader or supported ID starts no lookup.
+    """
+    if reader is None:
+        return
+    for cand in candidates:
+        current = (cand.doi or None, cand.arxiv_id or None)
+        queries = [current] if any(current) else []
+        primary = {f"doi:{cand.doi}", f"arxiv:{cand.arxiv_id}"}
+        for key in cand.identifier_keys():
+            if key in primary:
+                continue
+            namespace, _, value = key.partition(":")
+            if namespace == "doi":
+                query = (value, None)
+            elif namespace == "arxiv":
+                query = (None, value)
+            else:
+                continue
+            if query not in queries:
+                queries.append(query)
+        if not queries:
+            continue
+        incomplete, existing = False, None
+        for doi, arxiv in queries:
+            if arxiv and ("%" in arxiv or "_" in arxiv):
+                incomplete = True
+                arxiv = None
+                if not doi:
+                    continue
+            try:
+                existing = reader.find_by_external_id(doi=doi, arxiv_id=arxiv)
+            except Exception as exc:  # noqa: BLE001 — external Zotero-read boundary, explicit unknown
+                incomplete = True
+                LOGGER.warning("library coverage lookup failed for %r; leaving unknown: %s", cand.title[:60], exc)
+                continue
+            if existing:
+                break
+        cand.in_library = True if existing else None if incomplete else False
+        cand.existing_zotero_key = existing or None
 
 
 def _stamp(cands: list[Candidate], *, source: str, variant: str, at: str) -> list[Candidate]:

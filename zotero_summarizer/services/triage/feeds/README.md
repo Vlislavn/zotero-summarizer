@@ -30,7 +30,7 @@ run_daemon_loop ─every N s→ run_daemon_tick (_tick)
 | file | responsibility |
 |---|---|
 | `__init__.py` | facade: re-exports the public + test-accessed API |
-| `_common.py` | constants, `TriagedCandidate`/`DaemonTickReport`, conn + config helpers (leaf) |
+| `_common.py` | constants, `_generate_zotero_key` (alphabet from `integrations._zotero_write_common.ZOTERO_KEY_ALPHABET`), `TriagedCandidate`/`DaemonTickReport`, conn + config helpers (leaf) |
 | `_triage.py` | abstract-only triage primitive + concurrent scoring + prestige re-score — incl. the cold-start author prior via `cold_start_policy_from_config` (an unknown author h-index stays `None`, including telemetry, and never becomes UI evidence); exact HackerNoon hosts select the practitioner prompt while retaining the common result/scoring path (accepts a `triage_llm` override — the backlog drain passes the optional `CUSTOM_*` provider) |
 | `_gate.py` | (gate-only rejects and near-threshold rejects now carry plain sentences instead of raw scores) Phase 1.13 classifier gate, counterfactual audit, background retrain. In `gate_only` mode an item the gate cannot score (still no title+abstract after the OpenAlex backfill in `model.predict`) has no LLM fallback, so it is returned as a terminal gate-reject `(item, None)` instead of a predictionless survivor — `record_tick_decisions` records it `gate_rejected:gate_unscorable:no_abstract` and marks it read, so one no-abstract item no longer crashes the whole drain. `install_gate()` is the **single source of truth** for "a fresh gate is live": atomic swap + immediate Today-slate rescore — both the daemon retrain (`_gate_retrain_worker`) and the UI `POST /api/admin/retrain` install through it, so the in-memory gate and the slate never drift from the on-disk artifact. `schedule_slate_rescore_async()` re-scores on a background thread (used at startup when a cached gate loads with an unchanged sha → no retrain fires). `install_gate` clears `RuntimeState.classifier_gate_error` on success and the retrain worker records it on failure, so the readiness probe reports WHY the gate is `None`. The background `_gate_retrain_worker` now threads `triage_db_path` into `train_and_save`, so the daemon retrain applies the SAME `hybrid_gt` verdict/outcome overlay as `/admin/retrain` (without it it trained on raw-CSV labels, missing user verdicts + the unchecked-add downgrade) |
 | `_daily.py` | advisory plateau selection: candidate scoring, black-swan allocation and full-text refine only; no automatic write, cutoff or rejection |
@@ -47,6 +47,13 @@ run_daemon_loop ─every N s→ run_daemon_tick (_tick)
 **Boundaries:** imports `model/` (gate, prestige, surprise), `zotero/` (pending),
 and `storage.feeds`; standard services rules. `_common` is the leaf — siblings
 import from it, never the reverse.
+
+`_tick_phases.mark_processed_read` collects IDs before writing. App RSS read
+state and its processed-row markers commit together, before the legacy Zotero
+path runs. Zotero uses the writer's backup-first lock retry; only a normal
+return (even zero updated rows) triggers a separate marker commit. An unavailable
+writer or a writer exception is logged and skips that commit, with no tick-level
+retry of the batch. App storage failures still propagate.
 
 Optional Zotero read-sync logs backup/retention filesystem failures and returns
 zero without interrupting the tick or replaying the batch. Markers may already be
@@ -104,3 +111,5 @@ The existing daemon training-ledger producer is retained with its original synth
 Retain original RSS partition consumption of the producer-owned private prefilter outcome, not generated tags.
 
 The existing question/native source stack carries the original post-commit materialization/verdict/recovery mirror callers. No new delivery controller or source-derived action is designed here.
+
+`_triage` sizes its pool with `services/llm/concurrency.effective_llm_concurrency`; `_tick` reads `services/model/quality_flags.rank_quality_first_enabled`.

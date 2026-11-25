@@ -30,7 +30,7 @@ from pathlib import Path
 from tempfile import mkdtemp
 from typing import Any
 
-from zotero_summarizer.services._common import atomic_write, now_iso_z
+from zotero_summarizer.services._io import atomic_write, now_iso_z
 from zotero_summarizer.services.model.classifier_store import (
     load_trained, model_path, read_metadata, write_archive,
 )

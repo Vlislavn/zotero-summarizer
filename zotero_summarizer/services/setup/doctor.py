@@ -14,12 +14,9 @@ from urllib.parse import urlsplit
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models.providers import STAGES, ProviderConfig, ProviderType, resolve_stage
-from zotero_summarizer.services._common import (
-    read_config,
-    read_json_or_empty,
-    state,
-    write_json_atomic,
-)
+from zotero_summarizer.services._common import state
+from zotero_summarizer.services._io import read_json_or_empty, write_json_atomic
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services.setup.doctor_environment import (
     _database,
     _environment,

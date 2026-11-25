@@ -12,12 +12,13 @@ import json
 import threading
 from contextlib import contextmanager
 from filelock import FileLock
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.runtime import memoized, request_memo
-from zotero_summarizer.services._common import LOGGER, now_iso_z, settings, write_json_atomic
+from zotero_summarizer.services._common import LOGGER, settings
+from zotero_summarizer.services._io import now_iso_z, write_json_atomic
 
 _CACHE_FILENAME = "deep_reviews.json"
 _CACHE_LOCK = threading.RLock()   # guards cache reads, quarantine, and read-merge-write
@@ -226,20 +227,22 @@ def get_usable_review(item_key: str) -> dict[str, Any] | None:
     return _project_usable(_read_all().get(item_key), item_key)
 
 
+def _project_all(project: Callable[[dict[str, Any] | None, str], dict[str, Any] | None]) -> dict[str, Any]:
+    """Read every stored review, prime PDF identities once, keep what ``project`` returns."""
+    from zotero_summarizer.services.library._review_identity import prime_pdf_paths
+
+    entries = _read_all()
+    prime_pdf_paths(entries)
+    return {key: projected for key, entry in entries.items()
+            if (projected := project(entry, key)) is not None}
+
+
 def usable_reviews() -> dict[str, Any]:
     """Current + outdated (valid) reviews, each tagged with ``review_freshness``.
     Display/Today seam: the strict ``current_reviews`` stays for correctness-critical
     consumers (Zotero note sync, regeneration prewarm)."""
-    from zotero_summarizer.services.library._review_identity import prime_pdf_paths
-
-    def compute() -> dict[str, Any]:
-        entries = _read_all()
-        prime_pdf_paths(entries)
-        return {key: projected for key, entry in entries.items()
-                if (projected := _project_usable(entry, key)) is not None}
-
     with request_memo():
-        return memoized("usable_reviews", compute)
+        return memoized("usable_reviews", lambda: _project_all(_project_usable))
 
 
 def get_current_review(item_key: str) -> dict[str, Any] | None:
@@ -266,16 +269,8 @@ def _project_current(entry: dict[str, Any] | None, key: str) -> dict[str, Any] |
 
 def current_reviews() -> dict[str, Any]:
     """Current projected reviews. Within a ``request_memo`` scope computed once (read-only result)."""
-    from zotero_summarizer.services.library._review_identity import prime_pdf_paths
-
-    def compute() -> dict[str, Any]:
-        entries = _read_all()
-        prime_pdf_paths(entries)
-        return {key: projected for key, entry in entries.items()
-                if (projected := _project_current(entry, key)) is not None}
-
     with request_memo():  # one pass hashes each PDF / resolves each library item at most once
-        return memoized("current_reviews", compute)
+        return memoized("current_reviews", lambda: _project_all(_project_current))
 
 
 def current_reviews_for_keys(item_keys: list[str]) -> dict[str, Any]:

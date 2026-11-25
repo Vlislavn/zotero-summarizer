@@ -1,4 +1,4 @@
-"""Spawn the one-shot Telegram child (auth or digest); its receipt is verified before the parent proceeds."""
+"""Spawn the one-shot Telegram child (auth, digest or comments); its receipt is verified before the parent proceeds."""
 from __future__ import annotations
 
 import json
@@ -35,10 +35,10 @@ def _verify(settings, purpose: str, receipt: dict) -> dict:
     return receipt  # digest persists telegram-today.json in-child; there is no export bundle
 
 
-def run_child(settings, purpose: str) -> dict:
+def run_child(settings, purpose: str, source_ids=()) -> dict:
     from zotero_summarizer.integrations.telegram_session import _budgets
 
-    if purpose not in {"auth", "digest"}:
+    if purpose not in {"auth", "digest", "comments"}:
         raise ValueError("invalid Telegram process purpose")
     if purpose == "auth":
         require_terminal()
@@ -52,6 +52,8 @@ def run_child(settings, purpose: str) -> dict:
         command = [sys.executable, "-I", "-B", "-c", reentry, str(source_root), "research-feed",
                    "_telegram-child", "--purpose", purpose, "--receipt", str(path),
                    "--project-root", str(settings.project_root)]
+        if purpose == "comments":
+            command += ["--source-ids", ",".join(source_ids)]
         completed = subprocess.run(
             command, cwd=source_root, close_fds=True, timeout=wall + reserve,
             stdin=None if purpose == "auth" else subprocess.DEVNULL,
@@ -62,7 +64,7 @@ def run_child(settings, purpose: str) -> dict:
             failure = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
             if failure is not None and failure.get("error") == "optional_dependency_missing":
                 raise OptionalTelegramMissing("Telegram requires the optional telegram extra")
-            if purpose == "digest":
+            if purpose in {"digest", "comments"}:
                 raise TelegramChildFailed(failure.get("result", {}).get("status") if failure else None)
             if failure is not None and "result" in failure:
                 print(json.dumps({"status": "telegram_incomplete", "result": failure["result"]}, indent=2))

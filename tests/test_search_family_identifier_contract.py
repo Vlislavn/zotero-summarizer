@@ -4,10 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests._zotero_fixtures import add_library_item, build_zotero_db
 from zotero_summarizer.integrations._zotero_read_lookup import ZoteroLookupMixin
 from zotero_summarizer.services.search._models import Candidate
 from zotero_summarizer.services.search.dedup import to_version_families
-from zotero_summarizer.services.search.pipeline import _annotate_library_coverage
+from zotero_summarizer.services.search.federate import _annotate_library_coverage
 
 
 @pytest.mark.parametrize("invalid", [None, "doi:10.1234/a", [1], [""], ["title:Same"], ["doi:"]])
@@ -90,24 +91,14 @@ def test_unsupported_identifiers_do_not_trigger_a_native_read():
 
 
 @pytest.fixture
-def native_reader():
-    connection = sqlite3.connect(":memory:")
+def native_reader(tmp_path):
+    db_path = build_zotero_db(tmp_path / "zotero")
+    add_library_item(db_path, item_key="UNRELATED", title="Unrelated", url="https://example.org/unrelated")
+    add_library_item(db_path, item_key="SAFEKEY1", title="Saved by DOI", doi="10.1234/saved")
+    add_library_item(db_path, item_key="ARXIV001", title="Saved by arXiv",
+                     url="https://arxiv.org/abs/2401.01234v3")
+    connection = sqlite3.connect(db_path)
     connection.row_factory = sqlite3.Row
-    connection.executescript("""
-        CREATE TABLE libraries(libraryID INTEGER, type TEXT);
-        INSERT INTO libraries VALUES (1, 'user');
-        CREATE TABLE items(itemID INTEGER, libraryID INTEGER, key TEXT);
-        INSERT INTO items VALUES (1, 1, 'UNRELATED'), (2, 1, 'SAFEKEY1'), (3, 1, 'ARXIV001');
-        CREATE TABLE itemData(itemID INTEGER, fieldID INTEGER, valueID INTEGER);
-        INSERT INTO itemData VALUES (1, 1, 1), (2, 2, 2), (3, 1, 3);
-        CREATE TABLE fields(fieldID INTEGER, fieldName TEXT);
-        INSERT INTO fields VALUES (1, 'url'), (2, 'DOI');
-        CREATE TABLE itemDataValues(valueID INTEGER, value TEXT);
-        INSERT INTO itemDataValues VALUES
-            (1, 'https://example.org/unrelated'), (2, '10.1234/saved'),
-            (3, 'https://arxiv.org/abs/2401.01234v3');
-        CREATE TABLE deletedItems(itemID INTEGER);
-    """)
 
     class Reader(ZoteroLookupMixin):
         def _execute_read(self, read):

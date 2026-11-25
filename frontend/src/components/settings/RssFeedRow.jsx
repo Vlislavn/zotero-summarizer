@@ -7,10 +7,10 @@ const checkedAt = (value) => when(/[zZ]|[+-]\d\d:?\d\d$/.test(value) ? value : `
 // One compact RSS subscription row: name, where/when/how much, Edit; Delete lives
 // behind a "More" menu (never a red button on every row) and still asks to confirm.
 // Only the host is shown; the full URL (often a long arXiv query) is the hover title and the Edit form.
-export const feedHost = url => { try { return new URL(url).host; } catch { return String(url || ''); } };
+const feedHost = url => { try { return new URL(url).host; } catch { return String(url || ''); } };
 
 // Plain-language reading of the saved last-error text; the raw text stays in the hover title.
-export function plainFeedIssue(issue) {
+function plainFeedIssue(issue) {
   const text = String(issue || '');
   if (text.startsWith('RssNamespaceWarning:')) return 'Feed has minor formatting problems; it still works.';
   if (/^RssUrlRejected: Invalid RSS\/Atom feed document/.test(text)) return 'This address is not an RSS feed.';

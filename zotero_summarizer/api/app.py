@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+import sys
 from typing import AsyncIterator
 
 from fastapi import FastAPI
@@ -83,7 +84,10 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        set_context(AppContext(settings=effective_settings))
+        context = AppContext(settings=effective_settings)
+        if mobile_access is not None and sys.platform == "darwin":
+            context.state.forced_local_model_device = "cpu"
+        set_context(context)
         # Phase 0: make a fresh checkout runnable with no manual `cp`/`migrate`.
         # Idempotent + safe (never overwrites existing files); must run BEFORE
         # startup, which fails fast on a missing goals.yaml.

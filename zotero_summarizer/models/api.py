@@ -5,7 +5,7 @@ from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from zotero_summarizer.domain import normalize_reading_priority
+from zotero_summarizer.domain import normalize_reading_priority, unique_non_empty_strings
 from zotero_summarizer.models.config import GoalsConfig
 
 
@@ -49,6 +49,7 @@ class ErrorResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     config_loaded: bool
+    local_model_device: Literal["auto", "cpu"] = "auto"
     draft_model: Optional[str] = None
     refine_model: Optional[str] = None
     api_base: Optional[str] = None
@@ -211,21 +212,6 @@ class ZoteroItemTagUpdateRequest(BaseModel):
     remove_tags: List[str] = Field(default_factory=list)
     force: bool = False
 
-    @staticmethod
-    def _normalize_tags(value: List[str]) -> List[str]:
-        cleaned: List[str] = []
-        seen: set[str] = set()
-        for raw in value:
-            tag = str(raw or "").strip()
-            if not tag:
-                continue
-            folded = tag.casefold()
-            if folded in seen:
-                continue
-            seen.add(folded)
-            cleaned.append(tag)
-        return cleaned
-
     @field_validator("add_tags", "remove_tags", mode="before")
     @classmethod
     def _coerce_tag_lists(cls, value: Any) -> List[str]:
@@ -243,7 +229,7 @@ class ZoteroItemTagUpdateRequest(BaseModel):
     @field_validator("add_tags", "remove_tags")
     @classmethod
     def _normalize_tag_lists(cls, value: List[str]) -> List[str]:
-        return cls._normalize_tags(value)
+        return unique_non_empty_strings(value)
 
     @model_validator(mode="after")
     def _ensure_non_empty_update(self) -> "ZoteroItemTagUpdateRequest":

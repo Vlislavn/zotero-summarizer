@@ -9,7 +9,8 @@ import uuid
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models.research_feed import TelegramSourceSettings
-from zotero_summarizer.services._common import read_config, now_iso_z, write_json_atomic
+from zotero_summarizer.services._io import now_iso_z, write_json_atomic
+from zotero_summarizer.services.config_io import read_config
 from zotero_summarizer.services._adapters import require_loopback_endpoint
 from zotero_summarizer.services.research_feed import profile as profiles, telegram_processing, telegram_progress, telegram_selection
 from zotero_summarizer.services.research_feed.telegram_selection import output_dir as _output_dir
@@ -19,7 +20,7 @@ STALE_SECONDS = 900  # the child is killed after wall+reserve (<=~620 s); a 'col
 
 
 def sources(settings):
-    profile = profiles.load_profile(settings.data_dir, persist_default=False)
+    profile = profiles.load_profile(settings.data_dir)
     config = read_config(settings.config_path, settings.calibration_path)
     local_names, providers = [], []
     for provider in config.llm_routing.providers:
@@ -98,7 +99,7 @@ def status(settings):
         value = json.loads(path.read_text(encoding="utf-8"))
         # Closed projection: no receipt/session/path/account-owner fields enter HTTP.
         out = {key: value[key] for key in ("state", "connection", "verified_at", "updated_at", "operation_id",
-                                           "error", "started_at", "retry_at") if key in value}
+                                           "error", "started_at", "retry_at", "kind", "topic") if key in value}
         if _stale(value):
             out.update(state="error", error="interrupted")
         out["running"] = out.get("state") == "collecting"
@@ -129,7 +130,7 @@ def begin(settings, *, run_collect=None):
     dedicated Telegram child. The offline harness injects a fake collector. ``execute`` never
     raises: it records ``reviewed`` or ``error`` in operation.json. The caller holds ``_exclusive``.
     """
-    profile = profiles.load_profile(settings.data_dir, persist_default=False)
+    profile = profiles.load_profile(settings.data_dir)
     if not telegram_selection.targets(profile):
         raise APIError("telegram_sources_required", "Save at least one Telegram source", status_code=409)
     config = read_config(settings.config_path, settings.calibration_path)
@@ -138,11 +139,38 @@ def begin(settings, *, run_collect=None):
     except ValueError:
         raise APIError("telegram_local_required",
                        "Select an enabled Telegram provider and model (non-local needs your consent)", status_code=409) from None
+
+    def collect():
+        run = run_collect
+        if run is None:
+            from zotero_summarizer.services.research_feed import telegram_live
+            run = telegram_live.collect
+        run(settings, profile, config)
+    return _publish(settings, collect)
+
+
+def begin_discussions(settings, topic_id, source_ids, *, run_collect=None):
+    """Like ``begin`` for «Load discussions»: no sources/model requirement (tokens 0); a flood-wait window refuses first."""
+    retry_at = _retry_at(settings)
+    if retry_at:
+        raise APIError("deferred", "Telegram asked to wait", status_code=409, details={"retry_at": retry_at})
+
+    def collect():
+        run = run_collect
+        if run is None:
+            from zotero_summarizer.services.research_feed import telegram_live
+            run = telegram_live.load_discussions
+        run(settings, source_ids)
+    return _publish(settings, collect, kind="discussions", topic=topic_id)
+
+
+def _publish(settings, collect, **meta):
+    """Publish the 'collecting' state (``meta``: what the job is) and return ``execute()`` that runs ``collect()``."""
     path = _output_dir(settings) / "operation.json"
     if path.is_symlink():
         raise ValueError("Telegram operation state cannot be a symlink")
     state = {"operation_id": uuid.uuid4().hex, "state": "collecting", "connection": "unknown",
-             "verified_at": None, "error": None, "pid": os.getpid(), "started_at": now_iso_z()}
+             "verified_at": None, "error": None, "pid": os.getpid(), "started_at": now_iso_z(), **meta}
 
     def update(**values):
         state.update(values, updated_at=now_iso_z())
@@ -153,11 +181,7 @@ def begin(settings, *, run_collect=None):
 
     def execute():
         try:
-            collect = run_collect
-            if collect is None:
-                from zotero_summarizer.services.research_feed import telegram_live
-                collect = telegram_live.collect
-            collect(settings, profile, config)
+            collect()
             update(state="reviewed", connection="verified", verified_at=now_iso_z(), retry_at=_retry_at(settings))
         except Exception as error:
             code = getattr(error, "code", None)

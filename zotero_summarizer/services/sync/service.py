@@ -30,6 +30,9 @@ _PAPER_FIELDS = (
     "quality_grade",
     "quality_band",
     "proposed_verdict",
+    "read_decision",
+    "estimated_read_minutes",
+    "has_code",
 )
 
 

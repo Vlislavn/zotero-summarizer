@@ -11,7 +11,7 @@ from typing import Any
 
 
 from zotero_summarizer.domain import PRIORITY_TO_RELEVANCE
-from zotero_summarizer.services._common import now_iso_z as now_iso
+from zotero_summarizer.services._io import now_iso_z as now_iso
 
 AUDIT_PRIORITY_NAMES = ("dont_read", "could_read", "should_read", "must_read")
 # Single source of truth (domain) — kept under the legacy name for importers.

@@ -2,8 +2,8 @@
 
 The app commits a deliberate verdict to ``label_verdicts`` first and mirrors a
 ``label:<priority>`` tag to Zotero when possible. This module owns the reverse
-path: detecting a direct Zotero/iPad edit and reconciling it into the app's
-current-state store while ``interaction-events.jsonl`` keeps the trajectory.
+path: reconciling a Zotero/iPad ``label:*`` tag into the app's
+current-state store (never over a user verdict) while ``interaction-events.jsonl`` keeps the trajectory.
 
 The label is the **highest-precedence** signal: when present on a library item it
 overrides emoji/annotation/note engagement scoring in
@@ -46,10 +46,14 @@ class ReconcileCounts(NamedTuple):
                   verdict (you re-labelled in Zotero — a drift signal).
     ``removed`` — verdicts retracted because the ``label:*`` tag was deleted in
                   Zotero (you changed your mind by removing the tag).
+    ``differing`` — read-only report, nothing written: tags that differ from the
+                paper's in-app user verdict (``item_key``, ``tag``,
+                ``user_priority``, ``verdict_key``, ``verdict_at``).
     """
     synced: int
     changed: int
     removed: int
+    differing: tuple[dict[str, str], ...] = ()
 
 
 def detect_label(tags: list[str]) -> str | None:
@@ -75,8 +79,9 @@ def reconcile_label_verdicts(
 ) -> ReconcileCounts:
     """Two-way sync of Zotero ``label:<priority>`` tags into ``label_verdicts``.
 
-    A direct Zotero edit wins when reconciliation observes it. ``label_verdicts``
-    is the operational current-state cache read by Annotate and ``hybrid_gt``;
+    A Zotero tag never overrides an in-app user verdict; it creates or updates only the
+    tag-sourced / machine row of its paper.
+    ``label_verdicts`` is the operational current-state cache read by Annotate and ``hybrid_gt``;
     the app-owned interaction log is the durable decision trajectory. This is a
     bidirectional current-label bridge, not a claim that either mirror contains
     the other's full history.
@@ -85,7 +90,14 @@ def reconcile_label_verdicts(
        :class:`~services.golden.goldenset.GoldenSample` rows, duck-typed to avoid
        a circular import — each needs ``gold_signal_tier``, ``item_key``,
        ``gold_priority_inferred``): an item carrying a ``label:*`` tag (tier
-       ``user_label``) writes/updates its verdict. Idempotent (in-sync rows skip).
+       ``user_label``) is judged against its WHOLE alias family (``feed:g:`` and
+       Zotero key). An in-app user verdict anywhere in the family (origin other than
+       ``zotero_label``) is never changed (the app's own mirrored tag, or a stale
+       one, must not revert it); a differing tag is only reported in ``differing``.
+       Otherwise the tag fills the family: no verdict -> one new row; a tag-sourced
+       or machine-only (auto_quality / machine_add) row -> updated in place (origin
+       ``zotero_label``), keeping its comment, ``proposal_json`` and ``reasons_json``.
+       Idempotent; never creates a second row for a paper.
     2. **Retract** (user-confirmed 2026-06): a verdict whose ``label:*`` tag was
        *deleted* in Zotero is dropped — but SAFELY: only when the item is present,
        live (libraryID=1, not trashed) and carries no ``label:*`` tag. A missing /
@@ -98,43 +110,54 @@ def reconcile_label_verdicts(
     run_migrations(triage_db_path, "triage", TRIAGE_MIGRATIONS)
     synced = 0
     changed = 0
+    differing: list[dict[str, str]] = []
     states = label_mirrors.states(triage_db_path)
     samples = list(samples)
     live = _live_labels(zotero_db_path, {sample.item_key for sample in samples if sample.gold_signal_tier == "user_label"})
     retracted = _retracted_priorities(states, zotero_db_path, triage_db_path)
+    resolver = repositories.label_alias_resolver(triage_db_path)
     for sample in samples:
         if sample.gold_signal_tier != "user_label":
             continue
         priority = retracted.get(sample.item_key, detect_label(live.get(sample.item_key, [])))
         if priority is None:
             continue
-        existing = repositories.get_label_verdict(triage_db_path, sample.item_key)
-        if (
-            existing is not None
-            and existing["user_priority"] == priority
-            and existing.get("source") == VERDICT_SOURCE_USER
-        ):
+        family = repositories.list_label_verdict_family(triage_db_path, sample.item_key, resolver)
+        owner = next((row for row in family if row["source"] == VERDICT_SOURCE_USER
+                      and row["original_derived_priority"] != ZOTERO_LABEL_ORIGIN), None)
+        if owner is not None:
+            if owner["user_priority"] != priority:
+                differing.append({
+                    "item_key": sample.item_key, "tag": priority, "user_priority": owner["user_priority"],
+                    "verdict_key": owner["item_key"], "verdict_at": owner["created_at"],
+                })
+            continue
+        # No in-app human verdict in the family: update its tag-sourced / machine row in place.
+        machine = next((row for row in family if row["source"] == VERDICT_SOURCE_USER), family[0] if family else None)
+        if machine is not None and machine["source"] == VERDICT_SOURCE_USER and machine["user_priority"] == priority:
             continue
         row_id = label_verdicts.set_label_verdict(
             triage_db_path,
-            item_key=sample.item_key,
+            item_key=machine["item_key"] if machine else sample.item_key,
             original_derived_priority=ZOTERO_LABEL_ORIGIN,
             user_priority=priority,
             surface="zotero_reconcile",
             event_source="zotero",
-            comment=existing["comment"] if existing is not None else "",
+            comment=machine["comment"] if machine else "",
             transition_comment="",
-            history_known=existing is not None,
+            history_known=machine is not None,
             expected_revision=states.get(sample.item_key, {}).get("revision", 0),
+            reasons_json=machine["reasons_json"] if machine else None,
+            proposal_json=machine["proposal_json"] if machine else None,
         )
         if row_id is None:
             continue
-        if existing is not None and existing["user_priority"] != priority:
+        if machine is not None and machine["user_priority"] != priority:
             changed += 1
         synced += 1
 
     removed = _retract_removed_labels(zotero_db_path, triage_db_path)
-    return ReconcileCounts(synced=synced, changed=changed, removed=removed)
+    return ReconcileCounts(synced=synced, changed=changed, removed=removed, differing=tuple(differing))
 
 
 def _retracted_priorities(states: dict[str, dict], zotero_db_path: Path, triage_db_path: Path) -> dict[str, str | None]:
@@ -229,7 +252,7 @@ def _live_labels(zotero_db_path: Path, keys: set[str]) -> dict[str, list[str]]:
     """``{item_key: label_tags}`` for keys that are PRESENT + live in Zotero
     (libraryID=1, not trashed). Keys absent from the result are missing /
     unreadable / trashed — callers must NOT retract those."""
-    from zotero_summarizer.services._common import connect_sqlite_ro
+    from zotero_summarizer.services._io import connect_sqlite_ro
 
     out: dict[str, list[str]] = {}
     if not keys:
