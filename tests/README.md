@@ -25,6 +25,7 @@ the check/publish flow and PR rules: [CONTRIBUTING.md](../CONTRIBUTING.md#check-
 |---|---|
 | Project | A session-owned temporary project keeps collection from loading the real `.env`; each test gets its own `ZOTERO_SUMMARIZER_HOME` (`tmp_path`) |
 | Runtime | The process-global application context is reset per test |
+| Zotero | `ZOTERO_DATA_DIR` points at a missing per-test directory, so no code path reads the owner's `~/Zotero`; a test that needs a library builds one (`_zotero_fixtures.build_zotero_db`) and points at it |
 | Credentials | `*_API_KEY` / `*_TOKEN` variables and OS-keyring reads are hidden |
 | Network | IPv4/IPv6 `connect` raises unless an owned integration fixture replaces the guard |
 | Models | `onprem` is stubbed and the corpus encoder is a test double; other integrations are controlled per test |

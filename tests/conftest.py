@@ -89,6 +89,8 @@ def _isolate_app_and_network(monkeypatch, tmp_path):
     existing_handlers = set(handlers) | _handlers_on_other_loggers(LOGGER)
 
     monkeypatch.setenv("ZOTERO_SUMMARIZER_HOME", str(tmp_path))
+    # The owner's ~/Zotero is never read: a test that needs Zotero builds and points at its own.
+    monkeypatch.setenv("ZOTERO_DATA_DIR", str(tmp_path / "zotero-not-configured"))
     monkeypatch.setattr(runtime, "_context", None)
     for name in os.environ:
         if name.endswith(("_API_KEY", "_TOKEN")):
