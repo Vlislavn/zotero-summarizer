@@ -49,6 +49,7 @@ class ErrorResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     config_loaded: bool
+    local_model_device: Literal["auto", "cpu"] = "auto"
     draft_model: Optional[str] = None
     refine_model: Optional[str] = None
     api_base: Optional[str] = None

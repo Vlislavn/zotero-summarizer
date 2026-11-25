@@ -12,6 +12,7 @@ from typing import Any, Callable  # noqa: F401
 
 import numpy as np  # noqa: F401
 
+from zotero_summarizer.runtime import local_model_device_override
 from zotero_summarizer.services.model import classifier_const as const
 from zotero_summarizer.services.model._text import paper_text
 from zotero_summarizer.services.model.classifier_const import EMBEDDING_DIM, LOGGER, _SCHEMA
@@ -42,6 +43,9 @@ def _select_device(torch: Any) -> str:
     """Pick the fastest available device for encoder inference: Apple-Silicon
     MPS, then CUDA, then CPU. A small (~0.5GB) encoder runs comfortably on the
     GPU and is far faster there than on CPU for the per-tick gate batch."""
+    override = local_model_device_override()
+    if override is not None:
+        return override
     if torch.backends.mps.is_available():
         return "mps"
     if torch.cuda.is_available():

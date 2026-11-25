@@ -1,20 +1,24 @@
 """Acquire OA PDFs and attach them to Zotero, backup-first and non-interactively.
 
-Today Add and whole-library retry share this engine and can reuse a deep-review path.
+Today Add, Search Add, Apply-approved and whole-library retry share this engine and can reuse a deep-review path.
 """
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.integrations.pdf_fetch import valid_pdf_path
-from zotero_summarizer.services.library import _pdf_acquire
+from zotero_summarizer.integrations.zotero_read import ZoteroReader
+from zotero_summarizer.services._common import settings
+from zotero_summarizer.services.library import _pdf_acquire, deep_review
 from zotero_summarizer.services.zotero.zotero import (
     get_zotero_reader_or_raise,
     get_zotero_writer_or_raise,
 )
 
+LOGGER = logging.getLogger(__name__)
 _ATTACH_TITLE = "Full Text PDF"
 
 _LOCK = threading.Lock()
@@ -135,6 +139,30 @@ def fetch_fulltext_for_items(items: list[dict[str, Any]], *, force: bool = False
         row["status"] = f"attached_{row['status'][len('ready_'):]}" if index in applied else "write_failed"
         outcomes.append(row)
     return _summary(outcomes, result.get("backup_path"))
+
+
+def attach_best_effort(item_keys: list[str]) -> dict[str, Any]:
+    """Attach a cached-review or newly acquired OA PDF to just-added items. Call after
+    the Add committed; never raises. A failure or ``zotero_running`` is logged at INFO
+    and returned as ``{"error": ...}``; success is the ``fetch_fulltext_for_items`` summary."""
+    if not item_keys:
+        return {"attached": 0}
+    try:
+        reader = ZoteroReader(settings().zotero_data_dir)
+        urls = reader.get_field_values("url")
+        dois = reader.get_field_values("DOI")
+        pdf_paths = reader.get_pdf_paths(item_keys)  # a linked existing item may already hold a PDF
+        summary = fetch_fulltext_for_items([
+            {
+                "item_key": key, "has_pdf": bool(pdf_paths.get(key)), "url": urls.get(key, ""), "doi": dois.get(key, ""),
+                "cached_acquisition": (deep_review.get_cached_review(key) or {}).get("acquired_pdf"),
+            }
+            for key in item_keys
+        ])
+    except Exception as exc:  # noqa: BLE001 — best-effort; the add already succeeded
+        summary = {"attached": 0, "error": f"{type(exc).__name__}: {exc}"}
+    LOGGER.info("full-text attach after add: %s", summary.get("error") or summary.get("outcomes"))
+    return summary
 
 
 def fetch_fulltext_bulk(*, force: bool = False) -> dict[str, Any]:

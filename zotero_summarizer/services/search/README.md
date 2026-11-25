@@ -133,6 +133,13 @@ run_screen ─save→ ResearchSession(status=screened)                          
 - Check-write-stamp runs under the session lock via `session.materialize_once`, so concurrent Adds write once.
   An existing coverage hit reuses `existing_zotero_key` (no writer, no plan); either path stamps
   `materialized_zotero_key`. Re-add returns `already_added`.
+- Before creating, `_do_write` re-asks the live library (`library/existing_item.existing_library_key`: DOI → arXiv id →
+  title+year), not the session's coverage snapshot; a hit is reused like a coverage hit (`already_added`, nothing
+  written). Skipped when a plan is retained (that retry owns its key). A lookup failure proceeds with the Add.
+- Before writing a NEW item, `library/topic_filing.topic_paths(title, abstract)` picks topic leaves (Jev, Settings → Checklist engine; `[]` = Inbox only) and they are added by the same atomic write as `matched_collections`; the response carries `filed` (leaf names, `[]` when none).
+- After a NEW item is added (after the session lock, never for `already_added`) `fulltext.attach_best_effort`
+  tries to attach an open-access PDF; the Add never fails or rolls back for it. The response carries
+  `fulltext` (the outcome string, e.g. `attached_arxiv`, `no_oa_source`, `zotero_running` or an error text).
 - A new item first saves `planned_zotero_key` (eight ASCII uppercase letters/digits) in the session before
   backup/native work; a failed prewrite save dispatches nothing. Native or finalization failure retains the
   plan and the retry reuses the writer's existing-key no-op. A plan is not coverage or a success receipt.

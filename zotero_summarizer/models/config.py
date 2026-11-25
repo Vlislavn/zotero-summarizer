@@ -365,6 +365,9 @@ class GoalsConfig(BaseModel):
     # disagreement check. Off by default; Local = URL of a server on this machine; Cloud = the hosted service.
     checklist_engine: Literal["off", "local", "cloud"] = "off"
     checklist_local_url: str = "http://127.0.0.1:8766/v1/systemone"
+    # Settings "File new papers into topics": a newly Added paper also lands in the topic leaves the Checklist engine
+    # picks from data/topics/tree.json (no engine / no tree / unsure → Inbox only).
+    topic_filing_enabled: bool = True
     llm: LLMConfig
     # Per-stage provider+model routing. Optional in goals.yaml: when absent it is
     # synthesized from the legacy ``llm:`` block below (see ``_synthesize_routing``)
@@ -458,6 +461,7 @@ USER_OWNED_KEYS: frozenset[str] = frozenset(
         "review_depth",
         "checklist_engine",
         "checklist_local_url",
+        "topic_filing_enabled",
         "llm",
         "llm_routing",
         "university_access",

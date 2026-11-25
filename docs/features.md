@@ -81,7 +81,7 @@ path: HackerNoon tag feeds (e.g. `https://hackernoon.com/tagged/ai-agents/feed`,
 Search by topic and confirmed constraints to get deduplicated candidates and selected
 reviews. Result links are real web or identifier addresses, never guessed from titles.
 Adding a result to Zotero is always your explicit action; after an uncertain Add, recovery
-reuses the same planned item instead of creating a duplicate. Provider diagnostics tell an
+reuses the same planned item instead of creating a duplicate. Every Add (Search, Today, Feed review) first checks the library — same DOI, same arXiv id, or same title and year (±1) — and links the paper you already have instead of creating a copy; the existing item is not changed. After an Add (also Today's and Feed review's Apply approved) an open-access PDF is attached to the new item when one exists; if none is found or the network is off, the Add still succeeds without a PDF. When a Checklist engine is on (Settings → Checklist engine, local or cloud), a new Add is also filed into up to three topic folders it picks from your topic tree (`data/topics/tree.json`; Search Add shows them as `filed`); when the engine is off, unsure or unreachable, the paper lands in Inbox only and the Add is never blocked. Provider diagnostics tell an
 empty result apart from a failure but say nothing about relevance or complete coverage. [Code](../zotero_summarizer/services/search/) · [Tests](../tests/test_search_materialize_recovery.py).
 
 ### Related saved papers
@@ -202,6 +202,14 @@ note enters Pending only after its review is published, and staging it is not "s
 Zotero". When a write's outcome is uncertain, the app shows it as unconfirmed and never
 replays it automatically; because the app and Zotero keep separate databases, a partial
 write may need repair in Zotero. [Code](../zotero_summarizer/services/zotero/) · [Tests](../tests/test_pending_confirmation.py), [rejection](../tests/test_pending_rejection_atomic.py).
+
+### Keeping the library clean
+
+Add papers from the app when you can: every app Add checks for an existing copy (DOI, arXiv id,
+title and year) and attaches an open-access PDF when one exists. Adding with
+the Zotero connector also works, but it bypasses those checks, so duplicates, missing PDFs and
+unfiled papers can appear. Topic collections hold topics only; reading status stays in `label:*`
+tags. A paper may sit in several topic collections.
 
 ### RSS read-state backups
 

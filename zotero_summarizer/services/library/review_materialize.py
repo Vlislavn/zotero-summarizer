@@ -6,10 +6,13 @@ from typing import Any
 
 from zotero_summarizer.domain import VERDICT_SOURCE_USER, label_tag_for_priority
 from zotero_summarizer.services._common import settings as get_settings
+from zotero_summarizer.services.library import fulltext
+from zotero_summarizer.services.library.existing_item import existing_library_key
 from zotero_summarizer.services.library.review_eligibility import (
     ReviewedFeed, require_authorization, require_review, review_ready,
 )
 from zotero_summarizer.services.library.review_summary import pick_stored_summary
+from zotero_summarizer.services.library.topic_filing import topic_paths
 from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.storage.feed_identity import row_feed_keys
 
@@ -59,9 +62,11 @@ def materialize_row(
     LOGGER.info("note artifact_source=%s metrics=%s",
                 "persisted_summary" if stored is not None else "legacy_sparse",
                 triage_note_metrics(note_html, summary))
+    library_key = existing_library_key(feed_payload, new_key)  # before the write lock; a hit is never copied
+    topics = [] if library_key else topic_paths(feed_payload["title"], feed_payload.get("abstract") or "")  # Jev, before the lock
     with feeds_storage.open_triage_conn(get_settings().triage_db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
-        existing = feeds_storage.current_materialization_intent(conn, row, label_priority)
+        existing = feeds_storage.current_materialization_intent(conn, row, label_priority) or library_key
         if existing:
             feeds_storage.link_materialized_sibling(conn, row, existing)
             new_key = existing
@@ -70,7 +75,7 @@ def materialize_row(
                 new_item_key=new_key,
                 feed_payload=feed_payload,
                 inbox_collection_name=collection_name,
-                matched_collections=_matched_collections_from_row(row),
+                matched_collections=[*_matched_collections_from_row(row), *topics],
                 tags=tags,
                 note_title=f"Triage: {str(row.get('title') or '')[:80]}",
                 note_html=note_html,
@@ -170,12 +175,14 @@ def apply_all_approved(since_hours: int | None = None) -> dict[str, Any]:
     used_keys: set[str] = set()
     applied = 0
     note_mirrors = []
+    added_keys: list[str] = []
     from zotero_summarizer.services.golden import verdict_effects
 
     for row, priority in eligible:
         try:
-            materialize_row(row, writer=writer, used_keys=used_keys, label_priority=priority,
-                            review_proof=require_review(row), mirror_note=False)
+            added_keys.append(materialize_row(
+                row, writer=writer, used_keys=used_keys, label_priority=priority,
+                review_proof=require_review(row), mirror_note=False))
         except feeds_storage.MaterializationSuperseded as conflict:
             failed.append({"id": row["id"], "code": "superseded", "error": str(conflict)})
         else:
@@ -187,6 +194,7 @@ def apply_all_approved(since_hours: int | None = None) -> dict[str, Any]:
     return {
         "applied": applied,
         "note_mirrors": note_mirrors,
+        "fulltext": fulltext.attach_best_effort(added_keys),  # after every Add committed
         "pending_sync": 0,
         "zotero_sync_error": None,
         "failed_count": len(failed),

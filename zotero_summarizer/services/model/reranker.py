@@ -16,6 +16,8 @@ from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as Futur
 
 from sentence_transformers import CrossEncoder
 
+from zotero_summarizer.runtime import local_model_device_override
+
 LOGGER = logging.getLogger("zotero_summarizer.reranker")
 
 
@@ -41,7 +43,11 @@ class Reranker:
         if self._model is not None:
             return
         LOGGER.info("Loading cross-encoder reranker: %s (downloads once)", self.model_name)
-        self._model = CrossEncoder(self.model_name, max_length=512)
+        kwargs = {"max_length": 512}
+        override = local_model_device_override()
+        if override is not None:
+            kwargs["device"] = override
+        self._model = CrossEncoder(self.model_name, **kwargs)
         LOGGER.info("Reranker ready: %s", self.model_name)
 
     def ensure_loaded_async(self) -> None:

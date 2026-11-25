@@ -22,6 +22,9 @@ from typing import Any
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter, ZoteroWriteError
 from zotero_summarizer.services._common import settings
+from zotero_summarizer.services.library import fulltext
+from zotero_summarizer.services.library.existing_item import existing_library_key
+from zotero_summarizer.services.library.topic_filing import topic_paths
 from zotero_summarizer.services.search import session as session_store
 from zotero_summarizer.services.search._models import Candidate, ResearchSession
 from zotero_summarizer.services.zotero.collections import resolve_collection_name
@@ -62,16 +65,18 @@ def materialize_candidate(
     session_id: str, candidate_id: str, collection_key: str | None
 ) -> dict[str, Any]:
     """File one candidate into the chosen Zotero collection (default Inbox). Explicit
-    user action — returns ``{status, zotero_key, collection}``. The session lock
+    user action — returns ``{status, zotero_key, collection, fulltext, filed}`` (``fulltext`` = the best-effort
+    PDF attach outcome, e.g. ``attached_arxiv`` / ``no_oa_source``; ``filed`` = topic leaves it also landed in). The session lock
     serializes same-process Adds; a saved plan survives failed finalization so a
     retry can reuse the native writer's existing-key no-op, not create a new key."""
     from zotero_summarizer.services.triage.feeds import _generate_zotero_key
 
     collection_name = resolve_collection_name(collection_key, settings().zotero_data_dir)  # validate → fast 400, before the lock
     reused_existing = False
+    topics: list[str] = []
 
     def _do_write(cand: Candidate, sess: ResearchSession) -> str:
-        nonlocal reused_existing
+        nonlocal reused_existing, topics
         from zotero_summarizer.services.search.discovery import _freshness, require_current_discovery
 
         existing_only = bool(sess.discovery and cand.planned_zotero_key and _freshness(sess) != "current")
@@ -87,6 +92,11 @@ def materialize_candidate(
         if cand.existing_zotero_key and not existing_only:
             reused_existing = True
             return cand.existing_zotero_key
+        if not (existing_only or cand.planned_zotero_key):  # a retained plan retries its own write
+            library_key = existing_library_key(_feed_payload(cand), arxiv_id=cand.arxiv_id)  # live library, not the session snapshot
+            if library_key:
+                reused_existing = True
+                return library_key
         try:
             writer = ZoteroWriter(settings().zotero_data_dir)
         except Exception as exc:  # noqa: BLE001 — Zotero-write is optional; surface as 503, don't 500.
@@ -99,11 +109,14 @@ def materialize_candidate(
             cand.planned_zotero_key = _generate_zotero_key(set())
             session_store.save(sess)  # Persist identity before backup or any native write.
         new_key = cand.planned_zotero_key
+        if not existing_only:
+            topics = topic_paths(cand.title or "", cand.abstract or "")  # Jev before the write; [] = Inbox only
         try:
             receipt = writer.apply_feed_materialization(
                 new_item_key=new_key,
                 feed_payload=_feed_payload(cand),
                 inbox_collection_name=collection_name,
+                matched_collections=topics,
                 tags=[_TAG],
                 note_title=f"Targeted Search: {sess.raw_query[:80]}",
                 note_html=_note_html(cand, sess.raw_query),
@@ -131,7 +144,10 @@ def materialize_candidate(
     added, key = result
     if not added or reused_existing:
         return {"status": "already_added", "zotero_key": key}
-    return {"status": "added", "zotero_key": key, "collection": collection_name}
+    ft = fulltext.attach_best_effort([key])  # after the Add committed; never raises
+    return {"status": "added", "zotero_key": key, "collection": collection_name,
+            "fulltext": ft.get("error") or ft["outcomes"][0]["status"],
+            "filed": [path.rsplit(" > ", 1)[-1] for path in topics]}
 
 
 __all__ = ["materialize_candidate"]

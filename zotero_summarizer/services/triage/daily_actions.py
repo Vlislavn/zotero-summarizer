@@ -10,7 +10,6 @@ from typing import Any
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.domain import VERDICT_SOURCE_MACHINE_ADD, VERDICT_SOURCE_USER
-from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services.golden import label_verdicts, proposal_snapshot
@@ -402,24 +401,7 @@ def _carry_renders_best_effort(pairs: list[tuple[str, str]]) -> None:
 
 def _attach_fulltext_best_effort(materialized: list[tuple[str, str]]) -> dict[str, Any]:
     """Attach cached-review or newly acquired OA PDFs. Never fails the Add."""
-    if not materialized:
-        return {"attached": 0}
-    try:
-        reader = ZoteroReader(get_settings().zotero_data_dir)
-        urls = reader.get_field_values("url")
-        dois = reader.get_field_values("DOI")
-        items = [
-            {
-                "item_key": key, "has_pdf": False, "url": urls.get(key, ""),
-                "doi": dois.get(key, ""),
-                "cached_acquisition": (deep_review.get_cached_review(key) or {}).get("acquired_pdf"),
-            }
-            for _stable_key, key in materialized
-        ]
-        return fulltext.fetch_fulltext_for_items(items)
-    except Exception as exc:  # noqa: BLE001 — best-effort; the add already succeeded
-        LOGGER.exception("add_to_library: full-text fetch failed (non-fatal)")
-        return {"attached": 0, "error": f"{type(exc).__name__}: {exc}"}
+    return fulltext.attach_best_effort([key for _stable_key, key in materialized])
 
 
 def trash(item_ids: list[int]) -> dict[str, Any]:

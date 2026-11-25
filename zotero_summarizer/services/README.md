@@ -171,7 +171,7 @@ system-owned knob — `apply_env_overrides` re-validates, `render_overrides_doc`
 generates `docs/overrides.md`; precedence: code default < `goals.yaml` < `ZS_*` env;
 `read_config` additionally forces `prestige.enabled` off under `ZS_OFFLINE` so the
 now-default-on OpenAlex prestige never hits the network air-gapped),
-`health` (reports `starting` until the runtime config exists), `results` (`dashboard_results(item_keys="a,b")` = batch latest-row lookup, ≤200 keys),
+`health` (reports `starting` until the runtime config exists and exposes the effective local-model device policy as `auto` or `cpu`, without probing accelerators), `results` (`dashboard_results(item_keys="a,b")` = batch latest-row lookup, ≤200 keys),
 `corpus` (embeddings/affinity), `emoji_signals`
 (emoji→engagement taxonomy; `READ_EMOJIS` = non-meta engagement emojis only, used by the library read/hide partition).
 
