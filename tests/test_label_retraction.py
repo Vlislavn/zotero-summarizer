@@ -12,7 +12,7 @@ from zotero_summarizer.services.golden import hybrid_gt, label_verdicts
 from zotero_summarizer.services.golden.csv_store import edit_csv
 from zotero_summarizer.services.library.review_summary import append_verdict_to_golden
 from zotero_summarizer.services.sync import service as sync
-from zotero_summarizer.storage import repositories as db
+from zotero_summarizer.storage import db_core, repositories as db
 
 
 @pytest.mark.parametrize("lane", ["http", "reconcile", "offline"])
@@ -20,7 +20,7 @@ from zotero_summarizer.storage import repositories as db
 def test_retraction_removes_effective_label_and_reassignment_restores_it(tmp_path, monkeypatch, lane, tier):
     path = tmp_path / "triage.db"
     csv_path = tmp_path / "golden.csv"
-    monkeypatch.setattr(db, "DB_PATH", path)
+    monkeypatch.setattr(db_core, "DB_PATH", path)
     db.init_db()
     monkeypatch.setattr(golden, "_db_path", lambda: path)
     monkeypatch.setattr(golden, "log_retract_event", lambda *args: None)
@@ -65,7 +65,7 @@ def test_retraction_removes_effective_label_and_reassignment_restores_it(tmp_pat
 
 def test_retracted_stable_key_suppresses_legacy_csv_alias(tmp_path, monkeypatch):
     path = tmp_path / "triage.db"
-    monkeypatch.setattr(db, "DB_PATH", path)
+    monkeypatch.setattr(db_core, "DB_PATH", path)
     db.init_db()
     stable = "feed:g:" + "a" * 64
     with sqlite3.connect(path) as conn:
@@ -84,7 +84,7 @@ def test_retracted_stable_key_suppresses_legacy_csv_alias(tmp_path, monkeypatch)
 
 def test_standalone_csv_label_without_retraction_is_preserved(tmp_path, monkeypatch):
     path = tmp_path / "triage.db"
-    monkeypatch.setattr(db, "DB_PATH", path)
+    monkeypatch.setattr(db_core, "DB_PATH", path)
     db.init_db()
     row = {"item_key": "P1", "gold_signal_tier": "feed_user_label", "gold_priority_final": "must_read"}
     assert hybrid_gt.apply_hybrid([row], path)[0]["gold_priority_final"] == "must_read"

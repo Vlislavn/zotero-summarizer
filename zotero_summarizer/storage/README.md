@@ -66,7 +66,8 @@ services/ ─call→ storage/
 
 | file | responsibility |
 |---|---|
-| `repositories.py` | triage-DB core: `DB_PATH` (set once at startup) + `with_db_path()` for a concurrency-safe per-context override, schema, connection hardening, shared query helpers (re-exports the `_repo_*` groups below) incl. the public `table_columns(conn, table)` PRAGMA reader the `_repo_*` modules and `integrations._zotero_write_tags` share |
+| `repositories.py` | triage schema and startup initialization; facade that re-exports the `_repo_*` groups below and the existing shared helpers, but not mutable `DB_PATH` |
+| `db_core.py` | leaf owning `DB_PATH` (set at startup with `set_db_path()`), `resolve_db_path()` and per-context `with_db_path()`, connection hardening, `table_columns()` and shared query helpers; no imports from storage |
 | `_repo_results.py` · `_repo_jobs.py` | batch/result rows + queries · triage-job upserts/listing |
 | `_repo_pending.py` · `_repo_feedback.py` | pending-change queue with source-aware status transitions (including retry `failed → applied`) and a per-paper open-sibling check for safe Inbox removal · feedback signals |
 | `_repo_verdicts.py` · `_repo_labels.py` | role-value + weekly-A/B verdicts · label verdicts (with `source` provenance: `user` vs `machine_add` — the provisional "Add to library" verdict that the training overlay may outcome-correct; UPSERT propagates it so a deliberate relabel flips a machine add back to `user`). `list_label_verdict_keys` (keys only — golden-CSV preservation) and `list_label_verdict_priorities` (`{item_key: user_priority}` — the reading-queue handled-filter needs the priority so `dont_read` hides but a positive label stays visible) and `list_user_verdict_keys` (keys with the owner's own `source='user'` verdict — the queue's `decided` flag) are both **uncapped** (a paged fetch silently drops rows once the table outgrows the cap). Also owns the `review_notes` table (one editable free-text note per paper, jotted during a review — decoupled from a verdict): `upsert_review_note` / `get_review_note`, same UPSERT shape as `label_verdicts` |
@@ -97,9 +98,14 @@ generated rejection and updates ordinary rows; failures roll back both families.
 Other status callers retain their existing default behavior. No new queue/schema
 or native write is involved.
 
-**Boundaries:** must NOT import `services/` or `api/` (enforced). Connection
-hardening (WAL once per process/path + busy_timeout=10s + 0600) is shared by
-`_get_conn` and `_connect_to`, avoiding concurrent WAL-mode lock races.
+**Boundaries:** must NOT import `services/` or `api/` (enforced). Within storage,
+import shared helpers from the `db_core` leaf, not the `repositories` facade;
+the migration baseline still calls `repositories.apply_schema`. Move shared
+code down instead of relying on import order or hiding an edge inside a function.
+`deadcode cycles` blocks import-time cycles; `--advisory` reports soft cycles
+involving function-local imports, and `--strict-lazy` makes those blocking too.
+Connection hardening (WAL once per process/path + busy_timeout=10s + 0600) is
+shared by `_get_conn` and `_connect_to`, avoiding concurrent WAL-mode lock races.
 
 Startup job reconciliation converts `running` to `interrupted`, but `cancelling`
 to `cancelled`, so restart does not resume an acknowledged cancellation request.

@@ -52,6 +52,7 @@ cached_bullets(keys)-> {key: TL;DR bullets} for fresh cached cards only (no fact
 
 Computes the facts, by **reusing existing machinery** — no new DB table, no migration,
 no LLM, no UI.
+The triage fallback uses `repositories.resolve_db_path()` so it honors a per-context DB override.
 
 ```
 collect_facts(PaperRef)                      cache: Settings.card_facts_dir/<stable_key>.json

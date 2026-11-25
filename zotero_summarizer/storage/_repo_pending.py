@@ -13,7 +13,7 @@ from zotero_summarizer.domain import (  # noqa: F401
     EXPLICIT_FEEDBACK_SIGNALS,
     READING_PRIORITY_SORT_RANK,
 )
-from zotero_summarizer.storage.repositories import (  # noqa: F401
+from zotero_summarizer.storage.db_core import (  # noqa: F401
     _connect_to,
     _get_conn,
     _json_to_list,

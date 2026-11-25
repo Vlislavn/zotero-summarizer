@@ -13,11 +13,11 @@ from zotero_summarizer.models import PaperParameters
 from zotero_summarizer.services.library import _review_identity, deep_review
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 from zotero_summarizer.services.zotero import generated_notes, zotero
-from zotero_summarizer.storage import repositories
+from zotero_summarizer.storage import db_core, repositories
 
 
 def install_generated_writer(tmp_path, monkeypatch):
-    monkeypatch.setattr(repositories, "DB_PATH", tmp_path / "triage.db")
+    monkeypatch.setattr(db_core, "DB_PATH", tmp_path / "triage.db")
     repositories.init_db()
     db = build_zotero_db(tmp_path / "zotero")
     writer = ZoteroWriter(db.parent)
@@ -71,7 +71,7 @@ def published_review(config, paper_io, tmp_path, monkeypatch, request):
     add_library_item(db, item_key=key, title="Owned paper")
     fault = getattr(request, "param", None)
     if fault == "stage_insert_failure":
-        with sqlite3.connect(repositories.DB_PATH) as conn:
+        with sqlite3.connect(db_core.DB_PATH) as conn:
             conn.execute("""CREATE TRIGGER owned_stage_failure BEFORE INSERT ON pending_changes
                 BEGIN SELECT RAISE(ABORT, 'owned stage failure'); END""")
     elif fault is not None:

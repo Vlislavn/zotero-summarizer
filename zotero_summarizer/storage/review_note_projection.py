@@ -2,7 +2,7 @@
 
 from contextlib import closing, contextmanager
 
-from zotero_summarizer.storage import repositories, review_notes
+from zotero_summarizer.storage import db_core, review_notes
 
 
 def _target_key(keys):
@@ -83,7 +83,7 @@ def acknowledge(conn, desired) -> bool:
 @contextmanager
 def current_for_mirror(db_path, item_key):
     """Serialize delivery after save; normal exit alone does not acknowledge it."""
-    with closing(repositories._connect_to(db_path)) as conn, conn:
+    with closing(db_core._connect_to(db_path)) as conn, conn:
         # ponytail: external backup/write holds the app writer lock, as with
         # current manual/label mirrors; a dedicated worker is a separate concern.
         conn.execute("BEGIN IMMEDIATE")

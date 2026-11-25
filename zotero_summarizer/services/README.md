@@ -85,6 +85,8 @@ transport on construction failure or callback completion. Ordinary clients keep
 their prior options; all setup local-LLM requests must first pass admission.
 
 `_common.to_text` and `_common.unique_non_empty_strings` re-export `integrations.llm.to_text` and `domain.unique_non_empty_strings` (one implementation each).
+`_common.normalized_title_key` supplies the title-only display key to Library and Today;
+each caller owns ranking and which copies to keep.
 
 LLM-output JSON parsing (`extract_json_blob`, `safe_parse_response_json`) lives in `llm/json_response.py`.
 
@@ -121,7 +123,7 @@ All LLM clients are constructed through `services/llm/factory`, which calls
 stage, ...)` owns snapshot/identity checks and lazy cache admission; `RuntimeState`
 retains cache/lock/generation/invalidation and models-only provider metadata,
 without importing services or API code), `lifecycle` (startup composition root — small `_init_*`
-builders wire each singleton onto `RuntimeState`; LLM clients are NOT built here,
+builders wire each singleton onto `RuntimeState`; startup sets the default triage DB path via `repositories.set_db_path()`; LLM clients are NOT built here,
 they resolve lazily per stage so startup never depends on a provider being reachable;
 `_init_metadata_clients` builds the THREE optional network clients — OpenAlex prestige,
 Unpaywall full-text, and the authenticated OpenReview peer-review Search source

@@ -66,6 +66,11 @@ runtime.py → settings / models
 ```
 
 - `integrations/` and `storage/` never import `services/` or `api/`.
+- Within `storage/`, import shared DB helpers from the `db_core` leaf, never
+  from the `repositories` facade. Move shared code down rather than relying
+  on import order or moving an import into a function. `deadcode cycles` blocks
+  import-time cycles; function-local edges still count in advisory reports
+  and block with `--strict-lazy`.
 - `services/` may import only `api.errors` from the API layer, not `api.app` or
   `api.routes`. New service modules belong in a domain subpackage.
 - `runtime.py` is foundational process state and must not import `services/` or

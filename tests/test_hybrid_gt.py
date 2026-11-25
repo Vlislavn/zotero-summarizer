@@ -30,7 +30,7 @@ def _init_label_verdicts(db_path: Path) -> None:
     """Create the label_verdicts + processed_feed_items tables in ``db_path``.
 
     The production schema initializer ``repositories.init_db()`` operates
-    on the module-level ``DB_PATH`` constant, while the verdict insert
+    on the active ``db_core`` path, while the verdict insert
     helper takes an explicit path. For tests we touch the file the
     helper will read. The feeds table is part of the production schema
     (``apply_schema`` always creates it) and the hybrid merge reads

@@ -9,7 +9,7 @@ from typing import Any
 
 from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK, VERDICT_SOURCE_USER
 from zotero_summarizer.storage import question_sync, review_notes
-from zotero_summarizer.storage.repositories import _connect_to
+from zotero_summarizer.storage.db_core import _connect_to
 
 SYNC_CHANGES_TABLE = """
 CREATE TABLE IF NOT EXISTS sync_changes (

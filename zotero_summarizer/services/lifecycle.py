@@ -72,7 +72,7 @@ def _init_models(
 
 
 def _init_database(current_settings: Settings, app_state: RuntimeState) -> None:
-    triage_db.DB_PATH = current_settings.triage_db_path
+    triage_db.set_db_path(current_settings.triage_db_path)
     triage_db.init_db()
     app_state.corpus_write_lock = asyncio.Lock()
 

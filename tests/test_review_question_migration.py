@@ -5,7 +5,7 @@ from contextlib import closing
 
 import pytest
 
-from zotero_summarizer.storage import migrations, repositories, review_questions
+from zotero_summarizer.storage import db_core, migrations, review_questions
 
 # Frozen historical v2 declaration: deliberately not imported from current schema.
 OLD_SYNC_SCHEMA = """
@@ -97,14 +97,14 @@ def _historical_database(tmp_path, version):
 
 @pytest.fixture
 def enforce_foreign_keys(monkeypatch):
-    connect = repositories._connect_to
+    connect = db_core._connect_to
 
     def foreign_keys_on(path):
         conn = connect(path)
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
-    monkeypatch.setattr(repositories, "_connect_to", foreign_keys_on)
+    monkeypatch.setattr(db_core, "_connect_to", foreign_keys_on)
 
 
 def _rows(conn, table):
@@ -115,14 +115,14 @@ def _rows(conn, table):
 def test_populated_upgrade_preserves_history_receipts_triggers_and_highwater(tmp_path, enforce_foreign_keys, version):
     path = _historical_database(tmp_path, version)
     preserved = ("sync_changes", "sync_mutations", "review_notes", "label_verdicts", "label_mirror_receipts")
-    with closing(repositories._connect_to(path)) as conn:
+    with closing(db_core._connect_to(path)) as conn:
         before = {table: _rows(conn, table) for table in preserved}
         triggers = dict(conn.execute("SELECT name, sql FROM sqlite_master WHERE type='trigger'"))
         assert conn.execute("SELECT seq FROM sqlite_sequence WHERE name='sync_changes'").fetchone()[0] == 100
 
     assert migrations.run_migrations(path, "triage", migrations.TRIAGE_MIGRATIONS) == migrations.SCHEMA_VERSION
 
-    with closing(repositories._connect_to(path)) as conn, conn:
+    with closing(db_core._connect_to(path)) as conn, conn:
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         for table in preserved:
@@ -147,7 +147,7 @@ def test_populated_upgrade_preserves_history_receipts_triggers_and_highwater(tmp
                 conn.execute("UPDATE review_questions SET question='changed' WHERE submission_id=?", (saved["submission_id"],))
         snapshot = {table: _rows(conn, table) for table in (*preserved, "review_questions", "review_note_mirror_intents")}
     assert migrations.run_migrations(path, "triage", migrations.TRIAGE_MIGRATIONS) == migrations.SCHEMA_VERSION
-    with closing(repositories._connect_to(path)) as conn, conn:
+    with closing(db_core._connect_to(path)) as conn, conn:
         assert {table: _rows(conn, table) for table in snapshot} == snapshot
         before_revision = conn.execute("SELECT MAX(revision) FROM sync_changes").fetchone()[0]
         conn.execute("INSERT INTO label_verdicts(item_key, original_derived_priority, user_priority, comment, created_at) "
@@ -166,14 +166,14 @@ def test_populated_upgrade_preserves_history_receipts_triggers_and_highwater(tmp
 
 def test_v10_failure_rolls_back_rebuild_backfill_and_marker(tmp_path, enforce_foreign_keys):
     path = _historical_database(tmp_path, 9)
-    with closing(repositories._connect_to(path)) as conn, conn:
+    with closing(db_core._connect_to(path)) as conn, conn:
         conn.execute("CREATE TRIGGER reject_question_journal BEFORE INSERT ON sync_changes "
                      "WHEN NEW.field = 'review_question' BEGIN SELECT RAISE(ABORT, 'injected migration failure'); END")
         before_schema = [tuple(row) for row in conn.execute("SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name")]
         before = {table: _rows(conn, table) for table in ("sync_changes", "sync_mutations", "label_mirror_receipts", "schema_migrations", "review_questions", "sqlite_sequence")}
     with pytest.raises(sqlite3.IntegrityError, match="injected migration failure"):
         migrations.run_migrations(path, "triage", migrations.TRIAGE_MIGRATIONS)
-    with closing(repositories._connect_to(path)) as conn:
+    with closing(db_core._connect_to(path)) as conn:
         assert [tuple(row) for row in conn.execute("SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name")] == before_schema
         assert {table: _rows(conn, table) for table in before} == before
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
@@ -186,7 +186,7 @@ def test_new_and_upgraded_databases_converge_and_corpus_alignment_is_named(tmp_p
         assert migrations.run_migrations(path, "triage", migrations.TRIAGE_MIGRATIONS) == migrations.SCHEMA_VERSION
     schemas = []
     for path in [upgraded, fresh]:
-        with closing(repositories._connect_to(path)) as conn:
+        with closing(db_core._connect_to(path)) as conn:
             schemas.append([tuple(row) for row in conn.execute("SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name")])
     assert schemas[0] == schemas[1]
     alignment = next(m for m in migrations.CORPUS_MIGRATIONS if m.name == "review_note_projection_alignment")

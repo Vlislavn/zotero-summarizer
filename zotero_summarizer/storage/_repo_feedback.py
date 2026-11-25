@@ -5,7 +5,7 @@ import sqlite3
 from typing import Any
 
 from zotero_summarizer.domain import EXPLICIT_FEEDBACK_SIGNALS
-from zotero_summarizer.storage.repositories import _get_conn, _rows_to_dicts
+from zotero_summarizer.storage.db_core import _get_conn, _rows_to_dicts
 
 
 def insert_feedback_events(events: list[dict[str, Any]]) -> int:

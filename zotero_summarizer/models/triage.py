@@ -26,7 +26,6 @@ __all__ = [
     "CorpusImportRequest",
     "TriageFeedbackRequest",
     "TriageFeedbackResponse",
-    "TriageDimensionOverrideRequest",
     "CalibrationPeriodMetrics",
     "CalibrationMetricsResponse",
 ]
@@ -395,29 +394,6 @@ class TriageFeedbackResponse(BaseModel):
     verdict: Literal["approve", "reject"]
     signal: str
     queued: int = Field(default=0, ge=0)
-
-
-class TriageDimensionOverrideRequest(BaseModel):
-    goal_alignment: int | None = Field(default=None, ge=1, le=5)
-    novelty_for_goals: int | None = Field(default=None, ge=1, le=5)
-    methodological_rigor: int | None = Field(default=None, ge=1, le=5)
-    actionability: int | None = Field(default=None, ge=1, le=5)
-    evidence_strength: int | None = Field(default=None, ge=1, le=5)
-
-    @model_validator(mode="after")
-    def _ensure_any_override(self) -> "TriageDimensionOverrideRequest":
-        if all(
-            value is None
-            for value in [
-                self.goal_alignment,
-                self.novelty_for_goals,
-                self.methodological_rigor,
-                self.actionability,
-                self.evidence_strength,
-            ]
-        ):
-            raise ValueError("at least one triage dimension override is required")
-        return self
 
 
 class CalibrationPeriodMetrics(BaseModel):

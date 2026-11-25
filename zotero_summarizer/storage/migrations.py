@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from zotero_summarizer.settings import Settings
-from zotero_summarizer.storage import repositories
+from zotero_summarizer.storage import db_core, repositories
 
 
 @dataclass(frozen=True)
@@ -69,7 +69,7 @@ def _migration_label_mirror_receipts(conn: sqlite3.Connection) -> None:
 
 
 def _migration_review_training_sample(conn: sqlite3.Connection) -> None:
-    if "training_sample_json" not in repositories.table_columns(conn, "label_verdicts"):
+    if "training_sample_json" not in db_core.table_columns(conn, "label_verdicts"):
         conn.execute("ALTER TABLE label_verdicts ADD COLUMN training_sample_json TEXT")
 
 
@@ -122,12 +122,12 @@ def _migration_generated_write_review(conn: sqlite3.Connection) -> None:
 def _migration_combined_live_review(conn: sqlite3.Connection) -> None:
     from zotero_summarizer.storage import pending_actions, research_feed_telegram
 
-    columns = repositories.table_columns(conn, "pending_changes")
+    columns = db_core.table_columns(conn, "pending_changes")
     triggers = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
     pending = [name in columns for name in ("proposal_json", "audit_json", "backup_path")]
     pending += [name in triggers for name in ("pending_generated_immutable", "pending_generated_no_delete")]
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    live = ["initial_window_committed" in repositories.table_columns(conn, "research_feed_telegram_channels")]
+    live = ["initial_window_committed" in db_core.table_columns(conn, "research_feed_telegram_channels")]
     live += [name in tables for name in ("research_feed_telegram_bindings", "research_feed_telegram_account")]
     if (any(pending) and not all(pending)) or (any(live) and not all(live)):
         raise ValueError("incomplete experimental version-12 schema footprint")
@@ -148,7 +148,7 @@ def _migration_verdict_reason_chips(conn: sqlite3.Connection) -> None:
 
     Same shape as v7's ``training_sample_json``. NULL = no reason given; a fresh
     verdict without chips re-writes it to NULL (the decision owns its reasons)."""
-    if "reasons_json" not in repositories.table_columns(conn, "label_verdicts"):
+    if "reasons_json" not in db_core.table_columns(conn, "label_verdicts"):
         conn.execute("ALTER TABLE label_verdicts ADD COLUMN reasons_json TEXT")
 
 
@@ -156,7 +156,7 @@ def _migration_verdict_proposal(conn: sqlite3.Connection) -> None:
     """App proposal at decision time (#224): a nullable JSON column on the verdict row.
 
     NULL = no snapshot (old rows, machine writes). Additive; old builds ignore it."""
-    if "proposal_json" not in repositories.table_columns(conn, "label_verdicts"):
+    if "proposal_json" not in db_core.table_columns(conn, "label_verdicts"):
         conn.execute("ALTER TABLE label_verdicts ADD COLUMN proposal_json TEXT")
 
 
@@ -164,14 +164,14 @@ def _migration_telegram_post_reasons(conn: sqlite3.Connection) -> None:
     """One-tap 'не подошло' reasons on a Telegram post (#112): a nullable JSON column.
 
     NULL = not rejected; ``{"chips": [...], "v": 1}`` = rejected (chips may be empty)."""
-    if "reasons_json" not in repositories.table_columns(conn, "research_feed_telegram_posts"):
+    if "reasons_json" not in db_core.table_columns(conn, "research_feed_telegram_posts"):
         conn.execute("ALTER TABLE research_feed_telegram_posts ADD COLUMN reasons_json TEXT")
 
 
 def _migration_rss_fetch_watermark(conn: sqlite3.Connection) -> None:
     """Per-feed fetch progress (#161): newest confirmed-complete item time + an
     'incomplete fetch' flag. Nullable/defaulted, so old rows keep working."""
-    cols = repositories.table_columns(conn, "rss_feeds")
+    cols = db_core.table_columns(conn, "rss_feeds")
     if not cols:  # table not created yet (partial legacy DB): baseline creates it with the columns
         return
     if "fetch_watermark" not in cols:
@@ -200,7 +200,7 @@ def _migration_review_feedback(conn: sqlite3.Connection) -> None:
 def _migration_review_feedback_parts(conn: sqlite3.Connection) -> None:
     """Per-part feedback (#110): ``fields_json`` = ``{part: {chips, note, shown, at}}`` (or a
     ``{withdrawn, at}`` tombstone); the older chips/note columns stay the whole-review part."""
-    if "fields_json" not in repositories.table_columns(conn, "review_feedback"):
+    if "fields_json" not in db_core.table_columns(conn, "review_feedback"):
         conn.execute("ALTER TABLE review_feedback ADD COLUMN fields_json TEXT NOT NULL DEFAULT '{}'")
 
 
@@ -303,7 +303,7 @@ def run_migrations(db_path: Path, namespace: str, migrations: list[Migration]) -
     the DB at the last fully-applied version (never half-migrated).
     """
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = repositories._connect_to(db_path)
+    conn = db_core._connect_to(db_path)
     try:
         _ensure_migrations_table(conn)
         conn.commit()

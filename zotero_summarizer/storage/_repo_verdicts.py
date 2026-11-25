@@ -12,7 +12,7 @@ from zotero_summarizer.domain import (  # noqa: F401
     EXPLICIT_FEEDBACK_SIGNALS,
     READING_PRIORITY_SORT_RANK,
 )
-from zotero_summarizer.storage.repositories import (  # noqa: F401
+from zotero_summarizer.storage.db_core import (  # noqa: F401
     _AB_DECISION_THRESHOLD,
     _AB_WINNING_MARGIN,
     _VALID_AB_WINNERS,

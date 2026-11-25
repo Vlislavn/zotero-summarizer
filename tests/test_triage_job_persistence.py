@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from zotero_summarizer.storage import repositories as triage_db
+from zotero_summarizer.storage import db_core, repositories as triage_db
 
 
 def test_triage_job_roundtrip(monkeypatch, tmp_path):
-    monkeypatch.setattr(triage_db, "DB_PATH", tmp_path / "triage_history.db")
+    monkeypatch.setattr(db_core, "DB_PATH", tmp_path / "triage_history.db")
     triage_db.init_db()
 
     triage_db.upsert_triage_job(
@@ -35,7 +35,7 @@ def test_triage_job_roundtrip(monkeypatch, tmp_path):
 
 
 def test_mark_running_triage_jobs_interrupted(monkeypatch, tmp_path):
-    monkeypatch.setattr(triage_db, "DB_PATH", tmp_path / "triage_history.db")
+    monkeypatch.setattr(db_core, "DB_PATH", tmp_path / "triage_history.db")
     triage_db.init_db()
 
     triage_db.upsert_triage_job(

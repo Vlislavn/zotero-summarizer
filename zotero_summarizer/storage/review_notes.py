@@ -2,6 +2,8 @@
 from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 
+from zotero_summarizer.storage import db_core
+
 
 def alias_resolver(conn):
     """Load the feed/library identity graph once; return ``key -> sorted alias family``.
@@ -75,9 +77,7 @@ def current(conn, item_key, aliases=None):
 @contextmanager
 def current_for_mirror(db_path, item_key):
     """Hold current note intent stable until the caller finishes external delivery."""
-    from zotero_summarizer.storage import repositories  # local: repositories star-imports this module
-
-    with closing(repositories._connect_to(db_path)) as conn:
+    with closing(db_core._connect_to(db_path)) as conn:
         # ponytail: serialize app writers during delivery; use a dedicated delivery
         # worker if backup latency starts blocking local edits.
         conn.execute("BEGIN IMMEDIATE")

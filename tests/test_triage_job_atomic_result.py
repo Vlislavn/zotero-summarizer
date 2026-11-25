@@ -9,12 +9,12 @@ import pytest
 from tests.test_queue_changes import _build_summary
 from tests.test_triage_job_controls import _new_job, _state
 from zotero_summarizer.services.triage import triage_jobs as jobs
-from zotero_summarizer.storage import repositories as db
+from zotero_summarizer.storage import db_core, repositories as db
 
 
 def _setup_job(monkeypatch, tmp_path):
     path = tmp_path / "triage.db"
-    monkeypatch.setattr(db, "DB_PATH", path)
+    monkeypatch.setattr(db_core, "DB_PATH", path)
     db.init_db()
     reader = SimpleNamespace(get_item_detail=lambda key: {"title": key, "pdf_path": "/stub.pdf"})
     pipeline = Mock(return_value=_build_summary())

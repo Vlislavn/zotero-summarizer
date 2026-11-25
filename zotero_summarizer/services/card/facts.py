@@ -133,7 +133,7 @@ def _feed_row(key: str) -> dict[str, Any] | None:
     ``feed_key`` alias resolver. Fail-soft (no row / no DB → None)."""
     try:
         from zotero_summarizer.storage import feeds_lookup, repositories
-        conn = sqlite3.connect(str(repositories._resolve_db_path()))
+        conn = sqlite3.connect(str(repositories.resolve_db_path()))
         conn.row_factory = sqlite3.Row
         try:
             row = feeds_lookup.get_processed_feed_item_by_stable_key(conn, key)

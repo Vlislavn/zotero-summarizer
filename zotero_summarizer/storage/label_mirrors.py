@@ -3,7 +3,7 @@
 from contextlib import contextmanager
 from pathlib import Path
 
-from zotero_summarizer.storage import feeds_lookup, repositories
+from zotero_summarizer.storage import db_core, feeds_lookup
 
 _CURRENT_CHANGES = """
 SELECT s.item_key, s.revision AS revision, s.value, r.revision AS mirrored, s.comment, s.source
@@ -76,7 +76,7 @@ def acknowledge(conn, desired: dict) -> bool:
 @contextmanager
 def current_label(db_path: Path, item_key: str, *, revision: int | None = None, redeliver: bool = False):
     """Yield the caller-owned transaction and current intent; exit is not a delivery ACK."""
-    conn = repositories._connect_to(db_path)
+    conn = db_core._connect_to(db_path)
     try:
         conn.execute("BEGIN IMMEDIATE")
         desired = snapshot(conn, item_key, redeliver=redeliver)
@@ -90,7 +90,7 @@ def current_label(db_path: Path, item_key: str, *, revision: int | None = None, 
 
 def states(db_path: Path) -> dict[str, dict]:
     """Newest label revision per real Zotero target, across feed/library aliases."""
-    conn = repositories._connect_to(db_path)
+    conn = db_core._connect_to(db_path)
     try:
         conn.execute("BEGIN")
         rows = conn.execute(_CURRENT_CHANGES + " ORDER BY revision").fetchall()

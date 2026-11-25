@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor
 
-from zotero_summarizer.storage import repositories as triage_db
+from zotero_summarizer.storage import db_core, repositories as triage_db
 
 
 def test_pending_changes_insert_and_query(monkeypatch, tmp_path):
-    monkeypatch.setattr(triage_db, "DB_PATH", tmp_path / "triage_history.db")
+    monkeypatch.setattr(db_core, "DB_PATH", tmp_path / "triage_history.db")
     triage_db.init_db()
 
     inserted = triage_db.insert_pending_changes(
@@ -36,7 +36,7 @@ def test_pending_changes_insert_and_query(monkeypatch, tmp_path):
 
 
 def test_pending_history_item_filter_precedes_limit(monkeypatch, tmp_path):
-    monkeypatch.setattr(triage_db, "DB_PATH", tmp_path / "triage_history.db")
+    monkeypatch.setattr(db_core, "DB_PATH", tmp_path / "triage_history.db")
     triage_db.init_db()
     triage_db.insert_pending_changes("TARGET01", "Target", [{"change_type": "add_note", "payload": {"note_html": "old"}}])
     for index in range(8):
@@ -48,7 +48,7 @@ def test_pending_history_item_filter_precedes_limit(monkeypatch, tmp_path):
 
 
 def test_pending_exact_signature_lookup_checks_all_statuses_without_limit(monkeypatch, tmp_path):
-    monkeypatch.setattr(triage_db, "DB_PATH", tmp_path / "triage_history.db")
+    monkeypatch.setattr(db_core, "DB_PATH", tmp_path / "triage_history.db")
     triage_db.init_db()
     payload = {"add_tags": ["tag:x"], "remove_tags": []}
     triage_db.insert_pending_changes(
@@ -65,7 +65,7 @@ def test_pending_exact_signature_lookup_checks_all_statuses_without_limit(monkey
 
 def test_pending_signature_insert_is_atomic_across_concurrent_callers(monkeypatch, tmp_path):
     db_path = tmp_path / "triage_history.db"
-    monkeypatch.setattr(triage_db, "DB_PATH", db_path)
+    monkeypatch.setattr(db_core, "DB_PATH", db_path)
     triage_db.init_db()
     payload = {"add_tags": ["ri:weekly", "ri:yes"], "remove_tags": []}
 
@@ -83,7 +83,7 @@ def test_pending_signature_insert_is_atomic_across_concurrent_callers(monkeypatc
 
 
 def test_pending_changes_status_updates(monkeypatch, tmp_path):
-    monkeypatch.setattr(triage_db, "DB_PATH", tmp_path / "triage_history.db")
+    monkeypatch.setattr(db_core, "DB_PATH", tmp_path / "triage_history.db")
     triage_db.init_db()
 
     triage_db.insert_pending_changes(
@@ -123,7 +123,7 @@ def test_pending_changes_status_updates(monkeypatch, tmp_path):
 
 
 def test_item_remains_open_until_all_sibling_changes_finish(monkeypatch, tmp_path):
-    monkeypatch.setattr(triage_db, "DB_PATH", tmp_path / "triage_history.db")
+    monkeypatch.setattr(db_core, "DB_PATH", tmp_path / "triage_history.db")
     triage_db.init_db()
     triage_db.insert_pending_changes(
         "PAPER1",
@@ -143,7 +143,7 @@ def test_item_remains_open_until_all_sibling_changes_finish(monkeypatch, tmp_pat
 
 
 def test_pending_changes_reject_does_not_override_applied(monkeypatch, tmp_path):
-    monkeypatch.setattr(triage_db, "DB_PATH", tmp_path / "triage_history.db")
+    monkeypatch.setattr(db_core, "DB_PATH", tmp_path / "triage_history.db")
     triage_db.init_db()
 
     triage_db.insert_pending_changes(
@@ -173,7 +173,7 @@ def test_pending_changes_reject_does_not_override_applied(monkeypatch, tmp_path)
 
 
 def test_update_pending_change_payload_requires_pending_status(monkeypatch, tmp_path):
-    monkeypatch.setattr(triage_db, "DB_PATH", tmp_path / "triage_history.db")
+    monkeypatch.setattr(db_core, "DB_PATH", tmp_path / "triage_history.db")
     triage_db.init_db()
 
     triage_db.insert_pending_changes(

@@ -11,7 +11,7 @@ from zotero_summarizer.models import GoalsConfig, SummarizeRequest, SummarizeRes
 from zotero_summarizer.services.triage import summarization
 from zotero_summarizer.services.triage._execution import JobStopped, check_cancelled, run_blocking
 from zotero_summarizer.services.triage import triage_jobs as jobs
-from zotero_summarizer.storage import repositories
+from zotero_summarizer.storage import db_core, repositories
 
 
 async def _wait_for(predicate):
@@ -136,7 +136,7 @@ def test_timeout_retains_slot_until_thread_finishes_and_skips_later_items(monkey
 
 
 def test_startup_finalizes_cancellation_instead_of_resuming_it(monkeypatch, tmp_path):
-    monkeypatch.setattr(repositories, "DB_PATH", tmp_path / "triage.db")
+    monkeypatch.setattr(db_core, "DB_PATH", tmp_path / "triage.db")
     repositories.init_db()
     repositories.upsert_triage_job(_new_job("cancel", ["A"], status="cancelling"))
     assert repositories.mark_running_triage_jobs_interrupted() == 0

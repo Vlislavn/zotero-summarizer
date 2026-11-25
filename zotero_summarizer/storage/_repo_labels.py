@@ -9,7 +9,7 @@ from typing import Any
 
 from zotero_summarizer.domain import VERDICT_SOURCE_USER
 from zotero_summarizer.storage import review_notes
-from zotero_summarizer.storage.repositories import (
+from zotero_summarizer.storage.db_core import (
     _VALID_LABEL_PRIORITIES,
     _connect_to,
 )

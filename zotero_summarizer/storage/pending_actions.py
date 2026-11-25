@@ -13,7 +13,7 @@ from zotero_summarizer.models.api import (
 from zotero_summarizer.models.zotero_actions import (
     GeneratedNoteProposal, SystemMirrorRequest, UserNotePayload, VerdictNotePayload, ZoteroTargetIdentity,
 )
-from zotero_summarizer.storage import repositories
+from zotero_summarizer.storage import db_core
 
 
 def apply_schema(conn) -> None:
@@ -21,7 +21,7 @@ def apply_schema(conn) -> None:
         ("proposal_json", "TEXT"), ("audit_json", "TEXT NOT NULL DEFAULT '[]'"),
         ("backup_path", "TEXT"),
     ):
-        if name not in repositories.table_columns(conn, "pending_changes"):
+        if name not in db_core.table_columns(conn, "pending_changes"):
             conn.execute(f"ALTER TABLE pending_changes ADD COLUMN {name} {declaration}")
     conn.execute("""CREATE TRIGGER IF NOT EXISTS pending_generated_immutable
         BEFORE UPDATE ON pending_changes WHEN OLD.proposal_json IS NOT NULL AND (
@@ -37,7 +37,7 @@ def apply_schema(conn) -> None:
 @contextmanager
 def locked_queue() -> Iterator:
     """Lock order: review publication lock, then this queue transaction."""
-    conn = repositories._get_conn()
+    conn = db_core._get_conn()
     try:
         conn.execute("BEGIN IMMEDIATE")
         yield conn
