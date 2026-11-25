@@ -190,8 +190,9 @@ the paper text re-extracted from its PDF and a PDF copy up to 25 MB, with hash c
 verdict appears as «Checked: …». All feedback downloads as one JSON file. No tokens or network are used.
 [Code](../zotero_summarizer/services/library/review_feedback.py) · [Tests](../tests/test_review_feedback_parts.py).
 
-`zotero-summarizer similar "<query>" [--limit 10] [--json]` runs the same «Meaning» search as the Library page without the server (one line per paper with a `zotero://` link; also works while Zotero holds its database locked: the last copy is used and marked stale). [Code](../zotero_summarizer/cli/_similar.py) · [Tests](../tests/test_cli_similar.py).
+### Saved papers from the command line
 
+`zotero-summarizer similar "<query>" [--limit 10] [--json]` runs the same «Meaning» search as the Library page without the server (one line per paper with a `zotero://` link; also works while Zotero holds its database locked: the last copy is used and marked stale). [Code](../zotero_summarizer/cli/_similar.py) · [Tests](../tests/test_cli_similar.py).
 `zotero-summarizer candidates <note.md> [--limit 10]` picks up to 10 saved papers for one Obsidian note: a local model (the Feed stage model; nothing leaves the machine) turns the note into an English query, the «Meaning» search returns 15 papers, and papers the note already links or was offered, papers whose deep review graded them D and papers the local model calls not useful are dropped. It prints JSON and never writes the note; the vault's «Кандидаты из Zotero» button adds the lines. [Code](../zotero_summarizer/cli/_candidates.py).
 
 ## Save results
