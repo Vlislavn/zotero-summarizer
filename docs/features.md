@@ -190,6 +190,8 @@ the paper text re-extracted from its PDF and a PDF copy up to 25 MB, with hash c
 verdict appears as «Checked: …». All feedback downloads as one JSON file. No tokens or network are used.
 [Code](../zotero_summarizer/services/library/review_feedback.py) · [Tests](../tests/test_review_feedback_parts.py).
 
+`zotero-summarizer similar "<query>" [--limit 10] [--json]` runs the same «Meaning» search as the Library page without the server (one line per paper with a `zotero://` link; also works while Zotero holds its database locked: the last copy is used and marked stale). [Code](../zotero_summarizer/cli/_similar.py) · [Tests](../tests/test_cli_similar.py).
+
 ## Save results
 
 ### Zotero changes

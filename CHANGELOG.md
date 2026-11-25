@@ -4,6 +4,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ## [Unreleased]
 
+- Search: `zotero-summarizer similar "<query>"` runs the Meaning search without the server; a Zotero-locked database no longer hangs reads forever — the copy waits 2 s, then serves the old copy marked stale.
 - API surface removed (no caller in the app, MCP, CLI or tests): `GET /api/daily/pipeline`, `GET /api/library/review-feedback/export`, `POST /api/library/review-feedback`, `GET /api/feedback-analysis/runs`, `GET /api/library/review-fleet/calibration`.
 - Paper read: a page built while the saved review is outdated now says so (one line on the page and a non-blocking `review_outdated` audit finding) instead of silently lacking the brief and digest.
 - Review: «What they propose» (problem → proposal → result → conclusion + caveat) now sits in the verdict card and the HTML hero; every digest text field follows short-prose writing rules (one idea per sentence, terms explained, claim strength as stated, no TL;DR or abstract echo); Assessment no longer repeats the study rail; each reported metric now names who is compared with whom, on what, and what each scored (HTML digest lists them under «Metrics»). «How it works» is one fold (method-card steps, then Methods and Limitations; a card that cannot be grounded shows a quiet note instead of an error; the digest `methods` text is up to three short sentences). Saved reviews show «Outdated review» until regenerated.

@@ -33,6 +33,16 @@ def _signature(source: Path) -> list[list[int] | None]:
     return out
 
 
+def _give_up_when_locked(started: float):
+    """``backup(progress=)`` hook. CPython retries BUSY/LOCKED steps forever, so a source
+    held locked by a running Zotero would hang the copy (and every reader) with no end;
+    raise once the source stayed locked past ``_SOURCE_TIMEOUT_SECONDS``."""
+    def progress(status: int, remaining: int, total: int) -> None:
+        if status in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) and time.monotonic() - started > _SOURCE_TIMEOUT_SECONDS:
+            raise sqlite3.OperationalError("database is locked")
+    return progress
+
+
 class ReadCopy:
     def __init__(self, source: Path, copy_path: Path, *,
                  refresh_interval_seconds: float = DEFAULT_REFRESH_INTERVAL_SECONDS) -> None:
@@ -89,7 +99,7 @@ class ReadCopy:
             try:
                 dst = sqlite3.connect(str(tmp))
                 try:
-                    src.backup(dst)
+                    src.backup(dst, progress=_give_up_when_locked(time.monotonic()))
                 finally:
                     dst.close()
             finally:

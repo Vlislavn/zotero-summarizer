@@ -34,6 +34,7 @@ from zotero_summarizer.cli._goldenset import register_goldenset, _validate_golde
 from zotero_summarizer.cli._review_feedback import register_review_feedback  # noqa: E402
 from zotero_summarizer.cli._research_feed import register_research_feed, _validate_research_feed_args  # noqa: E402
 from zotero_summarizer.cli._setup import register_setup  # noqa: E402
+from zotero_summarizer.cli._similar import register_similar  # noqa: E402
 from zotero_summarizer.cli._helpers import _resolve_feed_ids  # noqa: F401,E402  (re-export for tests)
 
 
@@ -47,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_faithbench(subparsers)
     register_research_feed(subparsers)
     register_review_feedback(subparsers)
+    register_similar(subparsers)
     return parser
 
 

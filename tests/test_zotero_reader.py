@@ -211,3 +211,76 @@ def test_read_copy_is_not_reused_for_a_different_source(tmp_path):
 
     assert _count(ZoteroReader(first_dir, shared_copy, refresh_interval_seconds=3600)) == 1
     assert _count(ZoteroReader(second_dir, shared_copy, refresh_interval_seconds=3600)) == 3
+
+
+# --- ReadCopy: a source locked by a running Zotero must not hang the reader ---------
+
+def _plain_db(tmp_path):
+    source = tmp_path / "zotero.sqlite"
+    conn = sqlite3.connect(source)
+    conn.execute("CREATE TABLE t (x)")
+    conn.execute("INSERT INTO t VALUES (1)")
+    conn.commit()
+    conn.close()
+    return source
+
+
+def _hold_lock(source):
+    """Hold the file lock from another connection, like a running Zotero; the source 'changed'."""
+    import os
+    holder = sqlite3.connect(source, isolation_level=None)
+    holder.execute("PRAGMA locking_mode=EXCLUSIVE")
+    holder.execute("BEGIN EXCLUSIVE")
+    holder.execute("INSERT INTO t VALUES (2)")
+    os.utime(source, ns=(1, 1))  # signature differs from any stamp
+    return holder
+
+
+def _refresh_within(copy: ReadCopy, seconds: float):
+    """Run ``refresh`` in a thread; return (finished, error, elapsed)."""
+    import threading
+    import time
+    outcome: dict = {}
+
+    def run():
+        try:
+            copy.refresh()
+        except Exception as exc:  # noqa: BLE001 - the test inspects the type
+            outcome["error"] = exc
+
+    started = time.monotonic()
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    return not worker.is_alive(), outcome.get("error"), time.monotonic() - started
+
+
+def test_read_copy_keeps_old_copy_and_marks_stale_when_source_is_locked(tmp_path):
+    source = _plain_db(tmp_path)
+    copy = ReadCopy(source, tmp_path / "data" / "copy.sqlite")
+    copy.refresh()
+    assert copy.stale_since is None
+    holder = _hold_lock(source)
+    try:
+        finished, error, elapsed = _refresh_within(copy, 6.0)
+    finally:
+        holder.close()
+    assert finished, "refresh hung on a locked source"
+    assert error is None and elapsed < 3.5
+    assert copy.stale_since is not None
+    old = sqlite3.connect(copy.copy_path)
+    try:
+        assert old.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 1
+    finally:
+        old.close()
+
+
+def test_read_copy_without_a_copy_reports_a_locked_source_quickly(tmp_path):
+    source = _plain_db(tmp_path)
+    holder = _hold_lock(source)
+    try:
+        finished, error, elapsed = _refresh_within(ReadCopy(source, tmp_path / "data" / "copy.sqlite"), 6.0)
+    finally:
+        holder.close()
+    assert finished, "refresh hung on a locked source"
+    assert isinstance(error, ZoteroReadError) and elapsed < 3.5
