@@ -12,7 +12,7 @@ Enforcement runs explicitly via `make lint`; commit-hook installation is optiona
 | `check_slop.py` | debug leftovers + complexity limits block; heuristics are advisory (Tier 7, below); existing findings grandfathered |
 | `check_allowlists.py` | `reconcile`: flags STALE `slop_allowlist.txt` entries (run by the test suite) |
 | `slop_allowlist.txt` / `slop_severity.txt` | grandfathered slop findings (`<path>:<line>:<rule>`, empty) / per-rule severity overrides (`rule=off\|advise\|block`) |
-| deadcode-audit (`deadcode-gates` hook) | new orphan public symbols (tests do not count), Vulture ≥80% dead code, redundant transforms — **changed lines vs `BASE`** |
+| deadcode-audit (`deadcode-gates` hook) | new orphan public symbols (tests do not count), Vulture ≥80% dead code, redundant transforms — **changed lines vs `BASE`**; hard import cycles (top-level imports; function-local ones are "soft", advisory) — **whole tree**, accepted ones are listed in `.deadcode.yml` `allowed_cycles` |
 
 ## deadcode-audit (dead code, duplication, overlaps)
 
