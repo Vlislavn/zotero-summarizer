@@ -29,7 +29,7 @@ from zotero_summarizer.services.search._relevance import attach_relevance
 from zotero_summarizer.services.search.dedup import to_version_families
 from zotero_summarizer.services.search.federate import federate
 from zotero_summarizer.services.search.intent import _as_str_list, build_query_plan
-from zotero_summarizer.services.search.pipeline import _annotate_library_coverage
+from zotero_summarizer.services.search.federate import _annotate_library_coverage
 from zotero_summarizer.services.search.rank import rank_candidates, score_query_relevance
 from zotero_summarizer.settings import offline_requested
 

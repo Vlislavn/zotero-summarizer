@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
-import threading
 import time
 from pathlib import Path
+from typing import NoReturn
+
+from zotero_summarizer.cli._similar import _run_with_watchdog
 
 _TOTAL_SECONDS = 150.0
 _POOL = 15
@@ -63,20 +64,8 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _timeout() -> None:
-    print(f"error: no answer within {_TOTAL_SECONDS:.0f} s", file=sys.stderr, flush=True)
-    os._exit(3)
-
-
-def _command(args: argparse.Namespace) -> int:
-    watchdog = threading.Timer(_TOTAL_SECONDS, _timeout)
-    watchdog.daemon = True
-    watchdog.start()
-    code = _run(args)
-    watchdog.cancel()
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(code)  # a model-load thread may outlive the answer
+def _command(args: argparse.Namespace) -> NoReturn:
+    _run_with_watchdog(_run, args, _TOTAL_SECONDS)
 
 
 def register_candidates(subparsers: argparse._SubParsersAction) -> None:

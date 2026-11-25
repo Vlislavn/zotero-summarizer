@@ -8,7 +8,7 @@ from tests._zotero_fixtures import add_library_item, build_zotero_db
 from zotero_summarizer.integrations._zotero_read_lookup import ZoteroLookupMixin
 from zotero_summarizer.services.search._models import Candidate
 from zotero_summarizer.services.search.dedup import to_version_families
-from zotero_summarizer.services.search.pipeline import _annotate_library_coverage
+from zotero_summarizer.services.search.federate import _annotate_library_coverage
 
 
 @pytest.mark.parametrize("invalid", [None, "doi:10.1234/a", [1], [""], ["title:Same"], ["doi:"]])

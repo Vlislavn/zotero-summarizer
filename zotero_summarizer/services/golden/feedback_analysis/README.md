@@ -51,7 +51,8 @@ private report through a dedicated child process (manual `goldenset analyze-feed
 - `verify_inputs(destination) -> dict` validates the wire format, exact artifact inventory, full SHA-256/size, content
   identity and retained SQLite metadata without reading source locators; it refuses incomplete, changed, extra or
   symlinked artifacts. It is integrity checking, not authentication against someone who replaces bytes and recomputes
-  the manifest.
+  the manifest. Manifest and strict JSON readers share `provenance.unique_object` to reject duplicate keys as
+  `ValueError`, with distinct messages at the two boundaries.
 - Not a cross-file atomic transaction: capture can follow the logical cutoff, so analysis reconciles by cutoff and
   revisions and keeps unrecoverable gaps; CSV row timing is unknown. Logs are read twice over the same opened prefix
   (incompatible mutation fails). No lock covers adversarial write-and-restore or same-user namespace races.

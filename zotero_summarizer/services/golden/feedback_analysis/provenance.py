@@ -164,11 +164,11 @@ def aware_time(value):
     except (ValueError, OverflowError):
         return None
 
-def unique_object(pairs):
+def unique_object(pairs, *, duplicate_message: str = "duplicate JSON key"):
     value = {}
     for key, child in pairs:
         if key in value:
-            raise ValueError("duplicate JSON key")
+            raise ValueError(duplicate_message)
         value[key] = child
     return value
 

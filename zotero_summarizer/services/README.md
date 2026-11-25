@@ -87,6 +87,7 @@ their prior options; all setup local-LLM requests must first pass admission.
 `_common.to_text` and `_common.unique_non_empty_strings` re-export `integrations.llm.to_text` and `domain.unique_non_empty_strings` (one implementation each).
 `_common.normalized_title_key` supplies the title-only display key to Library and Today;
 each caller owns ranking and which copies to keep.
+`golden/feedback_analysis/provenance.unique_object` is the one duplicate-key JSON object hook (inputs reuse it).
 
 LLM-output JSON parsing (`extract_json_blob`, `safe_parse_response_json`) lives in `llm/json_response.py`.
 

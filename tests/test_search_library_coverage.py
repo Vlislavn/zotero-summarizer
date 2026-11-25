@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from zotero_summarizer.services.search._models import Candidate
-from zotero_summarizer.services.search.pipeline import _annotate_library_coverage
+from zotero_summarizer.services.search.federate import _annotate_library_coverage
 
 
 class _StubReader:

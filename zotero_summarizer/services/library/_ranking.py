@@ -14,6 +14,7 @@ from statistics import median
 from typing import Any
 
 from zotero_summarizer.domain import TRIAGE_APPROVED_TAG_TOKEN, score_to_priority
+from zotero_summarizer.services._common import normalized_title_key
 from zotero_summarizer.services.model.quality_flags import band_primary_enabled, quality_promote_enabled
 from zotero_summarizer.services.emoji_signals import HARD_VETO_EMOJIS, READ_EMOJIS
 from zotero_summarizer.services.library._row_nearest import attach_nearest_kept, corpus_cache
@@ -72,7 +73,7 @@ def _content_key(rec: dict[str, Any]) -> str:
     different order or truncate them (so an author guard misses real dups). Two
     genuinely-distinct papers sharing an identical full title is negligible in a
     personal library (and a v1/v2 preprint dup is desirable to collapse)."""
-    return "".join(ch for ch in (rec.get("title") or "").lower() if ch.isalnum())
+    return normalized_title_key(rec.get("title"))
 
 
 def _dedup_by_content(records: list[dict[str, Any]]) -> list[dict[str, Any]]:

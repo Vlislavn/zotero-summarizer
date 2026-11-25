@@ -69,6 +69,11 @@ def html_to_text(html: str) -> str:
     return _HTML_WS_RE.sub(" ", _HTML_TAG_RE.sub(" ", html or "")).strip()
 
 
+def normalized_title_key(title: str | None) -> str:
+    """Title-only identity for display dedup: lowercase, keeping Unicode alphanumerics."""
+    return "".join(ch for ch in (title or "").lower() if ch.isalnum())
+
+
 def log_context(prefix: str, message: str, *args: Any) -> None:
     LOGGER.info("%s " + message, prefix, *args)
 

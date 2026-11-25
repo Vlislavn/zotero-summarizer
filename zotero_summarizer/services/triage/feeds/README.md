@@ -48,6 +48,13 @@ run_daemon_loop ─every N s→ run_daemon_tick (_tick)
 and `storage.feeds`; standard services rules. `_common` is the leaf — siblings
 import from it, never the reverse.
 
+`_tick_phases.mark_processed_read` collects IDs before writing. App RSS read
+state and its processed-row markers commit together, before the legacy Zotero
+path runs. Zotero uses the writer's backup-first lock retry; only a normal
+return (even zero updated rows) triggers a separate marker commit. An unavailable
+writer or a writer exception is logged and skips that commit, with no tick-level
+retry of the batch. App storage failures still propagate.
+
 Optional Zotero read-sync logs backup/retention filesystem failures and returns
 zero without interrupting the tick or replaying the batch. Markers may already be
 committed; the next tick rescans unread rows rather than assuming rollback.

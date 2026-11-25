@@ -10,12 +10,13 @@ import stat
 import time
 from dataclasses import dataclass, fields
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 from zotero_summarizer.settings import Settings
 
 from .provenance import (ALIGNMENT, RETAINED_PATHS, canonical_bytes, declared_provenance,
-                         digest_manifest, source_record, timestamp_now, utc_iso, validate_manifest)
+                         digest_manifest, source_record, timestamp_now, unique_object, utc_iso, validate_manifest)
 from .sqlite_snapshot import capture_sqlite, inspect_snapshot
 
 DEFAULT_WALL_CAP_SECONDS = 60.0
@@ -278,15 +279,6 @@ def freeze_inputs(settings: Settings, destination: Path, *, cutoff: datetime, pr
         raise
 
 
-def _unique_keys(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate input manifest key")
-        result[key] = value
-    return result
-
-
 def verify_inputs(destination: Path) -> dict:
     """Validate shape, retained bytes and DB metadata; never follow source locators."""
     guard = _Guard(_budgets(None))
@@ -296,5 +288,5 @@ def verify_inputs(destination: Path) -> dict:
         raw = handle.read(MAX_MANIFEST_BYTES + 1)
     if len(raw) > MAX_MANIFEST_BYTES:
         raise BudgetExceeded("frozen-input manifest byte budget exhausted")
-    manifest = json.loads(raw, object_pairs_hook=_unique_keys)
+    manifest = json.loads(raw, object_pairs_hook=partial(unique_object, duplicate_message="duplicate input manifest key"))
     return _verify_retained(destination, manifest, guard, published=True)

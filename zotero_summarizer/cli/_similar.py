@@ -13,7 +13,8 @@ import json
 import os
 import sys
 import threading
-from typing import Any
+from collections.abc import Callable
+from typing import Any, NoReturn
 
 _RERANKER_WAIT_SECONDS = 20.0
 _TOTAL_SECONDS = 55.0
@@ -103,20 +104,24 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _command(args: argparse.Namespace) -> int:
-    watchdog = threading.Timer(_TOTAL_SECONDS, _timeout)
+def _run_with_watchdog(run: Callable[[argparse.Namespace], int], args: argparse.Namespace, seconds: float) -> NoReturn:
+    """Exit without waiting for a background model-load thread."""
+    def timeout() -> None:
+        print(f"error: no answer within {seconds:.0f} s", file=sys.stderr, flush=True)
+        os._exit(3)
+
+    watchdog = threading.Timer(seconds, timeout)
     watchdog.daemon = True
     watchdog.start()
-    code = _run(args)
+    code = run(args)
     watchdog.cancel()
     sys.stdout.flush()
     sys.stderr.flush()
     os._exit(code)
 
 
-def _timeout() -> None:
-    print(f"error: no answer within {_TOTAL_SECONDS:.0f} s", file=sys.stderr, flush=True)
-    os._exit(3)
+def _command(args: argparse.Namespace) -> NoReturn:
+    _run_with_watchdog(_run, args, _TOTAL_SECONDS)
 
 
 def register_similar(subparsers: argparse._SubParsersAction) -> None:

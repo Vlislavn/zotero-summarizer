@@ -7,6 +7,7 @@ They live here so the orchestrator stays a thin, readable sequence.
 from __future__ import annotations
 
 import random
+import sqlite3
 from itertools import chain, islice, zip_longest
 from collections import Counter
 from dataclasses import dataclass
@@ -262,21 +263,10 @@ def record_tick_decisions(results: _TickResults, *, tick_id: str, review_mode: b
         conn.commit()
 
 
-def mark_processed_read(
-    results: _TickResults,
-    stale_to_mark: list[tuple[int, int, str]],
-    *,
-    writer: ZoteroWriter | None,
-    tick_id: str,
-) -> int:
-    """Mark every item the tick touched read in Zotero; return the marked count.
-
-    Gate-rejected + dedup-skipped + stale-unread items are evicted too, else the
-    bounded round-robin picker re-grabs the same batch forever. Fatal-error rows
-    (item_id<=0) are spared so they get another chance next tick. A Zotero-write
-    failure is logged and the tick proceeds (the rows stay unread, retried next
-    tick).
-    """
+def _collect_read_ids(
+    results: _TickResults, stale_to_mark: list[tuple[int, int, str]],
+) -> tuple[list[int], list[int]]:
+    """Collect positive IDs in write order; return (app RSS, Zotero)."""
     zotero_ids: list[int] = []
     app_rss_ids: list[int] = []
 
@@ -284,6 +274,7 @@ def mark_processed_read(
         item_id = int(item.get("item_id") or 0)
         if item_id <= 0:
             return
+        # Write routing uses the exact source string; receipt routing trims it.
         if str(item.get("source_type") or item.get("source") or "") == "app_rss":
             app_rss_ids.append(item_id)
         else:
@@ -302,62 +293,88 @@ def mark_processed_read(
             zotero_ids.append(int(_fi))
     zotero_ids = [i for i in zotero_ids if i > 0]
     app_rss_ids = [i for i in app_rss_ids if i > 0]
-    if not zotero_ids and not app_rss_ids:
-        return 0
-    marked = 0
-    touched_items = [
-        item
-        for item, _ in (
-            results.triaged
-            + results.fast_rejected
-            + results.gate_rejected
-        )
-    ] + list(results.library_skipped) + list(results.processed_dup_skipped)
+    return app_rss_ids, zotero_ids
 
-    if app_rss_ids:
-        with _triage_conn() as conn:
-            marked += rss_storage.mark_rss_items_read(conn, app_rss_ids)
-            for item in touched_items:
-                if not is_app_rss_source(item):
-                    continue
-                feeds_storage.record_read_marked(
-                    conn,
-                    feed_library_id=int(item.get("feed_library_id") or 0),
-                    feed_item_id=int(item.get("item_id") or 0),
-                )
-            for _fl, _fi, _source_type in stale_to_mark:
-                if _source_type != "app_rss":
-                    continue
-                feeds_storage.record_read_marked(
-                    conn, feed_library_id=int(_fl), feed_item_id=int(_fi),
-                )
-            conn.commit()
 
-    if not zotero_ids:
-        return marked
-    if writer is None:
-        LOGGER.info("[%s] Zotero writer unavailable; skipped %d legacy readTime updates", tick_id, len(zotero_ids))
-        return marked
-    try:
-        zotero_marked = writer.mark_feed_items_read(zotero_ids)
-    except Exception as exc:
-        LOGGER.warning("[%s] mark_feed_items_read failed: %s", tick_id, exc)
-        return marked
-    marked += zotero_marked
-    with _triage_conn() as conn:
-        for item in touched_items:
-            if is_app_rss_source(item):
-                continue
+def _record_read_markers(
+    conn: sqlite3.Connection,
+    touched_items: list[dict[str, Any]],
+    stale_to_mark: list[tuple[int, int, str]],
+    *,
+    app_rss: bool,
+) -> None:
+    for item in touched_items:
+        if is_app_rss_source(item) == app_rss:
             feeds_storage.record_read_marked(
                 conn,
                 feed_library_id=int(item.get("feed_library_id") or 0),
                 feed_item_id=int(item.get("item_id") or 0),
             )
-        for _fl, _fi, _source_type in stale_to_mark:
-            if _source_type == "app_rss":
-                continue
+    for feed_library_id, feed_item_id, source_type in stale_to_mark:
+        if (source_type == "app_rss") == app_rss:
             feeds_storage.record_read_marked(
-                conn, feed_library_id=int(_fl), feed_item_id=int(_fi),
+                conn, feed_library_id=int(feed_library_id), feed_item_id=int(feed_item_id),
             )
+
+
+def _mark_and_record_app_rss_read(
+    app_rss_ids: list[int],
+    touched_items: list[dict[str, Any]],
+    stale_to_mark: list[tuple[int, int, str]],
+) -> int:
+    if not app_rss_ids:
+        return 0
+    with _triage_conn() as conn:
+        marked = rss_storage.mark_rss_items_read(conn, app_rss_ids)
+        _record_read_markers(conn, touched_items, stale_to_mark, app_rss=True)
         conn.commit()
     return marked
+
+
+def _mark_and_record_zotero_read(
+    zotero_ids: list[int],
+    touched_items: list[dict[str, Any]],
+    stale_to_mark: list[tuple[int, int, str]],
+    *,
+    writer: ZoteroWriter | None,
+    tick_id: str,
+) -> int:
+    if not zotero_ids:
+        return 0
+    if writer is None:
+        LOGGER.info("[%s] Zotero writer unavailable; skipped %d legacy readTime updates", tick_id, len(zotero_ids))
+        return 0
+    try:
+        marked = writer.mark_feed_items_read(zotero_ids)
+    except Exception as exc:
+        LOGGER.warning("[%s] mark_feed_items_read failed: %s", tick_id, exc)
+        return 0
+    with _triage_conn() as conn:
+        _record_read_markers(conn, touched_items, stale_to_mark, app_rss=False)
+        conn.commit()
+    return marked
+
+
+def mark_processed_read(
+    results: _TickResults,
+    stale_to_mark: list[tuple[int, int, str]],
+    *,
+    writer: ZoteroWriter | None,
+    tick_id: str,
+) -> int:
+    """Mark decided items read and return the total updated across both sources.
+
+    Gate rejects, dedup skips and stale-unread items are evicted too, so the
+    bounded picker can advance. Error rows are left for retry.
+    """
+    app_rss_ids, zotero_ids = _collect_read_ids(results, stale_to_mark)
+    if not app_rss_ids and not zotero_ids:
+        return 0
+    touched_items = [
+        item for item, _ in results.triaged + results.fast_rejected + results.gate_rejected
+    ] + list(results.library_skipped) + list(results.processed_dup_skipped)
+    app_rss_marked = _mark_and_record_app_rss_read(app_rss_ids, touched_items, stale_to_mark)
+    zotero_marked = _mark_and_record_zotero_read(
+        zotero_ids, touched_items, stale_to_mark, writer=writer, tick_id=tick_id,
+    )
+    return app_rss_marked + zotero_marked

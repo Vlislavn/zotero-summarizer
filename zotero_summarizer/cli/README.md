@@ -72,6 +72,9 @@ main() = parse args → validate command budgets → selected Settings/.env → 
 | `_faithbench.py` | `faithbench build/run/judge/report` — faithfulness mini-benchmark of the deep_review-stage model (span-verified QA + traps + review-claim grounding). Build stages the review CSV before publishing the immutable benchmark file as its version marker; QA runs require explicit approval of every generated review-CSV row and bind that CSV hash into the manifest. `build --max-builder-windows` bounds contiguous 6,000-character source windows per paper; its CLI/env/default precedence, preflight behavior and cost are documented below. `run` is resumable via `--run-id` and takes `--provider/--model` to sweep a model for THIS run only (no goals.yaml edit; recorded in the manifest); `judge` uses the pinned remote judge (`CUSTOM_BASE_URL`/`CUSTOM_API_KEY`). See `services/faithbench/README.md` |
 | `_research_feed.py` / `_telegram.py` | `research-feed run` produces RSS or explicitly selected Telegram reports; `view` prints retained Markdown without processing (a non-`.md` or missing report is a one-line `error:` with exit 2); `telegram-auth` owns explicit interactive authorization. RSS generation reuses deep review unless `--cached-only` (papers without a cached triage are listed by title but do not make the exit code 1); queuing Zotero changes requires `--queue-zotero`. A generating run prints plain progress on stderr (screening count, «screened N/M», the full-text review step). |
 
+`similar` and `candidates` share `_similar._run_with_watchdog`: each supplies its own runner and deadline;
+normal completion flushes both streams before the hard exit.
+
 Handlers use lazy imports inside the function bodies to keep CLI startup fast.
 
 `serve` refuses non-loopback binds at parser and handler boundaries and disables
