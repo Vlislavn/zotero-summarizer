@@ -6,6 +6,7 @@ env/
 .agents/
 .pi/npm/
 .pi/settings.json
+.pi/backlog/
 .codex/
 __pycache__/
 *.pyc
