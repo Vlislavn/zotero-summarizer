@@ -32,7 +32,7 @@ history lives in the changelog and Git. Run every command you document.
 
 ## Check and publish
 ```bash
-make lint  # guardrails + deadcode-audit gates on committed changes vs origin/main (refreshes deadcode-audit; see tools/precommit/README.md)
+make lint  # guardrails + deadcode-audit gates (changed lines vs origin/main; hard import cycles, whole tree) (refreshes deadcode-audit; see tools/precommit/README.md)
 make check # complete local checks; no publication
 # Commit the intended files, then:
 tools/create-pr.sh 'Title' /path/to/body.md

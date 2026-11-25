@@ -4,6 +4,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Current
 
 ## [Unreleased]
 
+- Dev: hard import cycles fail `make lint` (`deadcode cycles`); the `storage` cycle is gone — DB path lives in `storage/db_core.py` (`set_db_path`, `resolve_db_path`; `repositories.DB_PATH` removed); dead dimension-override API removed, table kept; two complex functions split.
 - Obsidian: `zotero-summarizer candidates <note.md>` offers up to 10 saved papers for a note — local-model query and «useful?» filter (91 % relevant vs 72.6 % unfiltered on 19 notes), deep-review grade D dropped; read-only JSON for the vault button
 - Library hygiene: every app Add (Search, Today, Feed review) first looks for the same paper (DOI, arXiv id, title+year) and links it instead of creating a copy; Search Add and Apply approved now attach an open-access PDF; Jev files a new Add into topic collections (`topic_filing_enabled`, tree in `data/topics/tree.json`).
 - Fixed: macOS mobile serving routes SPECTER2, the local cross-encoder and goal-summary embeddings to CPU to contain reproduced MPS driver growth; ordinary serving and other platforms keep automatic device selection, and health reports the effective `cpu`/`auto` policy.
